@@ -1,0 +1,291 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared configuration anchor — maps directly to Helm library chart _helpers.tpl
+# ─────────────────────────────────────────────────────────────────────────────
+x-nova-common: &nova-common
+  restart: unless-stopped
+  networks:
+    - nova-internal
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+x-nova-healthcheck: &nova-healthcheck
+  interval: 15s
+  timeout: 5s
+  retries: 5
+  start_period: 30s
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Infrastructure
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  postgres:
+    <<: *nova-common
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nova_dev_password}
+      POSTGRES_DB: nova
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD-SHELL", "pg_isready -U nova -d nova"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  redis:
+    <<: *nova-common
+    image: redis:7-alpine
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+
+  # Ollama for local model serving (dev profile)
+  # vLLM would replace this for production (profiles: ["prod"])
+  ollama:
+    <<: *nova-common
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      <<: *nova-healthcheck
+      # ollama/ollama image does not include curl — use the ollama binary itself.
+      # `ollama list` connects to the running server and exits 0 when ready.
+      test: ["CMD", "ollama", "list"]
+      start_period: 60s    # give more time on first run (model downloads may be pending)
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+    # On Apple Silicon, Ollama uses Metal automatically — no GPU flags needed
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Nova Platform Services
+# ─────────────────────────────────────────────────────────────────────────────
+  llm-gateway:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: llm-gateway/Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    develop:
+      watch:
+        - action: sync
+          path: ./llm-gateway/app
+          target: /app/app
+          ignore:
+            - __pycache__
+            - "*.pyc"
+        - action: rebuild
+          path: ./llm-gateway/pyproject.toml
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434
+      REDIS_URL: redis://redis:6379/1
+      DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL:-llama3.2}
+      DEFAULT_EMBED_MODEL: nomic-embed-text
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # ── Subscription auth (quota from existing subscriptions, no API billing) ──
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      CHATGPT_ACCESS_TOKEN: ${CHATGPT_ACCESS_TOKEN:-}
+      CHATGPT_TOKEN_DIR: ${CHATGPT_TOKEN_DIR:-}
+      # ── Free-tier providers (set keys in .env to activate) ────────────────────
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_USE_ADC: ${GEMINI_USE_ADC:-false}
+      CEREBRAS_API_KEY: ${CEREBRAS_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # ── Paid API keys ─────────────────────────────────────────────────────────
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # ── Per-provider default models (override in .env to swap model variants) ─
+      DEFAULT_OLLAMA_MODEL: ${DEFAULT_OLLAMA_MODEL:-llama3.2}
+      DEFAULT_GROQ_MODEL: ${DEFAULT_GROQ_MODEL:-groq/llama-3.3-70b-versatile}
+      DEFAULT_GEMINI_MODEL: ${DEFAULT_GEMINI_MODEL:-gemini/gemini-2.5-flash}
+      DEFAULT_CEREBRAS_MODEL: ${DEFAULT_CEREBRAS_MODEL:-cerebras/llama-3.3-70b}
+      DEFAULT_OPENROUTER_MODEL: ${DEFAULT_OPENROUTER_MODEL:-openrouter/meta-llama/llama-3.1-8b-instruct:free}
+      DEFAULT_GITHUB_MODEL: ${DEFAULT_GITHUB_MODEL:-github/gpt-4o-mini}
+      DEFAULT_CLAUDE_MAX_MODEL: ${DEFAULT_CLAUDE_MAX_MODEL:-claude-max/claude-sonnet-4-6}
+      DEFAULT_CHATGPT_MODEL: ${DEFAULT_CHATGPT_MODEL:-chatgpt/gpt-4o}
+    # ── Volume mounts for credential auto-discovery ───────────────────────────
+    # Uncomment whichever auth methods you use:
+    #
+    # Claude Max (Linux ~/.claude/.credentials.json auto-discovery):
+    # volumes:
+    #   - ${HOME}/.claude:/root/.claude:ro
+    #
+    # ChatGPT Plus/Pro (codex auth.json auto-discovery):
+    # volumes:
+    #   - ${HOME}/.codex:/root/.codex:ro
+    #
+    # Gemini ADC (gcloud auth application-default login):
+    # volumes:
+    #   - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+    #
+    # All three at once:
+    # volumes:
+    #   - ${HOME}/.claude:/root/.claude:ro
+    #   - ${HOME}/.codex:/root/.codex:ro
+    #   - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
+    ports:
+      - "8001:8001"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live', timeout=3)"]
+
+  memory-service:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: memory-service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nova:${POSTGRES_PASSWORD:-nova_dev_password}@postgres:5432/nova
+      REDIS_URL: redis://redis:6379/0
+      LLM_GATEWAY_URL: http://llm-gateway:8001
+      EMBEDDING_MODEL: nomic-embed-text
+      EMBEDDING_DIMENSIONS: "768"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      llm-gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/live', timeout=3)"]
+
+  orchestrator:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    develop:
+      watch:
+        - action: sync
+          path: ./orchestrator/app
+          target: /app/app
+          ignore:
+            - __pycache__
+            - "*.pyc"
+        - action: rebuild
+          path: ./orchestrator/pyproject.toml
+    environment:
+      REDIS_URL: redis://redis:6379/2
+      MEMORY_SERVICE_URL: http://memory-service:8002
+      LLM_GATEWAY_URL: http://llm-gateway:8001
+      DEFAULT_MODEL: ${DEFAULT_CHAT_MODEL:-llama3.2}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Phase 2: auth + cost tracking
+      DATABASE_URL: postgresql+asyncpg://nova:${POSTGRES_PASSWORD:-nova_dev_password}@postgres:5432/nova
+      NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      # Phase 3: workspace path inside the container
+      WORKSPACE_ROOT: /workspace
+      SHELL_TIMEOUT_SECONDS: ${SHELL_TIMEOUT_SECONDS:-30}
+    # Phase 3: mount your host project directory at /workspace so agents can
+    # read/write real files. Set NOVA_WORKSPACE in .env to your project root.
+    # Defaults to a ./workspace subdirectory of this repo for zero-config dev.
+    volumes:
+      - ${NOVA_WORKSPACE:-./workspace}:/workspace:rw
+    ports:
+      - "8000:8000"
+    depends_on:
+      memory-service:
+        condition: service_healthy
+      llm-gateway:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)"]
+
+  chat-api:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: chat-api/Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+    develop:
+      watch:
+        - action: sync
+          path: ./chat-api/app
+          target: /app/app
+          ignore:
+            - __pycache__
+            - "*.pyc"
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      REDIS_URL: redis://redis:6379/3
+      DEFAULT_MODEL: ${DEFAULT_CHAT_MODEL:-llama3.2}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8080:8080"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/live', timeout=3)"]
+
+  dashboard:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "3000:3000"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+      llm-gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Networks
+# ─────────────────────────────────────────────────────────────────────────────
+networks:
+  nova-internal:
+    driver: bridge
+    # Phase 2 will add: nova-sandbox (internal: true) for PII Guardian enforcement
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Volumes
+# ─────────────────────────────────────────────────────────────────────────────
+volumes:
+  postgres-data:
+  redis-data:
+  ollama-data:

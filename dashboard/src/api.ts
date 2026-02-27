@@ -1,0 +1,262 @@
+import type { AgentInfo, ApiKey, OAIModel, PipelineTask, Pod, PodAgent, UsageEvent } from './types'
+
+// Admin secret is stored in localStorage so you can change it without
+// rebuilding the dashboard. Default matches the dev .env value.
+export const getAdminSecret = () =>
+  localStorage.getItem('nova_admin_secret') ?? 'nova-admin-secret-change-me'
+
+export const setAdminSecret = (s: string) =>
+  localStorage.setItem('nova_admin_secret', s)
+
+async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const resp = await fetch(url, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Secret': getAdminSecret(),
+      ...(options.headers ?? {}),
+    },
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText)
+    throw new Error(`${resp.status}: ${text}`)
+  }
+  // 204 No Content — return undefined
+  if (resp.status === 204) return undefined as T
+  return resp.json() as Promise<T>
+}
+
+// ── Agents ────────────────────────────────────────────────────────────────────
+export const getAgents = () => apiFetch<AgentInfo[]>('/api/v1/agents')
+
+// ── Usage ─────────────────────────────────────────────────────────────────────
+export const getUsage = (limit = 500) =>
+  apiFetch<UsageEvent[]>(`/api/v1/usage?limit=${limit}`)
+
+// ── Keys ──────────────────────────────────────────────────────────────────────
+export const getKeys = () => apiFetch<ApiKey[]>('/api/v1/keys')
+
+export const createKey = (name: string, rate_limit_rpm: number) =>
+  apiFetch<ApiKey & { raw_key: string }>('/api/v1/keys', {
+    method: 'POST',
+    body: JSON.stringify({ name, rate_limit_rpm }),
+  })
+
+export const revokeKey = (id: string) =>
+  apiFetch<void>(`/api/v1/keys/${id}`, { method: 'DELETE' })
+
+// ── Models ────────────────────────────────────────────────────────────────────
+export const getModels = () =>
+  apiFetch<{ data: OAIModel[] }>('/v1/models')
+
+// ── Pipeline Tasks ─────────────────────────────────────────────────────────────
+
+export const submitPipelineTask = (
+  user_input: string,
+  pod_name?: string,
+  model_override?: string,
+  metadata: Record<string, unknown> = {},
+) =>
+  apiFetch<{ task_id: string; status: string; pod_name: string; queued_at: string }>(
+    '/api/v1/pipeline/tasks',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        user_input,
+        pod_name,
+        metadata: { ...metadata, ...(model_override ? { model_override } : {}) },
+      }),
+    },
+  )
+
+export const getPipelineTasks = (params: { status?: string; pod_id?: string; limit?: number } = {}) => {
+  const qs = new URLSearchParams()
+  if (params.status)  qs.set('status', params.status)
+  if (params.pod_id)  qs.set('pod_id', params.pod_id)
+  if (params.limit)   qs.set('limit', String(params.limit))
+  return apiFetch<PipelineTask[]>(`/api/v1/pipeline/tasks?${qs}`)
+}
+
+export const getPipelineTask = (task_id: string) =>
+  apiFetch<PipelineTask>(`/api/v1/pipeline/tasks/${task_id}`)
+
+export const cancelPipelineTask = (task_id: string) =>
+  apiFetch<{ task_id: string; status: string }>(
+    `/api/v1/pipeline/tasks/${task_id}/cancel`,
+    { method: 'POST' },
+  )
+
+export const reviewPipelineTask = (task_id: string, decision: 'approve' | 'reject', comment?: string) =>
+  apiFetch<{ task_id: string; status: string; decision: string }>(
+    `/api/v1/pipeline/tasks/${task_id}/review`,
+    { method: 'POST', body: JSON.stringify({ decision, comment }) },
+  )
+
+export const getQueueStats = () =>
+  apiFetch<{ queue_depth: number; dead_letter_depth: number }>('/api/v1/pipeline/queue-stats')
+
+// ── Pods ───────────────────────────────────────────────────────────────────────
+
+export const getPods = () => apiFetch<Pod[]>('/api/v1/pods')
+
+export const getPod = (pod_id: string) => apiFetch<Pod>(`/api/v1/pods/${pod_id}`)
+
+export const createPod = (data: Partial<Pod>) =>
+  apiFetch<Pod>('/api/v1/pods', { method: 'POST', body: JSON.stringify(data) })
+
+export const updatePod = (pod_id: string, data: Partial<Pod>) =>
+  apiFetch<Pod>(`/api/v1/pods/${pod_id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deletePod = (pod_id: string) =>
+  apiFetch<void>(`/api/v1/pods/${pod_id}`, { method: 'DELETE' })
+
+export const getPodAgents = (pod_id: string) =>
+  apiFetch<PodAgent[]>(`/api/v1/pods/${pod_id}/agents`)
+
+export const updatePodAgent = (pod_id: string, agent_id: string, data: Partial<PodAgent>) =>
+  apiFetch<PodAgent>(`/api/v1/pods/${pod_id}/agents/${agent_id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+
+export const patchAgentConfig = (
+  agent_id: string,
+  data: { model?: string | null; system_prompt?: string | null; fallback_models?: string[] },
+) =>
+  apiFetch<AgentInfo>(`/api/v1/agents/${agent_id}/config`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+
+// ── Direct chat (admin stream) ────────────────────────────────────────────────
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: string
+}
+
+/**
+ * Stream a chat turn directly with the primary Nova agent.
+ * Uses the admin secret — no API key required.
+ *
+ * Yields text deltas as they arrive. Pass the sessionId back on the next call
+ * to continue the same conversation thread (with memory).
+ */
+export async function* streamChat(
+  messages: ChatMessage[],
+  model?: string,
+  sessionId?: string,
+): AsyncGenerator<string, void, unknown> {
+  const resp = await fetch('/api/v1/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Secret': getAdminSecret(),
+    },
+    body: JSON.stringify({ messages, model, session_id: sessionId }),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText)
+    throw new Error(`${resp.status}: ${text}`)
+  }
+
+  const reader = resp.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const events = buffer.split('\n\n')
+    buffer = events.pop() ?? ''
+    for (const event of events) {
+      const line = event.trim()
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6)
+      if (data === '[DONE]') return
+      if (data.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(data) as Record<string, unknown>
+          if (parsed.error) throw new Error(String(parsed.error))
+        } catch {
+          if (data) yield data
+        }
+      } else if (data) {
+        yield data
+      }
+    }
+  }
+}
+
+// ── MCP Servers ────────────────────────────────────────────────────────────────
+
+export interface MCPServer {
+  id: string
+  name: string
+  description: string
+  transport: 'stdio' | 'http'
+  command: string | null
+  args: string[]
+  env: Record<string, string>
+  url: string | null
+  enabled: boolean
+  created_at: string
+  metadata: Record<string, unknown>
+  // Runtime status fields (populated by list endpoint, not in DB)
+  connected?: boolean
+  tool_count?: number
+  active_tools?: string[]
+}
+
+export const getMCPServers = () =>
+  apiFetch<MCPServer[]>('/api/v1/mcp-servers')
+
+export const createMCPServer = (data: Partial<MCPServer>) =>
+  apiFetch<MCPServer & { connected: boolean }>('/api/v1/mcp-servers', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const updateMCPServer = (id: string, data: Partial<MCPServer>) =>
+  apiFetch<MCPServer & { connected: boolean }>(`/api/v1/mcp-servers/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+
+export const deleteMCPServer = (id: string) =>
+  apiFetch<void>(`/api/v1/mcp-servers/${id}`, { method: 'DELETE' })
+
+export const reloadMCPServer = (id: string) =>
+  apiFetch<{ name: string; connected: boolean; tool_count: number; tools: string[] }>(
+    `/api/v1/mcp-servers/${id}/reload`,
+    { method: 'POST' },
+  )
+
+// ── Platform configuration ────────────────────────────────────────────────────
+
+export interface PlatformConfigEntry {
+  key: string
+  /** Decoded value — string, number, boolean, or null */
+  value: string | number | boolean | null
+  description: string
+  is_secret: boolean
+  updated_at: string | null
+}
+
+export const getPlatformConfig = () =>
+  apiFetch<PlatformConfigEntry[]>('/api/v1/config')
+
+/**
+ * Update a single platform config entry.
+ * Pass the value as a JSON-encoded string:
+ *   updatePlatformConfig('nova.persona', '"My custom persona"')
+ *   updatePlatformConfig('nova.default_model', 'null')
+ */
+export const updatePlatformConfig = (key: string, value: string) =>
+  apiFetch<PlatformConfigEntry>(`/api/v1/config/${encodeURIComponent(key)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ value }),
+  })
+

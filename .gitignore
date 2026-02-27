@@ -1,0 +1,27 @@
+# Secrets
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.venv/
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Cache
+.cache/
+
+# Claude Code local settings
+.claude/
+
+# OS
+.DS_Store
+*.log

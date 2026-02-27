@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #fafaf8; /* stone-50 */
+    color: #1c1917;            /* stone-900 */
+  }
+}

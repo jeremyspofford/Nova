@@ -1,0 +1,161 @@
+"""
+LiteLLM provider — thin wrapper giving access to 100+ models through one interface.
+Trade-off: ~500µs overhead per request, acceptable for <1000 RPS.
+"""
+from __future__ import annotations
+
+import logging
+from typing import AsyncIterator
+
+import litellm
+from nova_contracts import (
+    CompleteRequest,
+    CompleteResponse,
+    EmbedRequest,
+    EmbedResponse,
+    ModelCapability,
+    StreamChunk,
+    ToolCall,
+)
+
+from app.providers.base import ModelProvider
+
+log = logging.getLogger(__name__)
+
+litellm.drop_params = True    # ignore unsupported params per model instead of erroring
+litellm.modify_params = True  # auto-add dummy tool when history has tool_use but tools= is absent
+
+
+class LiteLLMProvider(ModelProvider):
+    """
+    Universal cloud provider adapter via LiteLLM.
+    Handles Anthropic, OpenAI, Gemini, Cohere, and 100+ others.
+    """
+
+    def __init__(self, default_model: str = "claude-sonnet-4-6"):
+        self._default_model = default_model
+
+    @property
+    def name(self) -> str:
+        return "litellm"
+
+    @property
+    def capabilities(self) -> set[ModelCapability]:
+        return {
+            ModelCapability.chat,
+            ModelCapability.streaming,
+            ModelCapability.function_calling,
+            ModelCapability.vision,
+            ModelCapability.embeddings,
+            ModelCapability.structured_output,
+        }
+
+    @staticmethod
+    def _serialize_messages(request_messages) -> list[dict]:
+        """Convert nova-contracts Message objects to the dict format LiteLLM expects.
+        Handles tool_calls on assistant messages and tool_call_id on tool result messages."""
+        import json as _json
+        out = []
+        for m in request_messages:
+            msg: dict = {"role": m.role, "content": m.content}
+            # Assistant messages that made tool calls need the tool_calls list
+            if m.tool_calls:
+                msg["tool_calls"] = [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": _json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in m.tool_calls
+                ]
+            # Tool result messages need tool_call_id (and optionally name)
+            if m.tool_call_id:
+                msg["tool_call_id"] = m.tool_call_id
+            if m.name:
+                msg["name"] = m.name
+            out.append(msg)
+        return out
+
+    async def complete(self, request: CompleteRequest) -> CompleteResponse:
+        messages = self._serialize_messages(request.messages)
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                },
+            }
+            for t in request.tools
+        ]
+
+        kwargs = {
+            "model": request.model or self._default_model,
+            "messages": messages,
+            "temperature": request.temperature,
+            "stream": False,
+        }
+        if tools:
+            kwargs["tools"] = tools
+        if request.max_tokens:
+            kwargs["max_tokens"] = request.max_tokens
+
+        response = await litellm.acompletion(**kwargs)
+        choice = response.choices[0]
+        message = choice.message
+
+        tool_calls = []
+        if hasattr(message, "tool_calls") and message.tool_calls:
+            for tc in message.tool_calls:
+                import json
+                tool_calls.append(ToolCall(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=json.loads(tc.function.arguments or "{}"),
+                ))
+
+        usage = response.usage
+        cost = litellm.completion_cost(completion_response=response) if usage else None
+
+        return CompleteResponse(
+            content=message.content or "",
+            model=response.model,
+            tool_calls=tool_calls,
+            input_tokens=usage.prompt_tokens if usage else 0,
+            output_tokens=usage.completion_tokens if usage else 0,
+            cost_usd=cost,
+            finish_reason=choice.finish_reason or "stop",
+        )
+
+    async def stream(self, request: CompleteRequest) -> AsyncIterator[StreamChunk]:
+        messages = self._serialize_messages(request.messages)
+
+        response = await litellm.acompletion(
+            model=request.model or self._default_model,
+            messages=messages,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens,
+            stream=True,
+        )
+
+        async for chunk in response:
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason
+            content = delta.content or ""
+            yield StreamChunk(delta=content, finish_reason=finish_reason)
+
+    async def embed(self, request: EmbedRequest) -> EmbedResponse:
+        response = await litellm.aembedding(
+            model=request.model,
+            input=request.texts,
+        )
+        embeddings = [item["embedding"] for item in response.data]
+        return EmbedResponse(
+            embeddings=embeddings,
+            model=response.model,
+            input_tokens=response.usage.prompt_tokens if response.usage else 0,
+        )

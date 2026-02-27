@@ -1,0 +1,23 @@
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// During `npm run dev`, Vite proxies API calls so the browser never sees
+// cross-origin requests. In production Docker, nginx does the same job.
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    port: 5173,
+    proxy: {
+      // Orchestrator — agents, tasks, keys, usage
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // LLM Gateway — models list
+      '/v1': {
+        target: 'http://localhost:8001',
+        changeOrigin: true,
+      },
+    },
+  },
+})

@@ -1,0 +1,403 @@
+"""
+Orchestrator FastAPI router — agent lifecycle, task routing, key management, usage reporting.
+"""
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+
+from nova_contracts import (
+    AgentInfo,
+    AgentStatus,
+    CreateAgentRequest,
+    SubmitTaskRequest,
+    TaskResult,
+)
+
+from app.agents.runner import run_agent_turn, run_agent_turn_streaming
+from app.auth import AdminDep, ApiKeyDep
+from app.db import (
+    create_api_key_record,
+    generate_api_key,
+    get_pool,
+    list_api_keys,
+    revoke_api_key,
+)
+from app.store import (
+    create_agent,
+    delete_agent,
+    get_agent,
+    get_task_result,
+    list_agents,
+    store_task_result,
+    update_agent_config,
+    update_agent_status,
+)
+
+log = logging.getLogger(__name__)
+router = APIRouter(tags=["orchestrator"])
+
+
+# ── Agent lifecycle ───────────────────────────────────────────────────────────
+
+@router.post("/api/v1/agents", response_model=AgentInfo, status_code=201)
+async def create_new_agent(req: CreateAgentRequest, _key: ApiKeyDep):
+    return await create_agent(req.config)
+
+
+@router.get("/api/v1/agents", response_model=list[AgentInfo])
+async def get_agents(_key: ApiKeyDep):
+    return await list_agents()
+
+
+@router.get("/api/v1/agents/{agent_id}", response_model=AgentInfo)
+async def get_agent_info(agent_id: str, _key: ApiKeyDep):
+    agent = await get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
+class UpdateAgentConfigRequest(BaseModel):
+    model: str | None = None
+    system_prompt: str | None = None
+    fallback_models: list[str] = []
+
+
+@router.patch("/api/v1/agents/{agent_id}/config", response_model=AgentInfo)
+async def patch_agent_config(
+    agent_id: str, req: UpdateAgentConfigRequest, _admin: AdminDep
+):
+    """Update model, system prompt, and fallback model list for a Redis agent. Admin-only."""
+    agent = await update_agent_config(
+        agent_id,
+        model=req.model,
+        system_prompt=req.system_prompt,
+        fallback_models=req.fallback_models,
+    )
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
+@router.delete("/api/v1/agents/{agent_id}", status_code=204)
+async def delete_agent_endpoint(agent_id: str, _key: ApiKeyDep):
+    """Permanently delete an agent. Use ?soft=true to only mark it stopped."""
+    existed = await delete_agent(agent_id)
+    if not existed:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+
+@router.delete("/api/v1/agents", status_code=200)
+async def bulk_delete_agents(_admin: AdminDep, confirm: bool = Query(default=False)):
+    """Delete all agents. Admin-only. Requires ?confirm=true to prevent accidents."""
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Pass ?confirm=true to delete all agents. This cannot be undone.",
+        )
+    agents = await list_agents()
+    for agent in agents:
+        await delete_agent(str(agent.id))
+    return {"deleted": len(agents)}
+
+
+# ── Task routing ──────────────────────────────────────────────────────────────
+
+@router.post("/api/v1/tasks", response_model=TaskResult, status_code=202)
+async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
+    agent = await get_agent(str(req.agent_id))
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.status == AgentStatus.stopped:
+        raise HTTPException(status_code=409, detail="Agent is stopped")
+
+    task_id = uuid4()
+    session_id = req.session_id or str(uuid4())
+    await update_agent_status(str(req.agent_id), AgentStatus.running)
+
+    result = await run_agent_turn(
+        agent_id=str(req.agent_id),
+        task_id=task_id,
+        session_id=session_id,
+        messages=req.messages,
+        model=agent.config.model,
+        system_prompt=agent.config.system_prompt,
+        api_key_id=key.id,
+    )
+    await store_task_result(result)
+    await update_agent_status(str(req.agent_id), AgentStatus.idle)
+    return result
+
+
+@router.post("/api/v1/tasks/stream")
+async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
+    agent = await get_agent(str(req.agent_id))
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    task_id = uuid4()
+    session_id = req.session_id or str(uuid4())
+    await update_agent_status(str(req.agent_id), AgentStatus.running)
+
+    async def generate():
+        import json as _json
+        try:
+            async for delta in run_agent_turn_streaming(
+                agent_id=str(req.agent_id),
+                task_id=task_id,
+                session_id=session_id,
+                messages=req.messages,
+                model=agent.config.model,
+                system_prompt=agent.config.system_prompt,
+                api_key_id=key.id,
+            ):
+                yield f"data: {delta}\n\n".encode()
+            yield b"data: [DONE]\n\n"
+        except Exception as e:
+            log.error("Streaming error (agent=%s): %s", req.agent_id, e)
+            yield f"data: {_json.dumps({'error': str(e)})}\n\n".encode()
+            yield b"data: [DONE]\n\n"
+        finally:
+            await update_agent_status(str(req.agent_id), AgentStatus.idle)
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.get("/api/v1/tasks/{task_id}", response_model=TaskResult)
+async def get_task(task_id: str, _key: ApiKeyDep):
+    result = await get_task_result(task_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+# ── Direct chat (admin dashboard) ────────────────────────────────────────────
+
+class ChatRequest(BaseModel):
+    messages: list[dict]
+    model: str | None = None
+    session_id: str | None = None
+
+
+@router.post("/api/v1/chat/stream")
+async def chat_stream(req: ChatRequest, _admin: AdminDep):
+    """
+    Streaming chat directly with the primary Nova agent. Admin-only.
+
+    This endpoint is for the dashboard chat UI — it uses the admin secret
+    so no API key is needed. External API consumers should use
+    POST /v1/chat/completions with an API key instead.
+
+    - model: override the agent's configured model for this turn only
+    - session_id: pass back the X-Session-Id header value to continue a conversation
+    """
+    agents = await list_agents()
+    if not agents:
+        raise HTTPException(
+            status_code=503,
+            detail="No agents available — Nova is still starting up",
+        )
+
+    # Use the primary agent (Nova) — first in the list by creation time
+    agent = agents[0]
+    model = req.model or agent.config.model
+    task_id = uuid4()
+    session_id = req.session_id or str(uuid4())
+
+    await update_agent_status(str(agent.id), AgentStatus.running)
+
+    async def generate():
+        import json as _json
+        try:
+            async for delta in run_agent_turn_streaming(
+                agent_id=str(agent.id),
+                task_id=task_id,
+                session_id=session_id,
+                messages=req.messages,
+                model=model,
+                system_prompt=agent.config.system_prompt,
+                api_key_id=None,
+            ):
+                yield f"data: {delta}\n\n".encode()
+            yield b"data: [DONE]\n\n"
+        except Exception as e:
+            log.error("Chat stream error (agent=%s): %s", agent.id, e)
+            yield f"data: {_json.dumps({'error': str(e)})}\n\n".encode()
+            yield b"data: [DONE]\n\n"
+        finally:
+            await update_agent_status(str(agent.id), AgentStatus.idle)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "X-Session-Id": session_id,
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+# ── Key management (admin-only) ───────────────────────────────────────────────
+
+class CreateKeyRequest(BaseModel):
+    name: str
+    rate_limit_rpm: int = 60
+    metadata: dict = {}
+
+
+class KeyResponse(BaseModel):
+    id: UUID
+    name: str
+    key_prefix: str
+    is_active: bool
+    rate_limit_rpm: int
+    created_at: datetime
+    last_used_at: datetime | None = None
+    metadata: dict = {}
+
+
+class CreateKeyResponse(KeyResponse):
+    raw_key: str  # Returned ONCE at creation — never stored, never retrievable again
+
+
+@router.post("/api/v1/keys", response_model=CreateKeyResponse, status_code=201)
+async def create_key(req: CreateKeyRequest, _admin: AdminDep):
+    """Create a new API key. Save raw_key immediately — it will not be shown again."""
+    raw_key, key_hash, key_prefix = generate_api_key()
+    row = await create_api_key_record(
+        name=req.name,
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        rate_limit_rpm=req.rate_limit_rpm,
+        metadata=req.metadata,
+    )
+    return CreateKeyResponse(**row, raw_key=raw_key)
+
+
+@router.get("/api/v1/keys", response_model=list[KeyResponse])
+async def list_keys(_admin: AdminDep):
+    """List all API keys. Raw keys are never returned — prefix and metadata only."""
+    rows = await list_api_keys()
+    return [KeyResponse(**r) for r in rows]
+
+
+@router.delete("/api/v1/keys/{key_id}", status_code=204)
+async def revoke_key(key_id: UUID, _admin: AdminDep):
+    """Deactivate an API key. Row is preserved in the DB for audit trail."""
+    existed = await revoke_api_key(key_id)
+    if not existed:
+        raise HTTPException(status_code=404, detail="Key not found or already revoked")
+
+
+# ── Platform configuration (admin-only) ──────────────────────────────────────
+
+class ConfigUpdateRequest(BaseModel):
+    value: str              # JSON-encoded value (Python side handles parsing)
+    description: str | None = None
+
+
+def _config_row(row: dict) -> dict:
+    """Decode JSONB value back to a Python scalar for the API response."""
+    import json as _json
+    d = dict(row)
+    d["updated_at"] = d["updated_at"].isoformat() if d.get("updated_at") else None
+    # Decode the JSONB value so the frontend receives a plain string/number/null
+    raw = d.get("value")
+    try:
+        d["value"] = _json.loads(raw) if raw is not None else None
+    except Exception:
+        d["value"] = raw
+    return d
+
+
+@router.get("/api/v1/config")
+async def list_platform_config(_admin: AdminDep) -> list[dict]:
+    """Return all platform config entries. Values are decoded from JSONB. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT key, value, description, is_secret, updated_at "
+            "FROM platform_config ORDER BY key"
+        )
+    return [_config_row(dict(r)) for r in rows]
+
+
+@router.patch("/api/v1/config/{key}")
+async def update_platform_config(
+    key: str, req: ConfigUpdateRequest, _admin: AdminDep
+) -> dict:
+    """
+    Update a single platform config entry. Admin-only.
+
+    req.value must be a JSON-encoded string, e.g.:
+      '"My persona text"'  →  stores the string  My persona text
+      'null'               →  clears the value
+      '42'                 →  stores the integer 42
+    """
+    import json as _json
+    # Validate that req.value is valid JSON before storing
+    try:
+        _json.loads(req.value)
+    except _json.JSONDecodeError:
+        # Treat as a bare string if it's not valid JSON — wrap it
+        req.value = _json.dumps(req.value)
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        update_desc = req.description is not None
+        if update_desc:
+            row = await conn.fetchrow(
+                """
+                UPDATE platform_config
+                SET value = $2::jsonb, description = $3, updated_at = NOW()
+                WHERE key = $1
+                RETURNING key, value, description, is_secret, updated_at
+                """,
+                key, req.value, req.description,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                UPDATE platform_config
+                SET value = $2::jsonb, updated_at = NOW()
+                WHERE key = $1
+                RETURNING key, value, description, is_secret, updated_at
+                """,
+                key, req.value,
+            )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
+    return _config_row(dict(row))
+
+
+# ── Usage reporting (admin-only) ──────────────────────────────────────────────
+
+@router.get("/api/v1/usage")
+async def get_usage(
+    _admin: AdminDep,
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+):
+    """Recent usage events with key name join, newest first. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT u.id, u.api_key_id, k.name AS key_name,
+                   u.agent_id, u.session_id, u.model,
+                   u.input_tokens, u.output_tokens, u.cost_usd,
+                   u.duration_ms, u.created_at
+            FROM   usage_events u
+            LEFT   JOIN api_keys k ON k.id = u.api_key_id
+            ORDER  BY u.created_at DESC
+            LIMIT  $1 OFFSET $2
+            """,
+            limit, offset,
+        )
+    return [dict(r) for r in rows]

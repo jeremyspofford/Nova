@@ -1,0 +1,55 @@
+# Nova AI Platform — Ollama model configuration
+# Models listed here are pulled into Ollama automatically on startup.
+# Edit this file to add/remove models without touching any scripts.
+#
+# Run ./scripts/setup.sh to apply changes (it reads this file).
+
+ollama:
+  pull_on_startup:
+    # ── REQUIRED ─────────────────────────────────────────────────────────────
+    # Embedding model used by memory-service — must be exactly 768 dimensions.
+    - name: nomic-embed-text
+      required: true
+      description: "768-dim text embeddings (memory service depends on this)"
+
+    # ── Chat models (optional — comment out any you don't need locally) ──────
+    # These are only needed if you want local inference.
+    # If you've configured Cerebras, Groq, Claude Max, etc. in .env, you can
+    # comment out all chat models to skip a large download.
+    - name: llama3.2
+      required: false
+      description: "3.8B params, ~2.0 GB — fast, good quality, good default"
+
+    # Uncomment to pull additional models:
+    # - name: llama3.2:3b
+    #   required: false
+    #   description: "3B variant, ~1.9 GB — faster, slightly lower quality"
+
+    # - name: mistral
+    #   required: false
+    #   description: "7B, ~4.1 GB — strong reasoning, good for code"
+
+    # - name: qwen2.5
+    #   required: false
+    #   description: "7B, ~4.4 GB — excellent multilingual support"
+
+    # - name: phi4
+    #   required: false
+    #   description: "14B, ~8.2 GB — highest local quality, needs 16GB+ RAM"
+
+    # - name: deepseek-r1
+    #   required: false
+    #   description: "7B, ~4.7 GB — strong chain-of-thought reasoning"
+
+    # - name: gemma3
+    #   required: false
+    #   description: "4B, ~3.3 GB — Google model, fast and capable"
+
+# ── GPU configuration ────────────────────────────────────────────────────────
+# Controls how Ollama uses GPU acceleration.
+# This section does NOT affect docker-compose directly — see docker-compose.gpu.yml
+# for NVIDIA GPU enablement. Ollama on macOS uses Metal automatically.
+gpu:
+  # Number of GPU layers to offload to the GPU (0 = CPU only, -1 = all layers)
+  # Tune this if you run out of VRAM: set to a fraction of total model layers
+  num_gpu: -1   # -1 means "all" — Ollama picks the right number automatically
