@@ -1,7 +1,20 @@
 .PHONY: help up dev build down logs ps watch migrate
 
-COMPOSE      = docker compose
 DASHBOARD    = dashboard
+
+# ── GPU auto-detection ────────────────────────────────────────────────────────
+# Override with NOVA_GPU=cpu|nvidia|rocm in .env or environment
+NOVA_GPU     ?= auto
+GPU_OVERLAY  :=
+ifeq ($(NOVA_GPU),nvidia)
+  GPU_OVERLAY = -f docker-compose.gpu.yml
+else ifeq ($(NOVA_GPU),rocm)
+  GPU_OVERLAY = -f docker-compose.rocm.yml
+else ifeq ($(NOVA_GPU),auto)
+  GPU_OVERLAY = $(shell command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1 && echo "-f docker-compose.gpu.yml")
+endif
+
+COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY)
 
 # ─────────────────────────────────────────────────────────────────────────────
 help: ## Show available commands
