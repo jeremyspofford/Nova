@@ -59,25 +59,32 @@ StdioMCPClient (JSON-RPC 2.0 over subprocess stdin/stdout). Tools namespaced as 
 
 ## Next Up
 
+### Phase 5.5 — Hardening
+
+Inserted based on competitive review. Building forward without a safety net (no tests, no observability) is the biggest risk to the platform. This phase addresses operational maturity before adding memory complexity.
+
+1. **Test foundation** — pytest fixtures for orchestrator + memory-service; integration tests for pipeline execution, memory retrieval, auth
+2. **Fix streaming token counts** — `orchestrator/app/agents/runner.py` returns 0 tokens for streaming responses; accumulate chunks or use LLM gateway response headers
+3. **Fix reaper race condition** — `orchestrator/app/reaper.py` has TOCTOU race between UPDATE and enqueue_task; use Redis Lua script for atomic requeue
+4. **Structured JSON logging** — across all services (replace unstructured string logs)
+5. **Embedding cache activation** — wire up existing `embedding_cache` table in `memory-service/app/embedding.py` (table exists in schema but is never queried)
+6. **Working memory cleanup job** — background task deleting expired rows from `working_memories` (expires_at column exists but nothing enforces it)
+
 ### Phase 6 — Memory Overhaul
 
 The memory system is the connective tissue for self-direction. The Planning Agent (Phase 7) depends on it.
 
-**Three-tier architecture:**
+**Already built (not in scope):**
+- 4-tier memory schema (working/episodic/semantic/procedural) — `memory-service/app/db/schema.sql`
+- Hybrid RRF retrieval engine (70% vector + 30% keyword) — `memory-service/app/retrieval.py`
+- HNSW indexes, tsvector GIN indexes, monthly partitioning for episodic table
 
-| Tier | Store | Purpose |
-|---|---|---|
-| Session | Redis | Active context window, tool results, turn history |
-| Structured | PostgreSQL | Facts (key-value + confidence), episodes (task summaries + lessons), project context |
-| Semantic | pgvector | Embedding similarity search |
-
-**Key deliverables:**
-
-1. **Hybrid retrieval** — `70% cosine_similarity + 30% ts_rank` (full-text). Fixes pure vector search on exact keyword lookups. All inside PostgreSQL.
-2. **ACT-R confidence decay** — `effective_confidence = base_confidence × (days_since_last_access ^ -0.5)`. Prevents stale info from contaminating planner context.
-3. **`save_fact()` upsert** — `ON CONFLICT DO UPDATE` keyed on `(project_id, category, key)`. No duplicate facts across sessions.
-4. **Embedding fallback chain** — `text-embedding-3-small` → Ollama `nomic-embed-text` (zero-pad 768→1536 dims).
-5. **Memory Compaction Pipeline** — nightly asyncio task reads recent episodes from memory-service, runs a compaction LLM call, upserts distilled facts back.
+**Remaining deliverables:**
+1. **ACT-R confidence decay** — `effective_confidence = base_confidence × (days_since_last_access ^ -0.5)`. Prevents stale info from contaminating planner context.
+2. **`save_fact()` upsert** — `ON CONFLICT DO UPDATE` keyed on `(project_id, category, key)`. No duplicate facts across sessions.
+3. **Memory Compaction Pipeline** — background asyncio task reads recent episodes, runs a compaction LLM call, upserts distilled semantic facts.
+4. **Automatic partition creation** — episodic partitions are hardcoded through 2026-04; need a startup hook or background job to create future partitions.
+5. **Embedding fallback chain** — `text-embedding-3-small` → Ollama `nomic-embed-text` (zero-pad 768→1536 dims).
 6. **Memory Inspector** dashboard page — browse facts, episodes, project context; manually flag or delete stale entries.
 
 ---
@@ -87,6 +94,8 @@ The memory system is the connective tissue for self-direction. The Planning Agen
 ### Phase 7 — Self-Directed Autonomy (Goal Layer + Planning + Evaluation)
 
 **This is the goal the entire platform is built toward.** User defines a goal; Nova works toward it autonomously.
+
+**Prerequisites:** Tool sandboxing must be improved before agents run unsupervised.
 
 **New components:**
 
@@ -130,7 +139,37 @@ Self-direction v2: Nova learns from its own history.
 
 ---
 
+## Competitive Insights — Features to Adopt
+
+Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGraph, MetaGPT, OpenHands, AutoGPT, BabyAGI, and the OpenAI Agents SDK.
+
+| Feature | Inspiration | Description | Target Phase |
+|---|---|---|---|
+| **Tool sandboxing** | IronClaw (WASM), NanoClaw (containers) | Docker-in-Docker or gVisor for `run_shell`; agents running unsupervised need containment | Before Phase 7 |
+| **Graph-based execution / DAG** | LangGraph | Implement `parallel_group` support in pipeline executor for parallel stages (field exists in schema, executor ignores it) | Phase 6 or 7 |
+| **Agent Swarms / dynamic teams** | NanoClaw | Allow dynamic agent composition instead of fixed pipeline order; agents can recruit specialists mid-task | Phase 7+ |
+| **Agent handoff protocol** | OpenAI Swarm/Agents SDK | Let agents dynamically delegate to other agents mid-task instead of fixed sequential pipeline | Phase 7+ |
+| **Execution cost estimation** | CrewAI Enterprise | Predict token cost before running a task; enforce real-time budget caps, not just post-hoc tracking | Phase 7 |
+| **Replay/debug mode** | LangGraph | Expose pipeline checkpoints in dashboard for step-by-step inspection of completed tasks | Phase 6 |
+| **HTTP MCP transport** | Ecosystem trend | Add HTTP/SSE transport alongside existing stdio; enables remote MCP servers | Phase 6 |
+| **Outbound webhooks** | CrewAI | POST on task lifecycle events (completed, failed, escalated); pull forward from Phase 9 | Phase 6 or 7 |
+| **Priority queue** | LangGraph | Redis sorted set for task priority levels; high-priority tasks shouldn't wait behind batch jobs | Phase 5.5 or 6 |
+| **OpenTelemetry tracing** | LangGraph, CrewAI | Distributed tracing across all 5 services for task lifecycle observability | Phase 5.5 |
+
+---
+
 ## Known Gaps & Deferred Work
+
+### Bugs & Technical Debt
+
+- **Streaming token counts broken** — `orchestrator/app/agents/runner.py` returns 0 tokens for streaming responses; usage tracking is broken for the primary interaction mode
+- **Reaper race condition** — `orchestrator/app/reaper.py` TOCTOU between UPDATE and enqueue_task can cause double-queuing
+- **No circuit breaker for LLM providers** — if a provider is down, requests fail immediately instead of routing to fallback
+- **DB connection pool has no idle validation** — stale connections after Postgres restarts aren't detected
+- **Admin secret default not rejected in production** — `nova-admin-secret-change-me` is accepted without warning
+- **`parallel_group` field exists but is ignored** — pipeline executor runs everything sequentially regardless
+- **Contracts not enforced** — `nova-contracts` Pydantic models exist but aren't validated at service boundaries; agent responses are unchecked dicts
+- **Embedding cache unused** — `embedding_cache` table exists in memory-service schema but is never queried or written to
 
 ### Phase 3 — End-to-End Tool Testing (deferred)
 
@@ -164,6 +203,28 @@ Sidebar panel, "Ask Nova" command, diff view. Mentioned in Phase 3b.
 - **ClaudeCode provider** — spawn `claude -p` subprocess using Claude Max subscription for zero API cost per call (designed in Phase 4, not yet implemented)
 - **Post-pipeline agents** — Documentation Agent, Diagramming Agent, Security Review Agent, Memory Extraction Agent (designed, not built)
 - **Default pods** — Quick Reply, Research, Code Generation, Analysis (designed in Phase 4, only Quartet default shipped)
+- **Skills framework** (from NanoClaw) — modular instruction sets stored as files, loaded per-task context
+
+---
+
+## Competitive Landscape Summary
+
+### What Nova Has That Others Don't
+
+- **Quartet pipeline with safety rails on every task** — most platforms have no built-in guardrail or code review step
+- **9-provider LLM routing** including subscription-based (Claude Max, ChatGPT) for zero API cost
+- **Full admin dashboard** — most open-source platforms are CLI-only
+- **Hybrid RRF retrieval** — more sophisticated than the pure-vector approach used by competitors
+- **4-tier memory schema** — working/episodic/semantic/procedural with proper indexes
+- **MCP integration** — ahead of most; only NanoClaw and OpenAI Agents SDK have this
+
+### Where Nova Lags
+
+- **Testing** — zero tests vs. mature test suites in all major platforms
+- **Observability** — no structured logging, tracing, or metrics vs. LangGraph's built-in tracing
+- **Tool sandboxing** — host execution vs. IronClaw's WASM and NanoClaw's container isolation
+- **Dynamic agent composition** — fixed pipeline vs. NanoClaw's Agent Swarms and CrewAI's dynamic crews
+- **Edge deployment** — Docker-only vs. PicoClaw's 10MB footprint on RISC-V
 
 ---
 
@@ -175,3 +236,9 @@ Sidebar panel, "Ask Nova" command, diff view. Mentioned in Phase 3b.
 - Reaper timeout: 150s no heartbeat = stale agent
 - Task heartbeat: every 30s; tasks expire in Redis after 24h
 - `REQUIRE_AUTH=false` bypasses API key validation for development
+- Memory service hybrid retrieval (RRF) is already implemented — was listed as Phase 6 but is done
+- Episodic partitions are hardcoded through 2026-04; need auto-creation
+- `parallel_group` DB field exists but executor runs everything sequentially
+- AI agent market: $7.84B in 2025, projected $52.62B by 2030 (46.3% CAGR)
+- MCP (Model Context Protocol) is becoming the standard for tool integration — adopted by OpenAI, Anthropic, Cursor, Replit, VS Code
+- Guardrails are mandatory in 2026 (California SB 243/AB 489, Singapore Model AI Governance Framework) — Nova's built-in Guardrail Agent is a competitive advantage
