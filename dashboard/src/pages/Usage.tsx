@@ -149,7 +149,7 @@ export function Usage() {
                 <YAxis
                   type="category"
                   dataKey="label"
-                  width={140}
+                  width={110}
                   tick={{ fontSize: 10, fill: chartColors.tick }}
                   axisLine={false}
                   tickLine={false}

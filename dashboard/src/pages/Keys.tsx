@@ -49,7 +49,7 @@ export function Keys() {
       {newKey && (
         <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 p-4">
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1">Key created — save it now, it won't be shown again</p>
-          <div className="flex items-center gap-2 font-mono text-sm text-emerald-800 dark:text-emerald-300">
+          <div className="flex items-center gap-2 font-mono text-sm text-emerald-800 dark:text-emerald-300 break-all">
             {newKey}
             <CopyButton text={newKey} />
           </div>

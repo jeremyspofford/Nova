@@ -317,7 +317,7 @@ function SubmitForm() {
           <select
             value={podName}
             onChange={e => setPodName(e.target.value)}
-            className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
+            className="max-w-[160px] rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
           >
             <option value="">Default pod</option>
             {pods?.map(p => (
@@ -329,10 +329,10 @@ function SubmitForm() {
           <select
             value={modelId}
             onChange={e => setModelId(e.target.value)}
-            className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
+            className="max-w-[160px] rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
             title="Override the model for this task (leaves agent defaults intact)"
           >
-            <option value="">Pod default model</option>
+            <option value="">Default model</option>
             {models.map(m => (
               <option key={m.id} value={m.id}>{m.id}</option>
             ))}

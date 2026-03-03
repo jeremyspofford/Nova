@@ -182,15 +182,15 @@ export function Chat() {
           </span>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 shrink-0">
           <select
             value={modelId}
             onChange={e => setModelId(e.target.value)}
             disabled={isStreaming}
             title="Override Nova's default model for this conversation"
-            className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
+            className="w-28 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
           >
-            <option value="">Nova default model</option>
+            <option value="">Default model</option>
             {models.map(m => (
               <option key={m.id} value={m.id}>{m.id}</option>
             ))}
@@ -200,10 +200,10 @@ export function Chat() {
             onClick={startNewConversation}
             disabled={isStreaming || messages.length === 0}
             title="Start a new conversation (clears history)"
-            className="flex items-center gap-1.5 rounded-md border border-neutral-300 dark:border-neutral-600 px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40 transition-colors"
+            className="flex items-center gap-1.5 rounded-md border border-neutral-300 dark:border-neutral-600 px-2 sm:px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40 transition-colors"
           >
             <RefreshCw size={11} />
-            New
+            <span className="hidden sm:inline">New</span>
           </button>
         </div>
       </div>
@@ -244,7 +244,7 @@ export function Chat() {
             value={input}
             onChange={e => { setInput(e.target.value); resizeTextarea() }}
             onKeyDown={handleKeyDown}
-            placeholder="Message Nova… (Enter to send, Shift+Enter for newline)"
+            placeholder="Message Nova…"
             rows={1}
             className="flex-1 resize-none overflow-hidden rounded-xl border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-4 py-2.5 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors"
             style={{ minHeight: '42px', maxHeight: '160px' }}
@@ -260,12 +260,12 @@ export function Chat() {
         </div>
 
         <div className="mt-2 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-          <span>
+          <span className="min-w-0 truncate">
             {isStreaming
               ? 'Nova is responding…'
               : sessionId
-                ? `Session ${sessionId.slice(0, 8)}… · ${messages.filter(m => m.role === 'user').length} messages`
-                : 'New session · Enter to send'}
+                ? `${messages.filter(m => m.role === 'user').length} messages`
+                : 'Enter to send · Shift+Enter for newline'}
           </span>
           {modelId && (
             <span className="font-mono text-accent-600 dark:text-accent-400">{modelId}</span>
