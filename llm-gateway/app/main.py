@@ -5,13 +5,14 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from nova_contracts.logging import configure_logging
 
 from app.config import settings
 from app.health import health_router
 from app.openai_router import openai_router
 from app.router import router
 
-logging.basicConfig(level=settings.log_level)
+configure_logging("llm-gateway", settings.log_level)
 log = logging.getLogger(__name__)
 
 

@@ -95,7 +95,7 @@ async def _reap_stale_running_tasks() -> None:
                     f"Reaper: task {task_id} stale in state '{task['status']}' "
                     f"(attempt {retry_count + 1}/{max_retries}) — re-queuing"
                 )
-                await conn.execute(
+                updated = await conn.fetchval(
                     """
                     UPDATE tasks
                     SET status = 'queued',
@@ -103,10 +103,15 @@ async def _reap_stale_running_tasks() -> None:
                         queued_at = now(),
                         current_stage = NULL,
                         error = NULL
-                    WHERE id = $1
+                    WHERE id = $1 AND status = ANY($2::text[])
+                    RETURNING id
                     """,
                     task["id"],
+                    list(ACTIVE_STATES),
                 )
+                if not updated:
+                    logger.info(f"Reaper: task {task_id} already handled by another process — skipping")
+                    continue
                 await enqueue_task(task_id)
                 await _audit(conn, "task_requeued", "warning", task_id=task_id,
                              data={"retry_count": retry_count + 1, "reason": "heartbeat_timeout"})
@@ -156,6 +161,17 @@ async def _reap_stuck_queued_tasks() -> None:
 
         for task in stuck:
             task_id = str(task["id"])
+            # Guard: confirm task is still queued before re-pushing
+            still_queued = await conn.fetchval(
+                """
+                SELECT id FROM tasks
+                WHERE id = $1 AND status = 'queued'
+                """,
+                task["id"],
+            )
+            if not still_queued:
+                logger.info(f"Reaper: task {task_id} no longer queued — skipping")
+                continue
             logger.warning(f"Reaper: task {task_id} stuck in queued state — re-pushing to queue")
             await enqueue_task(task_id)
             await _audit(conn, "task_requeued", "warning", task_id=task_id,

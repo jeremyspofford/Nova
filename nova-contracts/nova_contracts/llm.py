@@ -72,6 +72,9 @@ class StreamChunk(BaseModel):
     delta: str
     tool_calls: list[ToolCall] = Field(default_factory=list)
     finish_reason: str | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 class EmbedRequest(BaseModel):

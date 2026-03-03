@@ -88,9 +88,18 @@ class OllamaProvider(ModelProvider):
                     chunk = json.loads(line)
                     content = chunk.get("message", {}).get("content", "")
                     done = chunk.get("done", False)
+
+                    input_tokens = None
+                    output_tokens = None
+                    if done:
+                        input_tokens = chunk.get("prompt_eval_count")
+                        output_tokens = chunk.get("eval_count")
+
                     yield StreamChunk(
                         delta=content,
                         finish_reason="stop" if done else None,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
                     )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:

@@ -33,15 +33,15 @@ function Section({
   children: React.ReactNode
 }) {
   return (
-    <div className="rounded-xl border border-stone-200 bg-white overflow-hidden">
-      <div className="border-b border-stone-100 px-5 py-4">
+    <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 overflow-hidden">
+      <div className="border-b border-stone-100 dark:border-stone-800 px-4 py-4 sm:px-5">
         <div className="flex items-center gap-2">
-          <Icon size={15} className="text-teal-700" />
-          <h2 className="text-sm font-semibold text-stone-900">{title}</h2>
+          <Icon size={15} className="text-teal-700 dark:text-teal-400" />
+          <h2 className="text-sm font-semibold text-stone-900 dark:text-stone-100">{title}</h2>
         </div>
-        <p className="mt-0.5 text-xs text-stone-400">{description}</p>
+        <p className="mt-0.5 text-xs text-stone-400 dark:text-stone-500">{description}</p>
       </div>
-      <div className="px-5 py-4 space-y-4">{children}</div>
+      <div className="px-4 py-4 sm:px-5 space-y-4">{children}</div>
     </div>
   )
 }
@@ -85,18 +85,18 @@ function ConfigField({
   const handleReset = () => { setDraft(value); setDirty(false) }
 
   const inputClass =
-    'w-full rounded-lg border border-stone-300 bg-stone-50 px-3 py-2 text-sm text-stone-900 ' +
-    'placeholder:text-stone-400 outline-none focus:border-teal-600 disabled:opacity-50 transition-colors'
+    'w-full rounded-lg border border-stone-300 dark:border-stone-600 bg-stone-50 dark:bg-stone-800 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 ' +
+    'placeholder:text-stone-400 dark:placeholder:text-stone-500 outline-none focus:border-teal-600 disabled:opacity-50 transition-colors'
 
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
-        <label className="text-xs font-medium text-stone-600">{label}</label>
+        <label className="text-xs font-medium text-stone-600 dark:text-stone-400">{label}</label>
         {dirty && (
           <div className="flex items-center gap-2">
             <button
               onClick={handleReset}
-              className="flex items-center gap-1 text-xs text-stone-400 hover:text-stone-700"
+              className="flex items-center gap-1 text-xs text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300"
             >
               <RotateCcw size={10} /> Reset
             </button>
@@ -130,7 +130,7 @@ function ConfigField({
       )}
 
       {description && (
-        <p className="mt-1 text-xs text-stone-400">{description}</p>
+        <p className="mt-1 text-xs text-stone-400 dark:text-stone-500">{description}</p>
       )}
     </div>
   )
@@ -161,15 +161,15 @@ export function Settings() {
   const novaGreeting = useConfigValue(entries, 'nova.greeting', '')
   const defaultModel = useConfigValue(entries, 'nova.default_model', '')
 
-  if (isLoading) return <div className="p-6 text-sm text-stone-400">Loading…</div>
-  if (error)     return <div className="p-6 text-sm text-red-600">{String(error)}</div>
+  if (isLoading) return <div className="px-4 py-6 sm:px-6 text-sm text-stone-400 dark:text-stone-500">Loading…</div>
+  if (error)     return <div className="px-4 py-6 sm:px-6 text-sm text-red-600 dark:text-red-400">{String(error)}</div>
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-4 py-6 sm:px-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-lg font-semibold text-stone-900">Platform Settings</h1>
-        <p className="mt-1 text-sm text-stone-400">
+        <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Platform Settings</h1>
+        <p className="mt-1 text-sm text-stone-400 dark:text-stone-500">
           Runtime configuration for this Nova instance. Changes take effect immediately —
           no restart required.
         </p>
@@ -238,7 +238,7 @@ export function Settings() {
       </Section>
 
       {saveMutation.isError && (
-        <p className="text-sm text-red-600">{String(saveMutation.error)}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{String(saveMutation.error)}</p>
       )}
     </div>
   )

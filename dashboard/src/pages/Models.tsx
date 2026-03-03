@@ -27,24 +27,24 @@ export function Models() {
   ]
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="px-4 py-6 sm:px-6 space-y-6">
       <div className="flex items-baseline gap-3">
-        <h1 className="text-lg font-semibold text-stone-900">Models</h1>
+        <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Models</h1>
         {models.length > 0 && (
-          <span className="text-sm text-stone-400">{models.length} registered</span>
+          <span className="text-sm text-stone-400 dark:text-stone-500">{models.length} registered</span>
         )}
       </div>
 
-      {isLoading && <p className="text-sm text-stone-400">Loading…</p>}
-      {error && <p className="text-sm text-red-600">Failed to load models: {String(error)}</p>}
+      {isLoading && <p className="text-sm text-stone-400 dark:text-stone-500">Loading…</p>}
+      {error && <p className="text-sm text-red-600 dark:text-red-400">Failed to load models: {String(error)}</p>}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sorted.map(provider => (
-          <div key={provider} className="rounded-xl border border-stone-200 bg-white p-4">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-teal-700">{provider}</p>
+          <div key={provider} className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-teal-700 dark:text-teal-400">{provider}</p>
             <ul className="space-y-1.5">
               {groups[provider].map(id => (
-                <li key={id} className="font-mono text-xs text-stone-500 truncate" title={id}>
+                <li key={id} className="font-mono text-xs text-stone-500 dark:text-stone-400 truncate" title={id}>
                   {id}
                 </li>
               ))}

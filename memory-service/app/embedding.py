@@ -86,12 +86,64 @@ async def get_embeddings_batch(
     session: AsyncSession,
     model: str = settings.embedding_model,
 ) -> list[list[float]]:
-    """Batch embedding with cache population."""
-    async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
-        resp = await client.post("/embed", json={"model": model, "texts": texts})
-        resp.raise_for_status()
-        data = resp.json()
-    return data["embeddings"]
+    """Batch embedding with 3-tier cache (Redis → PostgreSQL → LLM Gateway)."""
+    redis = get_redis()
+    results: dict[int, list[float]] = {}
+    miss_indices: list[int] = []
+
+    # Check L1 (Redis) and L2 (PostgreSQL) for each text
+    for i, t in enumerate(texts):
+        text_hash = _hash_text(t, model)
+        redis_key = _cache_key(text_hash)
+
+        # L1: Redis
+        cached = await redis.get(redis_key)
+        if cached:
+            results[i] = json.loads(cached)
+            continue
+
+        # L2: PostgreSQL embedding_cache
+        row = await session.execute(
+            text("SELECT embedding FROM embedding_cache WHERE content_hash = :h"),
+            {"h": text_hash},
+        )
+        db_row = row.fetchone()
+        if db_row:
+            embedding = _parse_pg_vector(str(db_row[0]))
+            await redis.setex(redis_key, settings.redis_embedding_cache_ttl, json.dumps(embedding))
+            results[i] = embedding
+            continue
+
+        miss_indices.append(i)
+
+    # L3: Batch-call gateway for cache misses only
+    if miss_indices:
+        miss_texts = [texts[i] for i in miss_indices]
+        async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
+            resp = await client.post("/embed", json={"model": model, "texts": miss_texts})
+            resp.raise_for_status()
+            data = resp.json()
+
+        for j, idx in enumerate(miss_indices):
+            embedding = data["embeddings"][j]
+            results[idx] = embedding
+
+            # Write-through to both caches
+            t = texts[idx]
+            text_hash = _hash_text(t, model)
+            redis_key = _cache_key(text_hash)
+            await redis.setex(redis_key, settings.redis_embedding_cache_ttl, json.dumps(embedding))
+            embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
+            await session.execute(
+                text("""
+                    INSERT INTO embedding_cache (content_hash, embedding, model)
+                    VALUES (:h, :e::halfvec, :m)
+                    ON CONFLICT (content_hash) DO NOTHING
+                """),
+                {"h": text_hash, "e": embedding_str, "m": model},
+            )
+
+    return [results[i] for i in range(len(texts))]
 
 
 async def _call_llm_gateway(text: str, model: str) -> list[float]:

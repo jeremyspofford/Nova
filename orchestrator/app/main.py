@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from nova_contracts.logging import configure_logging
 
 from app.clients import close_clients
 from app.config import settings
@@ -18,7 +19,7 @@ from app.reaper import reaper_loop
 from app.router import router
 from app.store import ensure_primary_agent, recover_stale_agents
 
-logging.basicConfig(level=settings.log_level)
+configure_logging("orchestrator", settings.log_level)
 log = logging.getLogger(__name__)
 
 

@@ -7,4 +7,123 @@
     background-color: #fafaf8; /* stone-50 */
     color: #1c1917;            /* stone-900 */
   }
+  .dark body,
+  html.dark body {
+    background-color: #0c0a09; /* stone-950 */
+    color: #e7e5e4;            /* stone-200 */
+  }
+}
+
+/* ── Markdown rendering in chat bubbles ──────────────────────────────────── */
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child  { margin-bottom: 0; }
+
+.markdown-body p { margin: 0.5em 0; }
+.markdown-body p:first-child { margin-top: 0; }
+.markdown-body p:last-child  { margin-bottom: 0; }
+
+.markdown-body code {
+  font-size: 0.8em;
+  background: #e7e5e4; /* stone-200 */
+  padding: 0.15em 0.35em;
+  border-radius: 4px;
+}
+.dark .markdown-body code {
+  background: #292524; /* stone-800 */
+  color: #d6d3d1;      /* stone-300 */
+}
+
+.markdown-body pre {
+  margin: 0.5em 0;
+  padding: 0.75em 1em;
+  background: #1c1917; /* stone-900 */
+  border-radius: 8px;
+  overflow-x: auto;
+}
+.dark .markdown-body pre {
+  background: #0c0a09; /* stone-950 */
+}
+
+.markdown-body pre code {
+  background: none;
+  padding: 0;
+  color: #e7e5e4; /* stone-200 */
+  font-size: 0.8em;
+  line-height: 1.6;
+}
+
+.markdown-body ul, .markdown-body ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li  { margin: 0.15em 0; }
+
+.markdown-body blockquote {
+  margin: 0.5em 0;
+  padding: 0.25em 0.75em;
+  border-left: 3px solid #d6d3d1; /* stone-300 */
+  color: #78716c; /* stone-500 */
+}
+.dark .markdown-body blockquote {
+  border-left-color: #57534e; /* stone-600 */
+  color: #a8a29e;              /* stone-400 */
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3,
+.markdown-body h4, .markdown-body h5, .markdown-body h6 {
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.markdown-body h1 { font-size: 1.2em; }
+.markdown-body h2 { font-size: 1.1em; }
+.markdown-body h3 { font-size: 1.05em; }
+
+.markdown-body table {
+  display: block;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.9em;
+  width: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.markdown-body th, .markdown-body td {
+  border: 1px solid #d6d3d1 !important;
+  padding: 0.3em 0.6em;
+}
+.dark .markdown-body th, .dark .markdown-body td {
+  border-color: #44403c !important; /* stone-700 */
+}
+.markdown-body th {
+  background: #f5f5f4;
+  font-weight: 600;
+}
+.dark .markdown-body th {
+  background: #292524; /* stone-800 */
+}
+.markdown-body tr:nth-child(even) {
+  background: #fafaf9;
+}
+.dark .markdown-body tr:nth-child(even) {
+  background: #1c1917; /* stone-900 */
+}
+
+.markdown-body a {
+  color: #0f766e; /* teal-700 */
+  text-decoration: underline;
+}
+.dark .markdown-body a {
+  color: #2dd4bf; /* teal-400 */
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e7e5e4;
+  margin: 0.75em 0;
+}
+.dark .markdown-body hr {
+  border-top-color: #44403c; /* stone-700 */
 }

@@ -53,28 +53,28 @@ export function Usage() {
   const activeView  = VIEWS.find(v => v.id === view)!
 
   return (
-    <div className="p-6 space-y-6">
-      <h1 className="text-lg font-semibold text-stone-900">Usage & Cost</h1>
+    <div className="px-4 py-6 sm:px-6 space-y-6">
+      <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Usage & Cost</h1>
 
       {/* ── Summary cards (always visible, all-time totals) ─────────────── */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         {[
           { label: 'Total cost (all time)',   value: `$${totalCost.toFixed(4)}`          },
           { label: 'Total tokens (all time)', value: totalTokens.toLocaleString()         },
           { label: 'Total calls (all time)',  value: totalCalls.toLocaleString()          },
         ].map(({ label, value }) => (
-          <div key={label} className="rounded-xl border border-stone-200 bg-white p-4">
-            <p className="text-xs text-stone-400">{label}</p>
-            <p className="mt-1 text-xl font-semibold text-stone-900">{value}</p>
+          <div key={label} className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4">
+            <p className="text-xs text-stone-400 dark:text-stone-500">{label}</p>
+            <p className="mt-1 text-xl font-semibold text-stone-900 dark:text-stone-100">{value}</p>
           </div>
         ))}
       </div>
 
       {/* ── Drill-down chart ─────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-stone-200 bg-white overflow-hidden">
+      <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 overflow-hidden">
 
         {/* Tab bar */}
-        <div className="flex items-center gap-1 border-b border-stone-200 px-4 pt-3 pb-0">
+        <div className="flex items-center gap-1 border-b border-stone-200 dark:border-stone-800 px-4 pt-3 pb-0">
           {VIEWS.map(v => (
             <button
               key={v.id}
@@ -82,8 +82,8 @@ export function Usage() {
               className={clsx(
                 'px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
                 view === v.id
-                  ? 'border-teal-600 text-teal-700'
-                  : 'border-transparent text-stone-400 hover:text-stone-700',
+                  ? 'border-teal-600 text-teal-700 dark:text-teal-400'
+                  : 'border-transparent text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300',
               )}
             >
               {v.label}
@@ -92,7 +92,7 @@ export function Usage() {
 
           {/* Sort toggle — only visible in By Model view */}
           {view === 'model' && (
-            <div className="ml-auto mb-1 flex items-center gap-0.5 rounded-lg border border-stone-300 p-0.5">
+            <div className="ml-auto mb-1 flex items-center gap-0.5 rounded-lg border border-stone-300 dark:border-stone-600 p-0.5">
               {(['cost', 'alpha'] as const).map(s => (
                 <button
                   key={s}
@@ -100,8 +100,8 @@ export function Usage() {
                   className={clsx(
                     'rounded px-2 py-1 text-xs font-medium transition-colors',
                     sortBy === s
-                      ? 'bg-stone-200 text-stone-900'
-                      : 'text-stone-400 hover:text-stone-700',
+                      ? 'bg-stone-200 dark:bg-stone-700 text-stone-900 dark:text-stone-100'
+                      : 'text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300',
                   )}
                 >
                   {s === 'cost' ? 'By Cost' : 'A → Z'}
@@ -112,10 +112,10 @@ export function Usage() {
         </div>
 
         <div className="p-4">
-          <p className="mb-4 text-xs text-stone-400">{activeView.description}</p>
+          <p className="mb-4 text-xs text-stone-400 dark:text-stone-500">{activeView.description}</p>
 
           {chartData.length === 0 ? (
-            <p className="py-8 text-center text-sm text-stone-400">
+            <p className="py-8 text-center text-sm text-stone-400 dark:text-stone-500">
               {isLoading ? 'Loading…' : 'No data for this period'}
             </p>
           ) : view === 'model' ? (
@@ -130,7 +130,7 @@ export function Usage() {
                 <YAxis
                   type="category"
                   dataKey="label"
-                  width={220}
+                  width={140}
                   tick={{ fontSize: 10, fill: '#a8a29e' }}
                   axisLine={false}
                   tickLine={false}
@@ -194,54 +194,58 @@ export function Usage() {
 
           {/* Per-view summary row */}
           {chartData.length > 0 && (
-            <div className="mt-3 flex gap-6 border-t border-stone-200 pt-3">
+            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-stone-200 dark:border-stone-800 pt-3">
               {[
                 { label: 'Cost',   value: `$${chartData.reduce((s, d) => s + d.cost, 0).toFixed(4)}` },
                 { label: 'Tokens', value: chartData.reduce((s, d) => s + d.tokens, 0).toLocaleString() },
                 { label: 'Calls',  value: chartData.reduce((s, d) => s + d.calls, 0).toLocaleString()  },
               ].map(({ label, value }) => (
                 <div key={label}>
-                  <span className="text-xs text-stone-400">{label}: </span>
-                  <span className="text-xs font-medium text-stone-700">{value}</span>
+                  <span className="text-xs text-stone-400 dark:text-stone-500">{label}: </span>
+                  <span className="text-xs font-medium text-stone-700 dark:text-stone-300">{value}</span>
                 </div>
               ))}
-              <span className="ml-auto text-xs text-stone-400">{activeView.description}</span>
+              <span className="ml-auto hidden sm:inline text-xs text-stone-400 dark:text-stone-500">{activeView.description}</span>
             </div>
           )}
         </div>
       </div>
 
       {/* ── Recent events table ──────────────────────────────────────────── */}
-      <div className="rounded-xl border border-stone-200 bg-white overflow-hidden">
-        <div className="border-b border-stone-200 px-4 py-3 flex items-center justify-between">
-          <p className="text-xs font-medium text-stone-500 uppercase tracking-wider">Recent Events</p>
-          <p className="text-xs text-stone-400">showing last 50 of {totalCalls}</p>
+      <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 overflow-hidden">
+        <div className="border-b border-stone-200 dark:border-stone-800 px-4 py-3 flex items-center justify-between">
+          <p className="text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wider">Recent Events</p>
+          <p className="text-xs text-stone-400 dark:text-stone-500">showing last 50 of {totalCalls}</p>
         </div>
-        {isLoading && <p className="p-4 text-sm text-stone-400">Loading…</p>}
-        {error     && <p className="p-4 text-sm text-red-600">Failed to load usage: {String(error)}</p>}
+        {isLoading && <p className="p-4 text-sm text-stone-400 dark:text-stone-500">Loading…</p>}
+        {error     && <p className="p-4 text-sm text-red-600 dark:text-red-400">Failed to load usage: {String(error)}</p>}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-stone-200 text-xs text-stone-400">
-                {['Time', 'Model', 'Key', 'In', 'Out', 'Cost', 'Duration'].map(h => (
-                  <th key={h} className="px-4 py-2 text-left font-medium">{h}</th>
-                ))}
+              <tr className="border-b border-stone-200 dark:border-stone-800 text-xs text-stone-400 dark:text-stone-500">
+                <th className="px-3 sm:px-4 py-2 text-left font-medium">Time</th>
+                <th className="px-3 sm:px-4 py-2 text-left font-medium">Model</th>
+                <th className="hidden sm:table-cell px-4 py-2 text-left font-medium">Key</th>
+                <th className="hidden lg:table-cell px-4 py-2 text-left font-medium">In</th>
+                <th className="hidden lg:table-cell px-4 py-2 text-left font-medium">Out</th>
+                <th className="px-3 sm:px-4 py-2 text-left font-medium">Cost</th>
+                <th className="hidden md:table-cell px-4 py-2 text-left font-medium">Duration</th>
               </tr>
             </thead>
             <tbody>
               {events.slice(0, 50).map(e => (
-                <tr key={e.id} className="border-b border-stone-200/50 hover:bg-stone-100/30 transition-colors">
-                  <td className="px-4 py-2 text-stone-500 whitespace-nowrap text-xs">
+                <tr key={e.id} className="border-b border-stone-200/50 dark:border-stone-800/50 hover:bg-stone-100/30 dark:hover:bg-stone-800/30 transition-colors">
+                  <td className="px-3 sm:px-4 py-2 text-stone-500 dark:text-stone-400 whitespace-nowrap text-xs">
                     {formatDistanceToNow(new Date(e.created_at), { addSuffix: true })}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-stone-700 max-w-48 truncate">{e.model}</td>
-                  <td className="px-4 py-2 text-stone-400 text-xs">{e.key_name ?? 'dev'}</td>
-                  <td className="px-4 py-2 text-stone-500 text-xs">{e.input_tokens.toLocaleString()}</td>
-                  <td className="px-4 py-2 text-stone-500 text-xs">{e.output_tokens.toLocaleString()}</td>
-                  <td className="px-4 py-2 text-emerald-700 text-xs">
+                  <td className="px-3 sm:px-4 py-2 font-mono text-xs text-stone-700 dark:text-stone-300 max-w-32 sm:max-w-48 truncate">{e.model}</td>
+                  <td className="hidden sm:table-cell px-4 py-2 text-stone-400 dark:text-stone-500 text-xs">{e.key_name ?? 'dev'}</td>
+                  <td className="hidden lg:table-cell px-4 py-2 text-stone-500 dark:text-stone-400 text-xs">{e.input_tokens.toLocaleString()}</td>
+                  <td className="hidden lg:table-cell px-4 py-2 text-stone-500 dark:text-stone-400 text-xs">{e.output_tokens.toLocaleString()}</td>
+                  <td className="px-3 sm:px-4 py-2 text-emerald-700 dark:text-emerald-400 text-xs">
                     {e.cost_usd != null ? `$${e.cost_usd.toFixed(4)}` : '—'}
                   </td>
-                  <td className="px-4 py-2 text-stone-400 text-xs">
+                  <td className="hidden md:table-cell px-4 py-2 text-stone-400 dark:text-stone-500 text-xs">
                     {e.duration_ms != null ? `${e.duration_ms}ms` : '—'}
                   </td>
                 </tr>

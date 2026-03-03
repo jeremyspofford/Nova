@@ -154,6 +154,9 @@ async def run_agent_turn_streaming(
     )
 
     full_response: list[str] = []
+    stream_input_tokens = 0
+    stream_output_tokens = 0
+    stream_cost_usd: float | None = None
     async with llm_client.stream("POST", "/stream", json=complete_req.model_dump()) as resp:
         resp.raise_for_status()
         async for line in resp.aiter_lines():
@@ -170,6 +173,13 @@ async def run_agent_turn_streaming(
                 if delta:
                     full_response.append(delta)
                     yield delta
+                # Capture token counts from the final chunk (sent by providers)
+                if chunk_data.get("input_tokens") is not None:
+                    stream_input_tokens = chunk_data["input_tokens"]
+                if chunk_data.get("output_tokens") is not None:
+                    stream_output_tokens = chunk_data["output_tokens"]
+                if chunk_data.get("cost_usd") is not None:
+                    stream_cost_usd = chunk_data["cost_usd"]
 
     if full_response:
         await _store_exchange(agent_id, session_id, query, "".join(full_response))
@@ -181,9 +191,9 @@ async def run_agent_turn_streaming(
         agent_id=UUID(agent_id),
         session_id=session_id,
         model=model,
-        input_tokens=0,    # not available from streaming chunks in Phase 2
-        output_tokens=0,
-        cost_usd=None,
+        input_tokens=stream_input_tokens,
+        output_tokens=stream_output_tokens,
+        cost_usd=stream_cost_usd,
         duration_ms=duration_ms,
     )
 

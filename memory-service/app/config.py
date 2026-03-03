@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"  # Ollama default
     embedding_dimensions: int = 768
 
+    # Cleanup
+    working_memory_cleanup_interval_seconds: int = 300
+
     # Service
     service_host: str = "0.0.0.0"
     service_port: int = 8002

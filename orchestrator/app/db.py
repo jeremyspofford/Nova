@@ -52,10 +52,24 @@ async def init_db() -> None:
     Called from orchestrator lifespan on startup.
     """
     global _pool
+    import asyncio
+
     # asyncpg uses plain postgresql:// — strip the SQLAlchemy dialect prefix
     # so the same DATABASE_URL env var format works for both services.
     dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-    _pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10, init=_init_connection)
+
+    # Retry connection — pg_isready can report healthy before Postgres
+    # is fully accepting application connections.
+    for attempt in range(1, 11):
+        try:
+            _pool = await asyncpg.create_pool(dsn, min_size=2, max_size=10, init=_init_connection)
+            break
+        except (asyncpg.CannotConnectNowError, OSError) as exc:
+            if attempt == 10:
+                raise
+            log.warning("Postgres not ready (attempt %d/10): %s — retrying in 2s", attempt, exc)
+            await asyncio.sleep(2)
+
     await _run_schema_migrations()
     log.info("DB pool ready, schema applied")
 

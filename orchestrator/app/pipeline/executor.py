@@ -86,6 +86,9 @@ async def execute_pipeline(task_id: str) -> None:
     Main entry point. Called by queue_worker for every dequeued task.
     Runs the full quartet pipeline and writes final status to the tasks table.
     """
+    from nova_contracts.logging import set_context, clear_context
+    set_context(task_id=task_id)
+
     logger.info(f"Pipeline starting for task {task_id}")
     start = time.monotonic()
 
@@ -105,6 +108,7 @@ async def execute_pipeline(task_id: str) -> None:
         await clear_heartbeat(task_id)
         elapsed = int((time.monotonic() - start) * 1000)
         logger.info(f"Pipeline finished for task {task_id} in {elapsed}ms")
+        clear_context()
 
 
 async def mark_task_failed(task_id: str, error: str) -> None:

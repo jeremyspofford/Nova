@@ -140,13 +140,37 @@ class LiteLLMProvider(ModelProvider):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=True,
+            stream_options={"include_usage": True},
         )
 
         async for chunk in response:
-            delta = chunk.choices[0].delta
-            finish_reason = chunk.choices[0].finish_reason
-            content = delta.content or ""
-            yield StreamChunk(delta=content, finish_reason=finish_reason)
+            choice = chunk.choices[0] if chunk.choices else None
+            content = ""
+            finish_reason = None
+            if choice:
+                content = choice.delta.content or ""
+                finish_reason = choice.finish_reason
+
+            # Extract usage from final chunk (sent by LiteLLM when include_usage=True)
+            input_tokens = None
+            output_tokens = None
+            cost = None
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                input_tokens = getattr(usage, "prompt_tokens", None)
+                output_tokens = getattr(usage, "completion_tokens", None)
+                try:
+                    cost = litellm.completion_cost(completion_response=chunk)
+                except Exception:
+                    pass
+
+            yield StreamChunk(
+                delta=content,
+                finish_reason=finish_reason,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+            )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
         response = await litellm.aembedding(

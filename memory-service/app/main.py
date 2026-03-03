@@ -3,17 +3,20 @@ Nova Memory Service — main entrypoint.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from nova_contracts.logging import configure_logging
 
+from app.cleanup import cleanup_loop
 from app.config import settings
 from app.db.database import run_schema_migrations
 from app.health import health_router
 from app.router import context_router, router
 
-logging.basicConfig(level=settings.log_level)
+configure_logging("memory-service", settings.log_level)
 log = logging.getLogger(__name__)
 
 
@@ -21,9 +24,15 @@ log = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     log.info("Memory Service starting — running schema migrations")
     await run_schema_migrations()
+
+    _cleanup_task = asyncio.create_task(cleanup_loop(), name="cleanup")
     log.info("Memory Service ready")
+
     yield
+
     log.info("Memory Service shutting down")
+    _cleanup_task.cancel()
+    await asyncio.gather(_cleanup_task, return_exceptions=True)
 
 
 app = FastAPI(

@@ -7,11 +7,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from nova_contracts.logging import configure_logging
 
 from app.config import settings
 from app.websocket import handle_websocket
 
-logging.basicConfig(level=settings.log_level)
+configure_logging("chat-api", settings.log_level)
 log = logging.getLogger(__name__)
 
 
@@ -72,6 +73,7 @@ async def test_ui():
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nova Chat</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <style>
     /* ── Warm Stone + Deep Teal — matches the Nova dashboard ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -224,6 +226,60 @@ async def test_ui():
     #send:hover  { background: #14b8a6; }
     #send:disabled { background: #d6d3d1; cursor: default; }
     #send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ── Markdown inside assistant bubbles ── */
+    .assistant .bubble { white-space: normal; }
+    .assistant .bubble p { margin: 0.4em 0; }
+    .assistant .bubble p:first-child { margin-top: 0; }
+    .assistant .bubble p:last-child  { margin-bottom: 0; }
+
+    .assistant .bubble code {
+      font-size: 0.85em;
+      background: #f5f5f4;
+      padding: 0.15em 0.35em;
+      border-radius: 4px;
+    }
+    .assistant .bubble pre {
+      margin: 0.5em 0;
+      padding: 0.75em 1em;
+      background: #1c1917;
+      border-radius: 8px;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .assistant .bubble pre code {
+      background: none;
+      padding: 0;
+      color: #e7e5e4;
+      font-size: 0.85em;
+      line-height: 1.6;
+    }
+
+    .assistant .bubble ul, .assistant .bubble ol { margin: 0.4em 0; padding-left: 1.5em; }
+    .assistant .bubble ul { list-style: disc; }
+    .assistant .bubble ol { list-style: decimal; }
+    .assistant .bubble li  { margin: 0.15em 0; }
+
+    .assistant .bubble blockquote {
+      margin: 0.5em 0;
+      padding: 0.25em 0.75em;
+      border-left: 3px solid #d6d3d1;
+      color: #78716c;
+    }
+
+    .assistant .bubble h1, .assistant .bubble h2, .assistant .bubble h3 { font-weight: 600; margin: 0.6em 0 0.3em; }
+    .assistant .bubble h1 { font-size: 1.2em; }
+    .assistant .bubble h2 { font-size: 1.1em; }
+    .assistant .bubble h3 { font-size: 1.05em; }
+
+    .assistant .bubble { overflow-x: auto; }
+    .assistant .bubble table { display: table; border-collapse: collapse; margin: 0.5em 0; font-size: 0.9em; width: auto; }
+    .assistant .bubble th, .assistant .bubble td { border: 1px solid #d6d3d1; padding: 0.3em 0.6em; }
+    .assistant .bubble th { background: #f5f5f4; font-weight: 600; }
+    .assistant .bubble tr:nth-child(even) { background: #fafaf9; }
+
+    .assistant .bubble a { color: #0f766e; text-decoration: underline; }
+    .assistant .bubble hr { border: none; border-top: 1px solid #e7e5e4; margin: 0.75em 0; }
   </style>
 </head>
 <body>
@@ -251,7 +307,9 @@ async def test_ui():
   const sendBtn = document.getElementById('send');
   const dot     = document.getElementById('status-dot');
   const statusTxt = document.getElementById('status-text');
-  let ws, sessionId, streamDiv;
+  let ws, sessionId, streamDiv, streamRaw = '';
+
+  marked.setOptions({ breaks: true });
 
   /* ── Auto-grow textarea ── */
   inputEl.addEventListener('input', () => {
@@ -280,13 +338,19 @@ async def test_ui():
         if (!streamDiv) {
           streamDiv = addBubble('assistant');
           streamDiv.classList.add('streaming');
+          streamRaw = '';
         }
-        streamDiv.textContent += data.delta;
+        streamRaw += data.delta;
+        streamDiv.innerHTML = marked.parse(streamRaw);
         scrollBottom();
 
       } else if (data.type === 'stream_end') {
-        if (streamDiv) streamDiv.classList.remove('streaming');
+        if (streamDiv) {
+          streamDiv.classList.remove('streaming');
+          streamDiv.innerHTML = marked.parse(streamRaw);
+        }
         streamDiv = null;
+        streamRaw = '';
         sendBtn.disabled = false;
 
       } else if (data.type === 'error') {
@@ -319,7 +383,11 @@ async def test_ui():
 
   function addMsg(type, text) {
     const b = addBubble(type);
-    b.textContent = text;
+    if (type === 'assistant') {
+      b.innerHTML = marked.parse(text);
+    } else {
+      b.textContent = text;
+    }
     return b;
   }
 

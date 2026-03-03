@@ -1,6 +1,8 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NavBar } from './components/NavBar'
+import { ChatProvider } from './stores/chat-store'
+import { ThemeProvider } from './stores/theme-store'
 import { Overview } from './pages/Overview'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
@@ -23,8 +25,10 @@ const queryClient = new QueryClient({
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+      <ChatProvider>
       <BrowserRouter>
-        <div className="min-h-screen bg-stone-50">
+        <div className="min-h-screen bg-stone-50 dark:bg-stone-950">
           <NavBar />
           <main className="mx-auto max-w-6xl">
             <Routes>
@@ -41,6 +45,8 @@ export default function App() {
           </main>
         </div>
       </BrowserRouter>
+      </ChatProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   )
 }
