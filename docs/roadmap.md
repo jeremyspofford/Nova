@@ -82,7 +82,27 @@ The foundation: seven containerised microservices communicating over HTTP.
 8. Denylist: `sudo ls` → confirm blocked
 
 **Phase 3b (after testing passes):**
-- Docker sandbox mode for `run_shell` (currently `host` mode only)
+
+### Phase 3b — Sandbox Tiers
+
+Four named access levels for agent tool execution. Configured per-pod in the pod configuration (Phase 4). Ordered by escalating trust: isolated → nova → workspace → host.
+
+| Tier | Config value | Filesystem access | Shell execution | Use case |
+|------|-------------|-------------------|-----------------|----------|
+| **Isolated** | `sandbox=isolated` | None — no mounts, ephemeral only | Ephemeral container per invocation (Docker or gVisor) | Pure computation, API calls, text tasks with no persistence needed |
+| **Nova** | `sandbox=nova` | Nova installation directory mounted at `/nova` (config, prompts, models.yaml, .env) | In orchestrator container, path-constrained to `/nova` | Self-configuration — Nova updates its own settings, system prompts, and pod definitions |
+| **Workspace** *(default)* | `sandbox=workspace` | Scoped to `NOVA_WORKSPACE` mounted at `/workspace` | In orchestrator container, path-constrained | Coding projects, file generation, working on a user-specified directory |
+| **Host** | `sandbox=host` | Full host filesystem | Unrestricted subprocess in orchestrator container | DevOps, infra, system administration — explicit opt-in only |
+
+**Current state:** Only `workspace` mode is functional. `run_shell` always executes in the orchestrator container. The `shell_sandbox` config field exists in `config.py` but is not yet read by the tool code.
+
+**Implementation notes:**
+- `isolated` requires spinning an ephemeral container per `run_shell` call — needs Docker socket or gVisor; Docker-in-Docker is fragile. gVisor preferred.
+- `nova` tier mounts the Nova install directory (parent of `docker-compose.yml`) read-write at `/nova`. Path validation must reject traversal outside `/nova`. This tier enables conversational self-configuration but carries risk: a poorly-prompted agent could corrupt its own guardrails or `.env`. Dashboard should warn on save (same as `host`). A future hardening step could make `.env` and guardrail system prompts read-only within this tier, with writes only via a validated config API.
+- `host` should require explicit confirmation in the dashboard UI before a pod can be saved with this tier — it is effectively unrestricted.
+- Network isolation is a separate axis from filesystem isolation and should be addressed independently.
+- The `NOVA_WORKSPACE` footgun: currently accepts any path including `/` or `~`. Should validate that workspace tier paths are not system roots.
+
 - VS Code extension — sidebar panel, "Ask Nova" command, diff view
 
 ---
@@ -197,6 +217,21 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 | **Session Replay** — step through any agent session message-by-message | |
 | **Model Switcher** — dropdown in chat UI, persists to localStorage | |
 | UI overhaul — visual polish across all pages | |
+
+### Settings page expansion
+
+| Feature | Description |
+|---|---|
+| **.env editor** | Masked inputs for secrets (API keys shown as `••••••`, reveal-on-click). Warns on save for values that require a service restart vs. those read at runtime. Backend endpoint reads/writes the actual `.env` file; requires `nova` sandbox tier or host access. |
+| **models.yaml editor** | Add/remove Ollama models to auto-pull on startup. Pairs with the Ollama model manager below. |
+| **System prompt editor** | Per-agent operational prompts editable in UI, separate from the persona field. Prerequisite for self-configuration via `nova` sandbox tier. |
+| **Provider status panel** | For each configured provider (Anthropic, OpenAI, Ollama, Groq, Gemini, etc.): API key present, last successful call, ping latency, one-click test button. |
+| **Ollama model manager** | List installed models with disk usage, pull new models by name, delete models. Handles "pull now" vs. the models.yaml "pull on startup". |
+| **Memory browser** | Search, view, and delete stored memories. Essential before self-directed operation where Nova writes its own memories. |
+| **Context budget editor** | Tune the `system/tools/memory/history/working` percentage split. Currently hardcoded in orchestrator config. |
+| **Service health page** | Live status of all 7 services using existing `/health/live` and `/health/ready` endpoints. Replaces `make ps`. |
+| **Log viewer** | SSE-streamed log tail, filterable by service and log level. |
+| **Guardrail findings feed** | Dedicated view for guardrail findings — severity, resolution, agent context. Surfaced separately from the generic audit log. |
 
 ---
 
