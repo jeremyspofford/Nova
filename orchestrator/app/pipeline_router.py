@@ -728,6 +728,124 @@ async def reload_mcp_server_endpoint(server_id: str, _admin: AdminDep) -> dict:
     }
 
 
+# ── Agent Endpoints (ACP/A2A outbound delegation) ─────────────────────────────
+
+class AgentEndpointRequest(BaseModel):
+    name: str
+    description: str = ""
+    url: str
+    auth_token: str | None = None
+    protocol: str = "a2a"            # 'a2a' | 'acp' | 'generic'
+    input_schema: dict[str, Any] = {}
+    output_schema: dict[str, Any] = {}
+    enabled: bool = True
+    metadata: dict[str, Any] = {}
+
+
+def _endpoint_row_to_dict(row) -> dict:
+    d = dict(row)
+    d["id"] = str(d["id"])
+    d["created_at"] = d["created_at"].isoformat()
+    d["input_schema"] = dict(d.get("input_schema") or {})
+    d["output_schema"] = dict(d.get("output_schema") or {})
+    d["metadata"] = dict(d.get("metadata") or {})
+    # Never expose the raw auth token in list responses
+    d.pop("auth_token", None)
+    return d
+
+
+@router.get("/api/v1/agent-endpoints")
+async def list_agent_endpoints(_admin: AdminDep) -> list[dict]:
+    """List all registered agent endpoints. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT * FROM agent_endpoints ORDER BY name"
+        )
+    return [_endpoint_row_to_dict(r) for r in rows]
+
+
+@router.post("/api/v1/agent-endpoints", status_code=201)
+async def create_agent_endpoint(
+    req: AgentEndpointRequest, _admin: AdminDep
+) -> dict:
+    """Register a new external agent endpoint. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO agent_endpoints
+                (name, description, url, auth_token, protocol,
+                 input_schema, output_schema, enabled, metadata)
+            VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9::jsonb)
+            RETURNING *
+            """,
+            req.name, req.description, req.url, req.auth_token,
+            req.protocol, req.input_schema, req.output_schema,
+            req.enabled, req.metadata,
+        )
+    return _endpoint_row_to_dict(row)
+
+
+@router.get("/api/v1/agent-endpoints/{endpoint_id}")
+async def get_agent_endpoint(endpoint_id: str, _admin: AdminDep) -> dict:
+    """Get a single agent endpoint by ID. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM agent_endpoints WHERE id = $1::uuid", endpoint_id
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Agent endpoint not found")
+    return _endpoint_row_to_dict(row)
+
+
+@router.patch("/api/v1/agent-endpoints/{endpoint_id}")
+async def update_agent_endpoint(
+    endpoint_id: str, req: AgentEndpointRequest, _admin: AdminDep
+) -> dict:
+    """Update an agent endpoint configuration. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE agent_endpoints SET
+                name          = $2,
+                description   = $3,
+                url           = $4,
+                auth_token    = $5,
+                protocol      = $6,
+                input_schema  = $7::jsonb,
+                output_schema = $8::jsonb,
+                enabled       = $9,
+                metadata      = $10::jsonb
+            WHERE id = $1::uuid
+            RETURNING *
+            """,
+            endpoint_id, req.name, req.description, req.url,
+            req.auth_token, req.protocol,
+            req.input_schema, req.output_schema,
+            req.enabled, req.metadata,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Agent endpoint not found")
+    return _endpoint_row_to_dict(row)
+
+
+@router.delete("/api/v1/agent-endpoints/{endpoint_id}", status_code=204)
+async def delete_agent_endpoint_route(
+    endpoint_id: str, _admin: AdminDep
+) -> None:
+    """Remove an agent endpoint. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM agent_endpoints WHERE id = $1::uuid", endpoint_id
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Agent endpoint not found")
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _task_dict(row) -> dict:

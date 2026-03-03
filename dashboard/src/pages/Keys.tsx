@@ -8,7 +8,7 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
   const copy = () => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) }
   return (
-    <button onClick={copy} className="ml-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300">
+    <button onClick={copy} className="ml-1 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300">
       {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
     </button>
   )
@@ -34,13 +34,13 @@ export function Keys() {
   return (
     <div className="px-4 py-6 sm:px-6 space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">API Keys</h1>
-        <p className="mt-1 text-sm text-stone-400 dark:text-stone-500 max-w-2xl">
+        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">API Keys</h1>
+        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400 max-w-2xl">
           These keys let external clients call Nova's LLM-compatible API at{' '}
-          <code className="rounded bg-stone-100 dark:bg-stone-800 px-1 py-0.5 text-xs text-stone-600 dark:text-stone-400">/v1/chat/completions</code>.
+          <code className="rounded bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">/v1/chat/completions</code>.
           Any tool that speaks the OpenAI API format — IDE plugins, n8n, other AI apps — can send requests
           through Nova using one of these keys. Each key has its own rate limit and usage tracking.
-          The <span className="font-medium text-stone-600 dark:text-stone-400">dev-key</span> entries are the default
+          The <span className="font-medium text-neutral-600 dark:text-neutral-400">dev-key</span> entries are the default
           development keys created automatically on first startup.
         </p>
       </div>
@@ -58,22 +58,22 @@ export function Keys() {
       )}
 
       {/* Create form */}
-      <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4">
-        <p className="mb-3 text-xs font-medium text-stone-500 dark:text-stone-400 uppercase tracking-wider">Create Key</p>
+      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4">
+        <p className="mb-3 text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Create Key</p>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
           <div className="flex-1">
-            <label className="mb-1 block text-xs text-stone-400 dark:text-stone-500">Name</label>
+            <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Name</label>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. continue-dev"
-              className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-stone-100 dark:bg-stone-800 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 placeholder:text-stone-400 dark:placeholder:text-stone-500 outline-none focus:border-teal-600" />
+              className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600" />
           </div>
           <div className="flex gap-3 items-end">
             <div className="w-28">
-              <label className="mb-1 block text-xs text-stone-400 dark:text-stone-500">RPM limit</label>
+              <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">RPM limit</label>
               <input type="number" value={rpm} onChange={e => setRpm(Number(e.target.value))} min={1} max={9999}
-                className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-stone-100 dark:bg-stone-800 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 outline-none focus:border-teal-600" />
+                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600" />
             </div>
             <button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}
-              className="flex items-center gap-1.5 rounded-md bg-teal-700 px-4 py-2 text-sm text-white hover:bg-teal-500 disabled:opacity-40 shrink-0">
+              className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-2 text-sm text-white hover:bg-accent-500 disabled:opacity-40 shrink-0">
               <Plus size={14} /> Create
             </button>
           </div>
@@ -82,13 +82,13 @@ export function Keys() {
       </div>
 
       {/* Keys table */}
-      <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 overflow-hidden">
-        {isLoading && <p className="p-4 text-sm text-stone-400 dark:text-stone-500">Loading…</p>}
+      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+        {isLoading && <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
         {error && <p className="p-4 text-sm text-red-600 dark:text-red-400">{String(error)}</p>}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-stone-200 dark:border-stone-800 text-xs text-stone-400 dark:text-stone-500">
+              <tr className="border-b border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400">
                 <th className="px-3 sm:px-4 py-3 text-left font-medium">Name</th>
                 <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Prefix</th>
                 <th className="px-3 sm:px-4 py-3 text-left font-medium">RPM</th>
@@ -99,26 +99,26 @@ export function Keys() {
             </thead>
             <tbody>
               {keys.map(k => (
-                <tr key={k.id} className="border-b border-stone-200/50 dark:border-stone-800/50 hover:bg-stone-100/30 dark:hover:bg-stone-800/30">
-                  <td className="px-3 sm:px-4 py-3 font-medium text-stone-900 dark:text-stone-100">{k.name}</td>
-                  <td className="hidden sm:table-cell px-4 py-3 font-mono text-xs text-stone-500 dark:text-stone-400">{k.key_prefix}…</td>
-                  <td className="px-3 sm:px-4 py-3 text-stone-500 dark:text-stone-400">{k.rate_limit_rpm}/min</td>
-                  <td className="hidden md:table-cell px-4 py-3 text-stone-400 dark:text-stone-500 text-xs">
+                <tr key={k.id} className="border-b border-neutral-200/50 dark:border-neutral-800/50 hover:bg-neutral-100/30 dark:hover:bg-neutral-800/30">
+                  <td className="px-3 sm:px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">{k.name}</td>
+                  <td className="hidden sm:table-cell px-4 py-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">{k.key_prefix}…</td>
+                  <td className="px-3 sm:px-4 py-3 text-neutral-500 dark:text-neutral-400">{k.rate_limit_rpm}/min</td>
+                  <td className="hidden md:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
                     {formatDistanceToNow(new Date(k.created_at), { addSuffix: true })}
                   </td>
-                  <td className="hidden lg:table-cell px-4 py-3 text-stone-400 dark:text-stone-500 text-xs">
+                  <td className="hidden lg:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
                     {k.last_used_at ? formatDistanceToNow(new Date(k.last_used_at), { addSuffix: true }) : 'never'}
                   </td>
                   <td className="px-3 sm:px-4 py-3">
                     <button onClick={() => { if (confirm(`Revoke "${k.name}"?`)) revokeMutation.mutate(k.id) }}
-                      className="text-stone-400 dark:text-stone-500 hover:text-red-600 dark:hover:text-red-400 transition-colors">
+                      className="text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
                       <Trash2 size={14} />
                     </button>
                   </td>
                 </tr>
               ))}
               {keys.length === 0 && !isLoading && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-stone-400 dark:text-stone-500">No API keys yet</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No API keys yet</td></tr>
               )}
             </tbody>
           </table>

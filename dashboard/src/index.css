@@ -2,15 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme CSS custom properties (defaults = teal accent, stone neutral) ──── */
+:root {
+  /* accent: teal */
+  --accent-50:  240 253 250;
+  --accent-100: 204 251 241;
+  --accent-200: 153 246 228;
+  --accent-300: 94 234 212;
+  --accent-400: 45 212 191;
+  --accent-500: 20 184 166;
+  --accent-600: 13 148 136;
+  --accent-700: 15 118 110;
+  --accent-800: 17 94 89;
+  --accent-900: 19 78 74;
+  --accent-950: 4 47 46;
+
+  /* card surface (light: white, dark: neutral-900) */
+  --card: 255 255 255;
+
+  /* neutral: stone */
+  --neutral-50:  250 250 249;
+  --neutral-100: 245 245 244;
+  --neutral-200: 231 229 228;
+  --neutral-300: 214 211 209;
+  --neutral-400: 168 162 158;
+  --neutral-500: 120 113 108;
+  --neutral-600: 87 83 78;
+  --neutral-700: 68 64 60;
+  --neutral-800: 41 37 36;
+  --neutral-900: 28 25 23;
+  --neutral-950: 12 10 9;
+}
+
 @layer base {
   body {
-    background-color: #fafaf8; /* stone-50 */
-    color: #1c1917;            /* stone-900 */
+    background-color: rgb(var(--neutral-50));
+    color: rgb(var(--neutral-900));
   }
   .dark body,
   html.dark body {
-    background-color: #0c0a09; /* stone-950 */
-    color: #e7e5e4;            /* stone-200 */
+    background-color: rgb(var(--neutral-950));
+    color: rgb(var(--neutral-200));
   }
 }
 
@@ -24,30 +56,30 @@
 
 .markdown-body code {
   font-size: 0.8em;
-  background: #e7e5e4; /* stone-200 */
+  background: rgb(var(--neutral-200));
   padding: 0.15em 0.35em;
   border-radius: 4px;
 }
 .dark .markdown-body code {
-  background: #292524; /* stone-800 */
-  color: #d6d3d1;      /* stone-300 */
+  background: rgb(var(--neutral-800));
+  color: rgb(var(--neutral-300));
 }
 
 .markdown-body pre {
   margin: 0.5em 0;
   padding: 0.75em 1em;
-  background: #1c1917; /* stone-900 */
+  background: rgb(var(--neutral-900));
   border-radius: 8px;
   overflow-x: auto;
 }
 .dark .markdown-body pre {
-  background: #0c0a09; /* stone-950 */
+  background: rgb(var(--neutral-950));
 }
 
 .markdown-body pre code {
   background: none;
   padding: 0;
-  color: #e7e5e4; /* stone-200 */
+  color: rgb(var(--neutral-200));
   font-size: 0.8em;
   line-height: 1.6;
 }
@@ -64,12 +96,12 @@
 .markdown-body blockquote {
   margin: 0.5em 0;
   padding: 0.25em 0.75em;
-  border-left: 3px solid #d6d3d1; /* stone-300 */
-  color: #78716c; /* stone-500 */
+  border-left: 3px solid rgb(var(--neutral-300));
+  color: rgb(var(--neutral-500));
 }
 .dark .markdown-body blockquote {
-  border-left-color: #57534e; /* stone-600 */
-  color: #a8a29e;              /* stone-400 */
+  border-left-color: rgb(var(--neutral-600));
+  color: rgb(var(--neutral-400));
 }
 
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
@@ -91,39 +123,39 @@
   -webkit-overflow-scrolling: touch;
 }
 .markdown-body th, .markdown-body td {
-  border: 1px solid #d6d3d1 !important;
+  border: 1px solid rgb(var(--neutral-300)) !important;
   padding: 0.3em 0.6em;
 }
 .dark .markdown-body th, .dark .markdown-body td {
-  border-color: #44403c !important; /* stone-700 */
+  border-color: rgb(var(--neutral-700)) !important;
 }
 .markdown-body th {
-  background: #f5f5f4;
+  background: rgb(var(--neutral-100));
   font-weight: 600;
 }
 .dark .markdown-body th {
-  background: #292524; /* stone-800 */
+  background: rgb(var(--neutral-800));
 }
 .markdown-body tr:nth-child(even) {
-  background: #fafaf9;
+  background: rgb(var(--neutral-50));
 }
 .dark .markdown-body tr:nth-child(even) {
-  background: #1c1917; /* stone-900 */
+  background: rgb(var(--neutral-900));
 }
 
 .markdown-body a {
-  color: #0f766e; /* teal-700 */
+  color: rgb(var(--accent-700));
   text-decoration: underline;
 }
 .dark .markdown-body a {
-  color: #2dd4bf; /* teal-400 */
+  color: rgb(var(--accent-400));
 }
 
 .markdown-body hr {
   border: none;
-  border-top: 1px solid #e7e5e4;
+  border-top: 1px solid rgb(var(--neutral-200));
   margin: 0.75em 0;
 }
 .dark .markdown-body hr {
-  border-top-color: #44403c; /* stone-700 */
+  border-top-color: rgb(var(--neutral-700));
 }

@@ -45,7 +45,7 @@ function resolveStageState(task: PipelineTask): { completedUpTo: number; activeI
 // ── Status badge ───────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<string, { label: string; className: string; pulse?: boolean }> = {
-  queued:              { label: 'Queued',        className: 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-300' },
+  queued:              { label: 'Queued',        className: 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300' },
   running:             { label: 'Running',       className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
   context_running:     { label: 'Context',       className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
   task_running:        { label: 'Task',          className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
@@ -54,12 +54,12 @@ const STATUS_CONFIG: Record<string, { label: string; className: string; pulse?: 
   decision_running:    { label: 'Decision',      className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
   complete:            { label: 'Complete',      className: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' },
   failed:              { label: 'Failed',        className: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' },
-  cancelled:           { label: 'Cancelled',     className: 'bg-stone-400/30 dark:bg-stone-600/30 text-stone-400 dark:text-stone-500' },
+  cancelled:           { label: 'Cancelled',     className: 'bg-neutral-400/30 dark:bg-neutral-600/30 text-neutral-500 dark:text-neutral-400' },
   pending_human_review:{ label: 'Needs Review',  className: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400', pulse: true },
 }
 
 function StatusBadge({ status }: { status: TaskStatus }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, className: 'bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-300' }
+  const cfg = STATUS_CONFIG[status] ?? { label: status, className: 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300' }
   return (
     <span className={clsx('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium', cfg.className)}>
       {cfg.pulse && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
@@ -83,7 +83,7 @@ function StageProgress({ task }: { task: PipelineTask }) {
         return (
           <div key={stage} className="flex items-center gap-0.5 sm:gap-1">
             {i > 0 && (
-              <div className={clsx('h-px flex-1 w-3 sm:w-5', done ? 'bg-emerald-500' : 'bg-stone-200 dark:bg-stone-700')} />
+              <div className={clsx('h-px flex-1 w-3 sm:w-5', done ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700')} />
             )}
             <div
               title={STAGE_LABELS[stage]}
@@ -92,7 +92,7 @@ function StageProgress({ task }: { task: PipelineTask }) {
                 done   && 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-600 text-emerald-700 dark:text-emerald-400',
                 active && !failed && 'border-amber-400 text-amber-700 dark:text-amber-400 animate-pulse bg-amber-50 dark:bg-amber-900/30',
                 failed && 'border-red-500 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30',
-                !done && !active && 'border-stone-300 dark:border-stone-600 text-stone-400 dark:text-stone-500 bg-white dark:bg-stone-900',
+                !done && !active && 'border-neutral-300 dark:border-neutral-600 text-neutral-500 dark:text-neutral-400 bg-card dark:bg-neutral-900',
               )}
             >
               {done   ? '✓' : i + 1}
@@ -127,7 +127,7 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
         placeholder="Optional comment…"
         value={comment}
         onChange={e => setComment(e.target.value)}
-        className="mb-2 w-full resize-none rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1.5 text-xs text-stone-900 dark:text-stone-100 outline-none focus:border-purple-500"
+        className="mb-2 w-full resize-none rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-purple-500"
       />
       <div className="flex gap-2">
         <button
@@ -144,7 +144,7 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
         >
           <ThumbsDown size={12} /> Reject
         </button>
-        {review.isPending && <Loader2 size={14} className="animate-spin self-center text-stone-500 dark:text-stone-400" />}
+        {review.isPending && <Loader2 size={14} className="animate-spin self-center text-neutral-500 dark:text-neutral-400" />}
         {review.isError && <span className="self-center text-xs text-red-600 dark:text-red-400">Failed — try again</span>}
       </div>
     </div>
@@ -174,8 +174,8 @@ function TaskCard({ task }: { task: PipelineTask }) {
 
   return (
     <div className={clsx(
-      'rounded-xl border bg-white dark:bg-stone-900 p-4 transition-all',
-      needsReview ? 'border-purple-200 dark:border-purple-800' : 'border-stone-200 dark:border-stone-800',
+      'rounded-xl border bg-card dark:bg-neutral-900 p-4 transition-all',
+      needsReview ? 'border-purple-200 dark:border-purple-800' : 'border-neutral-200 dark:border-neutral-800',
     )}>
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
@@ -183,13 +183,13 @@ function TaskCard({ task }: { task: PipelineTask }) {
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <StatusBadge status={task.status} />
             {task.pod_name && (
-              <span className="rounded-full bg-teal-50 dark:bg-teal-900/30 px-2 py-0.5 text-xs text-teal-700 dark:text-teal-400">
+              <span className="rounded-full bg-accent-50 dark:bg-accent-900/30 px-2 py-0.5 text-xs text-accent-700 dark:text-accent-400">
                 {task.pod_name}
               </span>
             )}
-            <span className="text-xs text-stone-400 dark:text-stone-500">{relativeTime}</span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">{relativeTime}</span>
           </div>
-          <p className="truncate text-sm text-stone-700 dark:text-stone-300">{task.user_input}</p>
+          <p className="truncate text-sm text-neutral-700 dark:text-neutral-300">{task.user_input}</p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
@@ -198,14 +198,14 @@ function TaskCard({ task }: { task: PipelineTask }) {
               onClick={() => cancelMutation.mutate()}
               disabled={cancelMutation.isPending}
               title="Cancel task"
-              className="rounded-md p-1 text-stone-400 dark:text-stone-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
+              className="rounded-md p-1 text-neutral-500 dark:text-neutral-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
             >
               <X size={14} />
             </button>
           )}
           <button
             onClick={() => setExpanded(e => !e)}
-            className="rounded-md p-1 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300"
+            className="rounded-md p-1 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
           >
             {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
@@ -229,10 +229,10 @@ function TaskCard({ task }: { task: PipelineTask }) {
 
       {/* Expanded detail */}
       {expanded && (
-        <div className="mt-3 space-y-2 border-t border-stone-200 dark:border-stone-800 pt-3">
+        <div className="mt-3 space-y-2 border-t border-neutral-200 dark:border-neutral-800 pt-3">
           {/* Task ID + retry info */}
-          <div className="flex flex-wrap gap-x-4 text-xs text-stone-400 dark:text-stone-500">
-            <span>ID: <code className="text-stone-400 dark:text-stone-500">{task.id.slice(0, 8)}…</code></span>
+          <div className="flex flex-wrap gap-x-4 text-xs text-neutral-500 dark:text-neutral-400">
+            <span>ID: <code className="text-neutral-500 dark:text-neutral-400">{task.id.slice(0, 8)}…</code></span>
             <span>Retries: {task.retry_count}/{task.max_retries}</span>
             {task.started_at && <span>Started: {formatDistanceToNow(new Date(task.started_at), { addSuffix: true })}</span>}
             {task.completed_at && <span>Completed: {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}</span>}
@@ -240,15 +240,15 @@ function TaskCard({ task }: { task: PipelineTask }) {
 
           {/* Full user input */}
           <div>
-            <p className="mb-1 text-xs font-medium text-stone-400 dark:text-stone-500">Input</p>
-            <p className="text-sm text-stone-500 dark:text-stone-400 whitespace-pre-wrap break-words">{task.user_input}</p>
+            <p className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">Input</p>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400 whitespace-pre-wrap break-words">{task.user_input}</p>
           </div>
 
           {/* Output */}
           {task.output && (
             <div>
               <p className="mb-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Output</p>
-              <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-stone-50 dark:bg-stone-800 p-3 text-xs text-stone-700 dark:text-stone-300">
+              <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-neutral-50 dark:bg-neutral-800 p-3 text-xs text-neutral-700 dark:text-neutral-300">
                 {task.output}
               </pre>
             </div>
@@ -299,15 +299,15 @@ function SubmitForm() {
   })
 
   return (
-    <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-4">
-      <h2 className="mb-3 text-sm font-semibold text-stone-900 dark:text-stone-100">Submit Task</h2>
+    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4">
+      <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Submit Task</h2>
       <div className="space-y-2">
         <textarea
           rows={3}
           placeholder="Describe what you want the agent pipeline to do…"
           value={input}
           onChange={e => setInput(e.target.value)}
-          className="w-full resize-none rounded-md border border-stone-300 dark:border-stone-600 bg-stone-100 dark:bg-stone-800 px-3 py-2 text-sm text-stone-900 dark:text-stone-100 outline-none placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-teal-600"
+          className="w-full resize-none rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:border-accent-600"
           onKeyDown={e => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && input.trim()) submit.mutate()
           }}
@@ -317,7 +317,7 @@ function SubmitForm() {
           <select
             value={podName}
             onChange={e => setPodName(e.target.value)}
-            className="rounded-md border border-stone-300 dark:border-stone-600 bg-stone-100 dark:bg-stone-800 px-2 py-1.5 text-sm text-stone-700 dark:text-stone-300 outline-none focus:border-teal-600"
+            className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
           >
             <option value="">Default pod</option>
             {pods?.map(p => (
@@ -329,7 +329,7 @@ function SubmitForm() {
           <select
             value={modelId}
             onChange={e => setModelId(e.target.value)}
-            className="rounded-md border border-stone-300 dark:border-stone-600 bg-stone-100 dark:bg-stone-800 px-2 py-1.5 text-sm text-stone-700 dark:text-stone-300 outline-none focus:border-teal-600"
+            className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
             title="Override the model for this task (leaves agent defaults intact)"
           >
             <option value="">Pod default model</option>
@@ -341,7 +341,7 @@ function SubmitForm() {
           <button
             onClick={() => submit.mutate()}
             disabled={!input.trim() || submit.isPending}
-            className="ml-auto flex items-center gap-1.5 rounded-md bg-teal-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-teal-500 disabled:opacity-40"
+            className="ml-auto flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-40"
           >
             {submit.isPending
               ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
@@ -369,9 +369,9 @@ function QueueStats() {
   if (!data) return null
 
   return (
-    <div className="hidden sm:flex gap-4 text-xs text-stone-400 dark:text-stone-500">
-      <span>Queue depth: <strong className="text-stone-700 dark:text-stone-300">{data.queue_depth}</strong></span>
-      <span>Dead-letter: <strong className={data.dead_letter_depth > 0 ? 'text-red-600 dark:text-red-400' : 'text-stone-700 dark:text-stone-300'}>{data.dead_letter_depth}</strong></span>
+    <div className="hidden sm:flex gap-4 text-xs text-neutral-500 dark:text-neutral-400">
+      <span>Queue depth: <strong className="text-neutral-700 dark:text-neutral-300">{data.queue_depth}</strong></span>
+      <span>Dead-letter: <strong className={data.dead_letter_depth > 0 ? 'text-red-600 dark:text-red-400' : 'text-neutral-700 dark:text-neutral-300'}>{data.dead_letter_depth}</strong></span>
     </div>
   )
 }
@@ -417,15 +417,15 @@ export function Tasks() {
     <div className="space-y-6 px-4 py-8 sm:px-6">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Pipeline Tasks</h1>
-          <p className="text-sm text-stone-400 dark:text-stone-500 truncate">Submit and monitor async agent tasks</p>
+          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Pipeline Tasks</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">Submit and monitor async agent tasks</p>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <QueueStats />
           <button
             onClick={() => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })}
             disabled={isFetching}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40"
           >
             <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
           </button>
@@ -435,7 +435,7 @@ export function Tasks() {
       <SubmitForm />
 
       {/* Tab bar */}
-      <div className="flex items-center gap-1 border-b border-stone-200 dark:border-stone-800 overflow-x-auto">
+      <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 overflow-x-auto">
         {tabDef.map(t => (
           <button
             key={t.key}
@@ -443,15 +443,15 @@ export function Tasks() {
             className={clsx(
               'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors -mb-px',
               tab === t.key
-                ? 'border-teal-600 text-teal-700 dark:text-teal-400'
-                : 'border-transparent text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300',
+                ? 'border-accent-600 text-accent-700 dark:text-accent-400'
+                : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300',
             )}
           >
             {t.label}
             {t.count !== undefined && t.count > 0 && (
               <span className={clsx(
                 'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-                t.alert ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' : 'bg-stone-200 dark:bg-stone-700 text-stone-500 dark:text-stone-400',
+                t.alert ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400',
               )}>
                 {t.count}
               </span>
@@ -463,7 +463,7 @@ export function Tasks() {
       {/* Task list */}
       <div className="space-y-3">
         {tabTasks[tab].length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-16 text-stone-400 dark:text-stone-500">
+          <div className="flex flex-col items-center gap-2 py-16 text-neutral-500 dark:text-neutral-400">
             {tab === 'active'  && <><Clock size={24} /><p className="text-sm">No active tasks</p></>}
             {tab === 'review'  && <><CheckCircle size={24} /><p className="text-sm">No tasks awaiting review</p></>}
             {tab === 'history' && <><AlertCircle size={24} /><p className="text-sm">No completed tasks yet</p></>}

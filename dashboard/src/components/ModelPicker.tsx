@@ -65,13 +65,13 @@ export function ModelPicker({
     <div className="space-y-3">
       {/* ── Primary model ──────────────────────────────────────────────── */}
       <div>
-        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           Primary model
         </label>
         <select
           value={primaryModel ?? ''}
           onChange={e => onChange(e.target.value || null, fallbackModels)}
-          className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-stone-50 dark:bg-stone-800 px-3 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-900"
+          className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600 focus:ring-2 focus:ring-accent-100 dark:focus:ring-accent-900"
         >
           <option value="">{inheritLabel}</option>
           {allModelIds.map(id => (
@@ -82,13 +82,13 @@ export function ModelPicker({
 
       {/* ── Fallback list ──────────────────────────────────────────────── */}
       <div>
-        <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+        <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           Fallback models{' '}
-          <span className="normal-case text-stone-300 dark:text-stone-600">(tried in order on failure)</span>
+          <span className="normal-case text-neutral-300 dark:text-neutral-600">(tried in order on failure)</span>
         </label>
 
         {fallbackModels.length === 0 && !addingFallback && (
-          <p className="mb-1.5 text-[11px] italic text-stone-400 dark:text-stone-500">
+          <p className="mb-1.5 text-[11px] italic text-neutral-500 dark:text-neutral-400">
             No fallbacks — task will fail if primary model is unavailable
           </p>
         )}
@@ -97,17 +97,17 @@ export function ModelPicker({
           {fallbackModels.map((fb, i) => (
             <div
               key={fb}
-              className="flex items-center gap-1.5 rounded-md border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-2 py-1"
+              className="flex items-center gap-1.5 rounded-md border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-2 py-1"
             >
-              <span className="w-4 shrink-0 text-center text-[10px] font-semibold text-stone-400 dark:text-stone-500">
+              <span className="w-4 shrink-0 text-center text-[10px] font-semibold text-neutral-500 dark:text-neutral-400">
                 {i + 1}
               </span>
-              <span className="flex-1 truncate font-mono text-xs text-stone-700 dark:text-stone-300">{fb}</span>
+              <span className="flex-1 truncate font-mono text-xs text-neutral-700 dark:text-neutral-300">{fb}</span>
               <button
                 onClick={() => moveUp(i)}
                 disabled={i === 0}
                 title="Move up"
-                className="rounded p-0.5 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 disabled:opacity-20"
+                className="rounded p-0.5 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 disabled:opacity-20"
               >
                 <ArrowUp size={11} />
               </button>
@@ -115,14 +115,14 @@ export function ModelPicker({
                 onClick={() => moveDown(i)}
                 disabled={i === fallbackModels.length - 1}
                 title="Move down"
-                className="rounded p-0.5 text-stone-400 dark:text-stone-500 hover:text-stone-700 dark:hover:text-stone-300 disabled:opacity-20"
+                className="rounded p-0.5 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 disabled:opacity-20"
               >
                 <ArrowDown size={11} />
               </button>
               <button
                 onClick={() => removeFallback(i)}
                 title="Remove"
-                className="rounded p-0.5 text-stone-400 dark:text-stone-500 hover:text-red-500"
+                className="rounded p-0.5 text-neutral-500 dark:text-neutral-400 hover:text-red-500"
               >
                 <X size={11} />
               </button>
@@ -132,7 +132,7 @@ export function ModelPicker({
 
         {addingFallback ? (
           <select
-            className="mt-1.5 w-full rounded-md border border-teal-400 dark:border-teal-600 bg-white dark:bg-stone-900 px-3 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none ring-2 ring-teal-100 dark:ring-teal-900 focus:border-teal-600"
+            className="mt-1.5 w-full rounded-md border border-accent-400 dark:border-accent-600 bg-card dark:bg-neutral-900 px-3 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none ring-2 ring-accent-100 dark:ring-accent-900 focus:border-accent-600"
             defaultValue=""
             autoFocus
             onBlur={() => setAddingFallback(false)}
@@ -151,7 +151,7 @@ export function ModelPicker({
         ) : available.length > 0 ? (
           <button
             onClick={() => setAddingFallback(true)}
-            className="mt-1.5 flex items-center gap-1 text-[11px] text-teal-700 dark:text-teal-400 hover:text-teal-600 dark:hover:text-teal-300"
+            className="mt-1.5 flex items-center gap-1 text-[11px] text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300"
           >
             <Plus size={11} /> Add fallback
           </button>

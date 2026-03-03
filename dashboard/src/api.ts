@@ -234,6 +234,44 @@ export const reloadMCPServer = (id: string) =>
     { method: 'POST' },
   )
 
+// ── Agent Endpoints (ACP/A2A outbound delegation) ────────────────────────────
+
+export interface AgentEndpoint {
+  id: string
+  name: string
+  description: string
+  url: string
+  protocol: 'a2a' | 'acp' | 'generic'
+  input_schema: Record<string, unknown>
+  output_schema: Record<string, unknown>
+  enabled: boolean
+  created_at: string
+  metadata: Record<string, unknown>
+  // auth_token is never returned by the API; pass it only on create/update
+}
+
+export interface AgentEndpointWrite extends Omit<AgentEndpoint, 'id' | 'created_at'> {
+  auth_token?: string
+}
+
+export const getAgentEndpoints = () =>
+  apiFetch<AgentEndpoint[]>('/api/v1/agent-endpoints')
+
+export const createAgentEndpoint = (data: Partial<AgentEndpointWrite>) =>
+  apiFetch<AgentEndpoint>('/api/v1/agent-endpoints', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const updateAgentEndpoint = (id: string, data: Partial<AgentEndpointWrite>) =>
+  apiFetch<AgentEndpoint>(`/api/v1/agent-endpoints/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+
+export const deleteAgentEndpoint = (id: string) =>
+  apiFetch<void>(`/api/v1/agent-endpoints/${id}`, { method: 'DELETE' })
+
 // ── Platform configuration ────────────────────────────────────────────────────
 
 export interface PlatformConfigEntry {

@@ -14,14 +14,14 @@ import { ModelPicker } from '../components/ModelPicker'
 
 const ROLE_COLORS: Record<string, string> = {
   context:     'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800',
-  task:        'bg-teal-50 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-800',
+  task:        'bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 border-accent-200 dark:border-accent-800',
   guardrail:   'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800',
   code_review: 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-800',
   decision:    'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800',
 }
 
 function RoleBadge({ role }: { role: string }) {
-  const cls = ROLE_COLORS[role] ?? 'bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-400 border-stone-200 dark:border-stone-800'
+  const cls = ROLE_COLORS[role] ?? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800'
   return (
     <span className={clsx('rounded-full border px-2 py-0.5 text-xs font-medium capitalize', cls)}>
       {role.replace('_', ' ')}
@@ -68,7 +68,7 @@ function AgentRow({
   return (
     <div className={clsx(
       'rounded-lg border transition-all',
-      agent.enabled ? 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900' : 'border-stone-100 dark:border-stone-800 bg-stone-50 dark:bg-stone-800 opacity-60',
+      agent.enabled ? 'border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900' : 'border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 opacity-60',
     )}>
       {/* Summary row — click to expand, toggle stays separate */}
       <div className="flex items-center gap-3 px-3 py-2.5">
@@ -77,17 +77,17 @@ function AgentRow({
           onClick={() => setExpanded(e => !e)}
           className="flex shrink-0 items-center gap-2 min-w-0 flex-1 text-left"
         >
-          <span className="shrink-0 text-stone-400 dark:text-stone-500">
+          <span className="shrink-0 text-neutral-500 dark:text-neutral-400">
             {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           </span>
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-stone-100 dark:bg-stone-800 text-[10px] font-bold text-stone-400 dark:text-stone-500">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-500 dark:text-neutral-400">
             {agent.position + 1}
           </span>
           <RoleBadge role={agent.role} />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-stone-800 dark:text-stone-200">{agent.name}</p>
+            <p className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">{agent.name}</p>
             {agent.model && (
-              <p className="truncate text-xs text-stone-400 dark:text-stone-500">{agent.model}</p>
+              <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{agent.model}</p>
             )}
           </div>
         </button>
@@ -95,13 +95,13 @@ function AgentRow({
         {/* Right-side metadata (non-clickable) */}
         <span
           title={`On failure: ${agent.on_failure}`}
-          className="hidden shrink-0 items-center gap-1 text-xs text-stone-400 dark:text-stone-500 sm:flex"
+          className="hidden shrink-0 items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 sm:flex"
         >
           {FAILURE_ICON[agent.on_failure] ?? null}
           {agent.on_failure}
         </span>
 
-        <span className="hidden rounded-full bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 text-[10px] text-stone-400 dark:text-stone-500 sm:inline">
+        <span className="hidden rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400 sm:inline">
           {agent.allowed_tools ? `${agent.allowed_tools.length} tools` : 'all tools'}
         </span>
 
@@ -113,11 +113,11 @@ function AgentRow({
           className="relative shrink-0 ml-1"
         >
           {toggle.isPending ? (
-            <Loader2 size={14} className="animate-spin text-stone-400 dark:text-stone-500" />
+            <Loader2 size={14} className="animate-spin text-neutral-500 dark:text-neutral-400" />
           ) : (
             <div className={clsx(
               'h-4 w-7 rounded-full transition-colors',
-              agent.enabled ? 'bg-teal-700' : 'bg-stone-200 dark:bg-stone-700',
+              agent.enabled ? 'bg-accent-700' : 'bg-neutral-200 dark:bg-neutral-700',
             )}>
               <div className={clsx(
                 'absolute top-0.5 size-3 rounded-full bg-white shadow transition-all',
@@ -130,7 +130,7 @@ function AgentRow({
 
       {/* Expanded config detail */}
       {expanded && (
-        <div className="border-t border-stone-100 dark:border-stone-800 px-4 pb-4 pt-3 space-y-4">
+        <div className="border-t border-neutral-100 dark:border-neutral-800 px-4 pb-4 pt-3 space-y-4">
 
           {/* Settings: temp, tokens, timeout, retries, on_failure, tools — all editable */}
           <AgentAdvancedSettings agent={agent} podId={podId} />
@@ -151,11 +151,11 @@ function AgentRow({
 
 function ConfigStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <div className="rounded-md bg-stone-50 dark:bg-stone-800 border border-stone-100 dark:border-stone-800 px-3 py-2">
-      <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500 mb-0.5">
+    <div className="rounded-md bg-neutral-50 dark:bg-neutral-800 border border-neutral-100 dark:border-neutral-800 px-3 py-2">
+      <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-0.5">
         {icon} {label}
       </p>
-      <p className="text-sm font-semibold text-stone-700 dark:text-stone-300">{value}</p>
+      <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{value}</p>
     </div>
   )
 }
@@ -195,13 +195,13 @@ function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string })
     <div>
       {/* Header row */}
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-stone-500 dark:text-stone-400">
+        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
           <FileText size={11} /> System Prompt
         </p>
         {!editing && (
           <button
             onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/30 border border-transparent hover:border-teal-200 dark:hover:border-teal-800 transition-colors"
+            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
           >
             Edit
           </button>
@@ -216,23 +216,23 @@ function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string })
             value={draft}
             onChange={e => setDraft(e.target.value)}
             placeholder="Describe this agent's role, persona, and constraints…"
-            className="w-full resize-y rounded-md border border-teal-400 dark:border-teal-600 bg-white dark:bg-stone-900 px-3 py-2 font-mono text-xs text-stone-800 dark:text-stone-200 outline-none ring-2 ring-teal-200 dark:ring-teal-900 placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-teal-600"
+            className="w-full resize-y rounded-md border border-accent-400 dark:border-accent-600 bg-card dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-neutral-800 dark:text-neutral-200 outline-none ring-2 ring-accent-200 dark:ring-accent-900 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:border-accent-600"
             autoFocus
           />
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-stone-400 dark:text-stone-500">{draft.length} chars</span>
+            <span className="text-[10px] text-neutral-500 dark:text-neutral-400">{draft.length} chars</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={cancel}
                 disabled={save.isPending}
-                className="rounded-md border border-stone-200 dark:border-stone-800 px-3 py-1 text-xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+                className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 onClick={() => save.mutate()}
                 disabled={save.isPending}
-                className="flex items-center gap-1.5 rounded-md bg-teal-700 px-3 py-1 text-xs font-medium text-white hover:bg-teal-600 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
               >
                 {save.isPending
                   ? <><Loader2 size={11} className="animate-spin" /> Saving…</>
@@ -247,13 +247,13 @@ function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string })
       ) : (
         /* ── View mode ─────────────────────────────────────────────────── */
         agent.system_prompt ? (
-          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-stone-50 dark:bg-stone-800 border border-stone-100 dark:border-stone-800 px-3 py-2 font-mono text-xs text-stone-600 dark:text-stone-400 leading-relaxed">
+          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-neutral-50 dark:bg-neutral-800 border border-neutral-100 dark:border-neutral-800 px-3 py-2 font-mono text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
             {agent.system_prompt}
           </pre>
         ) : (
           <button
             onClick={() => setEditing(true)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-stone-300 dark:border-stone-600 py-3 text-xs text-stone-400 dark:text-stone-500 hover:border-teal-400 dark:hover:border-teal-600 hover:text-teal-600 dark:hover:text-teal-400 transition-colors"
+            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-neutral-300 dark:border-neutral-600 py-3 text-xs text-neutral-500 dark:text-neutral-400 hover:border-accent-400 dark:hover:border-accent-600 hover:text-accent-600 dark:hover:text-accent-400 transition-colors"
           >
             <FileText size={12} />
             No system prompt — click to add one
@@ -325,13 +325,13 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-stone-500 dark:text-stone-400">
+        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
           <Settings2 size={11} /> Settings
         </p>
         {!editing && (
           <button
             onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/30 border border-transparent hover:border-teal-200 dark:hover:border-teal-800 transition-colors"
+            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
           >
             Edit
           </button>
@@ -339,19 +339,19 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
       </div>
 
       {editing ? (
-        <div className="space-y-3 rounded-md border border-teal-200 dark:border-teal-800 bg-teal-50/20 dark:bg-teal-900/10 p-3">
+        <div className="space-y-3 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50/20 dark:bg-accent-900/10 p-3">
 
           {/* On-failure + numeric fields */}
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {/* On failure */}
             <div className="col-span-2 sm:col-span-1">
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 On Failure
               </label>
               <select
                 value={onFailure}
                 onChange={e => setOnFailure(e.target.value)}
-                className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600"
+                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
               >
                 {ON_FAILURE_OPTIONS.map(o => (
                   <option key={o} value={o}>{o}</option>
@@ -361,53 +361,53 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
 
             {/* Temperature */}
             <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 Temperature
               </label>
               <input
                 type="number" step="0.05" min="0" max="2"
                 value={temperature}
                 onChange={e => setTemperature(e.target.value)}
-                className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600"
+                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
               />
             </div>
 
             {/* Max tokens */}
             <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 Max Tokens
               </label>
               <input
                 type="number" min="1"
                 value={maxTokens}
                 onChange={e => setMaxTokens(e.target.value)}
-                className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600"
+                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
               />
             </div>
 
             {/* Timeout */}
             <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 Timeout (s)
               </label>
               <input
                 type="number" min="1"
                 value={timeout}
                 onChange={e => setTimeout_(e.target.value)}
-                className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600"
+                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
               />
             </div>
 
             {/* Max retries */}
             <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 Max Retries
               </label>
               <input
                 type="number" min="0" max="10"
                 value={maxRetries}
                 onChange={e => setMaxRetries(e.target.value)}
-                className="w-full rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1.5 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600"
+                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
               />
             </div>
           </div>
@@ -415,28 +415,28 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
           {/* Allowed tools */}
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+              <label className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
                 Allowed Tools
               </label>
               <button
                 onClick={() => setTools(t => t === null ? [] : null)}
-                className="text-[10px] text-teal-700 dark:text-teal-400 hover:underline"
+                className="text-[10px] text-accent-700 dark:text-accent-400 hover:underline"
               >
                 {tools === null ? 'Restrict to list' : 'Allow all tools'}
               </button>
             </div>
             {tools === null ? (
-              <p className="text-xs italic text-stone-400 dark:text-stone-500">All tools allowed (no restriction)</p>
+              <p className="text-xs italic text-neutral-500 dark:text-neutral-400">All tools allowed (no restriction)</p>
             ) : (
               <div className="space-y-1.5">
                 <div className="flex flex-wrap gap-1 min-h-6">
                   {tools.length === 0 && (
-                    <span className="text-xs italic text-stone-400 dark:text-stone-500">No tools — add one below</span>
+                    <span className="text-xs italic text-neutral-500 dark:text-neutral-400">No tools — add one below</span>
                   )}
                   {tools.map((t, i) => (
-                    <span key={i} className="flex items-center gap-0.5 rounded-full bg-stone-100 dark:bg-stone-800 border border-stone-200 dark:border-stone-800 pl-2 pr-1 py-0.5 text-[11px] text-stone-700 dark:text-stone-300">
+                    <span key={i} className="flex items-center gap-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 pl-2 pr-1 py-0.5 text-[11px] text-neutral-700 dark:text-neutral-300">
                       {t}
-                      <button onClick={() => removeTool(i)} className="ml-0.5 rounded-full hover:bg-stone-300 dark:hover:bg-stone-600 p-0.5">
+                      <button onClick={() => removeTool(i)} className="ml-0.5 rounded-full hover:bg-neutral-300 dark:hover:bg-neutral-600 p-0.5">
                         <XIcon size={9} />
                       </button>
                     </span>
@@ -449,12 +449,12 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
                     value={toolInput}
                     onChange={e => setToolInput(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTool() } }}
-                    className="flex-1 rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-2 py-1 text-xs text-stone-800 dark:text-stone-200 outline-none focus:border-teal-600 placeholder:text-stone-400 dark:placeholder:text-stone-500"
+                    className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600 placeholder:text-neutral-400 dark:placeholder:text-neutral-500"
                   />
                   <button
                     onClick={addTool}
                     disabled={!toolInput.trim()}
-                    className="flex items-center gap-0.5 rounded-md border border-stone-300 dark:border-stone-600 px-2 py-1 text-xs text-stone-600 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+                    className="flex items-center gap-0.5 rounded-md border border-neutral-300 dark:border-neutral-600 px-2 py-1 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
                   >
                     <Plus size={11} /> Add
                   </button>
@@ -468,14 +468,14 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
             <button
               onClick={cancel}
               disabled={save.isPending}
-              className="rounded-md border border-stone-200 dark:border-stone-800 px-3 py-1 text-xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+              className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
             >
               Cancel
             </button>
             <button
               onClick={() => save.mutate()}
               disabled={save.isPending}
-              className="flex items-center gap-1.5 rounded-md bg-teal-700 px-3 py-1 text-xs font-medium text-white hover:bg-teal-600 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
             >
               {save.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : 'Save'}
             </button>
@@ -544,13 +544,13 @@ function AgentModelPicker({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-stone-500 dark:text-stone-400">
+        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
           <Cpu size={11} /> Model
         </p>
         {!editing && (
           <button
             onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-teal-700 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/30 border border-transparent hover:border-teal-200 dark:hover:border-teal-800 transition-colors"
+            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
           >
             Edit
           </button>
@@ -569,14 +569,14 @@ function AgentModelPicker({
             <button
               onClick={cancel}
               disabled={save.isPending}
-              className="rounded-md border border-stone-200 dark:border-stone-800 px-3 py-1 text-xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+              className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
             >
               Cancel
             </button>
             <button
               onClick={() => save.mutate()}
               disabled={save.isPending || !hasChanges}
-              className="flex items-center gap-1.5 rounded-md bg-teal-700 px-3 py-1 text-xs font-medium text-white hover:bg-teal-600 disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
             >
               {save.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : 'Save'}
             </button>
@@ -588,24 +588,24 @@ function AgentModelPicker({
       ) : (
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-stone-400 dark:text-stone-500">Primary:</span>
+            <span className="text-neutral-500 dark:text-neutral-400">Primary:</span>
             {agent.model ? (
-              <span className="font-mono text-stone-700 dark:text-stone-300">{agent.model}</span>
+              <span className="font-mono text-neutral-700 dark:text-neutral-300">{agent.model}</span>
             ) : (
-              <span className="italic text-stone-400 dark:text-stone-500">
+              <span className="italic text-neutral-500 dark:text-neutral-400">
                 inherit{podDefaultModel ? ` (${podDefaultModel.split('/').pop()})` : ''}
               </span>
             )}
           </div>
           {(agent.fallback_models ?? []).length > 0 ? (
-            <p className="text-xs text-stone-400 dark:text-stone-500">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
               Fallbacks:{' '}
-              <span className="font-mono text-stone-500 dark:text-stone-400">
+              <span className="font-mono text-neutral-500 dark:text-neutral-400">
                 {(agent.fallback_models ?? []).join(' → ')}
               </span>
             </p>
           ) : (
-            <p className="text-xs italic text-stone-400 dark:text-stone-500">No fallbacks configured</p>
+            <p className="text-xs italic text-neutral-500 dark:text-neutral-400">No fallbacks configured</p>
           )}
         </div>
       )}
@@ -623,7 +623,7 @@ function PodDetail({ podId }: { podId: string }) {
   })
 
   if (isLoading) return (
-    <div className="flex items-center gap-2 py-4 pl-6 text-xs text-stone-400 dark:text-stone-500">
+    <div className="flex items-center gap-2 py-4 pl-6 text-xs text-neutral-500 dark:text-neutral-400">
       <Loader2 size={12} className="animate-spin" /> Loading agents…
     </div>
   )
@@ -635,13 +635,13 @@ function PodDetail({ podId }: { podId: string }) {
   const agents = data.agents ?? []
 
   if (agents.length === 0) return (
-    <p className="py-4 pl-6 text-xs text-stone-400 dark:text-stone-500">No agents configured in this pod.</p>
+    <p className="py-4 pl-6 text-xs text-neutral-500 dark:text-neutral-400">No agents configured in this pod.</p>
   )
 
   return (
-    <div className="mt-2 space-y-1.5 pl-4 pt-1 border-t border-stone-200 dark:border-stone-800">
+    <div className="mt-2 space-y-1.5 pl-4 pt-1 border-t border-neutral-200 dark:border-neutral-800">
       {/* Column headers — desktop only */}
-      <div className="hidden sm:flex gap-3 px-3 py-1 text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500">
+      <div className="hidden sm:flex gap-3 px-3 py-1 text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
         <span className="w-5 shrink-0">#</span>
         <span className="w-24 shrink-0">Role</span>
         <span className="flex-1">Name / Model</span>
@@ -684,7 +684,7 @@ function PodCard({ pod }: { pod: Pod }) {
   return (
     <div className={clsx(
       'rounded-xl border transition-all',
-      pod.enabled ? 'border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900' : 'border-stone-200/50 dark:border-stone-800/50 bg-white/40 dark:bg-stone-900/40',
+      pod.enabled ? 'border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900' : 'border-neutral-200/50 dark:border-neutral-800/50 bg-white/40 dark:bg-neutral-900/40',
     )}>
       {/* Header */}
       <button
@@ -692,52 +692,52 @@ function PodCard({ pod }: { pod: Pod }) {
         className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
       >
         {/* Expand chevron */}
-        <span className="shrink-0 text-stone-400 dark:text-stone-500">
+        <span className="shrink-0 text-neutral-500 dark:text-neutral-400">
           {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </span>
 
         {/* Pod status dot */}
         <span className={clsx(
           'size-2 shrink-0 rounded-full',
-          pod.enabled ? 'bg-emerald-500' : 'bg-stone-400',
+          pod.enabled ? 'bg-emerald-500' : 'bg-neutral-400',
         )} />
 
         {/* Name */}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="font-medium text-stone-900 dark:text-stone-100">{pod.name}</span>
+            <span className="font-medium text-neutral-900 dark:text-neutral-100">{pod.name}</span>
             {!pod.enabled && (
-              <span className="text-xs text-stone-400 dark:text-stone-500">disabled</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">disabled</span>
             )}
           </div>
           {pod.description && (
-            <p className="truncate text-xs text-stone-400 dark:text-stone-500">{pod.description}</p>
+            <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{pod.description}</p>
           )}
         </div>
 
         {/* Agent count */}
-        <span className="flex shrink-0 items-center gap-1 text-xs text-stone-400 dark:text-stone-500">
+        <span className="flex shrink-0 items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400">
           <Layers size={11} />
           {pod.active_agent_count ?? 0} agents
         </span>
 
         {/* Model */}
         {pod.default_model && (
-          <span className="hidden shrink-0 rounded-full bg-stone-100 dark:bg-stone-800 px-2 py-0.5 text-xs text-stone-400 dark:text-stone-500 sm:inline">
+          <span className="hidden shrink-0 rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 dark:text-neutral-400 sm:inline">
             {pod.default_model.split('/').pop()}
           </span>
         )}
 
         {/* Human review setting */}
         <div className="hidden shrink-0 items-center gap-1 text-xs sm:flex">
-          <span className="text-stone-400 dark:text-stone-500">Review:</span>
-          <span className="text-stone-500 dark:text-stone-400">{REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}</span>
+          <span className="text-neutral-500 dark:text-neutral-400">Review:</span>
+          <span className="text-neutral-500 dark:text-neutral-400">{REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}</span>
         </div>
 
         {/* Escalation threshold */}
         <span className={clsx(
           'hidden shrink-0 text-xs font-medium capitalize sm:inline',
-          THRESHOLD_COLORS[pod.escalation_threshold] ?? 'text-stone-500 dark:text-stone-400',
+          THRESHOLD_COLORS[pod.escalation_threshold] ?? 'text-neutral-500 dark:text-neutral-400',
         )}>
           {pod.escalation_threshold}
         </span>
@@ -746,12 +746,12 @@ function PodCard({ pod }: { pod: Pod }) {
         {(pod.routing_keywords?.length ?? 0) > 0 && (
           <div className="hidden shrink-0 gap-1 sm:flex">
             {(pod.routing_keywords ?? []).slice(0, 3).map(kw => (
-              <span key={kw} className="rounded-full bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 text-[10px] text-stone-400 dark:text-stone-500">
+              <span key={kw} className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
                 {kw}
               </span>
             ))}
             {(pod.routing_keywords?.length ?? 0) > 3 && (
-              <span className="text-[10px] text-stone-400 dark:text-stone-500">+{(pod.routing_keywords?.length ?? 0) - 3}</span>
+              <span className="text-[10px] text-neutral-500 dark:text-neutral-400">+{(pod.routing_keywords?.length ?? 0) - 3}</span>
             )}
           </div>
         )}
@@ -785,14 +785,14 @@ export function Pods() {
     <div className="space-y-6 px-4 py-8 sm:px-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Pod Manager</h1>
-          <p className="text-sm text-stone-400 dark:text-stone-500">Inspect and configure agent pipeline pods</p>
+          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Pod Manager</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">Inspect and configure agent pipeline pods</p>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => qc.invalidateQueries({ queryKey: ['pods'] })}
             disabled={isFetching}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 hover:text-stone-900 dark:hover:text-stone-100 disabled:opacity-40"
+            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40"
           >
             <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
           </button>
@@ -800,25 +800,25 @@ export function Pods() {
       </div>
 
       {/* Summary strip */}
-      <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-4 py-3 sm:px-5 text-sm">
+      <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-3 sm:px-5 text-sm">
         <div>
-          <span className="text-stone-400 dark:text-stone-500">Total pods</span>
-          <span className="ml-2 font-semibold text-stone-900 dark:text-stone-100">{pods.length}</span>
+          <span className="text-neutral-500 dark:text-neutral-400">Total pods</span>
+          <span className="ml-2 font-semibold text-neutral-900 dark:text-neutral-100">{pods.length}</span>
         </div>
         <div>
           <CheckCircle2 size={13} className="mr-1 inline text-emerald-700 dark:text-emerald-400" />
-          <span className="text-stone-400 dark:text-stone-500">Enabled</span>
+          <span className="text-neutral-500 dark:text-neutral-400">Enabled</span>
           <span className="ml-2 font-semibold text-emerald-700 dark:text-emerald-400">{enabled.length}</span>
         </div>
         <div>
-          <XCircle size={13} className="mr-1 inline text-stone-400 dark:text-stone-500" />
-          <span className="text-stone-400 dark:text-stone-500">Disabled</span>
-          <span className="ml-2 font-semibold text-stone-500 dark:text-stone-400">{disabled.length}</span>
+          <XCircle size={13} className="mr-1 inline text-neutral-500 dark:text-neutral-400" />
+          <span className="text-neutral-500 dark:text-neutral-400">Disabled</span>
+          <span className="ml-2 font-semibold text-neutral-500 dark:text-neutral-400">{disabled.length}</span>
         </div>
       </div>
 
       {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-stone-400 dark:text-stone-500">
+        <div className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
           <Loader2 size={14} className="animate-spin" /> Loading pods…
         </div>
       )}
@@ -832,7 +832,7 @@ export function Pods() {
       {/* Enabled pods */}
       {enabled.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">Active Pods</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Active Pods</h2>
           {enabled.map(pod => <PodCard key={pod.id} pod={pod} />)}
         </div>
       )}
@@ -840,23 +840,23 @@ export function Pods() {
       {/* Disabled pods */}
       {disabled.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">Disabled Pods</h2>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Disabled Pods</h2>
           {disabled.map(pod => <PodCard key={pod.id} pod={pod} />)}
         </div>
       )}
 
       {!isLoading && pods.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-20 text-stone-400 dark:text-stone-500">
+        <div className="flex flex-col items-center gap-3 py-20 text-neutral-500 dark:text-neutral-400">
           <Layers size={32} />
           <p className="text-sm">No pods found</p>
-          <p className="text-xs text-stone-400 dark:text-stone-500">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">
             Pods are created via the orchestrator API or by running database migrations.
           </p>
         </div>
       )}
 
-      <p className="text-xs text-stone-400 dark:text-stone-500">
-        To create or delete pods, use <code className="text-stone-400 dark:text-stone-500">POST /api/v1/pods</code> with your admin secret.
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        To create or delete pods, use <code className="text-neutral-500 dark:text-neutral-400">POST /api/v1/pods</code> with your admin secret.
       </p>
     </div>
   )

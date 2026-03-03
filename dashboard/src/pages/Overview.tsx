@@ -29,32 +29,32 @@ function PipelineSummary() {
   const recentDone   = tasks.filter(t => t.status === 'complete').length
 
   return (
-    <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-5 py-4">
+    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
           <ListTodo size={12} /> Pipeline
         </p>
-        <Link to="/tasks" className="flex items-center gap-1 text-xs text-teal-700 dark:text-teal-400 hover:text-teal-600 dark:hover:text-teal-300">
+        <Link to="/tasks" className="flex items-center gap-1 text-xs text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300">
           View all <ArrowRight size={11} />
         </Link>
       </div>
       <div className="flex gap-6">
         <div>
-          <p className="text-2xl font-bold text-stone-900 dark:text-stone-100">{activeTasks}</p>
-          <p className="text-xs text-stone-400 dark:text-stone-500">Active</p>
+          <p className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{activeTasks}</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">Active</p>
         </div>
         <div>
-          <p className={`text-2xl font-bold ${reviewTasks > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-stone-900 dark:text-stone-100'}`}>
+          <p className={`text-2xl font-bold ${reviewTasks > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-neutral-900 dark:text-neutral-100'}`}>
             {reviewTasks}
           </p>
-          <p className="text-xs text-stone-400 dark:text-stone-500 flex items-center gap-1">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
             {reviewTasks > 0 && <AlertCircle size={10} className="text-amber-500" />}
             Needs Review
           </p>
         </div>
         <div>
           <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{recentDone}</p>
-          <p className="text-xs text-stone-400 dark:text-stone-500 flex items-center gap-1">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
             <CheckCircle2 size={10} className="text-emerald-500" />
             Complete
           </p>
@@ -90,16 +90,16 @@ function ServiceRow({
   const dot =
     status === 'ok'       ? 'bg-emerald-500' :
     status === 'degraded' ? 'bg-amber-500'   :
-                            'bg-stone-300'
+                            'bg-neutral-300'
 
   return (
     <div className="flex items-center justify-between py-2 first:pt-0 last:pb-0">
       <div className="flex items-center gap-2 min-w-0">
-        <Icon size={13} className="shrink-0 text-stone-400 dark:text-stone-500" />
-        <span className="text-xs font-medium text-stone-700 dark:text-stone-300 truncate">{label}</span>
+        <Icon size={13} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
+        <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300 truncate">{label}</span>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        {detail && <span className="text-xs text-stone-400 dark:text-stone-500">{detail}</span>}
+        {detail && <span className="text-xs text-neutral-500 dark:text-neutral-400">{detail}</span>}
         <span className={`h-2 w-2 rounded-full ${dot}`} />
       </div>
     </div>
@@ -136,17 +136,17 @@ function SystemServices() {
     connectedServers.length === enabledServers.length ? 'ok' : 'degraded'
 
   return (
-    <div className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 px-5 py-4">
+    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-stone-400 dark:text-stone-500">
+        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
           <Cpu size={12} /> System Services
         </p>
-        <Link to="/mcp" className="flex items-center gap-1 text-xs text-teal-700 dark:text-teal-400 hover:text-teal-600 dark:hover:text-teal-300">
+        <Link to="/mcp" className="flex items-center gap-1 text-xs text-accent-700 dark:text-accent-400 hover:text-accent-600 dark:hover:text-accent-300">
           MCP config <ArrowRight size={11} />
         </Link>
       </div>
 
-      <div className="divide-y divide-stone-100 dark:divide-stone-800">
+      <div className="divide-y divide-neutral-100 dark:divide-neutral-800">
         <ServiceRow
           icon={Layers}
           label="Queue Worker"
@@ -209,7 +209,7 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-stone-300 dark:border-stone-600 py-2 text-xs text-stone-400 dark:text-stone-500 hover:border-teal-400 dark:hover:border-teal-600 hover:text-teal-600 dark:hover:text-teal-400 transition-colors"
+        className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-neutral-300 dark:border-neutral-600 py-2 text-xs text-neutral-500 dark:text-neutral-400 hover:border-accent-400 dark:hover:border-accent-600 hover:text-accent-600 dark:hover:text-accent-400 transition-colors"
       >
         <Pencil size={11} /> Edit model &amp; system prompt
       </button>
@@ -217,7 +217,7 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
   }
 
   return (
-    <div className="space-y-4 rounded-md border border-teal-200 dark:border-teal-800 bg-teal-50/30 dark:bg-teal-900/20 p-3">
+    <div className="space-y-4 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50/30 dark:bg-accent-900/20 p-3">
 
       {/* Model + fallbacks */}
       <ModelPicker
@@ -228,7 +228,7 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
 
       {/* System prompt */}
       <div>
-        <label className="mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-stone-400 dark:text-stone-500">
+        <label className="mb-1 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
           <FileText size={10} /> System Prompt
         </label>
         <textarea
@@ -236,9 +236,9 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
           value={systemPrompt}
           onChange={e => setSystemPrompt(e.target.value)}
           placeholder="Describe this agent's role, persona, and constraints…"
-          className="w-full resize-y rounded-md border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-900 px-3 py-2 font-mono text-xs text-stone-800 dark:text-stone-200 outline-none placeholder:text-stone-400 dark:placeholder:text-stone-500 focus:border-teal-600 focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-900"
+          className="w-full resize-y rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-neutral-800 dark:text-neutral-200 outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:border-accent-600 focus:ring-2 focus:ring-accent-100 dark:focus:ring-accent-900"
         />
-        <p className="mt-0.5 text-[10px] text-stone-400 dark:text-stone-500">{systemPrompt.length} chars</p>
+        <p className="mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">{systemPrompt.length} chars</p>
       </div>
 
       {/* Actions */}
@@ -246,14 +246,14 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
         <button
           onClick={cancel}
           disabled={save.isPending}
-          className="rounded-md border border-stone-200 dark:border-stone-800 px-3 py-1 text-xs text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 disabled:opacity-40"
+          className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
         >
           Cancel
         </button>
         <button
           onClick={() => save.mutate()}
           disabled={save.isPending}
-          className="flex items-center gap-1.5 rounded-md bg-teal-700 px-3 py-1 text-xs font-medium text-white hover:bg-teal-600 disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
         >
           {save.isPending
             ? <><Loader2 size={11} className="animate-spin" /> Saving…</>
@@ -282,15 +282,15 @@ export function Overview() {
     <div className="px-4 py-6 sm:px-6 space-y-6">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-stone-900 dark:text-stone-100">Overview</h1>
-          <p className="text-sm text-stone-400 dark:text-stone-500 truncate">
+          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Overview</h1>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">
             {active.length} active agent{active.length !== 1 ? 's' : ''} · auto-refreshes every 5s
           </p>
         </div>
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="flex items-center gap-1.5 rounded-md border border-stone-300 dark:border-stone-600 px-3 py-1.5 text-xs text-stone-500 dark:text-stone-400 hover:border-stone-400 dark:hover:border-stone-500 hover:text-stone-800 dark:hover:text-stone-200 disabled:opacity-40"
+          className="flex items-center gap-1.5 rounded-md border border-neutral-300 dark:border-neutral-600 px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:border-neutral-400 dark:hover:border-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200 disabled:opacity-40"
         >
           <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} /> Refresh
         </button>
@@ -302,13 +302,13 @@ export function Overview() {
         <SystemServices />
       </div>
 
-      {isLoading && <p className="text-sm text-stone-400 dark:text-stone-500">Loading agents…</p>}
+      {isLoading && <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading agents…</p>}
       {error && <p className="text-sm text-red-600 dark:text-red-400">Failed to load agents: {String(error)}</p>}
 
       {active.length === 0 && !isLoading && (
-        <div className="rounded-xl border border-dashed border-stone-300 dark:border-stone-600 p-12 text-center">
-          <Bot size={32} className="mx-auto mb-3 text-stone-400 dark:text-stone-500" />
-          <p className="text-sm text-stone-400 dark:text-stone-500">
+        <div className="rounded-xl border border-dashed border-neutral-300 dark:border-neutral-600 p-12 text-center">
+          <Bot size={32} className="mx-auto mb-3 text-neutral-500 dark:text-neutral-400" />
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
             No active agents. The primary agent is created on orchestrator startup.
           </p>
         </div>
@@ -316,35 +316,35 @@ export function Overview() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {active.map(agent => (
-          <div key={agent.id} className="rounded-xl border border-stone-200 dark:border-stone-800 bg-white dark:bg-stone-900 p-5 space-y-3">
+          <div key={agent.id} className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-5 space-y-3">
             {/* Header */}
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="truncate font-medium text-stone-900 dark:text-stone-100">{agent.config.name}</p>
-                <p className="truncate text-xs text-stone-400 dark:text-stone-500 mt-0.5">{agent.config.model}</p>
+                <p className="truncate font-medium text-neutral-900 dark:text-neutral-100">{agent.config.name}</p>
+                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">{agent.config.model}</p>
               </div>
               <StatusBadge status={agent.status} />
             </div>
 
             {/* Metadata */}
-            <div className="space-y-1 text-xs text-stone-400 dark:text-stone-500">
+            <div className="space-y-1 text-xs text-neutral-500 dark:text-neutral-400">
               <p>
-                <span className="text-stone-500 dark:text-stone-400">Last active: </span>
+                <span className="text-neutral-500 dark:text-neutral-400">Last active: </span>
                 {agent.last_active
                   ? formatDistanceToNow(new Date(agent.last_active), { addSuffix: true })
                   : 'never'}
               </p>
               <p>
-                <span className="text-stone-500 dark:text-stone-400">Created: </span>
+                <span className="text-neutral-500 dark:text-neutral-400">Created: </span>
                 {formatDistanceToNow(new Date(agent.created_at), { addSuffix: true })}
               </p>
-              <p className="font-mono text-stone-400 dark:text-stone-500 truncate">{agent.id}</p>
+              <p className="font-mono text-neutral-500 dark:text-neutral-400 truncate">{agent.id}</p>
             </div>
 
             {/* Fallbacks summary (view mode) */}
             {(agent.config.fallback_models ?? []).length > 0 && (
-              <p className="text-xs text-stone-400 dark:text-stone-500">
-                <span className="text-stone-500 dark:text-stone-400">Fallbacks: </span>
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                <span className="text-neutral-500 dark:text-neutral-400">Fallbacks: </span>
                 <span className="font-mono">
                   {(agent.config.fallback_models ?? []).join(' → ')}
                 </span>
@@ -355,7 +355,7 @@ export function Overview() {
             {agent.config.tools.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {agent.config.tools.map(t => (
-                  <span key={t} className="rounded bg-stone-100 dark:bg-stone-800 px-1.5 py-0.5 text-xs text-stone-500 dark:text-stone-400">
+                  <span key={t} className="rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                     {t}
                   </span>
                 ))}

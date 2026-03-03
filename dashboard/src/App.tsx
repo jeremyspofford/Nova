@@ -12,6 +12,7 @@ import { Settings } from './pages/Settings'
 import { Models } from './pages/Models'
 import { Tasks } from './pages/Tasks'
 import { Pods } from './pages/Pods'
+import { AgentEndpoints } from './pages/AgentEndpoints'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -28,7 +29,7 @@ export default function App() {
       <ThemeProvider>
       <ChatProvider>
       <BrowserRouter>
-        <div className="min-h-screen bg-stone-50 dark:bg-stone-950">
+        <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
           <NavBar />
           <main className="mx-auto max-w-6xl">
             <Routes>
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="/usage"   element={<Usage />} />
               <Route path="/keys"    element={<Keys />} />
               <Route path="/mcp"     element={<MCP />} />
+              <Route path="/agents"  element={<AgentEndpoints />} />
               <Route path="/models"   element={<Models />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
