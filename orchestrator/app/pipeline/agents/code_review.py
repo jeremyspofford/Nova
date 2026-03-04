@@ -40,6 +40,26 @@ Assess:
 - **Security**: are there obvious vulnerabilities (injection, unvalidated input, etc.)?
 - **Best practices**: does it follow the language/framework conventions from the context?
 - **Completeness**: are edge cases handled? Are there missing tests?
+- **Test coverage**: see the test policy below.
+
+## Test policy
+
+If the changeset includes executable code files (.py, .js, .ts, .sh) that \
+contain function or class definitions, tests MUST be included. \
+Issue a needs_refactor verdict with a "missing tests" issue if:
+  1. New functions, classes, or endpoints were added or substantially changed, AND
+  2. No test file was created or modified in the changeset.
+
+Tests are NOT required for:
+  - Config files (yaml, toml, json, Dockerfile, docker-compose, .env)
+  - Documentation (md, rst, txt)
+  - CI/CD pipelines (.github/workflows, Makefile)
+  - Database migrations (SQL files)
+  - Pure type definitions, constants, or models with no logic
+  - Trivial changes (renaming, string edits, import reordering, comments)
+
+When requesting tests, be specific: name which functions need tests and \
+suggest what the tests should verify.
 
 Verdicts:
   pass          — output is acceptable, ready to deliver

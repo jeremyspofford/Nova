@@ -1,5 +1,9 @@
 # Nova AI Platform — Roadmap
 
+> Living document. Keep up to date as work progresses.
+>
+> **Last updated:** 2026-03-03
+>
 > **Vision:** A self-directed autonomous AI platform. You define a goal. Nova breaks it into
 > subtasks, executes them through a coordinated pipeline of specialized agents with built-in
 > safety rails, evaluates its own progress, re-plans as needed, and completes the goal — with
@@ -168,7 +172,8 @@ Post-pipeline (parallel, best-effort, non-blocking):
 - BRPOP async task dispatch — long tasks don't block the HTTP layer
 - Task state machine (11 states): `submitted → queued → context_running → task_running → guardrail_running → review_running → pending_human_review → completing → complete | failed | cancelled`
 - `pending_human_review` pauses the loop — task waits, doesn't fail
-- Cancel from dashboard at any state
+- `clarification_needed` — Context Agent detects ambiguous requests and pauses with questions before expensive Task Agent runs. User answers via `POST /clarify`, pipeline resumes from checkpoint with enriched input. No new tables — uses existing `status` (free-form text) and `metadata` (JSONB) columns.
+- Cancel from dashboard at any state (including `clarification_needed`)
 
 ### C. New Database Tables
 
@@ -235,6 +240,22 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 
 ---
 
+## 🔜 Phase 5.5 — Hardening
+
+> Building forward without a safety net (no tests, no observability) is the biggest risk to the platform.
+> This phase addresses operational maturity before adding memory complexity.
+> Inserted based on competitive review.
+
+1. **Fix MCP tools invisible to agents** — pipeline agents and the interactive runner use the static `ALL_TOOLS` constant (populated at import time, built-ins only) instead of calling `get_all_tools()` which merges built-in + MCP tools. MCP servers connect and load correctly, but no agent can see or use them. Fix: replace `ALL_TOOLS` imports with `get_all_tools()` calls in `pipeline/agents/context.py`, `pipeline/agents/task.py`, and `agents/runner.py`; support `mcp__*` names in `allowed_tools`; inject MCP tool names into agent system prompts.
+2. **Test foundation** — pytest fixtures for orchestrator + memory-service; integration tests for pipeline execution, memory retrieval, auth
+3. **Fix streaming token counts** — `orchestrator/app/agents/runner.py` returns 0 tokens for streaming responses; accumulate chunks or use LLM gateway response headers
+4. **Fix reaper race condition** — `orchestrator/app/reaper.py` has TOCTOU race between UPDATE and enqueue_task; use Redis Lua script for atomic requeue
+5. **Structured JSON logging** — across all services (replace unstructured string logs)
+6. **Embedding cache activation** — wire up existing `embedding_cache` table in `memory-service/app/embedding.py` (table exists in schema but is never queried)
+7. **Working memory cleanup job** — background task deleting expired rows from `working_memories` (expires_at column exists but nothing enforces it)
+
+---
+
 ## 🔜 Phase 6 — Memory Overhaul
 
 > Memory is the connective tissue of self-direction.
@@ -264,6 +285,692 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 4. **Embedding fallback chain** — `text-embedding-3-small` → Ollama `nomic-embed-text` (zero-pad 768→1536 dims).
 
 5. **Memory Inspector page** (in dashboard) — browse facts, episodes, project context; manually flag or delete stale entries.
+
+---
+
+## 🔜 Phase 6b — Code Quality & DRY Cleanup
+
+> Technical debt sweep before the complexity of self-directed autonomy.
+> Every DRY violation found here is a future divergence bug waiting to happen —
+> especially once autonomous agents are modifying config and writing memories.
+
+### Orchestrator
+
+| Issue | Files | Priority |
+|---|---|---|
+| **Bug: `"review_running"` should be `"code_review_running"`** — stale code-review tasks are never reaped | `reaper.py:69` | Critical |
+| **Bug: MCP tools invisible to all agents** — pipeline agents (`context.py`, `task.py`) and the interactive runner (`runner.py`) import the static `ALL_TOOLS` constant which is populated at module import time and never includes MCP tools. `get_all_tools()` exists in `tools/__init__.py` and correctly merges built-in + MCP tools, but nothing calls it. **Fix:** (1) Change `context.py` and `task.py` to call `get_all_tools()` instead of importing `ALL_TOOLS`; (2) Change `runner.py:_run_tool_loop()` to use `get_all_tools()` when `tools=None`; (3) Update `allowed_tools` validation in pod agent config to support `mcp__*` namespaced tool names; (4) Inject available MCP tool names into agent system prompts so models know they can use them | `pipeline/agents/context.py:59`, `pipeline/agents/task.py:98`, `agents/runner.py:400`, `tools/__init__.py:35` | Critical |
+| Extract shared `audit_log_insert()` — currently duplicated 3× with diverging implementations (executor uses JSONB codec, reaper uses `json.dumps`, router inlines raw SQL) | `pipeline/executor.py`, `reaper.py`, `pipeline_router.py` | High |
+| Unify tool-use loops — `_resolve_tool_rounds` and `_run_tool_loop` are ~40 lines of identical logic | `agents/runner.py` | High |
+| Unify LLM endpoint usage — pipeline agents use `/v1/chat/completions` (OpenAI format), runner uses `/complete` (Nova format) with different response parsing | `pipeline/agents/base.py`, `agents/runner.py` | High |
+| Reaper timing constants ignore config — `REAPER_INTERVAL_SECONDS`, `STALE_HEARTBEAT_SECONDS` are module-level constants that shadow `settings` fields | `reaper.py`, `queue.py` vs `config.py` | High |
+| Remove dead config fields `task_queue_key` / `task_dead_letter_key` — never read, `queue.py` defines its own constants | `config.py:48-49` | Medium |
+| Merge `_load_pod` / `_load_default_pod` — identical query + construction, only WHERE clause differs | `pipeline/executor.py:379-405` | Medium |
+| Extract shared `_serialize_row()` — three row-to-dict helpers with copy-pasted logic | `pipeline_router.py` | Medium |
+| Extract SSE streaming helper — `generate()` closure duplicated in two route handlers | `router.py:138-169, 188-243` | Medium |
+| Move `import json` / `import asyncio` from function bodies to top-level (10+ occurrences) | `router.py`, `agents/runner.py` | Low |
+| Replace `datetime.utcnow()` with `datetime.now(timezone.utc)` | `store.py:36,65,141` | Low |
+| Convert f-string logging to `%s` lazy style in hot paths | `executor.py`, `reaper.py`, `queue.py` | Low |
+
+### Memory Service
+
+| Issue | Files | Priority |
+|---|---|---|
+| **Bug: `_actr_confidence` in router.py crashes on `None` `last_accessed_at`** — retrieval.py version handles it, router.py copy doesn't | `router.py:97` vs `retrieval.py:60` | Critical |
+| Deduplicate `_actr_confidence` — define once in `retrieval.py`, import in `router.py` | `retrieval.py:60`, `router.py:97` | High |
+| Deduplicate `TIER_TABLES` — defined twice with string vs enum keys | `retrieval.py:26`, `router.py:40` | High |
+| Extract `_to_pg_vector()` helper — embedding string serialization duplicated 7× across 3 files | `embedding.py`, `router.py`, `retrieval.py` | High |
+| Collapse `_call_llm_gateway` / `_call_llm_gateway_batch` — identical retry+fallback structure | `embedding.py:146-205` | High |
+| Remove or merge dead `GET /api/v1/memories` (v1 browse) — superseded by `/browse` (v2) | `router.py:48-94` | Medium |
+| Extract `_save_fact_internal` from router to a `service.py` module — compaction imports it at runtime to dodge circular deps | `compaction.py:62`, `router.py` | Medium |
+| Standardize session pattern — background tasks use bare `AsyncSessionLocal()` without rollback; should use `get_db()` | `cleanup.py:38`, `compaction.py:64` | Medium |
+| Name magic numbers — `limit=50`, `len//4` token estimate, `timeout=60.0`, `86400` sleep | `router.py`, `compaction.py`, `partitions.py` | Low |
+
+### LLM Gateway
+
+| Issue | Files | Priority |
+|---|---|---|
+| Extract shared `_serialize_messages()` — message serialization duplicated between litellm and claude_subscription providers | `litellm_provider.py:54-80`, `claude_subscription_provider.py:141-214` | High |
+| Extract shared `_parse_litellm_response()` — response extraction duplicated | `litellm_provider.py:108-132`, `claude_subscription_provider.py:171-194` | High |
+| Extract `_assert_available()` to subscription provider base — `is_available` guard duplicated 4× | `claude_subscription_provider.py`, `chatgpt_subscription_provider.py` | Medium |
+| Fix inconsistent SSE error JSON shape — `/stream` uses flat dict, `/v1` uses nested `{error: {message, type}}` | `router.py:55`, `openai_router.py:84` | Medium |
+| Define `DEFAULT_MODEL_KEY = "__default__"` constant — magic string in 3 locations | `registry.py:227,234`, `openai_router.py:113` | Low |
+| Move hardcoded `context_window=128000, max_output_tokens=8096` to per-model registry data | `router.py:79-80` | Medium |
+| Move `import json` / `import asyncio` from method bodies to top-level | Multiple provider files | Low |
+
+### Dashboard
+
+| Issue | Files | Priority |
+|---|---|---|
+| **Delete dead `Memory.tsx`** — 300+ lines, not routed, superseded by `MemoryInspector.tsx` | `pages/Memory.tsx` | High |
+| Remove duplicate inline `StatusBadge` in Tasks — shared component already exists | `Tasks.tsx:61` vs `components/StatusBadge.tsx` | High |
+| Extract `ACTIVE_TASK_STATUSES` constant — defined 3× in different files | `Overview.tsx:24`, `Tasks.tsx:166,383` | High |
+| Extract `<SaveCancelButtons>` component — save/cancel button pair duplicated 4× | `Overview.tsx`, `Pods.tsx` (×3) | Medium |
+| Extract shared card/page wrapper components — card container class repeated 25×, page root 8× | All page files | Medium |
+| Split `Pods.tsx` (864 lines) into subcomponents | `Pods.tsx` | Medium |
+| Standardize `refetchInterval` / `staleTime` per query key — same keys configured differently | `Overview.tsx`, `Tasks.tsx`, `MCP.tsx` | Low |
+| Fix debounce anti-pattern — timer stored on function via `as any`, should use `useRef` | `MemoryInspector.tsx:251` | Low |
+
+### Cross-Service / nova-contracts
+
+| Issue | Files | Priority |
+|---|---|---|
+| Extract shared health endpoint factory — identical `/health/live`, `/health/ready`, `/health/startup` in 3 services | `llm-gateway/health.py`, `chat-api/main.py`, `orchestrator/health.py` | Medium |
+| Deduplicate system prompt — diverging copies in orchestrator config and chat-api session.py | `orchestrator/config.py`, `chat-api/session.py:51-55` | Medium |
+| Replace `datetime.utcnow()` with `datetime.now(UTC)` in contracts and chat-api | `nova_contracts/memory.py:74`, `chat.py:28,36`, `chat-api/websocket.py` | Medium |
+| Move OAI compat models to `nova_contracts` — currently locked inside llm-gateway | `llm-gateway/openai_compat.py` | Low |
+| Define SSE encoding constants (`DATA_PREFIX`, `DONE_SENTINEL`) in contracts | Multiple services | Low |
+| Remove unused `UUID` import | `nova_contracts/chat.py:9` | Low |
+
+---
+
+## 🔜 Phase 6c — Nova SDK, CLI/TUI & Documentation
+
+> **Why now:** Every phase after this adds complexity (self-directed goals, triggers, computer use).
+> Without a typed SDK, the dashboard and any new client duplicates HTTP logic.
+> Without a CLI, Nova is trapped in the browser — unreachable from CI/CD, SSH sessions, and scripting.
+> Without documentation, the platform is inaccessible to anyone who didn't build it.
+>
+> This phase establishes the **SDK as the single integration layer** that all clients build on,
+> ships a **CLI/TUI that makes Nova usable from the terminal and CI pipelines**,
+> and introduces a **documentation system that stays current as the platform evolves**.
+
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────┐
+│               Nova Services (running)                │
+│   orchestrator · llm-gateway · memory-service        │
+└────────────────────────┬─────────────────────────────┘
+                         │ HTTP / SSE
+              ┌──────────┴──────────┐
+              │   nova-contracts    │  ← Pydantic request/response types (exists)
+              └──────────┬──────────┘
+                         │
+              ┌──────────┴──────────┐
+              │      nova-sdk       │  ← Typed async HTTP client (NEW)
+              └──┬──────┬───────┬───┘
+                 │      │       │
+          ┌──────┴┐  ┌──┴──┐  ┌┴───────────┐
+          │  CLI  │  │ TUI │  │  CI/CD &    │
+          │(Typer)│  │(Tex │  │  scripts    │
+          │       │  │tual)│  │             │
+          └───────┘  └─────┘  └─────────────┘
+
+   Dashboard (React) stays in sync via
+     auto-generated TypeScript types
+     from nova-contracts Pydantic models
+```
+
+**Three layers with clear responsibilities:**
+
+| Layer | Package | Responsibility | Consumers |
+|---|---|---|---|
+| **Contracts** | `nova-contracts/` (exists) | Pydantic types defining every request, response, and event shape | All services, SDK, type generation |
+| **SDK** | `nova-sdk/` (new) | Typed async HTTP client — how to talk to Nova programmatically | CLI, TUI, CI scripts, third-party integrations |
+| **CLI/TUI** | `nova-cli/` (new) | Terminal presentation — formatting, streaming, interactive UI | Humans in terminals |
+
+The SDK is the critical layer. It eliminates duplicated HTTP logic between the dashboard's `api.ts` and any new client. When an endpoint is added to the orchestrator, you update the contract, update the SDK, and every consumer gets it.
+
+### A. nova-sdk — Typed Python Client
+
+**Package:** `nova-sdk/` at repo root, installable as `pip install nova-sdk` (or from the mono-repo as a path dependency).
+
+**Design principles:**
+- Async-first (httpx async client), with sync wrappers for simple scripting
+- Every method returns typed Pydantic models from `nova-contracts`
+- Streaming methods yield typed event objects (not raw SSE strings)
+- Auth handled once at client init — API key or admin secret
+- Connection pooling, configurable timeouts, retry with backoff
+- Zero dependency on any service internals — pure HTTP client
+
+**Client structure:**
+
+```python
+from nova_sdk import NovaClient
+
+async with NovaClient(
+    url="https://nova.example.com",
+    api_key="sk-nova-...",        # or admin_secret="..." for admin ops
+    timeout=30.0,
+) as nova:
+    # Tasks
+    task = await nova.tasks.submit("Fix the auth bug in login.py")
+    task = await nova.tasks.get(task_id)
+    tasks = await nova.tasks.list(status="running", limit=50)
+    await nova.tasks.cancel(task_id)
+
+    # Streaming
+    async for event in nova.tasks.submit_stream("Refactor the logger"):
+        print(event.delta, end="")  # typed StreamEvent, not raw string
+
+    # Pipeline
+    stats = await nova.pipeline.queue_stats()
+    dead = await nova.pipeline.dead_letter()
+    findings = await nova.pipeline.findings(task_id)
+    reviews = await nova.pipeline.reviews(task_id)
+    artifacts = await nova.pipeline.artifacts(task_id)
+    await nova.pipeline.review(task_id, action="approve", comment="LGTM")
+
+    # Chat
+    async for event in nova.chat.stream("Explain the auth flow"):
+        print(event.delta, end="")
+
+    # Agents & Pods
+    agents = await nova.agents.list()
+    await nova.agents.update_config(agent_id, model="claude-sonnet-4-6")
+    pods = await nova.pods.list()
+    pod = await nova.pods.get(pod_id)
+
+    # Models
+    models = await nova.models.list()
+
+    # Keys (admin)
+    key = await nova.keys.create(name="ci-pipeline", rate_limit_rpm=60)
+    await nova.keys.revoke(key_id)
+
+    # Memory
+    results = await nova.memory.search("authentication patterns", limit=10)
+    await nova.memory.store(content="Always use parameterized queries", tier="procedural")
+    memories = await nova.memory.browse(tier="semantic", limit=50)
+
+    # MCP Servers (admin)
+    servers = await nova.mcp.list()
+    await nova.mcp.reload(server_id)
+
+    # Config (admin)
+    config = await nova.config.list()
+    await nova.config.set("default_chat_model", "claude-sonnet-4-6")
+
+    # Health
+    status = await nova.health.check()  # all services at once
+```
+
+**Resource module pattern** (each file in `nova_sdk/resources/`):
+
+```python
+# nova_sdk/resources/tasks.py
+class TasksResource:
+    def __init__(self, http: HttpClient):
+        self._http = http
+
+    async def submit(self, goal: str, **kwargs) -> Task:
+        resp = await self._http.post("/api/v1/pipeline/tasks", json={"goal": goal, **kwargs})
+        return Task.model_validate(resp)
+
+    async def submit_stream(self, goal: str, **kwargs) -> AsyncIterator[StreamEvent]:
+        async for event in self._http.stream_sse("/api/v1/tasks/stream", json={"goal": goal, **kwargs}):
+            yield StreamEvent.model_validate_json(event.data)
+
+    async def list(self, status: str | None = None, limit: int = 50) -> list[Task]:
+        ...
+
+    async def get(self, task_id: str) -> TaskDetail:
+        ...
+
+    async def cancel(self, task_id: str) -> None:
+        ...
+```
+
+**SSE streaming helper** (shared across all streaming endpoints):
+
+```python
+# nova_sdk/streaming.py
+async def consume_sse(response: httpx.Response) -> AsyncIterator[SSEEvent]:
+    """Parse SSE stream into typed events. Handles reconnection, [DONE] sentinel."""
+    async for line in response.aiter_lines():
+        if line.startswith("data: "):
+            payload = line[6:]
+            if payload == "[DONE]":
+                return
+            yield SSEEvent.model_validate_json(payload)
+```
+
+**Why this matters for the dashboard too:** Today `dashboard/src/api.ts` has its own `apiFetch<T>()` with hand-written URL construction. The TypeScript types are manually maintained. With this phase, we auto-generate `dashboard/src/types.generated.ts` from `nova-contracts` Pydantic models using a build step:
+
+```bash
+# In CI or as a make target
+python -m nova_contracts.export_jsonschema > /tmp/nova-schema.json
+npx json-schema-to-typescript /tmp/nova-schema.json > dashboard/src/types.generated.ts
+```
+
+This means: add a field to a Pydantic model → TypeScript types update automatically → dashboard gets type errors if it's out of sync. The dashboard's `api.ts` doesn't need to become a full SDK — it just gains accurate types.
+
+### B. nova-cli — Terminal Interface
+
+**Package:** `nova-cli/` at repo root. Installed as `pip install nova-cli` or `pipx install nova-cli`.
+
+**Tech stack:**
+- **Typer** — CLI framework with auto-generated help, shell completions, and argument validation
+- **Rich** — tables, panels, progress bars, markdown rendering, syntax highlighting
+- **httpx** — async HTTP (via the SDK)
+- **nova-sdk** — all API calls go through the SDK, CLI never constructs HTTP requests directly
+
+**The CLI is a thin presentation layer.** Every command is: parse args → call SDK method → format output. No business logic lives here.
+
+**Command tree:**
+
+```
+nova
+├── status                          # Health check all services + queue depth
+├── chat [message]                  # Interactive streaming chat (or one-shot with arg)
+│   ├── --model <model>             # Override model for this session
+│   ├── --session <id>              # Resume a prior session
+│   └── --no-stream                 # Wait for full response (for piping)
+├── task
+│   ├── submit <goal>               # Submit to pipeline queue
+│   │   ├── --stream                # Stream output as it executes
+│   │   ├── --wait                  # Block until complete, print result
+│   │   ├── --pod <pod>             # Target specific pod
+│   │   ├── --context <key:value>   # Inject structured context (repeatable)
+│   │   └── --json                  # Output task object as JSON
+│   ├── list                        # List tasks with status filter
+│   │   ├── --status <status>       # Filter: queued/running/complete/failed/cancelled
+│   │   └── --limit <n>
+│   ├── show <task_id>              # Full detail: stages, findings, reviews, artifacts
+│   ├── cancel <task_id>
+│   ├── review <task_id>            # Approve/reject pending_human_review tasks
+│   │   ├── --approve [comment]
+│   │   └── --reject [comment]
+│   ├── findings <task_id>          # List guardrail findings
+│   ├── reviews <task_id>           # List code review verdicts
+│   └── artifacts <task_id>         # List artifacts produced
+├── pod
+│   ├── list
+│   ├── show <pod_id>               # Pod config + agent list
+│   ├── create --name <n> [opts]
+│   └── delete <pod_id>
+├── agent
+│   ├── list [--pod <pod_id>]
+│   └── config <agent_id> [opts]    # Update model, system prompt, etc.
+├── model
+│   └── list [--provider <p>]       # Available models with context windows
+├── key
+│   ├── create --name <n> [--rpm N]
+│   ├── list
+│   └── revoke <key_id>
+├── memory
+│   ├── search <query>              # Hybrid vector+keyword search
+│   │   ├── --tier <tier>
+│   │   └── --limit <n>
+│   ├── browse                      # Paginated browse
+│   │   ├── --tier <tier>
+│   │   ├── --agent <agent_id>
+│   │   └── --limit/--offset
+│   ├── store <content>             # Store a memory
+│   │   └── --tier <tier>
+│   └── delete <memory_id>
+├── mcp
+│   ├── list                        # Servers with connection status
+│   ├── add --name <n> [opts]       # Register new server
+│   ├── reload <server_id>          # Reconnect
+│   └── remove <server_id>
+├── config
+│   ├── list                        # All platform config
+│   ├── get <key>
+│   ├── set <key> <value>
+│   └── export                      # Dump all config as JSON (for import/backup)
+├── queue                           # Queue depth + dead-letter inspection
+│   ├── stats
+│   └── dead-letter
+├── usage [--limit N]               # Recent usage events
+└── tui                             # Launch full interactive TUI (Phase 2)
+```
+
+**Global flags (all commands):**
+- `--url <url>` — Nova instance URL (default: `NOVA_URL` env var, fallback `http://localhost:8000`)
+- `--key <key>` — API key (default: `NOVA_API_KEY` env var)
+- `--admin-secret <s>` — Admin secret (default: `NOVA_ADMIN_SECRET` env var)
+- `--json` — Machine-readable JSON output (every command supports this)
+- `--no-color` — Disable Rich formatting
+- `--timeout <seconds>` — Request timeout override
+- `--profile <name>` — Named config profile (see Configuration below)
+
+**Configuration file** (`~/.config/nova/config.toml`):
+
+```toml
+[default]
+url = "http://localhost:8000"
+admin_secret = "from-env"   # special value meaning read from NOVA_ADMIN_SECRET
+
+[profiles.staging]
+url = "https://nova-staging.internal:8000"
+api_key = "sk-nova-..."
+
+[profiles.prod]
+url = "https://nova.internal:8000"
+api_key = "sk-nova-..."
+```
+
+Usage: `nova --profile staging task list` or `NOVA_PROFILE=staging nova task list`.
+
+**Auth resolution order:** CLI flag → env var → config profile → default profile. Admin secret and API key are separate — some commands need admin (key management, config), others work with a regular API key.
+
+**Output modes — every command supports both:**
+1. **Human mode (default):** Rich tables, colored status badges, markdown rendering, progress spinners
+2. **Machine mode (`--json`):** Raw JSON, one object per line for streaming, suitable for `jq` pipelines
+
+**Example human output:**
+
+```
+$ nova status
+┌─────────────────────────────────────────────┐
+│ Nova Platform Status                        │
+├──────────────────┬────────┬─────────────────┤
+│ Service          │ Status │ Details         │
+├──────────────────┼────────┼─────────────────┤
+│ orchestrator     │ ● UP   │ 3 active tasks  │
+│ llm-gateway      │ ● UP   │ 12 models       │
+│ memory-service   │ ● UP   │ 1,847 memories  │
+│ postgres         │ ● UP   │                 │
+│ redis            │ ● UP   │ queue: 2        │
+└──────────────────┴────────┴─────────────────┘
+```
+
+**Example machine output:**
+
+```
+$ nova --json task list --status running
+{"task_id": "abc-123", "status": "running", "stage": "guardrail_running", "goal": "Fix auth bug", "created_at": "..."}
+{"task_id": "def-456", "status": "running", "stage": "task_running", "goal": "Add tests", "created_at": "..."}
+```
+
+### C. CI/CD Integration — The Killer Use Case
+
+The CLI + SDK enables Nova as an automated participant in CI/CD pipelines. The primary use case: **a failed pipeline triggers Nova to investigate, fix, and open a merge request.**
+
+**Slim Docker image:**
+
+```dockerfile
+# nova-cli.Dockerfile
+FROM python:3.12-slim
+RUN pip install nova-cli
+# ~50MB image — just Python + httpx + typer + rich
+# No postgres, no redis, no dashboard — pure HTTP client
+ENTRYPOINT ["nova"]
+```
+
+Published as `ghcr.io/arialabs/nova-cli:latest` alongside the main Nova images.
+
+**GitLab pipeline recovery example:**
+
+```yaml
+# .gitlab-ci.yml
+stages:
+  - build
+  - test
+  - nova-recover  # only runs when earlier stages fail
+
+build:
+  stage: build
+  script: make build
+
+test:
+  stage: test
+  script: make test
+
+nova-investigate-and-fix:
+  stage: nova-recover
+  when: on_failure                              # only triggers on failure
+  image: ghcr.io/arialabs/nova-cli:latest
+  variables:
+    NOVA_URL: $NOVA_URL                         # from CI/CD variables
+    NOVA_API_KEY: $NOVA_API_KEY
+  script:
+    # Collect failure context
+    - |
+      nova task submit --wait --json \
+        --context "repo:${CI_PROJECT_URL}" \
+        --context "branch:${CI_COMMIT_REF_NAME}" \
+        --context "commit:${CI_COMMIT_SHA}" \
+        --context "pipeline:${CI_PIPELINE_URL}" \
+        --context "failed_job:${CI_JOB_NAME}" \
+        --context "log:$(cat /tmp/test-output.log | tail -200)" \
+        "A CI pipeline failed. Investigate the failure from the log output. \
+         Clone the repo, check out the branch, understand the error, write a fix, \
+         and open a GitLab merge request with the fix. \
+         Include the error analysis in the MR description."
+  artifacts:
+    paths:
+      - nova-result.json
+    when: always
+```
+
+**What Nova does with this task:**
+1. **Context Agent** — assembles repo context, reads the failure log, identifies relevant files
+2. **Task Agent** — analyzes the error, writes a fix, creates a branch, opens the MR (using git tools + a GitLab MCP server or agent endpoint)
+3. **Guardrail Agent** — checks the fix doesn't introduce security issues, credential leaks, or spec drift
+4. **Code Review Agent** — reviews the fix quality, may loop back for refinement
+5. **Decision Agent** — if confidence is low, escalates to human review queue instead of auto-merging
+
+**GitHub Actions equivalent:**
+
+```yaml
+nova-recover:
+  runs-on: ubuntu-latest
+  if: failure()
+  container:
+    image: ghcr.io/arialabs/nova-cli:latest
+  env:
+    NOVA_URL: ${{ secrets.NOVA_URL }}
+    NOVA_API_KEY: ${{ secrets.NOVA_API_KEY }}
+  steps:
+    - name: Investigate and fix
+      run: |
+        nova task submit --wait \
+          --context "repo:${{ github.repository }}" \
+          --context "branch:${{ github.ref_name }}" \
+          --context "run:${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+          "Investigate this CI failure and open a PR with a fix."
+```
+
+**Other CI/CD use cases beyond failure recovery:**
+- **PR review:** `nova task submit "Review this PR for security issues" --context "diff:$(git diff main...HEAD)"`
+- **Release notes:** `nova task submit "Generate release notes from commits since last tag" --context "log:$(git log v1.2.0..HEAD --oneline)"`
+- **Dependency audit:** `nova task submit "Audit dependencies for known vulnerabilities" --context "lockfile:$(cat package-lock.json)"`
+- **Scheduled maintenance:** cron-triggered `nova task submit "Run a code quality sweep on the auth module"`
+
+### D. TUI — Interactive Terminal Dashboard (Phase 2 of CLI)
+
+Built with **Textual** (from the Rich team — same styling primitives as the CLI). Launched via `nova tui`.
+
+**Why Textual:** It's Python, it reuses Rich's rendering, it has a CSS-like layout system, and it imports `nova-sdk` directly. No language boundary.
+
+**Layout:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Nova TUI                              ● orch ● llm ● mem   │
+├────────────┬────────────────────────────────────────────────┤
+│            │                                                │
+│  Tasks     │  Task: abc-123                                 │
+│  ────────  │  Goal: Fix authentication bug                  │
+│  ● abc-123 │  Status: guardrail_running                     │
+│  ● def-456 │                                                │
+│  ○ ghi-789 │  ■ Context  ■ Task  □ Guard  ○ Review  ○ Dec  │
+│  ✓ jkl-012 │                                                │
+│            │  ── Output ──────────────────────────────────── │
+│  Pods      │  Found the issue in auth/login.py:42.          │
+│  ────────  │  The bcrypt comparison uses == instead of      │
+│  Quartet   │  constant-time comparison. Fixing...           │
+│  Research  │                                                │
+│            │                                                │
+├────────────┴────────────────────────────────────────────────┤
+│ > nova task submit "Add rate limiting to /login endpoint"   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**TUI features:**
+- Live-updating task list with status indicators (websocket or polling)
+- 5-stage pipeline progress bar per task
+- Streaming output pane for active tasks
+- Service health indicators in the header
+- Command bar at the bottom for quick actions
+- Task detail panel with findings, reviews, artifacts tabs
+- Human review approval directly from the TUI
+- Chat panel (toggle with a keybinding)
+- Memory browser panel
+
+**Implementation note:** The TUI reuses the SDK entirely. Every widget is: poll SDK method → render with Textual widgets. The TUI is implemented **after** the CLI is stable because it depends on the same SDK and adds only presentation complexity.
+
+### E. Keeping Dashboard & CLI in Sync — The Contract Pipeline
+
+The core problem: `dashboard/src/api.ts` and `nova-sdk` both talk to the same APIs. Without a shared contract, they drift.
+
+**Solution: auto-generated TypeScript types from Pydantic models.**
+
+```
+nova-contracts/             (source of truth — Pydantic models)
+       │
+       ├──→ nova-sdk/        (Python client — imports contracts directly)
+       │
+       └──→ JSON Schema      (exported via Pydantic's .model_json_schema())
+              │
+              └──→ dashboard/src/types.generated.ts  (via json-schema-to-typescript)
+```
+
+**Build step (added to `Makefile`):**
+
+```makefile
+types:  ## Generate TypeScript types from nova-contracts
+	python -c "from nova_contracts import export_all_schemas; export_all_schemas('tmp/schemas')"
+	npx json-schema-to-typescript tmp/schemas/*.json -o dashboard/src/types.generated.ts
+```
+
+**What this gives you:**
+- Add a field to a Pydantic model → re-run `make types` → TypeScript types update → dashboard gets compile errors if it uses the old shape
+- The SDK uses contracts natively (Python imports) — zero drift by construction
+- CI can enforce this: `make types && git diff --exit-code dashboard/src/types.generated.ts` fails if someone forgot to regenerate
+
+**What this does NOT do:** It doesn't auto-generate the dashboard's fetch calls or the SDK's HTTP methods. Those are still hand-written. But the types ensure they agree on shapes, which is where 90% of drift bugs come from.
+
+### F. Documentation System
+
+Nova currently has: `README.md` (quick start), `CLAUDE.md` (AI instructions), `docs/roadmap.md` (this file), `docs/ide-integration.md`. That's it. There's no API reference, no architecture guide, no user guide, no contributor docs.
+
+**Documentation strategy — three tiers:**
+
+#### Tier 1: Auto-Generated Reference Docs (always current)
+
+These are generated from code and can never go stale:
+
+| Doc | Source | Tool | Output |
+|---|---|---|---|
+| **API Reference** | FastAPI route definitions + Pydantic models | FastAPI's built-in OpenAPI export + [Redoc](https://github.com/Redocly/redoc) or [Scalar](https://github.com/scalar/scalar) | Static HTML hosted at `/docs` on each service (already exists as Swagger), plus a unified exported reference |
+| **CLI Reference** | Typer command definitions | `typer utils docs --output` or custom export | Markdown file auto-generated from command tree with all flags, args, and help text |
+| **SDK Reference** | Docstrings + type annotations on `nova-sdk` | [pdoc](https://pdoc.dev) or [mkdocstrings](https://mkdocstrings.github.io) | Python API docs with examples |
+| **TypeScript Types** | nova-contracts export | json-schema-to-typescript | `types.generated.ts` with JSDoc comments |
+| **Configuration Reference** | `pydantic_settings.BaseSettings` classes across all services | Custom export script | Table of every env var, its type, default, and description |
+| **Database Schema** | `orchestrator/app/migrations/*.sql` | Schema dump + [SchemaSpy](https://schemaspy.org) or [dbdocs](https://dbdocs.io) | ER diagram + table/column reference |
+
+**Implementation:** A `make docs` target that runs all generators and outputs to `docs/generated/`. CI runs `make docs` and either publishes to GitHub Pages or bundles into the dashboard as a `/docs` route.
+
+#### Tier 2: Hand-Written Guides (versioned in `docs/`)
+
+These require human authorship but should be maintained alongside the code they describe:
+
+| Doc | Purpose | Location |
+|---|---|---|
+| **Architecture Guide** | Service topology, inter-service communication, data flow diagrams, Redis DB allocation, context budget split | `docs/architecture.md` |
+| **Getting Started** | Expand current README: prerequisites, first task, first pipeline run, connecting an IDE | `docs/getting-started.md` |
+| **CLI User Guide** | Workflows and examples beyond `--help`: CI/CD setup, scripting patterns, config profiles | `docs/cli-guide.md` |
+| **Self-Hosting Guide** | Production deployment: reverse proxy, TLS, GPU setup, resource sizing, backup strategy | `docs/self-hosting.md` |
+| **Pod & Agent Configuration** | How to design pods, configure agents, tune models, set up routing — the "admin playbook" | `docs/pods-and-agents.md` |
+| **MCP Integration Guide** | How to add MCP servers, write custom tools, use the tool catalog | `docs/mcp-guide.md` |
+| **Memory System** | Tier explanations, when to use each, how retrieval works, compaction, confidence decay | `docs/memory.md` |
+| **Contributing** | Repo structure, development setup, code conventions, PR workflow | `CONTRIBUTING.md` |
+
+#### Tier 3: Living Docs (in-app and contextual)
+
+| Doc | Description |
+|---|---|
+| **`nova --help` / `nova <cmd> --help`** | Auto-generated from Typer. First thing users see. Must be excellent. |
+| **Dashboard tooltips & help text** | Contextual guidance in the UI — "What is a pod?", "What does the guardrail agent check?" |
+| **`CLAUDE.md`** | Already exists. Kept current as the AI-readable project reference. |
+| **OpenAPI / Swagger UI** | Already exists at `/docs` on each service. Useful for API exploration. |
+| **`nova docs`** | CLI command that opens the documentation site in the default browser |
+| **`nova docs <topic>`** | CLI shortcut: `nova docs cli`, `nova docs pods`, `nova docs memory` — opens the relevant page |
+
+**Documentation site tooling:**
+
+[MkDocs Material](https://squidfunk.github.io/mkdocs-material/) is the recommended choice:
+- Markdown source files (matches existing `docs/` convention)
+- Auto-generates nav from file structure
+- Supports admonitions, tabs, code annotations, search
+- `mkdocs-gen-files` plugin can inject auto-generated reference docs at build time
+- Deploys as static HTML to GitHub Pages, Cloudflare Pages, or a `/docs` route in the dashboard
+- Used by FastAPI, Pydantic, Textual, and most Python projects in this ecosystem
+
+**`mkdocs.yml` structure:**
+
+```yaml
+site_name: Nova Documentation
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: teal        # matches dashboard palette
+nav:
+  - Home: index.md
+  - Getting Started: getting-started.md
+  - Architecture: architecture.md
+  - User Guides:
+    - CLI: cli-guide.md
+    - Dashboard: dashboard-guide.md
+    - Pods & Agents: pods-and-agents.md
+    - Memory: memory.md
+    - MCP Integration: mcp-guide.md
+  - CI/CD Integration: ci-cd.md
+  - Self-Hosting: self-hosting.md
+  - Reference:
+    - API: generated/api-reference.md
+    - CLI Commands: generated/cli-reference.md
+    - SDK: generated/sdk-reference.md
+    - Configuration: generated/config-reference.md
+    - Database Schema: generated/schema-reference.md
+  - Contributing: contributing.md
+  - Roadmap: roadmap.md
+plugins:
+  - search
+  - gen-files          # injects auto-generated docs at build time
+  - mkdocstrings       # Python docstring → docs
+```
+
+**Makefile targets:**
+
+```makefile
+docs:           ## Generate all reference docs + build site
+docs-serve:     ## Live preview at localhost:8000
+docs-publish:   ## Deploy to GitHub Pages
+```
+
+### Implementation Order
+
+This phase is internally ordered to maximize value at each step:
+
+| Step | Deliverable | Why this order |
+|---|---|---|
+| **1** | **Expand `nova-contracts`** — add missing request/response models for all endpoints (pipeline, pods, MCP, config, memory browse, health). Add `export_all_schemas()` for TypeScript generation. | Everything else depends on complete contracts. |
+| **2** | **Build `nova-sdk`** — typed async client with resource modules for every API surface. SSE streaming helper. Auth handling. Tests against a mock server. | SDK is the foundation for CLI, TUI, and CI scripts. Building it first means we can validate the API surface before adding presentation. |
+| **3** | **TypeScript type generation** — `make types` pipeline from contracts → JSON Schema → `types.generated.ts`. Update dashboard imports. | Quick win that immediately prevents dashboard/backend drift. |
+| **4** | **Build `nova-cli`** — Typer app, all commands, Rich formatting, `--json` mode, config profiles, shell completions. | Primary user-facing deliverable. Depends on SDK being stable. |
+| **5** | **`nova-cli` Docker image** — slim image, CI/CD example configs for GitLab and GitHub Actions. | Unlocks the CI/CD use case. Just packaging — no new code. |
+| **6** | **Documentation site** — MkDocs Material setup, auto-generated reference docs, initial hand-written guides (architecture, getting started, CLI guide, CI/CD guide). | Documentation benefits from everything above being built — we document what exists rather than what's planned. |
+| **7** | **TUI (`nova tui`)** — Textual app with task list, pipeline visualizer, chat panel, command bar. | Most complex presentation layer. Built last because it depends on a stable SDK and benefits from CLI command patterns already established. |
+
+### What Ships
+
+| Artifact | Description |
+|---|---|
+| `nova-contracts/` | Expanded with full request/response types + JSON Schema export |
+| `nova-sdk/` | New package — typed async Python client for all Nova APIs |
+| `nova-cli/` | New package — terminal CLI with all commands listed above |
+| `nova-cli` Docker image | `ghcr.io/arialabs/nova-cli:latest` — ~50MB slim image for CI/CD |
+| `dashboard/src/types.generated.ts` | Auto-generated TypeScript types from contracts |
+| `make types` | Makefile target to regenerate TS types |
+| `make docs` / `make docs-serve` | Documentation site build + preview |
+| `docs/` site | MkDocs Material site with auto-generated reference + hand-written guides |
+| CI/CD examples | GitLab CI and GitHub Actions example configs in `docs/ci-cd.md` |
 
 ---
 
@@ -367,11 +1074,158 @@ User: "Improve test coverage in auth module to 80%"
 - Cron scheduling — "run a security audit every Monday at 9am"
 - Event subscriptions — watch a file path, a Slack channel, an email inbox
 
-**Computer Use:**
-- Screenshot capture + vision model routing
-- Mouse/keyboard event dispatch
-- Sandboxed Playwright browser — Nova can use web UIs, not just APIs
-- Action replay / audit log
+**Computer Use — Live Browser Automation:**
+
+> **Status: Requires architectural decisions before implementation.** The four open questions below
+> must be discussed and resolved before work begins on this subsystem.
+
+Nova gets a real browser it can see and control. Users watch it work in real-time from the dashboard. The agent uses vision models to understand what's on screen and decides what to do next — navigate, click, type, scroll, inspect DevTools. Every action is recorded for audit and replay.
+
+**Architecture overview:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Dashboard                                                       │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │  Live Browser Viewer                                    │     │
+│  │  (WebSocket-streamed viewport frames)                   │     │
+│  │                                                         │     │
+│  │  ┌───────────────────────────────────────────────────┐  │     │
+│  │  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │  │     │
+│  │  │ ░░  Live view of what Nova sees and does        ░░ │  │     │
+│  │  │ ░░  in the browser — navigation, clicks, forms  ░░ │  │     │
+│  │  │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │  │     │
+│  │  └───────────────────────────────────────────────────┘  │     │
+│  │  Action log: [navigate google.com] [click #search] ... │     │
+│  └────────────────────────────────────────────────────────┘     │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │ WebSocket (viewport frames + action events)
+                       │
+┌──────────────────────┴──────────────────────────────────────────┐
+│ Orchestrator                                                     │
+│                                                                   │
+│  Vision Loop:                                                     │
+│  1. browser_screenshot → capture current page                     │
+│  2. Send screenshot to vision model (Claude, GPT-4o)              │
+│  3. Model decides next action (click, type, scroll, navigate)     │
+│  4. Execute action via CDP                                        │
+│  5. Wait for page settle → repeat                                 │
+│                                                                   │
+│  Browser Tools (registered in tool catalog):                      │
+│  • browser_navigate(url)                                          │
+│  • browser_click(selector | coordinates)                          │
+│  • browser_type(selector, text)                                   │
+│  • browser_scroll(direction, amount)                              │
+│  • browser_screenshot() → returns image for vision model          │
+│  • browser_read_page() → returns page text/DOM snapshot           │
+│  • browser_devtools(query) → inspect DOM, network, console        │
+│  • browser_wait(condition) → wait for selector, navigation, idle  │
+│  • browser_tabs() → list/switch/close tabs                        │
+└──────────────────────┬──────────────────────────────────────────┘
+                       │ CDP (Chrome DevTools Protocol) over WebSocket
+                       │
+┌──────────────────────┴──────────────────────────────────────────┐
+│ Browser Container (Chromium + Playwright)                         │
+│                                                                   │
+│  Headless or headed Chromium instance                             │
+│  Exposes CDP endpoint for orchestrator control                    │
+│  Screencast API streams viewport frames                           │
+│  Sandboxed: --no-sandbox, seccomp, network-restricted optional    │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**Dashboard browser viewer features:**
+- Embedded live viewport in a dashboard page (or panel within Tasks)
+- Real-time frame streaming — see exactly what the agent sees
+- Action overlay — highlight where Nova is clicking, what it's typing
+- Action log sidebar — timestamped sequence of every browser action
+- Task association — viewer is scoped to a specific task's browser session
+- Screenshot gallery — all screenshots captured during the task, browsable after completion
+
+**Vision loop — how the agent "sees":**
+- Agent calls `browser_screenshot()` → gets a PNG/JPEG of the current viewport
+- Screenshot sent to a vision-capable model (Claude with vision, GPT-4o) as part of the tool result
+- Model reasons about what's on screen and decides the next action
+- Actions executed via CDP → page updates → next screenshot → loop
+- `browser_read_page()` as a cheaper alternative when vision isn't needed (returns extracted text, DOM structure, or accessibility tree)
+
+**Action recording and replay:**
+- Every browser action stored as a structured event: `{timestamp, action, params, screenshot_before, screenshot_after}`
+- Stored as task artifacts (artifact_type: `browser_recording`)
+- Replayable in the dashboard — step through the sequence with before/after screenshots
+- Exportable as Playwright test scripts for CI regression testing
+
+**Browser tools registered in the tool catalog:**
+
+| Tool | Description |
+|---|---|
+| `browser_navigate` | Navigate to URL, wait for load |
+| `browser_click` | Click element by CSS selector, XPath, or x/y coordinates |
+| `browser_type` | Type text into a focused element or specified selector |
+| `browser_scroll` | Scroll page or element (up/down/left/right, by pixels or pages) |
+| `browser_screenshot` | Capture viewport screenshot, return as image for vision model |
+| `browser_read_page` | Extract page content as text, DOM snapshot, or accessibility tree |
+| `browser_devtools` | Query Chrome DevTools — DOM inspection, network requests, console logs, performance |
+| `browser_wait` | Wait for selector to appear, navigation to complete, or network idle |
+| `browser_tabs` | List open tabs, switch between tabs, open/close tabs |
+| `browser_evaluate` | Execute JavaScript in the page context (sandboxed) |
+
+### Open Architectural Decisions
+
+> **These must be discussed and resolved before implementation begins.**
+
+#### Decision 1: Dashboard viewport streaming approach
+
+How does the user watch Nova use the browser in real-time?
+
+| Option | How it works | Pros | Cons | Recommendation |
+|---|---|---|---|---|
+| **A. CDP Screencast** | Use Chrome's `Page.startScreencast` API to stream JPEG frames via CDP. Orchestrator forwards frames over WebSocket to the dashboard. | Lightweight — no extra infrastructure. We already have CDP access for browser control. Agent needs screenshots anyway, so frames are a byproduct. | Lower frame rate (5-15 fps typical). No direct user interaction with the viewport. Frame quality depends on JPEG compression settings. | **Recommended for v1.** Simplest path, leverages existing CDP connection, and watch-only is the right starting point. |
+| **B. noVNC** | Run a VNC server (e.g. x11vnc) inside the browser container with a virtual framebuffer (Xvfb). Dashboard embeds a noVNC client (JavaScript VNC viewer). | True pixel-perfect live view. Built-in support for user interaction (click/type in the viewer). Mature ecosystem. | Heavier — needs Xvfb + window manager + VNC server in the container. More moving parts. Extra protocol layer (VNC) on top of CDP. | Better for Phase 2 if interactive user control is needed. |
+| **C. WebRTC** | Stream the browser viewport as a WebRTC video stream. | Lowest latency, adaptive bitrate, real-time feel. | Most complex to set up. Needs STUN/TURN for non-local deployments. Overkill for an admin watching an agent work. | Over-engineered for this use case. |
+
+#### Decision 2: User interaction model
+
+Can the user interact with the browser, or just watch?
+
+| Option | Description | Pros | Cons | Recommendation |
+|---|---|---|---|---|
+| **A. Watch-only** | Dashboard shows a read-only live viewport. User observes but cannot click, type, or intervene. | Simple to build. No conflict between agent and user input. No input forwarding needed. | User can't help if agent is stuck. Can't "nudge" the agent by clicking the right thing. | **Recommended for v1.** Avoids the complexity of shared control. Agent can be guided via the existing human review queue instead. |
+| **B. Pause-and-takeover** | User can pause the agent's browser actions, interact with the browser manually, then resume the agent. | User can unblock stuck agents. Useful for authentication flows (user logs in, then hands back). | Needs pause/resume state machine. Must handle mid-action interrupts cleanly. More complex UI. | Good for v2. Design the CDP connection so this is possible later. |
+| **C. Shared control** | Both user and agent can interact simultaneously. | Maximum flexibility. | Race conditions (agent clicks while user types). Very hard to get right. Confusing UX. | Not recommended — the conflict handling isn't worth it. |
+
+#### Decision 3: Browser lifecycle
+
+How are browser instances created and destroyed?
+
+| Option | Description | Pros | Cons | Recommendation |
+|---|---|---|---|---|
+| **A. Per-task ephemeral** | Each task that needs a browser gets a fresh Chromium instance. Destroyed when the task completes. | Clean state — no session leakage between tasks. Simple mental model. Easy cleanup. Security: no cookies/credentials persist. | Startup cost (~2-3s for cold Chromium). Resource allocation per task. | **Recommended.** Browser tasks are inherently long-running (seconds to minutes), so 2-3s startup is negligible. Clean state is critical for an autonomous system. |
+| **B. Persistent pool** | Pre-warmed browser instances recycled across tasks. Pool manager assigns instances and cleans state between uses. | Fast — no startup delay. Efficient resource usage for burst workloads. | Must guarantee clean state between tasks (clear cookies, storage, close tabs, reset permissions). Session leakage is a security risk. Pool sizing and lifecycle complexity. | Only worthwhile if browser tasks become high-frequency. Not needed for v1. |
+| **C. Long-lived sidecar** | Single browser instance always running, shared across all tasks sequentially. | Simplest infrastructure. Always ready. | No isolation between tasks. If one task corrupts browser state, all subsequent tasks are affected. Can't run concurrent browser tasks. | Too fragile for autonomous agents. |
+
+#### Decision 4: Where does the browser container run?
+
+| Option | Description | Pros | Cons | Recommendation |
+|---|---|---|---|---|
+| **A. Docker Compose profile sidecar** | Browser runs as a service in `docker-compose.yml` under `--profile browser`. Started with `docker compose --profile browser up`. Always running when enabled. Orchestrator connects via CDP over the Docker network. | Simple setup. No Docker socket access needed. Consistent with existing service architecture. Easy to enable/disable. | Uses resources even when no browser task is running (unless using per-task lifecycle). Single instance limits concurrency. | **Recommended for v1.** Fits the existing Docker Compose architecture. Use the profile so it's opt-in — users who don't need browser capabilities don't pay the resource cost. |
+| **B. On-demand container** | Orchestrator spawns a browser container when a task needs one, destroys it after. Requires Docker socket access or a container management API. | Perfect resource efficiency — only runs when needed. Natural per-task isolation. | Needs Docker socket mount (security concern) or a sidecar container manager. Adds startup latency. More complex orchestration. | Better for production/multi-tenant deployments. Phase 2 consideration. |
+| **C. In the orchestrator container** | Install Chromium directly in the orchestrator's Docker image. Playwright runs in-process. | Zero network overhead. Simplest code path. | Bloats orchestrator image significantly (~400MB for Chromium). Security: browser exploits could compromise the orchestrator. No isolation. | Not recommended — violates service separation. |
+
+### Implementation outline (pending decisions)
+
+Assuming the recommended options (CDP Screencast, watch-only, per-task ephemeral, Docker Compose profile sidecar):
+
+| Step | Deliverable |
+|---|---|
+| **1** | Browser container image — Chromium + Playwright server, exposes CDP endpoint, Docker Compose profile |
+| **2** | Browser tools — `browser_navigate`, `browser_click`, `browser_type`, `browser_scroll`, `browser_screenshot`, `browser_read_page` registered in tool catalog |
+| **3** | Vision loop integration — `browser_screenshot` returns image, orchestrator routes to vision-capable model |
+| **4** | CDP Screencast forwarding — orchestrator WebSocket endpoint streams viewport frames to dashboard |
+| **5** | Dashboard browser viewer — embedded viewport component with action log, linked to active task |
+| **6** | Action recording — structured event log stored as task artifacts, viewable post-task |
+| **7** | DevTools tools — `browser_devtools`, `browser_evaluate` for DOM/network/console inspection |
+| **8** | Action replay — dashboard component to step through recorded browser sessions |
 
 ---
 
@@ -379,8 +1233,101 @@ User: "Improve test coverage in auth module to 80%"
 
 - **Capability-based YAML routing** — once Planning Agent assigns agents by role, formalize model requirements per role in a config file
 - **Telegram / mobile client** — conversational interface via Telegram or React Native
-- **Textual TUI** — terminal UI for goal submission and activity feed
 - **Key-level model restrictions** — `sk-nova-*` keys scoped to specific providers
 - **Multi-model A/B testing** — run two models on same subtask, Evaluation Agent picks the better output
 - **Self-hosted Ollama parity** — full tool support for local models
 - **Collaborative goals** — multiple users contributing context to a shared goal
+- **ClaudeCode provider** — spawn `claude -p` subprocess using Claude Max subscription for zero API cost per call (designed in Phase 4, not yet implemented)
+- **Post-pipeline agents** — Documentation Agent, Diagramming Agent, Security Review Agent, Memory Extraction Agent (designed, not built)
+- **Default pods** — Quick Reply, Research, Code Generation, Analysis (designed in Phase 4, only Quartet default shipped)
+- **Skills framework** (from NanoClaw) — modular instruction sets stored as files, loaded per-task context
+- **VS Code Extension** — sidebar panel, "Ask Nova" command, diff view
+
+---
+
+## Competitive Insights — Features to Adopt
+
+Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGraph, MetaGPT, OpenHands, AutoGPT, BabyAGI, and the OpenAI Agents SDK.
+
+| Feature | Inspiration | Description | Target Phase |
+|---|---|---|---|
+| **Tool sandboxing** | IronClaw (WASM), NanoClaw (containers) | Docker-in-Docker or gVisor for `run_shell`; agents running unsupervised need containment | Before Phase 7 |
+| **Graph-based execution / DAG** | LangGraph | Implement `parallel_group` support in pipeline executor for parallel stages (field exists in schema, executor ignores it) | Phase 6 or 7 |
+| **Agent Swarms / dynamic teams** | NanoClaw | Allow dynamic agent composition instead of fixed pipeline order; agents can recruit specialists mid-task | Phase 7+ |
+| **Agent handoff protocol** | OpenAI Swarm/Agents SDK | Let agents dynamically delegate to other agents mid-task instead of fixed sequential pipeline | Phase 7+ |
+| **Execution cost estimation** | CrewAI Enterprise | Predict token cost before running a task; enforce real-time budget caps, not just post-hoc tracking | Phase 7 |
+| **Replay/debug mode** | LangGraph | Expose pipeline checkpoints in dashboard for step-by-step inspection of completed tasks | Phase 6 |
+| **HTTP MCP transport** | Ecosystem trend | Add HTTP/SSE transport alongside existing stdio; enables remote MCP servers | Phase 6 |
+| **Outbound webhooks** | CrewAI | POST on task lifecycle events (completed, failed, escalated); pull forward from Phase 9 | Phase 6 or 7 |
+| **Priority queue** | LangGraph | Redis sorted set for task priority levels; high-priority tasks shouldn't wait behind batch jobs | Phase 5.5 or 6 |
+| **OpenTelemetry tracing** | LangGraph, CrewAI | Distributed tracing across all 5 services for task lifecycle observability | Phase 5.5 |
+
+---
+
+## Known Gaps & Deferred Work
+
+### Bugs & Technical Debt
+
+- **MCP tools invisible to agents** — pipeline agents and interactive runner import static `ALL_TOOLS` (built-ins only); `get_all_tools()` exists but nothing calls it. Tracked in Phase 5.5 and Phase 6b.
+- **Streaming token counts broken** — `orchestrator/app/agents/runner.py` returns 0 tokens for streaming responses; usage tracking is broken for the primary interaction mode
+- **Reaper race condition** — `orchestrator/app/reaper.py` TOCTOU between UPDATE and enqueue_task can cause double-queuing
+- **No circuit breaker for LLM providers** — if a provider is down, requests fail immediately instead of routing to fallback
+- **DB connection pool has no idle validation** — stale connections after Postgres restarts aren't detected
+- **Admin secret default not rejected in production** — `nova-admin-secret-change-me` is accepted without warning
+- **`parallel_group` field exists but is ignored** — pipeline executor runs everything sequentially regardless
+- **Contracts not enforced** — `nova-contracts` Pydantic models exist but aren't validated at service boundaries; agent responses are unchecked dicts
+- **Embedding cache unused** — `embedding_cache` table exists in memory-service schema but is never queried or written to
+
+### Phase 3 — End-to-End Tool Testing (deferred)
+
+Not yet validated with integration tests:
+1. `list_dir` root — confirm it sees actual files
+2. `read_file` — confirm content + truncation behavior
+3. `write_file` — verify changes appear on host filesystem
+4. `run_shell` — confirm stdout/stderr capture and timeout kill
+5. `search_codebase` — confirm file + line number results
+6. Git workflow: `git_status` → change → `git_commit` → verify in `git log`
+7. Path traversal: `../../etc/passwd` → confirm rejected
+8. Denylist: `sudo ls` → confirm blocked
+
+### Phase 3b — Sandbox Tiers (deferred)
+
+Four named access levels (isolated → nova → workspace → host). Only `workspace` mode is functional. See Phase 3b section above for full design.
+
+---
+
+## Competitive Landscape Summary
+
+### What Nova Has That Others Don't
+
+- **Quartet pipeline with safety rails on every task** — most platforms have no built-in guardrail or code review step
+- **9-provider LLM routing** including subscription-based (Claude Max, ChatGPT) for zero API cost
+- **Full admin dashboard** — most open-source platforms are CLI-only
+- **Hybrid RRF retrieval** — more sophisticated than the pure-vector approach used by competitors
+- **4-tier memory schema** — working/episodic/semantic/procedural with proper indexes
+- **MCP integration** — ahead of most; only NanoClaw and OpenAI Agents SDK have this
+
+### Where Nova Lags
+
+- **Testing** — zero tests vs. mature test suites in all major platforms
+- **Observability** — no structured logging, tracing, or metrics vs. LangGraph's built-in tracing
+- **Tool sandboxing** — host execution vs. IronClaw's WASM and NanoClaw's container isolation
+- **Dynamic agent composition** — fixed pipeline vs. NanoClaw's Agent Swarms and CrewAI's dynamic crews
+- **Edge deployment** — Docker-only vs. PicoClaw's 10MB footprint on RISC-V
+
+---
+
+## Findings & Notes
+
+- Migrations use pure SQL (no Alembic) — run idempotently at orchestrator startup
+- Redis DB allocation: orchestrator=2, llm-gateway=1, chat-api=3, memory-service=0
+- Context budget split: system 10%, tools 15%, memory 40%, history 20%, working 15%
+- Reaper timeout: 150s no heartbeat = stale agent
+- Task heartbeat: every 30s; tasks expire in Redis after 24h
+- `REQUIRE_AUTH=false` bypasses API key validation for development
+- Memory service hybrid retrieval (RRF) is already implemented — was listed as Phase 6 but is done
+- Episodic partitions are hardcoded through 2026-04; need auto-creation
+- `parallel_group` DB field exists but executor runs everything sequentially
+- AI agent market: $7.84B in 2025, projected $52.62B by 2030 (46.3% CAGR)
+- MCP (Model Context Protocol) is becoming the standard for tool integration — adopted by OpenAI, Anthropic, Cursor, Replit, VS Code
+- Guardrails are mandatory in 2026 (California SB 243/AB 489, Singapore Model AI Governance Framework) — Nova's built-in Guardrail Agent is a competitive advantage
