@@ -24,11 +24,13 @@ from nova_contracts import ToolDefinition
 
 if TYPE_CHECKING:
     from .mcp_client import StdioMCPClient
+    from .http_mcp_client import HTTPMCPClient
 
 log = logging.getLogger(__name__)
 
 # name → connected client (populated by load_mcp_servers at startup)
-_active_clients: dict[str, "StdioMCPClient"] = {}
+# Values are StdioMCPClient or HTTPMCPClient — both share the same public interface
+_active_clients: dict[str, "StdioMCPClient | HTTPMCPClient"] = {}
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -52,7 +54,7 @@ async def load_mcp_servers() -> int:
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM mcp_servers WHERE enabled = TRUE AND transport = 'stdio'"
+                "SELECT * FROM mcp_servers WHERE enabled = TRUE"
             )
         for row in rows:
             if await _connect_server(dict(row)):
@@ -115,39 +117,55 @@ async def disconnect_server(name: str) -> None:
 async def _connect_server(cfg: dict) -> bool:
     """
     Connect to a single MCP server using its DB config dict.
+    Dispatches to StdioMCPClient or HTTPMCPClient based on the transport field.
     Replaces any existing connection for the same server name.
     Returns True on success, False on failure.
     """
-    from .mcp_client import StdioMCPClient
-
     name = cfg["name"]
+    transport = cfg.get("transport", "stdio")
 
     # Cleanly disconnect any existing connection first
     if name in _active_clients:
         await disconnect_server(name)
 
-    if not cfg.get("command"):
-        log.warning("MCP server '%s' has no command configured — skipping", name)
-        return False
-
     try:
-        client = StdioMCPClient(
-            name=name,
-            command=cfg["command"],
-            args=list(cfg.get("args") or []),
-            env=dict(cfg.get("env") or {}),
-        )
+        if transport == "http":
+            from .http_mcp_client import HTTPMCPClient
+
+            url = cfg.get("url")
+            if not url:
+                log.warning("MCP server '%s' has transport=http but no URL — skipping", name)
+                return False
+
+            client = HTTPMCPClient(
+                name=name,
+                url=url,
+                env=dict(cfg.get("env") or {}),
+            )
+        else:
+            from .mcp_client import StdioMCPClient
+
+            if not cfg.get("command"):
+                log.warning("MCP server '%s' has no command configured — skipping", name)
+                return False
+
+            client = StdioMCPClient(
+                name=name,
+                command=cfg["command"],
+                args=list(cfg.get("args") or []),
+                env=dict(cfg.get("env") or {}),
+            )
+
         await client.start()
         await client.list_tools()
         _active_clients[name] = client
         log.info(
-            "MCP server '%s' connected (%d tools)",
-            name,
-            len(client.tools),
+            "MCP server '%s' connected via %s (%d tools)",
+            name, transport, len(client.tools),
         )
         return True
     except Exception as e:
-        log.error("Failed to connect MCP server '%s': %s", name, e)
+        log.error("Failed to connect MCP server '%s' (%s): %s", name, transport, e)
         return False
 
 
@@ -210,6 +228,25 @@ async def execute_mcp_tool(name: str, arguments: dict) -> str:
             tool_name, server_name, e,
         )
         return f"MCP tool error: {e}"
+
+
+# ── Tool catalog (for dashboard picker) ────────────────────────────────────────
+
+def get_tools_by_server() -> list[dict]:
+    """Tool details grouped by MCP server, for the dashboard tool picker."""
+    result = []
+    for name, client in _active_clients.items():
+        if not client.connected:
+            continue
+        result.append({
+            "category": name,
+            "source": "mcp",
+            "tools": [
+                {"name": f"mcp__{name}__{t.name}", "description": t.description}
+                for t in client.tools
+            ],
+        })
+    return result
 
 
 # ── Status / health ───────────────────────────────────────────────────────────

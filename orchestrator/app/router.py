@@ -3,6 +3,7 @@ Orchestrator FastAPI router — agent lifecycle, task routing, key management, u
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -21,6 +22,7 @@ from nova_contracts import (
 
 from app.agents.runner import run_agent_turn, run_agent_turn_streaming
 from app.auth import AdminDep, ApiKeyDep
+from app.tools.sandbox import SandboxTier, set_sandbox, reset_sandbox
 from app.db import (
     create_api_key_record,
     generate_api_key,
@@ -41,6 +43,22 @@ from app.store import (
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["orchestrator"])
+
+
+async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sandbox_token=None):
+    """SSE-formatted wrapper: yields deltas from run_agent_turn_streaming, handles errors, resets agent status."""
+    try:
+        async for delta in stream_gen:
+            yield f"data: {delta}\n\n".encode()
+        yield b"data: [DONE]\n\n"
+    except Exception as e:
+        log.error("%s error (agent=%s): %s", error_label, agent_id, e)
+        yield f"data: {json.dumps({'error': str(e)})}\n\n".encode()
+        yield b"data: [DONE]\n\n"
+    finally:
+        await update_agent_status(agent_id, AgentStatus.idle)
+        if sandbox_token is not None:
+            reset_sandbox(sandbox_token)
 
 
 # ── Agent lifecycle ───────────────────────────────────────────────────────────
@@ -111,6 +129,8 @@ async def bulk_delete_agents(_admin: AdminDep, confirm: bool = Query(default=Fal
 
 @router.post("/api/v1/tasks", response_model=TaskResult, status_code=202)
 async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
+    from app.config import settings as _settings
+
     agent = await get_agent(str(req.agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -121,22 +141,30 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
     session_id = req.session_id or str(uuid4())
     await update_agent_status(str(req.agent_id), AgentStatus.running)
 
-    result = await run_agent_turn(
-        agent_id=str(req.agent_id),
-        task_id=task_id,
-        session_id=session_id,
-        messages=req.messages,
-        model=agent.config.model,
-        system_prompt=agent.config.system_prompt,
-        api_key_id=key.id,
-    )
-    await store_task_result(result)
-    await update_agent_status(str(req.agent_id), AgentStatus.idle)
-    return result
+    # Set sandbox tier from global config for interactive turns
+    tier = SandboxTier(_settings.shell_sandbox) if _settings.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    sandbox_token = set_sandbox(tier)
+    try:
+        result = await run_agent_turn(
+            agent_id=str(req.agent_id),
+            task_id=task_id,
+            session_id=session_id,
+            messages=req.messages,
+            model=agent.config.model,
+            system_prompt=agent.config.system_prompt,
+            api_key_id=key.id,
+        )
+        await store_task_result(result)
+        await update_agent_status(str(req.agent_id), AgentStatus.idle)
+        return result
+    finally:
+        reset_sandbox(sandbox_token)
 
 
 @router.post("/api/v1/tasks/stream")
 async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
+    from app.config import settings as _settings
+
     agent = await get_agent(str(req.agent_id))
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -145,10 +173,14 @@ async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
     session_id = req.session_id or str(uuid4())
     await update_agent_status(str(req.agent_id), AgentStatus.running)
 
-    async def generate():
-        import json as _json
-        try:
-            async for delta in run_agent_turn_streaming(
+    # Set sandbox tier from global config for interactive turns
+    tier = SandboxTier(_settings.shell_sandbox) if _settings.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    sandbox_token = set_sandbox(tier)
+
+    return StreamingResponse(
+        _sse_stream(
+            str(req.agent_id),
+            run_agent_turn_streaming(
                 agent_id=str(req.agent_id),
                 task_id=task_id,
                 session_id=session_id,
@@ -156,17 +188,12 @@ async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
                 model=agent.config.model,
                 system_prompt=agent.config.system_prompt,
                 api_key_id=key.id,
-            ):
-                yield f"data: {delta}\n\n".encode()
-            yield b"data: [DONE]\n\n"
-        except Exception as e:
-            log.error("Streaming error (agent=%s): %s", req.agent_id, e)
-            yield f"data: {_json.dumps({'error': str(e)})}\n\n".encode()
-            yield b"data: [DONE]\n\n"
-        finally:
-            await update_agent_status(str(req.agent_id), AgentStatus.idle)
-
-    return StreamingResponse(generate(), media_type="text/event-stream")
+            ),
+            error_label="Streaming",
+            sandbox_token=sandbox_token,
+        ),
+        media_type="text/event-stream",
+    )
 
 
 @router.get("/api/v1/tasks/{task_id}", response_model=TaskResult)
@@ -212,10 +239,15 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
 
     await update_agent_status(str(agent.id), AgentStatus.running)
 
-    async def generate():
-        import json as _json
-        try:
-            async for delta in run_agent_turn_streaming(
+    # Set sandbox tier from global config for interactive turns
+    from app.config import settings as _settings
+    tier = SandboxTier(_settings.shell_sandbox) if _settings.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    sandbox_token = set_sandbox(tier)
+
+    return StreamingResponse(
+        _sse_stream(
+            str(agent.id),
+            run_agent_turn_streaming(
                 agent_id=str(agent.id),
                 task_id=task_id,
                 session_id=session_id,
@@ -223,18 +255,10 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
                 model=model,
                 system_prompt=agent.config.system_prompt,
                 api_key_id=None,
-            ):
-                yield f"data: {delta}\n\n".encode()
-            yield b"data: [DONE]\n\n"
-        except Exception as e:
-            log.error("Chat stream error (agent=%s): %s", agent.id, e)
-            yield f"data: {_json.dumps({'error': str(e)})}\n\n".encode()
-            yield b"data: [DONE]\n\n"
-        finally:
-            await update_agent_status(str(agent.id), AgentStatus.idle)
-
-    return StreamingResponse(
-        generate(),
+            ),
+            error_label="Chat stream",
+            sandbox_token=sandbox_token,
+        ),
         media_type="text/event-stream",
         headers={
             "X-Session-Id": session_id,
@@ -304,13 +328,12 @@ class ConfigUpdateRequest(BaseModel):
 
 def _config_row(row: dict) -> dict:
     """Decode JSONB value back to a Python scalar for the API response."""
-    import json as _json
     d = dict(row)
     d["updated_at"] = d["updated_at"].isoformat() if d.get("updated_at") else None
     # Decode the JSONB value so the frontend receives a plain string/number/null
     raw = d.get("value")
     try:
-        d["value"] = _json.loads(raw) if raw is not None else None
+        d["value"] = json.loads(raw) if raw is not None else None
     except Exception:
         d["value"] = raw
     return d
@@ -340,13 +363,12 @@ async def update_platform_config(
       'null'               →  clears the value
       '42'                 →  stores the integer 42
     """
-    import json as _json
     # Validate that req.value is valid JSON before storing
     try:
-        _json.loads(req.value)
-    except _json.JSONDecodeError:
+        json.loads(req.value)
+    except json.JSONDecodeError:
         # Treat as a bare string if it's not valid JSON — wrap it
-        req.value = _json.dumps(req.value)
+        req.value = json.dumps(req.value)
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -374,6 +396,28 @@ async def update_platform_config(
     if not row:
         raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
     return _config_row(dict(row))
+
+
+# ── Tool catalog (admin-only) ─────────────────────────────────────────────────
+
+@router.get("/api/v1/tools")
+async def list_available_tools(_admin: AdminDep):
+    """Return all available tools grouped by category. Admin-only."""
+    from app.tools.code_tools import CODE_TOOLS
+    from app.tools.git_tools import GIT_TOOLS
+    from app.tools.platform_tools import PLATFORM_TOOLS
+    from app.pipeline.tools.registry import get_tools_by_server
+
+    def _to_list(defs):
+        return [{"name": t.name, "description": t.description} for t in defs]
+
+    categories = [
+        {"category": "Code Tools", "source": "builtin", "tools": _to_list(CODE_TOOLS)},
+        {"category": "Git Tools", "source": "builtin", "tools": _to_list(GIT_TOOLS)},
+        {"category": "Platform Tools", "source": "builtin", "tools": _to_list(PLATFORM_TOOLS)},
+    ]
+    categories.extend(get_tools_by_server())
+    return categories
 
 
 # ── Usage reporting (admin-only) ──────────────────────────────────────────────

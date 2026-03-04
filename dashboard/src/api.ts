@@ -272,6 +272,110 @@ export const updateAgentEndpoint = (id: string, data: Partial<AgentEndpointWrite
 export const deleteAgentEndpoint = (id: string) =>
   apiFetch<void>(`/api/v1/agent-endpoints/${id}`, { method: 'DELETE' })
 
+// ── Memories ──────────────────────────────────────────────────────────────────
+
+export type MemoryTier = 'working' | 'episodic' | 'semantic' | 'procedural'
+
+export interface Memory {
+  id: string
+  content: string
+  tier: MemoryTier
+  score: number
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface MemorySearchResponse {
+  results: Memory[]
+  query: string
+  total_found: number
+}
+
+export interface BrowseMemoryItem {
+  id: string
+  content: string
+  tier: MemoryTier
+  agent_id: string
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string | null
+  project_id: string | null
+  category: string | null
+  key: string | null
+  base_confidence: number | null
+  effective_confidence: number | null
+  last_accessed_at: string | null
+}
+
+export interface BrowseMemoryResponse {
+  items: BrowseMemoryItem[]
+  total: number
+  offset: number
+  limit: number
+}
+
+/** Browse memories with pagination and full metadata. */
+export const browseMemoriesV2 = (
+  tier?: MemoryTier,
+  agent_id?: string,
+  limit = 50,
+  offset = 0,
+) => {
+  const qs = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+  if (tier)     qs.set('tier', tier)
+  if (agent_id) qs.set('agent_id', agent_id)
+  return apiFetch<BrowseMemoryResponse>(`/mem/api/v1/memories/browse?${qs}`)
+}
+
+/** Hybrid vector+keyword search across memory tiers. */
+export const searchMemories = (
+  query: string,
+  agent_id = 'nova',
+  tiers: MemoryTier[] = ['semantic', 'procedural', 'episodic'],
+  limit = 20,
+) =>
+  apiFetch<MemorySearchResponse>('/mem/api/v1/memories/search', {
+    method: 'POST',
+    body: JSON.stringify({ agent_id, query, tiers, limit }),
+  })
+
+export const deleteMemory = (id: string) =>
+  apiFetch<void>(`/mem/api/v1/memories/${id}`, { method: 'DELETE' })
+
+export interface SaveFactRequest {
+  agent_id: string
+  project_id: string
+  category: string
+  key: string
+  content: string
+  base_confidence?: number
+  metadata?: Record<string, unknown>
+}
+
+export interface SaveFactResponse {
+  id: string
+  project_id: string
+  category: string
+  key: string
+  version: number
+  created_at: string
+  updated_at: string
+  is_new: boolean
+}
+
+export const saveFact = (data: SaveFactRequest) =>
+  apiFetch<SaveFactResponse>('/mem/api/v1/memories/facts', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+// ── Tool catalog ──────────────────────────────────────────────────────────────
+
+export interface ToolInfo { name: string; description: string }
+export interface ToolCategory { category: string; source: 'builtin' | 'mcp'; tools: ToolInfo[] }
+
+export const getAvailableTools = () => apiFetch<ToolCategory[]>('/api/v1/tools')
+
 // ── Platform configuration ────────────────────────────────────────────────────
 
 export interface PlatformConfigEntry {

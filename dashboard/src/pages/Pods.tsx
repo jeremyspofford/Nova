@@ -3,12 +3,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronDown, ChevronRight, RefreshCw, Layers,
   CheckCircle2, XCircle, Loader2, AlertTriangle, Zap,
-  Thermometer, Hash, Clock, RotateCw, FileText, Cpu, Settings2, Plus, X as XIcon,
+  Thermometer, Hash, Clock, RotateCw, FileText, Cpu, Settings2, Shield, Wrench,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { getPods, getPod, updatePodAgent } from '../api'
+import { getPods, getPod, updatePod, updatePodAgent } from '../api'
 import type { Pod, PodAgent } from '../types'
 import { ModelPicker } from '../components/ModelPicker'
+import { SaveCancelButtons } from '../components/SaveCancelButtons'
+import { ToolPicker } from '../components/ToolPicker'
+import Card from '../components/Card'
 
 // ── Role badge ─────────────────────────────────────────────────────────────────
 
@@ -132,8 +135,11 @@ function AgentRow({
       {expanded && (
         <div className="border-t border-neutral-100 dark:border-neutral-800 px-4 pb-4 pt-3 space-y-4">
 
-          {/* Settings: temp, tokens, timeout, retries, on_failure, tools — all editable */}
+          {/* Settings: temp, tokens, timeout, retries, on_failure */}
           <AgentAdvancedSettings agent={agent} podId={podId} />
+
+          {/* Tools */}
+          <AgentToolSettings agent={agent} podId={podId} />
 
           {/* Model + fallbacks */}
           <AgentModelPicker agent={agent} podId={podId} podDefaultModel={podDefaultModel} />
@@ -221,24 +227,11 @@ function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string })
           />
           <div className="flex items-center justify-between gap-2">
             <span className="text-[10px] text-neutral-500 dark:text-neutral-400">{draft.length} chars</span>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={cancel}
-                disabled={save.isPending}
-                className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => save.mutate()}
-                disabled={save.isPending}
-                className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
-              >
-                {save.isPending
-                  ? <><Loader2 size={11} className="animate-spin" /> Saving…</>
-                  : 'Save'}
-              </button>
-            </div>
+            <SaveCancelButtons
+              onSave={() => save.mutate()}
+              onCancel={cancel}
+              isPending={save.isPending}
+            />
           </div>
           {save.isError && (
             <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
@@ -276,18 +269,6 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
   const [maxTokens, setMaxTokens]       = useState(String(agent.max_tokens))
   const [timeout, setTimeout_]          = useState(String(agent.timeout_seconds))
   const [maxRetries, setMaxRetries]     = useState(String(agent.max_retries))
-  const [tools, setTools]               = useState<string[] | null>(agent.allowed_tools)
-  const [toolInput, setToolInput]       = useState('')
-
-  const addTool = () => {
-    const t = toolInput.trim()
-    if (!t) return
-    setTools(prev => [...(prev ?? []), t])
-    setToolInput('')
-  }
-
-  const removeTool = (idx: number) =>
-    setTools(prev => (prev ?? []).filter((_, i) => i !== idx))
 
   const cancel = () => {
     setOnFailure(agent.on_failure)
@@ -295,8 +276,6 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
     setMaxTokens(String(agent.max_tokens))
     setTimeout_(String(agent.timeout_seconds))
     setMaxRetries(String(agent.max_retries))
-    setTools(agent.allowed_tools)
-    setToolInput('')
     setEditing(false)
   }
 
@@ -314,7 +293,7 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
       max_tokens: parseInt(maxTokens) || agent.max_tokens,
       timeout_seconds: parseInt(timeout) || agent.timeout_seconds,
       max_retries: parseInt(maxRetries) || agent.max_retries,
-      allowed_tools: tools,
+      allowed_tools: agent.allowed_tools,
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['pod', podId] })
@@ -412,74 +391,12 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
             </div>
           </div>
 
-          {/* Allowed tools */}
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                Allowed Tools
-              </label>
-              <button
-                onClick={() => setTools(t => t === null ? [] : null)}
-                className="text-[10px] text-accent-700 dark:text-accent-400 hover:underline"
-              >
-                {tools === null ? 'Restrict to list' : 'Allow all tools'}
-              </button>
-            </div>
-            {tools === null ? (
-              <p className="text-xs italic text-neutral-500 dark:text-neutral-400">All tools allowed (no restriction)</p>
-            ) : (
-              <div className="space-y-1.5">
-                <div className="flex flex-wrap gap-1 min-h-6">
-                  {tools.length === 0 && (
-                    <span className="text-xs italic text-neutral-500 dark:text-neutral-400">No tools — add one below</span>
-                  )}
-                  {tools.map((t, i) => (
-                    <span key={i} className="flex items-center gap-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-800 pl-2 pr-1 py-0.5 text-[11px] text-neutral-700 dark:text-neutral-300">
-                      {t}
-                      <button onClick={() => removeTool(i)} className="ml-0.5 rounded-full hover:bg-neutral-300 dark:hover:bg-neutral-600 p-0.5">
-                        <XIcon size={9} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="flex gap-1">
-                  <input
-                    type="text"
-                    placeholder="tool name…"
-                    value={toolInput}
-                    onChange={e => setToolInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTool() } }}
-                    className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600 placeholder:text-neutral-400 dark:placeholder:text-neutral-500"
-                  />
-                  <button
-                    onClick={addTool}
-                    disabled={!toolInput.trim()}
-                    className="flex items-center gap-0.5 rounded-md border border-neutral-300 dark:border-neutral-600 px-2 py-1 text-xs text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
-                  >
-                    <Plus size={11} /> Add
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
           {/* Actions */}
-          <div className="flex items-center justify-end gap-1.5">
-            <button
-              onClick={cancel}
-              disabled={save.isPending}
-              className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => save.mutate()}
-              disabled={save.isPending}
-              className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
-            >
-              {save.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : 'Save'}
-            </button>
-          </div>
+          <SaveCancelButtons
+            onSave={() => save.mutate()}
+            onCancel={cancel}
+            isPending={save.isPending}
+          />
           {save.isError && (
             <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
           )}
@@ -492,6 +409,77 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
           <ConfigStat icon={<Clock size={12} />} label="Timeout" value={`${agent.timeout_seconds}s`} />
           <ConfigStat icon={<RotateCw size={12} />} label="Max Retries" value={String(agent.max_retries)} />
         </div>
+      )}
+    </div>
+  )
+}
+
+// ── Inline tool picker ─────────────────────────────────────────────────────────
+
+function AgentToolSettings({ agent, podId }: { agent: PodAgent; podId: string }) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [tools, setTools] = useState<string[] | null>(agent.allowed_tools)
+
+  const save = useMutation({
+    mutationFn: () => updatePodAgent(podId, agent.id, {
+      name: agent.name, role: agent.role, enabled: agent.enabled,
+      position: agent.position, model: agent.model ?? undefined,
+      fallback_models: agent.fallback_models,
+      temperature: agent.temperature, max_tokens: agent.max_tokens,
+      timeout_seconds: agent.timeout_seconds, max_retries: agent.max_retries,
+      system_prompt: agent.system_prompt ?? undefined,
+      on_failure: agent.on_failure, run_condition: agent.run_condition,
+      artifact_type: agent.artifact_type ?? undefined,
+      parallel_group: agent.parallel_group ?? undefined,
+      allowed_tools: tools,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pod', podId] })
+      setEditing(false)
+    },
+  })
+
+  const cancel = () => {
+    setTools(agent.allowed_tools)
+    setEditing(false)
+  }
+
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
+          <Wrench size={11} /> Tools
+        </p>
+        {!editing && (
+          <button
+            onClick={() => setEditing(true)}
+            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
+          >
+            Edit
+          </button>
+        )}
+      </div>
+
+      {editing ? (
+        <div className="space-y-3 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50/20 dark:bg-accent-900/10 p-3">
+          <ToolPicker selectedTools={tools} onChange={setTools} />
+          <SaveCancelButtons
+            onSave={() => save.mutate()}
+            onCancel={cancel}
+            isPending={save.isPending}
+          />
+          {save.isError && (
+            <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
+          )}
+        </div>
+      ) : (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          {agent.allowed_tools
+            ? <>{agent.allowed_tools.length} tool{agent.allowed_tools.length !== 1 ? 's' : ''} allowed</>
+            : <span className="italic">All tools allowed (no restriction)</span>
+          }
+        </p>
       )}
     </div>
   )
@@ -565,22 +553,11 @@ function AgentModelPicker({
             onChange={(p, f) => { setPrimary(p); setFallbacks(f) }}
             podDefaultModel={podDefaultModel}
           />
-          <div className="flex items-center justify-end gap-1.5">
-            <button
-              onClick={cancel}
-              disabled={save.isPending}
-              className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => save.mutate()}
-              disabled={save.isPending || !hasChanges}
-              className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
-            >
-              {save.isPending ? <><Loader2 size={11} className="animate-spin" /> Saving…</> : 'Save'}
-            </button>
-          </div>
+          <SaveCancelButtons
+            onSave={() => save.mutate()}
+            onCancel={cancel}
+            isPending={save.isPending || !hasChanges}
+          />
           {save.isError && (
             <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
           )}
@@ -609,6 +586,49 @@ function AgentModelPicker({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Pod sandbox selector ──────────────────────────────────────────────────────
+
+const SANDBOX_TIERS = ['workspace', 'nova', 'host', 'isolated'] as const
+
+const SANDBOX_DESCRIPTIONS: Record<string, string> = {
+  workspace: 'Paths scoped to /workspace',
+  nova:      'Paths scoped to /nova (full repo)',
+  host:      'No path restriction (hard blocks only)',
+  isolated:  'No filesystem or shell access',
+}
+
+function PodSandbox({ pod }: { pod: Pod }) {
+  const qc = useQueryClient()
+  const save = useMutation({
+    mutationFn: (sandbox: string) => updatePod(pod.id, { ...pod, sandbox }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pods'] })
+      qc.invalidateQueries({ queryKey: ['pod', pod.id] })
+    },
+  })
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2">
+      <Shield size={14} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
+      <div className="min-w-0 flex-1">
+        <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-0.5">Sandbox Tier</p>
+        <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{SANDBOX_DESCRIPTIONS[pod.sandbox] ?? ''}</p>
+      </div>
+      <select
+        value={pod.sandbox ?? 'workspace'}
+        onChange={e => save.mutate(e.target.value)}
+        disabled={save.isPending}
+        className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
+      >
+        {SANDBOX_TIERS.map(t => (
+          <option key={t} value={t}>{t}</option>
+        ))}
+      </select>
+      {save.isPending && <Loader2 size={12} className="animate-spin text-neutral-500" />}
     </div>
   )
 }
@@ -757,9 +777,10 @@ function PodCard({ pod }: { pod: Pod }) {
         )}
       </button>
 
-      {/* Expanded agent list */}
+      {/* Expanded pod settings + agent list */}
       {expanded && (
-        <div className="px-4 pb-4">
+        <div className="px-4 pb-4 space-y-3">
+          <PodSandbox pod={pod} />
           <PodDetail podId={pod.id} />
         </div>
       )}
@@ -800,7 +821,7 @@ export function Pods() {
       </div>
 
       {/* Summary strip */}
-      <div className="flex flex-wrap gap-x-6 gap-y-2 rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-3 sm:px-5 text-sm">
+      <Card className="flex flex-wrap gap-x-6 gap-y-2 px-4 py-3 sm:px-5 text-sm">
         <div>
           <span className="text-neutral-500 dark:text-neutral-400">Total pods</span>
           <span className="ml-2 font-semibold text-neutral-900 dark:text-neutral-100">{pods.length}</span>
@@ -815,7 +836,7 @@ export function Pods() {
           <span className="text-neutral-500 dark:text-neutral-400">Disabled</span>
           <span className="ml-2 font-semibold text-neutral-500 dark:text-neutral-400">{disabled.length}</span>
         </div>
-      </div>
+      </Card>
 
       {isLoading && (
         <div className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
