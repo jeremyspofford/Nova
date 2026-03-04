@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
     -- state machine
     -- submitted | queued | context_running | task_running | guardrail_running |
-    -- review_running | pending_human_review | completing | complete | failed | cancelled
+    -- code_review_running | pending_human_review | completing | complete | failed | cancelled
     status               TEXT NOT NULL DEFAULT 'submitted',
     current_stage        TEXT,     -- which agent role is actively running
 

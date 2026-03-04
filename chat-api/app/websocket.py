@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import WebSocket, WebSocketDisconnect
@@ -58,7 +58,7 @@ async def handle_websocket(websocket: WebSocket):
                     "content": f"Session started",
                     "session_id": session_id,
                     "agent_id": agent_id,
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
             conversation_history.append({"role": "user", "content": user_content})
@@ -109,7 +109,7 @@ async def _stream_response(
                         await websocket.send_json({
                             "type": ChatMessageType.stream_end,
                             "session_id": session_id,
-                            "timestamp": datetime.utcnow().isoformat(),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
                         })
                         break
                     if line.startswith("data: "):
@@ -120,7 +120,7 @@ async def _stream_response(
                                 "type": ChatMessageType.stream_chunk,
                                 "delta": delta,
                                 "session_id": session_id,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                             })
 
     except httpx.HTTPStatusError as e:
@@ -137,7 +137,7 @@ async def _send_error(websocket: WebSocket, message: str, session_id: str | None
             "type": ChatMessageType.error,
             "content": message,
             "session_id": session_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         })
     except Exception:
         pass

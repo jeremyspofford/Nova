@@ -240,19 +240,19 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 
 ---
 
-## 🔜 Phase 5.5 — Hardening
+## ✅ Phase 5.5 — Hardening
 
-> Building forward without a safety net (no tests, no observability) is the biggest risk to the platform.
-> This phase addresses operational maturity before adding memory complexity.
-> Inserted based on competitive review.
+> Operational maturity before adding memory complexity.
 
-1. **Fix MCP tools invisible to agents** — pipeline agents and the interactive runner use the static `ALL_TOOLS` constant (populated at import time, built-ins only) instead of calling `get_all_tools()` which merges built-in + MCP tools. MCP servers connect and load correctly, but no agent can see or use them. Fix: replace `ALL_TOOLS` imports with `get_all_tools()` calls in `pipeline/agents/context.py`, `pipeline/agents/task.py`, and `agents/runner.py`; support `mcp__*` names in `allowed_tools`; inject MCP tool names into agent system prompts.
-2. **Test foundation** — pytest fixtures for orchestrator + memory-service; integration tests for pipeline execution, memory retrieval, auth
-3. **Fix streaming token counts** — `orchestrator/app/agents/runner.py` returns 0 tokens for streaming responses; accumulate chunks or use LLM gateway response headers
-4. **Fix reaper race condition** — `orchestrator/app/reaper.py` has TOCTOU race between UPDATE and enqueue_task; use Redis Lua script for atomic requeue
-5. **Structured JSON logging** — across all services (replace unstructured string logs)
-6. **Embedding cache activation** — wire up existing `embedding_cache` table in `memory-service/app/embedding.py` (table exists in schema but is never queried)
-7. **Working memory cleanup job** — background task deleting expired rows from `working_memories` (expires_at column exists but nothing enforces it)
+| Feature | Status |
+|---|---|
+| **Fix MCP tools invisible to agents** — replaced static `ALL_TOOLS` with `get_all_tools()` in `pipeline/agents/context.py`, `task.py`, and `agents/runner.py`; Context Agent allows `mcp__*` prefixed tools | ✅ |
+| **Test foundation** — pytest fixtures + 9 test files across orchestrator (6) and memory-service (3); `asyncio_mode = "auto"` | ✅ |
+| **Fix streaming token counts** — added `stream_options={"include_usage": True}` to Claude and ChatGPT subscription providers; read `chunk.usage` in stream loop | ✅ |
+| **Fix reaper race condition** — Redis SET dedup gate in `enqueue_task()` (SADD before LPUSH, SREM after BRPOP); CAS UPDATE in `_reap_stuck_queued_tasks` | ✅ |
+| **Structured JSON logging** — shared `JSONFormatter` in `nova-contracts/logging.py`; all 4 services use `configure_logging()`; async `ContextVar` correlation for task_id/agent_id | ✅ |
+| **Embedding cache activation** — 3-tier cache (Redis L1 → PostgreSQL L2 → LLM Gateway L3) with write-through; batch optimization; tests | ✅ |
+| **Working memory cleanup job** — background `cleanup_loop()` every 5 min; deletes expired `working_memories` rows; configurable interval; tests | ✅ |
 
 ---
 
@@ -288,79 +288,12 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 
 ---
 
-## 🔜 Phase 6b — Code Quality & DRY Cleanup
+## ✅ Phase 6b — Code Quality & DRY Cleanup
 
 > Technical debt sweep before the complexity of self-directed autonomy.
-> Every DRY violation found here is a future divergence bug waiting to happen —
-> especially once autonomous agents are modifying config and writing memories.
-
-### Orchestrator
-
-| Issue | Files | Priority |
-|---|---|---|
-| **Bug: `"review_running"` should be `"code_review_running"`** — stale code-review tasks are never reaped | `reaper.py:69` | Critical |
-| **Bug: MCP tools invisible to all agents** — pipeline agents (`context.py`, `task.py`) and the interactive runner (`runner.py`) import the static `ALL_TOOLS` constant which is populated at module import time and never includes MCP tools. `get_all_tools()` exists in `tools/__init__.py` and correctly merges built-in + MCP tools, but nothing calls it. **Fix:** (1) Change `context.py` and `task.py` to call `get_all_tools()` instead of importing `ALL_TOOLS`; (2) Change `runner.py:_run_tool_loop()` to use `get_all_tools()` when `tools=None`; (3) Update `allowed_tools` validation in pod agent config to support `mcp__*` namespaced tool names; (4) Inject available MCP tool names into agent system prompts so models know they can use them | `pipeline/agents/context.py:59`, `pipeline/agents/task.py:98`, `agents/runner.py:400`, `tools/__init__.py:35` | Critical |
-| Extract shared `audit_log_insert()` — currently duplicated 3× with diverging implementations (executor uses JSONB codec, reaper uses `json.dumps`, router inlines raw SQL) | `pipeline/executor.py`, `reaper.py`, `pipeline_router.py` | High |
-| Unify tool-use loops — `_resolve_tool_rounds` and `_run_tool_loop` are ~40 lines of identical logic | `agents/runner.py` | High |
-| Unify LLM endpoint usage — pipeline agents use `/v1/chat/completions` (OpenAI format), runner uses `/complete` (Nova format) with different response parsing | `pipeline/agents/base.py`, `agents/runner.py` | High |
-| Reaper timing constants ignore config — `REAPER_INTERVAL_SECONDS`, `STALE_HEARTBEAT_SECONDS` are module-level constants that shadow `settings` fields | `reaper.py`, `queue.py` vs `config.py` | High |
-| Remove dead config fields `task_queue_key` / `task_dead_letter_key` — never read, `queue.py` defines its own constants | `config.py:48-49` | Medium |
-| Merge `_load_pod` / `_load_default_pod` — identical query + construction, only WHERE clause differs | `pipeline/executor.py:379-405` | Medium |
-| Extract shared `_serialize_row()` — three row-to-dict helpers with copy-pasted logic | `pipeline_router.py` | Medium |
-| Extract SSE streaming helper — `generate()` closure duplicated in two route handlers | `router.py:138-169, 188-243` | Medium |
-| Move `import json` / `import asyncio` from function bodies to top-level (10+ occurrences) | `router.py`, `agents/runner.py` | Low |
-| Replace `datetime.utcnow()` with `datetime.now(timezone.utc)` | `store.py:36,65,141` | Low |
-| Convert f-string logging to `%s` lazy style in hot paths | `executor.py`, `reaper.py`, `queue.py` | Low |
-
-### Memory Service
-
-| Issue | Files | Priority |
-|---|---|---|
-| **Bug: `_actr_confidence` in router.py crashes on `None` `last_accessed_at`** — retrieval.py version handles it, router.py copy doesn't | `router.py:97` vs `retrieval.py:60` | Critical |
-| Deduplicate `_actr_confidence` — define once in `retrieval.py`, import in `router.py` | `retrieval.py:60`, `router.py:97` | High |
-| Deduplicate `TIER_TABLES` — defined twice with string vs enum keys | `retrieval.py:26`, `router.py:40` | High |
-| Extract `_to_pg_vector()` helper — embedding string serialization duplicated 7× across 3 files | `embedding.py`, `router.py`, `retrieval.py` | High |
-| Collapse `_call_llm_gateway` / `_call_llm_gateway_batch` — identical retry+fallback structure | `embedding.py:146-205` | High |
-| Remove or merge dead `GET /api/v1/memories` (v1 browse) — superseded by `/browse` (v2) | `router.py:48-94` | Medium |
-| Extract `_save_fact_internal` from router to a `service.py` module — compaction imports it at runtime to dodge circular deps | `compaction.py:62`, `router.py` | Medium |
-| Standardize session pattern — background tasks use bare `AsyncSessionLocal()` without rollback; should use `get_db()` | `cleanup.py:38`, `compaction.py:64` | Medium |
-| Name magic numbers — `limit=50`, `len//4` token estimate, `timeout=60.0`, `86400` sleep | `router.py`, `compaction.py`, `partitions.py` | Low |
-
-### LLM Gateway
-
-| Issue | Files | Priority |
-|---|---|---|
-| Extract shared `_serialize_messages()` — message serialization duplicated between litellm and claude_subscription providers | `litellm_provider.py:54-80`, `claude_subscription_provider.py:141-214` | High |
-| Extract shared `_parse_litellm_response()` — response extraction duplicated | `litellm_provider.py:108-132`, `claude_subscription_provider.py:171-194` | High |
-| Extract `_assert_available()` to subscription provider base — `is_available` guard duplicated 4× | `claude_subscription_provider.py`, `chatgpt_subscription_provider.py` | Medium |
-| Fix inconsistent SSE error JSON shape — `/stream` uses flat dict, `/v1` uses nested `{error: {message, type}}` | `router.py:55`, `openai_router.py:84` | Medium |
-| Define `DEFAULT_MODEL_KEY = "__default__"` constant — magic string in 3 locations | `registry.py:227,234`, `openai_router.py:113` | Low |
-| Move hardcoded `context_window=128000, max_output_tokens=8096` to per-model registry data | `router.py:79-80` | Medium |
-| Move `import json` / `import asyncio` from method bodies to top-level | Multiple provider files | Low |
-
-### Dashboard
-
-| Issue | Files | Priority |
-|---|---|---|
-| **Delete dead `Memory.tsx`** — 300+ lines, not routed, superseded by `MemoryInspector.tsx` | `pages/Memory.tsx` | High |
-| Remove duplicate inline `StatusBadge` in Tasks — shared component already exists | `Tasks.tsx:61` vs `components/StatusBadge.tsx` | High |
-| Extract `ACTIVE_TASK_STATUSES` constant — defined 3× in different files | `Overview.tsx:24`, `Tasks.tsx:166,383` | High |
-| Extract `<SaveCancelButtons>` component — save/cancel button pair duplicated 4× | `Overview.tsx`, `Pods.tsx` (×3) | Medium |
-| Extract shared card/page wrapper components — card container class repeated 25×, page root 8× | All page files | Medium |
-| Split `Pods.tsx` (864 lines) into subcomponents | `Pods.tsx` | Medium |
-| Standardize `refetchInterval` / `staleTime` per query key — same keys configured differently | `Overview.tsx`, `Tasks.tsx`, `MCP.tsx` | Low |
-| Fix debounce anti-pattern — timer stored on function via `as any`, should use `useRef` | `MemoryInspector.tsx:251` | Low |
-
-### Cross-Service / nova-contracts
-
-| Issue | Files | Priority |
-|---|---|---|
-| Extract shared health endpoint factory — identical `/health/live`, `/health/ready`, `/health/startup` in 3 services | `llm-gateway/health.py`, `chat-api/main.py`, `orchestrator/health.py` | Medium |
-| Deduplicate system prompt — diverging copies in orchestrator config and chat-api session.py | `orchestrator/config.py`, `chat-api/session.py:51-55` | Medium |
-| Replace `datetime.utcnow()` with `datetime.now(UTC)` in contracts and chat-api | `nova_contracts/memory.py:74`, `chat.py:28,36`, `chat-api/websocket.py` | Medium |
-| Move OAI compat models to `nova_contracts` — currently locked inside llm-gateway | `llm-gateway/openai_compat.py` | Low |
-| Define SSE encoding constants (`DATA_PREFIX`, `DONE_SENTINEL`) in contracts | Multiple services | Low |
-| Remove unused `UUID` import | `nova_contracts/chat.py:9` | Low |
+> Investigation found most items already resolved incrementally during prior phases.
+> Remaining fixes: `datetime.utcnow()` → `datetime.now(timezone.utc)` in chat-api,
+> stale `review_running` comment in migration 002.
 
 ---
 
