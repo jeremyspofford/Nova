@@ -14,6 +14,7 @@ import {
 } from '../api'
 import { MCP_CATALOG, ALL_TAGS, type CatalogEntry } from '../lib/mcp-catalog'
 import Card from '../components/Card'
+import { Input, Label, Select } from '../components/ui'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -143,24 +144,22 @@ function ServerForm({
       {/* Name + transport */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Name *</label>
-          <input
+          <Label>Name *</Label>
+          <Input
             value={form.name}
             onChange={e => set('name', e.target.value)}
             placeholder="e.g. filesystem, brave-search"
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Transport</label>
-          <select
+          <Label>Transport</Label>
+          <Select
             value={form.transport}
             onChange={e => set('transport', e.target.value)}
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
           >
             <option value="stdio">stdio (subprocess)</option>
             <option value="http">http (remote)</option>
-          </select>
+          </Select>
         </div>
       </div>
 
@@ -168,46 +167,42 @@ function ServerForm({
       {form.transport === 'stdio' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Command *</label>
-            <input
+            <Label>Command *</Label>
+            <Input
               value={form.command}
               onChange={e => set('command', e.target.value)}
               placeholder="e.g. npx, uvx, node, python3"
-              className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">
+            <Label>
               Args <span className="text-neutral-300 dark:text-neutral-600">(space-separated)</span>
-            </label>
-            <input
+            </Label>
+            <Input
               value={form.args}
               onChange={e => set('args', e.target.value)}
               placeholder="-y @modelcontextprotocol/server-filesystem /workspace"
-              className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
             />
           </div>
         </div>
       ) : (
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">URL *</label>
-          <input
+          <Label>URL *</Label>
+          <Input
             value={form.url}
             onChange={e => set('url', e.target.value)}
             placeholder="http://localhost:3000"
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
           />
         </div>
       )}
 
       {/* Description */}
       <div>
-        <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Description</label>
-        <input
+        <Label>Description</Label>
+        <Input
           value={form.description}
           onChange={e => set('description', e.target.value)}
           placeholder="Optional — shown in the server card"
-          className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
         />
       </div>
 

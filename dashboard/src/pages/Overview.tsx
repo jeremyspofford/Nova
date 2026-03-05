@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Bot, RefreshCw, ListTodo, AlertCircle, CheckCircle2, ArrowRight,
-  Pencil, FileText, Cpu, Layers, Plug,
+  Pencil, FileText, Cpu, Layers, Plug, MessageSquare,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { getAgents, getPipelineTasks, patchAgentConfig, getQueueStats, getMCPServers } from '../api'
@@ -255,6 +255,27 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
   )
 }
 
+// ── Chat hero (mobile only) ───────────────────────────────────────────────────
+
+function ChatHeroCard() {
+  return (
+    <Link to="/chat" className="md:hidden block">
+      <Card className="bg-gradient-to-r from-accent-700 to-accent-600 border-accent-600 p-5">
+        <div className="flex items-center gap-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/20">
+            <MessageSquare size={20} className="text-white" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-white">Chat with Nova</p>
+            <p className="text-xs text-white/70">Tap to start a conversation</p>
+          </div>
+          <ArrowRight size={16} className="ml-auto text-white/60 shrink-0" />
+        </div>
+      </Card>
+    </Link>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function Overview() {
@@ -283,6 +304,8 @@ export function Overview() {
           <RefreshCw size={12} className={isFetching ? 'animate-spin' : ''} /> Refresh
         </button>
       </div>
+
+      <ChatHeroCard />
 
       {/* ── Summary strips ──────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">

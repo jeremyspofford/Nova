@@ -15,15 +15,9 @@ import {
   RefreshCw, Trash2, Download, Check, HardDrive, Cloud, Loader2,
   AlertTriangle, ExternalLink, Server, X, Info,
 } from 'lucide-react'
+import { formatBytes } from '../lib/format'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '—'
-  const gb = bytes / 1_073_741_824
-  if (gb >= 1) return `${gb.toFixed(1)} GB`
-  return `${(bytes / 1_048_576).toFixed(0)} MB`
-}
 
 const TYPE_BADGE: Record<string, { label: string; className: string }> = {
   local:        { label: 'Local',        className: 'bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400' },
@@ -200,8 +194,8 @@ export function Models() {
               <thead>
                 <tr className="text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-100 dark:border-neutral-800">
                   <th className="text-left px-4 py-2 font-medium">Model</th>
-                  <th className="text-left px-4 py-2 font-medium">Parameters</th>
-                  <th className="text-left px-4 py-2 font-medium">Quant</th>
+                  <th className="hidden sm:table-cell text-left px-4 py-2 font-medium">Parameters</th>
+                  <th className="hidden sm:table-cell text-left px-4 py-2 font-medium">Quant</th>
                   <th className="text-right px-4 py-2 font-medium">Size</th>
                   <th className="w-10" />
                 </tr>
@@ -381,8 +375,8 @@ function PulledModelRow({
   return (
     <tr className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
       <td className="px-4 py-2.5 font-mono text-neutral-900 dark:text-neutral-100">{model.name}</td>
-      <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400">{model.parameter_size || '—'}</td>
-      <td className="px-4 py-2.5 text-neutral-500 dark:text-neutral-400">{model.quantization_level || '—'}</td>
+      <td className="hidden sm:table-cell px-4 py-2.5 text-neutral-500 dark:text-neutral-400">{model.parameter_size || '—'}</td>
+      <td className="hidden sm:table-cell px-4 py-2.5 text-neutral-500 dark:text-neutral-400">{model.quantization_level || '—'}</td>
       <td className="px-4 py-2.5 text-right text-neutral-500 dark:text-neutral-400">{formatBytes(model.size)}</td>
       <td className="px-2 py-2.5">
         <button

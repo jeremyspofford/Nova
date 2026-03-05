@@ -10,6 +10,7 @@ import {
   type MemoryTier,
 } from '../api'
 import Card from '../components/Card'
+import { Input, Label } from '../components/ui'
 
 // ── Tier badge ────────────────────────────────────────────────────────────────
 
@@ -166,27 +167,26 @@ function AddFactForm({ onDone }: { onDone: () => void }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {(['project_id', 'category', 'key'] as const).map(field => (
           <div key={field}>
-            <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400 capitalize">
+            <Label className="capitalize">
               {field.replace('_', ' ')} *
-            </label>
-            <input
+            </Label>
+            <Input
               value={form[field]}
               onChange={e => set(field, e.target.value)}
               placeholder={field === 'project_id' ? 'e.g. nova' : field === 'category' ? 'e.g. codebase' : 'e.g. auth_pattern'}
-              className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
             />
           </div>
         ))}
       </div>
 
       <div>
-        <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Content *</label>
-        <textarea
+        <Label>Content *</Label>
+        <Input
+          multiline
           value={form.content}
           onChange={e => set('content', e.target.value)}
           rows={3}
           placeholder="The fact to store — updated in-place if (project_id, category, key) already exists."
-          className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 resize-y"
         />
       </div>
 

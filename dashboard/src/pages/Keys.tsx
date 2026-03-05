@@ -4,6 +4,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { Plus, Trash2, Copy, Check } from 'lucide-react'
 import { getKeys, createKey, revokeKey } from '../api'
 import Card from '../components/Card'
+import { Input, Label } from '../components/ui'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -61,15 +62,13 @@ export function Keys() {
         <p className="mb-3 text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Create Key</p>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
           <div className="flex-1">
-            <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Name</label>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. continue-dev"
-              className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600" />
+            <Label>Name</Label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. continue-dev" />
           </div>
           <div className="flex gap-3 items-end">
             <div className="w-28">
-              <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">RPM limit</label>
-              <input type="number" value={rpm} onChange={e => setRpm(Number(e.target.value))} min={1} max={9999}
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600" />
+              <Label>RPM limit</Label>
+              <Input type="number" value={rpm} onChange={e => setRpm(Number(e.target.value))} min={1} max={9999} />
             </div>
             <button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}
               className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-2 text-sm text-white hover:bg-accent-500 disabled:opacity-40 shrink-0">

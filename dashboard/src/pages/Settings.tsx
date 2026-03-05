@@ -7,6 +7,7 @@ import { format } from 'date-fns'
 import { useTheme } from '../stores/theme-store'
 import { accentPalettes, themePresets } from '../lib/color-palettes'
 import Card from '../components/Card'
+import { formatBytes } from '../lib/format'
 
 // ── Helper: config entry hook ─────────────────────────────────────────────────
 
@@ -1056,12 +1057,6 @@ function DeveloperResourcesSection() {
 }
 
 // ── Backups section ──────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1_048_576).toFixed(1)} MB`
-}
 
 function BackupsSection() {
   const qc = useQueryClient()

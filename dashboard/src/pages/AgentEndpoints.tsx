@@ -10,6 +10,7 @@ import {
   type AgentEndpointWrite,
 } from '../api'
 import Card from '../components/Card'
+import { Input, Label, Select } from '../components/ui'
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 
@@ -93,89 +94,86 @@ function EndpointForm({
       {/* Name + protocol */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Name *</label>
-          <input
+          <Label>Name *</Label>
+          <Input
             value={form.name}
             onChange={e => set('name', e.target.value)}
             placeholder="e.g. coding-agent, research-bot"
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Protocol</label>
-          <select
+          <Label>Protocol</Label>
+          <Select
             value={form.protocol}
             onChange={e => set('protocol', e.target.value)}
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
           >
             {PROTOCOLS.map(p => (
               <option key={p} value={p}>{p.toUpperCase()}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
 
       {/* URL */}
       <div>
-        <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Base URL *</label>
-        <input
+        <Label>Base URL *</Label>
+        <Input
           value={form.url}
           onChange={e => set('url', e.target.value)}
           placeholder="https://agent.example.com"
-          className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
         />
       </div>
 
       {/* Description */}
       <div>
-        <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">Description</label>
-        <input
+        <Label>Description</Label>
+        <Input
           value={form.description}
           onChange={e => set('description', e.target.value)}
           placeholder="What does this agent do?"
-          className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
         />
       </div>
 
       {/* Auth token */}
       <div>
-        <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">
+        <Label>
           Auth Token{' '}
           <span className="text-neutral-300 dark:text-neutral-600">(sent as Bearer — leave blank to clear)</span>
-        </label>
-        <input
+        </Label>
+        <Input
           type="password"
           value={form.auth_token ?? ''}
           onChange={e => set('auth_token', e.target.value)}
           placeholder="sk-…"
-          className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
         />
       </div>
 
       {/* Schemas (optional) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">
+          <Label>
             Input Schema <span className="text-neutral-300 dark:text-neutral-600">(JSON, optional)</span>
-          </label>
-          <textarea
+          </Label>
+          <Input
+            multiline
             value={form.input_schema}
             onChange={e => set('input_schema', e.target.value)}
             rows={3}
             placeholder='{"type":"object","properties":{"task":{"type":"string"}}}'
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 resize-y"
+            className="text-xs font-mono"
           />
         </div>
         <div>
-          <label className="mb-1 block text-xs text-neutral-500 dark:text-neutral-400">
+          <Label>
             Output Schema <span className="text-neutral-300 dark:text-neutral-600">(JSON, optional)</span>
-          </label>
-          <textarea
+          </Label>
+          <Input
+            multiline
             value={form.output_schema}
             onChange={e => set('output_schema', e.target.value)}
             rows={3}
             placeholder='{"type":"object","properties":{"result":{"type":"string"}}}'
-            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-xs font-mono text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 resize-y"
+            className="text-xs font-mono"
           />
         </div>
       </div>

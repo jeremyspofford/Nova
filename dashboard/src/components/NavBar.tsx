@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import { Activity, Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, ShieldAlert, Globe, Lock, Unlock } from 'lucide-react'
 import clsx from 'clsx'
 
-const links = [
+const mainLinks = [
   { to: '/',         label: 'Overview', icon: Activity         },
   { to: '/chat',     label: 'Chat',     icon: MessageSquare    },
   { to: '/tasks',    label: 'Tasks',    icon: ListTodo         },
@@ -14,6 +14,12 @@ const links = [
   { to: '/agents',   label: 'Agents',   icon: Network          },
   { to: '/memory',   label: 'Memory',   icon: Brain            },
   { to: '/models',   label: 'Models',   icon: Cpu              },
+]
+
+const systemLinks = [
+  { to: '/settings',      label: 'Settings', icon: Settings    },
+  { to: '/recovery',      label: 'Recovery', icon: ShieldAlert },
+  { to: '/remote-access', label: 'Remote',   icon: Globe       },
 ]
 
 export function NavBar() {
@@ -28,7 +34,7 @@ export function NavBar() {
 
           {/* Desktop nav */}
           <div className="hidden md:flex gap-1">
-            {links.map(({ to, label, icon: Icon }) => (
+            {mainLinks.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -78,7 +84,7 @@ export function NavBar() {
       {mobileMenuOpen && (
         <div className="md:hidden border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-2">
           <div className="grid grid-cols-3 gap-1">
-            {links.map(({ to, label, icon: Icon }) => (
+            {[...mainLinks, ...systemLinks].map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}

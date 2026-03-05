@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { format } from 'date-fns'
 import Card from '../components/Card'
+import { formatBytes } from '../lib/format'
 import {
   getServiceStatus, restartService, restartAllServices,
   getBackups, createBackup, restoreBackup, deleteBackup,
@@ -14,12 +15,6 @@ import {
 } from '../api-recovery'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / 1_048_576).toFixed(1)} MB`
-}
 
 function StatusDot({ status, health }: { status: string; health: string }) {
   const isUp = status === 'running' && (health === 'healthy' || health === 'none')
@@ -98,7 +93,7 @@ function ServiceStatusSection() {
                   <tr className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 text-xs">
                     <th className="px-3 py-2 text-left font-medium">Service</th>
                     <th className="px-3 py-2 text-left font-medium">Status</th>
-                    <th className="px-3 py-2 text-right font-medium">Actions</th>
+                    <th className="hidden sm:table-cell px-3 py-2 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
@@ -110,7 +105,7 @@ function ServiceStatusSection() {
                       <td className="px-3 py-2">
                         <StatusDot status={svc.status} health={svc.health} />
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="hidden sm:table-cell px-3 py-2 text-right">
                         {svc.service !== 'postgres' && svc.service !== 'redis' && svc.status !== 'not_found' && (
                           <button
                             onClick={() => handleRestart(svc.service)}

@@ -13,6 +13,7 @@ import {
 import type { PipelineTask, TaskStatus } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import Card from '../components/Card'
+import { Input } from '../components/ui'
 
 // ── Stage pipeline definition ──────────────────────────────────────────────────
 
@@ -289,12 +290,13 @@ function SubmitForm() {
     <Card className="p-4">
       <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Submit Task</h2>
       <div className="space-y-2">
-        <textarea
+        <Input
+          multiline
           rows={3}
           placeholder="Describe what you want the agent pipeline to do…"
           value={input}
           onChange={e => setInput(e.target.value)}
-          className="w-full resize-none rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:border-accent-600"
+          className="resize-none"
           onKeyDown={e => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && input.trim()) submit.mutate()
           }}
