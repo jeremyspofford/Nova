@@ -92,6 +92,26 @@ def restart_service(service_name: str) -> dict:
         return {"service": service_name, "action": "error", "ok": False, "error": str(e)}
 
 
+def check_container_status(name: str) -> dict:
+    """Check status of an arbitrary container by name substring."""
+    try:
+        client = _client()
+        containers = client.containers.list(all=True)
+        for c in containers:
+            if name in c.name:
+                return {
+                    "name": name,
+                    "container_name": c.name,
+                    "status": c.status,
+                    "health": _get_health(c),
+                    "running": c.status == "running",
+                }
+        return {"name": name, "container_name": None, "status": "not_found", "health": "unknown", "running": False}
+    except DockerException as e:
+        logger.warning("Docker API error checking %s: %s", name, e)
+        return {"name": name, "container_name": None, "status": "error", "health": "unknown", "running": False}
+
+
 def restart_all_services() -> list[dict]:
     """Restart all Nova services (except postgres, redis, recovery)."""
     results = []

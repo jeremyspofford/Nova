@@ -1,0 +1,46 @@
+"""Async docker compose CLI wrapper for profiled services."""
+
+import asyncio
+import logging
+import os
+
+logger = logging.getLogger("nova.recovery.compose")
+
+COMPOSE_PROJECT_DIR = os.getenv("COMPOSE_PROJECT_DIR", "/project")
+COMPOSE_FILE = os.path.join(COMPOSE_PROJECT_DIR, "docker-compose.yml")
+
+
+async def _run_compose(*args: str) -> tuple[int, str, str]:
+    """Run a docker compose command and return (returncode, stdout, stderr)."""
+    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
+    logger.info("Running: %s", " ".join(cmd))
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        cwd=COMPOSE_PROJECT_DIR,
+    )
+    stdout, stderr = await proc.communicate()
+    return proc.returncode or 0, stdout.decode(), stderr.decode()
+
+
+async def start_profiled_service(profile: str, service: str) -> dict:
+    """Start a profiled service via docker compose up -d."""
+    code, stdout, stderr = await _run_compose(
+        "--profile", profile, "up", "-d", service,
+    )
+    if code != 0:
+        logger.error("compose up failed: %s", stderr)
+        return {"ok": False, "error": stderr.strip()}
+    return {"ok": True, "output": stdout.strip() or stderr.strip()}
+
+
+async def stop_profiled_service(profile: str, service: str) -> dict:
+    """Stop and remove a profiled service."""
+    code, stdout, stderr = await _run_compose(
+        "--profile", profile, "rm", "-sf", service,
+    )
+    if code != 0:
+        logger.error("compose rm failed: %s", stderr)
+        return {"ok": False, "error": stderr.strip()}
+    return {"ok": True, "output": stdout.strip() or stderr.strip()}

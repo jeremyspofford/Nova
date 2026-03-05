@@ -122,3 +122,38 @@ export const factoryReset = (keep: string[], confirm: string) =>
     '/api/v1/recovery/factory-reset',
     { method: 'POST', body: JSON.stringify({ keep, confirm }) },
   )
+
+// ── Env Management ──────────────────────────────────────────────────────────
+
+export const getEnvVars = () =>
+  recoveryFetch<Record<string, string>>('/api/v1/recovery/env')
+
+export const patchEnv = (updates: Record<string, string>) =>
+  recoveryFetch<Record<string, string>>(
+    '/api/v1/recovery/env',
+    { method: 'PATCH', body: JSON.stringify({ updates }) },
+  )
+
+// ── Compose Profiles ────────────────────────────────────────────────────────
+
+export const manageComposeProfile = (profile: string, action: 'start' | 'stop') =>
+  recoveryFetch<{ profile: string; service: string; action: string; ok: boolean }>(
+    '/api/v1/recovery/compose-profiles',
+    { method: 'POST', body: JSON.stringify({ profile, action }) },
+  )
+
+// ── Remote Access ───────────────────────────────────────────────────────────
+
+export interface RemoteAccessStatus {
+  cloudflare: {
+    configured: boolean
+    container: { name: string; container_name: string | null; status: string; health: string; running: boolean }
+  }
+  tailscale: {
+    configured: boolean
+    container: { name: string; container_name: string | null; status: string; health: string; running: boolean }
+  }
+}
+
+export const getRemoteAccessStatus = () =>
+  recoveryFetch<RemoteAccessStatus>('/api/v1/recovery/remote-access/status')

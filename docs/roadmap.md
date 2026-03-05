@@ -1179,6 +1179,239 @@ Assuming the recommended options (CDP Screencast, watch-only, per-task ephemeral
 
 ---
 
+## 🔜 Phase 9b — Integrated Web IDE & Git Workspace
+
+**Motivation:** Nova already has file tools, git tools, and a mounted workspace volume — but users have no way to *see* the code Nova is writing without SSH or a local editor. Adding a web-based IDE turns Nova from "an AI platform you talk to" into "a complete development environment where AI works alongside you." This is especially powerful for Pi (Phase 10) and cloud (Phase 11) users who may not have a local IDE at all.
+
+**Target users:**
+- Developers who want to review/edit Nova's output in real time
+- Pi users accessing Nova from a tablet, phone, or thin client
+- Cloud-hosted Nova users who need a full IDE without local installs
+- Teams who want GitHub/GitLab integration for repo-based workflows
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Dashboard                                                    │
+│  ┌──────────────┐  ┌──────────────────────────────────────┐ │
+│  │ Task Board    │  │ Web IDE (code-server iframe)         │ │
+│  │ Agent Feed    │  │                                      │ │
+│  │ Pipeline View │  │  ┌──────────────────────────────┐   │ │
+│  │               │  │  │ VS Code in browser            │   │ │
+│  │ "Open in IDE" │──│  │ Same workspace volume as      │   │ │
+│  │  buttons on   │  │  │ Nova agents — live file sync  │   │ │
+│  │  artifacts    │  │  └──────────────────────────────┘   │ │
+│  └──────────────┘  └──────────────────────────────────────┘ │
+└──────────────────────────┬──────────────────────────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │     code-server         │  ← VS Code in browser
+              │  (Docker Compose svc)   │     codercom/code-server
+              │                         │
+              │  volumes:               │
+              │   - workspace:/project  │  ← Same volume as orchestrator
+              └─────────────────────────┘
+                           │
+              ┌────────────┴────────────┐
+              │  GitHub / GitLab API    │  ← OAuth integration
+              │  Clone, branch, push    │     via recovery or orchestrator
+              └─────────────────────────┘
+```
+
+### Tier 1: Web IDE via code-server (Core Deliverable)
+
+**What:** Add [code-server](https://github.com/coder/code-server) as a Docker Compose profile service.
+
+```yaml
+# docker-compose.yml
+code-server:
+  <<: *nova-common
+  profiles: ["ide"]
+  image: codercom/code-server:latest
+  environment:
+    PASSWORD: ${CODE_SERVER_PASSWORD:-nova}
+    DEFAULT_WORKSPACE: /home/coder/project
+  volumes:
+    - ${NOVA_WORKSPACE:-./workspace}:/home/coder/project:rw
+  ports:
+    - "8443:8080"
+  healthcheck:
+    <<: *nova-healthcheck
+    test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+```
+
+**Key design decisions:**
+- **Profile-gated** (`--profile ide`) — opt-in, doesn't consume resources unless enabled
+- **Same workspace volume** — agents write files, user sees them instantly in the editor
+- **Password from `.env`** — setup script configures this
+- **nginx proxy** — `/ide/` route proxied to code-server (WebSocket support required)
+
+**Dashboard integration:**
+- New "IDE" nav item (only visible when code-server profile is active)
+- Embedded iframe or "Open in new tab" link
+- "Open in IDE" button on task artifacts (code files, configs)
+- File path links in agent activity feed open directly in the IDE
+
+**nginx config addition:**
+```nginx
+location /ide/ {
+    set $codeserver http://code-server:8080;
+    proxy_pass $codeserver/;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";  # WebSocket support
+    proxy_set_header Host $host;
+}
+```
+
+### Tier 2: Git Integration (GitHub / GitLab)
+
+**OAuth flow in dashboard Settings → Git section:**
+
+| Step | Description |
+|---|---|
+| **1. Connect** | User clicks "Connect GitHub" → OAuth redirect → token stored in DB (encrypted) |
+| **2. List repos** | Dashboard shows user's repos (public + private) |
+| **3. Clone** | User picks a repo → cloned into workspace volume → appears in IDE |
+| **4. Branch** | Nova creates a feature branch for each task (configurable) |
+| **5. Work** | Nova agents read/write files in the cloned repo |
+| **6. Review** | User reviews changes in the web IDE's built-in diff view |
+| **7. Push** | User (or Nova) commits and pushes back to origin |
+| **8. PR** | Optional: Nova opens a PR with task summary as description |
+
+**Supported providers:**
+
+| Provider | Auth Method | API |
+|---|---|---|
+| **GitHub** | GitHub App or OAuth App | REST v3 + GraphQL v4 |
+| **GitLab** | OAuth2 | REST v4 |
+| **Gitea** | OAuth2 | REST v1 |
+| **Bitbucket** | OAuth2 | REST v2 |
+
+**Git settings in dashboard:**
+- Connected accounts (GitHub, GitLab, etc.) with connect/disconnect
+- Default branch naming: `nova/<task-id>-<slug>` (configurable)
+- Auto-push on task completion (toggle)
+- Auto-PR on task completion (toggle)
+- PR template (markdown, with `{{task_summary}}`, `{{agent_findings}}` variables)
+
+**New orchestrator endpoints:**
+
+```
+POST   /api/git/clone          { repo_url, branch?, path? }
+POST   /api/git/checkout       { branch }
+POST   /api/git/commit         { message, files[]? }
+POST   /api/git/push           { remote?, branch? }
+POST   /api/git/create-pr      { title, body, base, head }
+GET    /api/git/status          → { branch, changed_files[], ahead, behind }
+GET    /api/git/repos           → list from connected provider
+GET    /api/git/branches        → list branches in current repo
+```
+
+### Tier 3: VS Code Extension (Separate Distribution)
+
+For power users who prefer native VS Code over the web IDE.
+
+**Extension features:**
+- **Nova sidebar panel** — task list, agent activity feed, pipeline status
+- **"Ask Nova" command** — send selected code/file as context to a new task
+- **Diff view** — review Nova's proposed changes before accepting
+- **Status bar** — connection status, active task count, model in use
+- **CodeLens** — inline "Explain with Nova" / "Refactor with Nova" on functions
+- **Terminal integration** — `nova task submit "..."` from the integrated terminal
+
+**Extension talks to Nova via:**
+- nova-sdk (Phase 6c) over HTTP
+- SSE for real-time updates (task progress, agent activity)
+- WebSocket for streaming responses
+
+**Distribution:**
+- VS Code Marketplace (free)
+- Also works with VSCodium, Cursor, Windsurf (same extension API)
+
+### Workflow: End-to-End Example
+
+```
+1. User enables IDE profile:
+   docker compose --profile ide up -d
+
+2. User opens Nova dashboard → Settings → Git → "Connect GitHub"
+   → OAuth flow → token saved
+
+3. User goes to dashboard → IDE → "Clone Repo"
+   → Picks "myorg/backend-api" → Cloned to /workspace/backend-api
+
+4. User submits task: "Add rate limiting to POST /api/users (100 req/min)"
+
+5. Quartet pipeline executes:
+   - Context Agent reads the repo, finds relevant files
+   - Task Agent writes rate limiting middleware + tests
+   - Guardrail Agent checks for security issues
+   - Code Review Agent approves
+
+6. Files appear instantly in the web IDE (same workspace volume)
+
+7. User reviews diff in IDE, makes minor tweaks
+
+8. User clicks "Push & Open PR" in dashboard
+   → Nova commits, pushes to nova/task-42-rate-limiting branch
+   → Opens PR with task summary + guardrail findings as description
+
+9. Team reviews PR on GitHub as normal
+```
+
+### What We're NOT Building
+
+- **Not forking VS Code** — Cursor/Windsurf have 50+ engineer teams maintaining forks. Not worth it.
+- **Not building a custom editor** — Code editors are a solved problem. We use code-server.
+- **Not replacing GitHub/GitLab** — Nova integrates with them, doesn't compete with them.
+- **Not adding CI/CD** — That's the user's existing pipeline. Nova opens PRs, CI runs on the PR.
+
+### Settings Page Updates
+
+**New "IDE & Git" section in Settings:**
+- IDE status (running / not enabled)
+- "Enable IDE" button (runs `docker compose --profile ide up -d`)
+- IDE password configuration
+- Connected Git accounts (GitHub, GitLab, etc.)
+- Default branch naming pattern
+- Auto-push / auto-PR toggles
+- PR template editor
+
+### Testing & Validation
+
+- [ ] code-server starts and serves VS Code in browser
+- [ ] Workspace volume shared — file written by orchestrator appears in IDE within 1s
+- [ ] nginx proxy works for IDE (including WebSocket for terminal)
+- [ ] GitHub OAuth flow: connect → list repos → clone → push → PR
+- [ ] GitLab OAuth flow: same as above
+- [ ] "Open in IDE" button from task artifact navigates to correct file
+- [ ] IDE works on Pi 4 (code-server supports ARM64)
+- [ ] IDE accessible from cloud deployment (Phase 11)
+
+### Success Criteria
+
+- [ ] Web IDE usable within 5 minutes of enabling the profile
+- [ ] GitHub clone-to-PR workflow works end-to-end without leaving the browser
+- [ ] File changes from Nova agents visible in IDE within 1 second
+- [ ] Works on ARM64 (Pi) and x86_64
+- [ ] VS Code extension connects to Nova and shows task status
+
+### Implementation Order
+
+| Step | Deliverable | Effort |
+|---|---|---|
+| **1** | code-server Docker Compose service (profile: ide) | Small |
+| **2** | nginx proxy for `/ide/` with WebSocket support | Small |
+| **3** | Dashboard "IDE" page (iframe embed + "Open in IDE" links) | Small |
+| **4** | Git clone/push/status endpoints in orchestrator | Medium |
+| **5** | GitHub OAuth flow in dashboard Settings | Medium |
+| **6** | GitLab OAuth flow | Medium |
+| **7** | Auto-branch + auto-PR on task completion | Medium |
+| **8** | VS Code extension (sidebar, commands, CodeLens) | Large |
+
+---
+
 ## 🔜 Phase 10 — Edge Computing & Single-Board Deployment (Raspberry Pi)
 
 **Motivation:** Compete with open-source platforms like OpenClaw that can run on constrained hardware. Enable Nova to run on a Raspberry Pi 4 (4GB RAM) or similar single-board computers by providing multiple deployment profiles, resource optimization, and intelligent fallback strategies.
@@ -1625,7 +1858,7 @@ Each cloud provider has different names and configurations:
 - **Post-pipeline agents** — Documentation Agent, Diagramming Agent, Security Review Agent, Memory Extraction Agent (designed, not built)
 - **Default pods** — Quick Reply, Research, Code Generation, Analysis (designed in Phase 4, only Quartet default shipped)
 - **Skills framework** (from NanoClaw) — modular instruction sets stored as files, loaded per-task context
-- **VS Code Extension** — sidebar panel, "Ask Nova" command, diff view
+- **VS Code Extension** — sidebar panel, "Ask Nova" command, diff view → **Moved to Phase 9b**
 
 ---
 

@@ -6,8 +6,10 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
 from .backup import create_backup, delete_backup, list_backups, restore_backup
+from .compose_client import start_profiled_service, stop_profiled_service
 from .config import settings
-from .docker_client import list_service_status, restart_all_services, restart_service
+from .docker_client import check_container_status, list_service_status, restart_all_services, restart_service
+from .env_manager import add_compose_profile, patch_env, read_env, remove_compose_profile
 from .factory_reset import factory_reset, get_categories
 
 logger = logging.getLogger("nova.recovery")
@@ -165,6 +167,94 @@ async def get_reset_categories():
     """List data categories available for factory reset."""
     return get_categories()
 
+
+# ── Env Management ────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/recovery/env")
+async def get_env_vars(x_admin_secret: str = Header(default="")):
+    """Read whitelisted env vars (secrets masked)."""
+    _check_admin(x_admin_secret)
+    return read_env()
+
+
+class EnvPatchRequest(BaseModel):
+    updates: dict[str, str]
+
+
+@router.patch("/api/v1/recovery/env")
+async def patch_env_vars(
+    req: EnvPatchRequest,
+    x_admin_secret: str = Header(default=""),
+):
+    """Update .env keys (whitelist enforced)."""
+    _check_admin(x_admin_secret)
+    try:
+        return patch_env(req.updates)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# ── Compose Profiles ─────────────────────────────────────────────────────────
+
+PROFILE_MAP = {
+    "cloudflare-tunnel": "cloudflared",
+    "tailscale": "tailscale",
+}
+
+
+class ComposeProfileRequest(BaseModel):
+    profile: str
+    action: str  # "start" or "stop"
+
+
+@router.post("/api/v1/recovery/compose-profiles")
+async def manage_compose_profile(
+    req: ComposeProfileRequest,
+    x_admin_secret: str = Header(default=""),
+):
+    """Add/remove a compose profile and start/stop its service."""
+    _check_admin(x_admin_secret)
+    if req.profile not in PROFILE_MAP:
+        raise HTTPException(400, f"Unknown profile: {req.profile}. Valid: {list(PROFILE_MAP.keys())}")
+
+    service = PROFILE_MAP[req.profile]
+    if req.action == "start":
+        add_compose_profile(req.profile)
+        result = await start_profiled_service(req.profile, service)
+    elif req.action == "stop":
+        result = await stop_profiled_service(req.profile, service)
+        remove_compose_profile(req.profile)
+    else:
+        raise HTTPException(400, "action must be 'start' or 'stop'")
+
+    if not result["ok"]:
+        raise HTTPException(500, result.get("error", "Compose operation failed"))
+    return {"profile": req.profile, "service": service, "action": req.action, **result}
+
+
+# ── Remote Access Status ─────────────────────────────────────────────────────
+
+@router.get("/api/v1/recovery/remote-access/status")
+async def get_remote_access_status(x_admin_secret: str = Header(default="")):
+    """Container + config status for Cloudflare Tunnel and Tailscale."""
+    _check_admin(x_admin_secret)
+    env = read_env()
+    cf_status = check_container_status("cloudflared")
+    ts_status = check_container_status("tailscale")
+
+    return {
+        "cloudflare": {
+            "configured": bool(env.get("CLOUDFLARE_TUNNEL_TOKEN")),
+            "container": cf_status,
+        },
+        "tailscale": {
+            "configured": bool(env.get("TAILSCALE_AUTHKEY")),
+            "container": ts_status,
+        },
+    }
+
+
+# ── Factory Reset ──────────────────────────────────────────────────────────────
 
 class FactoryResetRequest(BaseModel):
     keep: list[str] = []

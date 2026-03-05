@@ -285,9 +285,13 @@ services:
       NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
       BACKUP_DIR: /backups
       BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
+      NOVA_ENV_FILE: /project/.env
+      COMPOSE_PROJECT_DIR: /project
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./.env:/project/.env:rw
+      - ./docker-compose.yml:/project/docker-compose.yml:ro
     ports:
       - "8888:8888"
     depends_on:
