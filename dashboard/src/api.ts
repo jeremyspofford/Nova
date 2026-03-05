@@ -393,10 +393,53 @@ export interface OllamaStatus {
   routing_strategy: string
   wol_configured: boolean
   wol_last_sent_seconds_ago: number | null
+  gpu_available: boolean
 }
 
 export const getOllamaStatus = () =>
   apiFetch<OllamaStatus>('/v1/health/providers/ollama/status')
+
+// ── Model Discovery ──────────────────────────────────────────────────────────
+
+export interface DiscoveredModel {
+  id: string
+  registered: boolean
+}
+
+export interface ProviderModelList {
+  slug: string
+  name: string
+  type: 'local' | 'subscription' | 'free' | 'paid'
+  available: boolean
+  auth_methods: string[]
+  models: DiscoveredModel[]
+}
+
+export interface OllamaPulledModel {
+  name: string
+  size: number
+  parameter_size: string
+  quantization_level: string
+  digest: string
+  modified_at: string
+}
+
+export const discoverModels = (refresh = false) =>
+  apiFetch<ProviderModelList[]>(`/v1/models/discover${refresh ? '?refresh=true' : ''}`)
+
+export const getOllamaPulled = () =>
+  apiFetch<OllamaPulledModel[]>('/v1/models/ollama/pulled')
+
+export const pullOllamaModel = (name: string) =>
+  apiFetch<{ status: string; model: string }>('/v1/models/ollama/pull', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+
+export const deleteOllamaModel = (name: string) =>
+  apiFetch<{ status: string; model: string }>(`/v1/models/ollama/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
 
 // ── Tool catalog ──────────────────────────────────────────────────────────────
 

@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from nova_contracts.logging import configure_logging
 
 from app.config import settings
+from app.discovery import discovery_router
 from app.health import health_router
 from app.openai_router import openai_router
 from app.router import router
@@ -25,6 +26,15 @@ async def lifespan(app: FastAPI):
         os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
     if settings.openai_api_key:
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    # Auto-register any Ollama models that are pulled but not in the registry
+    try:
+        from app.registry import sync_ollama_models
+        added = await sync_ollama_models()
+        if added:
+            log.info("Synced %d Ollama model(s) into registry", added)
+    except Exception as e:
+        log.warning("Failed to sync Ollama models at startup: %s", e)
+
     log.info("LLM Gateway ready")
     yield
     log.info("LLM Gateway shutting down")
@@ -43,5 +53,6 @@ app = FastAPI(
 
 app.include_router(health_router)
 app.include_router(health_router, prefix="/v1")  # also expose at /v1/health/* for dashboard proxy
+app.include_router(discovery_router, prefix="/v1")  # /v1/models/discover, /v1/models/ollama/*
 app.include_router(router)
 app.include_router(openai_router)  # mounts at /v1/chat/completions, /v1/models

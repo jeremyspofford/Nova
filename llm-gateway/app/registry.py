@@ -252,13 +252,41 @@ async def get_routing_strategy() -> str:
 
 _OLLAMA_MODELS = {
     "llama3.2", "llama3.2:3b", "llama3.1", "mistral", "qwen2.5",
-    "phi4", "deepseek-r1", "gemma3", "nomic-embed-text",
+    "phi4", "deepseek-r1", "gemma3", "nomic-embed-text", "qwen2.5:1.5b",
 }
 
 
 def _is_ollama_model(model: str) -> bool:
     """Check if a model is an Ollama-local model (no provider prefix)."""
     return model in _OLLAMA_MODELS
+
+
+async def sync_ollama_models() -> int:
+    """Discover pulled Ollama models and register any that aren't in MODEL_REGISTRY.
+    Called at startup and after each successful pull. Returns count of newly registered models."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=5.0) as client:
+            resp = await client.get("/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        log.debug("sync_ollama_models: Ollama unreachable: %s", e)
+        return 0
+
+    added = 0
+    for m in data.get("models", []):
+        name = m["name"]
+        if name not in MODEL_REGISTRY and name != DEFAULT_MODEL_KEY:
+            MODEL_REGISTRY[name] = _ollama
+            _OLLAMA_MODELS.add(name)
+            added += 1
+            log.info("Auto-registered Ollama model: %s", name)
+
+    if added:
+        log.info("sync_ollama_models: registered %d new model(s)", added)
+    return added
 
 
 # ── Model → provider routing table ────────────────────────────────────────────

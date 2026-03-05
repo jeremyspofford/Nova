@@ -306,9 +306,7 @@ services:
     ports:
       - "3001:3000"
     depends_on:
-      orchestrator:
-        condition: service_healthy
-      llm-gateway:
+      recovery:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck

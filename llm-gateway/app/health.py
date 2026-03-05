@@ -87,7 +87,23 @@ async def ollama_status():
         "base_url": settings.ollama_base_url,
         "routing_strategy": strategy,
         "wol_configured": bool(settings.wol_mac_address),
+        "gpu_available": False,
     }
+
+    # Detect GPU availability from Ollama's /api/ps (running models show GPU layers)
+    # or from /api/tags response details
+    try:
+        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=3.0) as c:
+            r = await c.get("/api/ps")
+            if r.status_code == 200:
+                ps_data = r.json()
+                for m in ps_data.get("models", []):
+                    # size_vram > 0 means GPU is being used
+                    if m.get("size_vram", 0) > 0:
+                        result["gpu_available"] = True
+                        break
+    except Exception:
+        pass
 
     if settings.wol_mac_address:
         import time as _time
