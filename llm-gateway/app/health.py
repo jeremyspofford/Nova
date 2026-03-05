@@ -15,16 +15,16 @@ async def liveness():
 async def readiness():
     checks = {}
 
-    # Check Ollama connectivity
+    # Check Ollama connectivity (informational — not required for readiness)
     import httpx
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=5.0) as c:
+        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=3.0) as c:
             r = await c.get("/api/tags")
             checks["ollama"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
     except Exception as e:
-        checks["ollama"] = f"error: {e}"
+        checks["ollama"] = f"unreachable: {e}"
 
-    # Check Redis connectivity (used for rate limiting + caching)
+    # Check Redis connectivity (required for rate limiting + caching)
     try:
         from app.rate_limiter import _get_redis
         r = await _get_redis()
@@ -33,8 +33,9 @@ async def readiness():
     except Exception as e:
         checks["redis"] = f"error: {e}"
 
-    all_ok = all(v == "ok" for v in checks.values())
-    return {"status": "ready" if all_ok else "degraded", "checks": checks}
+    # Ollama is optional — only Redis is required for readiness
+    redis_ok = checks.get("redis") == "ok"
+    return {"status": "ready" if redis_ok else "degraded", "checks": checks}
 
 
 @health_router.get("/providers")
@@ -59,7 +60,7 @@ async def test_provider(slug: str):
 
     model = entry["default_model"]
     try:
-        provider = get_provider(model)
+        provider = await get_provider(model)
         req = CompleteRequest(
             model=model,
             messages=[Message(role="user", content="Say hi")],
@@ -71,6 +72,29 @@ async def test_provider(slug: str):
         return {"ok": True, "latency_ms": latency}
     except Exception as e:
         return {"ok": False, "latency_ms": 0, "error": str(e)}
+
+
+@health_router.get("/providers/ollama/status")
+async def ollama_status():
+    """Return detailed Ollama health info including WoL state."""
+    from app.registry import get_ollama_provider, get_routing_strategy
+
+    ollama = get_ollama_provider()
+    strategy = await get_routing_strategy()
+
+    result = {
+        "healthy": ollama.healthy,
+        "base_url": settings.ollama_base_url,
+        "routing_strategy": strategy,
+        "wol_configured": bool(settings.wol_mac_address),
+    }
+
+    if settings.wol_mac_address:
+        import time as _time
+        wol_age = _time.monotonic() - ollama._wol_sent_at if ollama._wol_sent_at > 0 else None
+        result["wol_last_sent_seconds_ago"] = int(wol_age) if wol_age is not None else None
+
+    return result
 
 
 @health_router.get("/startup")

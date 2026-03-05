@@ -1,4 +1,4 @@
-.PHONY: help up dev build down logs ps watch migrate
+.PHONY: help up dev build down logs ps watch migrate backup restore
 
 DASHBOARD    = dashboard
 
@@ -50,3 +50,10 @@ ps: ## Show container status
 migrate: ## Apply pending SQL migrations (runs inside orchestrator container)
 	$(COMPOSE) exec orchestrator python -c \
 	  "import asyncio; from app.db import init_db; asyncio.run(init_db())"
+
+# ── Backup / Restore ─────────────────────────────────────────────────────────
+backup: ## Create a database backup (emergency — normally use the Recovery UI)
+	@./scripts/backup.sh
+
+restore: ## List or restore backups (emergency — normally use the Recovery UI)
+	@./scripts/restore.sh $(F)

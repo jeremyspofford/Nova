@@ -2,6 +2,13 @@
 Provider registry — maps model names to ModelProvider instances.
 All providers are auto-detected from credentials on disk or env vars at startup.
 
+ROUTING STRATEGIES (configurable at runtime via platform_config)
+─────────────────────────────────────────────────────────────────────────────
+  local-only    Ollama models → _ollama only. Fail if offline.
+  local-first   Ollama models → try Ollama, fall back to cloud. (default)
+  cloud-only    Ollama models → skip Ollama, use cloud fallback model.
+  cloud-first   Ollama models → try cloud first, Ollama as backup.
+
 SUBSCRIPTION AUTH (no API billing — uses your existing subscription quota)
 ─────────────────────────────────────────────────────────────────────────────
   Claude Max/Pro    Run `claude setup-token`, set CLAUDE_CODE_OAUTH_TOKEN
@@ -30,8 +37,12 @@ PAID API KEYS
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import time
+
+import redis.asyncio as aioredis
 
 from app.config import settings
 from app.providers import (
@@ -41,6 +52,7 @@ from app.providers import (
     GeminiADCProvider,
     LiteLLMProvider,
     ModelProvider,
+    OllamaCloudFallback,
     OllamaProvider,
     discover_chatgpt_token,
     discover_claude_oauth_token,
@@ -49,6 +61,8 @@ from app.providers import (
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL_KEY = "__default__"
+
+VALID_STRATEGIES = {"local-only", "local-first", "cloud-only", "cloud-first"}
 
 
 def _inject_litellm_env_keys() -> None:
@@ -113,7 +127,44 @@ else:
     log.info("  ChatGPT subscription not detected  (run `codex login`)")
 
 
-# ── Default fallback chain (cheapest/fastest → most capable) ──────────────────
+# ── Cloud fallback chain (without Ollama) ────────────────────────────────────
+
+def _build_cloud_fallback() -> FallbackProvider:
+    """Build a fallback chain of all cloud providers (no Ollama)."""
+    chain: list[ModelProvider] = []
+
+    if settings.groq_api_key:
+        chain.append(_groq)
+    if settings.gemini_api_key or settings.gemini_use_adc:
+        chain.append(_gemini)
+    if settings.cerebras_api_key:
+        chain.append(_cerebras)
+    if settings.openrouter_api_key:
+        chain.append(_openrouter)
+    if settings.github_token:
+        chain.append(_github)
+
+    # Subscription providers come before paid API to prefer zero-cost
+    if _claude_subscription.is_available:
+        chain.append(_claude_subscription)
+    if _chatgpt_subscription.is_available:
+        chain.append(_chatgpt_subscription)
+
+    if settings.anthropic_api_key or settings.openai_api_key:
+        chain.append(_litellm)
+
+    if not chain:
+        # No cloud providers at all — use LiteLLM as a last resort (it'll error with no keys)
+        chain.append(_litellm)
+
+    log.info("Cloud fallback chain: %d provider(s)", len(chain))
+    return FallbackProvider(providers=chain)
+
+
+_cloud_fallback = _build_cloud_fallback()
+
+
+# ── Default fallback chain (Ollama + cloud) ──────────────────────────────────
 
 def _build_default_fallback() -> FallbackProvider:
     chain: list[ModelProvider] = [_ollama]  # always local-first
@@ -145,6 +196,71 @@ def _build_default_fallback() -> FallbackProvider:
 _default_fallback = _build_default_fallback()
 
 
+# ── Ollama-with-cloud-fallback provider ──────────────────────────────────────
+
+_ollama_with_fallback = OllamaCloudFallback(ollama=_ollama, cloud=_cloud_fallback)
+
+# ── Cloud-first fallback (cloud first, Ollama as backup) ─────────────────────
+
+_cloud_first_fallback = OllamaCloudFallback(ollama=_cloud_fallback, cloud=_ollama)
+
+
+# ── Routing strategy from Redis ──────────────────────────────────────────────
+
+_strategy_redis: aioredis.Redis | None = None
+_cached_strategy: str = settings.llm_routing_strategy
+_strategy_fetched_at: float = 0.0
+_STRATEGY_CACHE_TTL = 5.0  # seconds
+
+
+async def _get_strategy_redis() -> aioredis.Redis:
+    global _strategy_redis
+    if _strategy_redis is None:
+        _strategy_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    return _strategy_redis
+
+
+async def get_routing_strategy() -> str:
+    """Read llm.routing_strategy from Redis (synced from platform_config). Cached for 5s."""
+    global _cached_strategy, _strategy_fetched_at
+
+    now = time.monotonic()
+    if (now - _strategy_fetched_at) < _STRATEGY_CACHE_TTL:
+        return _cached_strategy
+
+    try:
+        r = await _get_strategy_redis()
+        val = await r.get("nova:config:llm.routing_strategy")
+        if val is not None:
+            # Value is JSON-encoded string, e.g. '"local-first"'
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, str):
+                    val = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            if val in VALID_STRATEGIES:
+                _cached_strategy = val
+    except Exception as e:
+        log.debug("Failed to read routing strategy from Redis: %s", e)
+
+    _strategy_fetched_at = now
+    return _cached_strategy
+
+
+# ── Ollama model names (models that route to Ollama by default) ──────────────
+
+_OLLAMA_MODELS = {
+    "llama3.2", "llama3.2:3b", "llama3.1", "mistral", "qwen2.5",
+    "phi4", "deepseek-r1", "gemma3", "nomic-embed-text",
+}
+
+
+def _is_ollama_model(model: str) -> bool:
+    """Check if a model is an Ollama-local model (no provider prefix)."""
+    return model in _OLLAMA_MODELS
+
+
 # ── Model → provider routing table ────────────────────────────────────────────
 #
 # Naming convention:
@@ -173,7 +289,7 @@ MODEL_REGISTRY: dict[str, ModelProvider] = {
     "chatgpt/gpt-5.2-codex":             _chatgpt_subscription,
     "chatgpt/gpt-5.3-codex":             _chatgpt_subscription,
 
-    # ── Local (Ollama) ─────────────────────────────────────────────────────────
+    # ── Local (Ollama) — will be overridden per-request by routing strategy ───
     "llama3.2":                           _ollama,
     "llama3.2:3b":                        _ollama,
     "llama3.1":                           _ollama,
@@ -319,9 +435,40 @@ def get_provider_catalog() -> list[dict]:
     return result
 
 
-def get_provider(model: str) -> ModelProvider:
-    """Look up the provider for a model ID, falling back to DEFAULT_MODEL_KEY."""
+async def get_provider(model: str) -> ModelProvider:
+    """
+    Look up the provider for a model ID, applying the routing strategy for Ollama models.
+    Non-Ollama models always route to their designated provider.
+    """
+    # Non-Ollama models — direct lookup, no strategy applied
+    if not _is_ollama_model(model):
+        provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY[DEFAULT_MODEL_KEY]
+        if model not in MODEL_REGISTRY:
+            log.warning("Unknown model '%s', using default fallback provider", model)
+        return provider
+
+    # Ollama model — apply routing strategy
+    strategy = await get_routing_strategy()
+
+    if strategy == "local-only":
+        return _ollama
+    elif strategy == "local-first":
+        return _ollama_with_fallback
+    elif strategy == "cloud-only":
+        return _cloud_fallback
+    elif strategy == "cloud-first":
+        return _cloud_first_fallback
+    else:
+        log.warning("Unknown routing strategy '%s', using local-first", strategy)
+        return _ollama_with_fallback
+
+
+def get_provider_sync(model: str) -> ModelProvider:
+    """Synchronous provider lookup (no strategy awareness). Used by health checks."""
     provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY[DEFAULT_MODEL_KEY]
-    if model not in MODEL_REGISTRY:
-        log.warning("Unknown model '%s', using default fallback provider", model)
     return provider
+
+
+def get_ollama_provider() -> OllamaProvider:
+    """Direct access to the Ollama provider instance (for health checks)."""
+    return _ollama

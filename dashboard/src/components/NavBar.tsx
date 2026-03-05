@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Activity, Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain } from 'lucide-react'
+import { Activity, Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, ShieldAlert } from 'lucide-react'
 import clsx from 'clsx'
 
 const links = [
@@ -48,6 +48,9 @@ export function NavBar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button onClick={() => navigate('/recovery')} title="Recovery" className="text-neutral-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors">
+            <ShieldAlert size={16} />
+          </button>
           <button onClick={() => navigate('/settings')} title="Settings" className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
             <Settings size={16} />
           </button>

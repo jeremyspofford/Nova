@@ -24,6 +24,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/mem/, ''),
       },
+      // Recovery Service
+      '/recovery-api': {
+        target: 'http://localhost:8888',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/recovery-api/, ''),
+      },
     },
   },
 })

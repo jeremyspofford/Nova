@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Save, RotateCcw, Bot, Sliders, Palette, Moon, Sun, Monitor, FileCode, ExternalLink, Activity, Gauge, ShieldCheck } from 'lucide-react'
-import { getPlatformConfig, updatePlatformConfig, getProviderStatus, testProvider, getAdminSecret, setAdminSecret, type PlatformConfigEntry, type ProviderStatus } from '../api'
+import { Save, RotateCcw, Bot, Sliders, Palette, Moon, Sun, Monitor, FileCode, ExternalLink, Activity, Gauge, ShieldCheck, Radio, Wifi, WifiOff, Power, HardDrive, Download, Trash2, Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { getPlatformConfig, updatePlatformConfig, getProviderStatus, testProvider, getAdminSecret, setAdminSecret, getOllamaStatus, getModels, type PlatformConfigEntry, type ProviderStatus } from '../api'
+import { getBackups, createBackup, deleteBackup, type BackupInfo } from '../api-recovery'
+import { format } from 'date-fns'
 import { useTheme } from '../stores/theme-store'
 import { accentPalettes, themePresets } from '../lib/color-palettes'
 import Card from '../components/Card'
@@ -304,6 +306,257 @@ function AppearanceSection() {
         {darkPreset === 'custom' && (
           <AccentPicker activeAccent={customDarkAccent} onSelect={setCustomDarkAccent} />
         )}
+      </div>
+    </Section>
+  )
+}
+
+// ── LLM Routing section ──────────────────────────────────────────────────────
+
+const ROUTING_STRATEGIES = [
+  { value: 'local-only',  label: 'Local Only',  desc: 'Use Ollama exclusively. Requests fail if offline.' },
+  { value: 'local-first', label: 'Local First',  desc: 'Try Ollama, fall back to cloud if offline. WoL wakes remote PC.' },
+  { value: 'cloud-only',  label: 'Cloud Only',  desc: 'Skip Ollama entirely. Always use cloud providers.' },
+  { value: 'cloud-first', label: 'Cloud First', desc: 'Prefer cloud, use Ollama as backup.' },
+] as const
+
+function CloudFallbackModelPicker({
+  value,
+  onSave,
+  saving,
+}: {
+  value: string
+  onSave: (key: string, value: string) => void
+  saving: boolean
+}) {
+  const { data } = useQuery({
+    queryKey: ['models'],
+    queryFn: getModels,
+    staleTime: 60_000,
+  })
+  const allModels = (data?.data ?? []).map(m => m.id)
+  // Filter to cloud models only (exclude local ollama models that don't have a provider prefix)
+  const cloudModels = allModels.filter(id =>
+    id.includes('/') || id.startsWith('gpt-') || id.startsWith('claude-') || id.startsWith('gemini-')
+  )
+
+  const [draft, setDraft] = useState(value)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    setDraft(value)
+    setDirty(false)
+  }, [value])
+
+  const handleChange = (v: string) => {
+    setDraft(v)
+    setDirty(v !== value)
+  }
+
+  const handleSave = () => onSave('llm.cloud_fallback_model', JSON.stringify(draft))
+  const handleReset = () => { setDraft(value); setDirty(false) }
+
+  return (
+    <div>
+      <div className="mb-1 flex items-center justify-between">
+        <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Cloud Fallback Model</label>
+        {dirty && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
+            >
+              <RotateCcw size={10} /> Reset
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
+            >
+              <Save size={10} /> {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <select
+        value={draft}
+        onChange={e => handleChange(e.target.value)}
+        className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+      >
+        {/* If current value isn't in the list, still show it */}
+        {draft && !cloudModels.includes(draft) && (
+          <option value={draft}>{draft}</option>
+        )}
+        {cloudModels.map(id => (
+          <option key={id} value={id}>{id}</option>
+        ))}
+        {cloudModels.length === 0 && !draft && (
+          <option value="">No cloud models available</option>
+        )}
+      </select>
+
+      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        Cloud model used when Ollama is unavailable (local-first/cloud-first strategies).
+      </p>
+    </div>
+  )
+}
+
+function LLMRoutingSection({
+  entries,
+  onSave,
+  saving,
+}: {
+  entries: PlatformConfigEntry[]
+  onSave: (key: string, value: string) => void
+  saving: boolean
+}) {
+  const strategy = useConfigValue(entries, 'llm.routing_strategy', 'local-first')
+  const ollamaUrl = useConfigValue(entries, 'llm.ollama_url', '')
+  const cloudFallback = useConfigValue(entries, 'llm.cloud_fallback_model', 'groq/llama-3.3-70b-versatile')
+  const wolMac = useConfigValue(entries, 'llm.wol_mac', '')
+  const wolBroadcast = useConfigValue(entries, 'llm.wol_broadcast', '255.255.255.255')
+
+  const { data: ollamaStatus } = useQuery({
+    queryKey: ['ollama-status'],
+    queryFn: getOllamaStatus,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  })
+
+  const [testing, setTesting] = useState(false)
+  const [testResult, setTestResult] = useState<{ ok: boolean; latency_ms: number; error?: string } | null>(null)
+
+  const handleTest = useCallback(async () => {
+    setTesting(true)
+    setTestResult(null)
+    try {
+      const result = await testProvider('ollama')
+      setTestResult(result)
+    } catch (e) {
+      setTestResult({ ok: false, latency_ms: 0, error: String(e) })
+    } finally {
+      setTesting(false)
+    }
+  }, [])
+
+  return (
+    <Section
+      icon={Radio}
+      title="LLM Routing"
+      description="Control how requests are routed between local Ollama and cloud providers."
+    >
+      {/* Strategy selector */}
+      <div>
+        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Routing Strategy</label>
+        <div className="inline-flex flex-wrap rounded-lg border border-neutral-200 dark:border-neutral-700 p-0.5">
+          {ROUTING_STRATEGIES.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => onSave('llm.routing_strategy', JSON.stringify(value))}
+              disabled={saving}
+              className={
+                'rounded-md px-3 py-1.5 text-xs font-medium transition-colors ' +
+                (strategy === value
+                  ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
+                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300')
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+          {ROUTING_STRATEGIES.find(s => s.value === strategy)?.desc}
+        </p>
+      </div>
+
+      {/* Ollama status indicator */}
+      <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {ollamaStatus?.healthy ? (
+              <Wifi size={14} className="text-emerald-500" />
+            ) : (
+              <WifiOff size={14} className="text-red-500" />
+            )}
+            <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+              Ollama {ollamaStatus?.healthy ? 'Online' : 'Offline'}
+            </span>
+          </div>
+          <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
+            {ollamaStatus?.base_url ?? '...'}
+          </span>
+        </div>
+
+        {ollamaStatus?.wol_configured && (
+          <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+            <Power size={12} />
+            <span>
+              WoL {ollamaStatus.wol_last_sent_seconds_ago != null
+                ? `sent ${ollamaStatus.wol_last_sent_seconds_ago}s ago`
+                : 'ready'}
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between">
+          <button
+            onClick={handleTest}
+            disabled={testing}
+            className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline disabled:opacity-40"
+          >
+            {testing ? 'Testing…' : 'Test Connection'}
+          </button>
+          {testResult && (
+            <span className={`text-xs ${testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {testResult.ok ? `${testResult.latency_ms}ms` : testResult.error ?? 'Failed'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Remote Ollama config */}
+      <ConfigField
+        label="Ollama URL"
+        configKey="llm.ollama_url"
+        value={ollamaUrl}
+        placeholder="http://192.168.1.50:11434"
+        description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var. Requires container restart to take effect."
+        onSave={onSave}
+        saving={saving}
+      />
+
+      <CloudFallbackModelPicker
+        value={cloudFallback}
+        onSave={onSave}
+        saving={saving}
+      />
+
+      {/* Wake-on-LAN config */}
+      <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Wake-on-LAN</label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <ConfigField
+            label="MAC Address"
+            configKey="llm.wol_mac"
+            value={wolMac}
+            placeholder="AA:BB:CC:DD:EE:FF"
+            description="MAC of the remote Ollama host."
+            onSave={onSave}
+            saving={saving}
+          />
+          <ConfigField
+            label="Broadcast IP"
+            configKey="llm.wol_broadcast"
+            value={wolBroadcast}
+            placeholder="192.168.1.255"
+            description="LAN broadcast address."
+            onSave={onSave}
+            saving={saving}
+          />
+        </div>
       </div>
     </Section>
   )
@@ -720,6 +973,137 @@ function DeveloperResourcesSection() {
   )
 }
 
+// ── Backups section ──────────────────────────────────────────────────────────
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1_048_576).toFixed(1)} MB`
+}
+
+function BackupsSection() {
+  const qc = useQueryClient()
+  const { data: backups, isLoading, error } = useQuery({
+    queryKey: ['recovery-backups'],
+    queryFn: getBackups,
+    staleTime: 30_000,
+  })
+
+  const [creating, setCreating] = useState(false)
+  const [deletingFile, setDeletingFile] = useState<string | null>(null)
+  const [message, setMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+
+  const handleCreate = useCallback(async () => {
+    setCreating(true)
+    setMessage(null)
+    try {
+      const result = await createBackup()
+      setMessage({ text: `Backup created: ${result.filename}`, type: 'success' })
+      qc.invalidateQueries({ queryKey: ['recovery-backups'] })
+    } catch (e) {
+      setMessage({ text: `Backup failed: ${e}`, type: 'error' })
+    }
+    setCreating(false)
+  }, [qc])
+
+  const handleDelete = useCallback(async (filename: string) => {
+    setDeletingFile(filename)
+    try {
+      await deleteBackup(filename)
+      qc.invalidateQueries({ queryKey: ['recovery-backups'] })
+    } catch (e) {
+      setMessage({ text: `Delete failed: ${e}`, type: 'error' })
+    }
+    setDeletingFile(null)
+  }, [qc])
+
+  return (
+    <Section
+      icon={HardDrive}
+      title="Backups"
+      description="Database backups. For full recovery options including restore and factory reset, visit the Recovery page."
+    >
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handleCreate}
+          disabled={creating}
+          className="rounded-lg bg-accent-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-500 disabled:opacity-40 transition-colors flex items-center gap-1.5"
+        >
+          {creating ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+          {creating ? 'Creating...' : 'Back Up Now'}
+        </button>
+        <a
+          href="/recovery"
+          className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline"
+        >
+          Open Recovery Page
+        </a>
+      </div>
+
+      {message && (
+        <div className={`rounded-lg px-3 py-2 text-xs flex items-center gap-2 ${
+          message.type === 'success'
+            ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900'
+            : 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-900'
+        }`}>
+          {message.type === 'success' ? <CheckCircle2 size={12} /> : <XCircle size={12} />}
+          {message.text}
+        </div>
+      )}
+
+      {isLoading ? (
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading backups...</p>
+      ) : error ? (
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Recovery service unavailable. Backups are managed through the recovery sidecar.
+        </p>
+      ) : (backups ?? []).length === 0 ? (
+        <p className="text-sm text-neutral-500 dark:text-neutral-400 text-center py-4">
+          No backups yet. Click "Back Up Now" to create your first backup.
+        </p>
+      ) : (
+        <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+          <table className="w-full">
+            <thead>
+              <tr className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
+                <th className="px-3 py-1.5 text-left font-medium">Backup</th>
+                <th className="px-3 py-1.5 text-left font-medium">Date</th>
+                <th className="px-3 py-1.5 text-right font-medium">Size</th>
+                <th className="px-3 py-1.5 text-right font-medium w-12"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              {(backups ?? []).map((b: BackupInfo) => (
+                <tr key={b.filename} className="text-neutral-700 dark:text-neutral-300">
+                  <td className="px-3 py-1.5 font-mono truncate max-w-[200px]" title={b.filename}>
+                    {b.filename}
+                  </td>
+                  <td className="px-3 py-1.5 text-neutral-500 dark:text-neutral-400">
+                    {format(new Date(b.created_at), 'MMM d, yyyy h:mm a')}
+                  </td>
+                  <td className="px-3 py-1.5 text-right text-neutral-500 dark:text-neutral-400">
+                    {formatBytes(b.size_bytes)}
+                  </td>
+                  <td className="px-3 py-1.5 text-right">
+                    <button
+                      onClick={() => handleDelete(b.filename)}
+                      disabled={deletingFile === b.filename}
+                      className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 disabled:opacity-40"
+                      title="Delete backup"
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
+  )
+}
+
 // ── Settings page ─────────────────────────────────────────────────────────────
 
 export function Settings() {
@@ -821,6 +1205,9 @@ export function Settings() {
         />
       </Section>
 
+      {/* ── LLM Routing ─────────────────────────────────────────────────── */}
+      <LLMRoutingSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+
       {/* ── Provider Status ──────────────────────────────────────────────── */}
       <ProviderStatusSection />
 
@@ -829,6 +1216,9 @@ export function Settings() {
 
       {/* ── Admin Secret ──────────────────────────────────────────────────── */}
       <AdminSecretSection />
+
+      {/* ── Backups ─────────────────────────────────────────────────────── */}
+      <BackupsSection />
 
       {/* ── Appearance ────────────────────────────────────────────────────── */}
       <AppearanceSection />

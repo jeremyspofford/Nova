@@ -7,10 +7,25 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/1"
     response_cache_ttl: int = 300  # 5 minutes for identical requests
 
-    # Ollama (development)
+    # Ollama
     ollama_base_url: str = "http://ollama:11434"
     default_chat_model: str = "llama3.2"
     default_embed_model: str = "nomic-embed-text"
+
+    # Wake-on-LAN (for remote Ollama host)
+    wol_mac_address: str = ""                    # empty = WoL disabled
+    wol_broadcast_ip: str = "255.255.255.255"
+    wol_boot_wait_seconds: int = 90              # suppress repeat WoL for this long
+
+    # Ollama timeouts
+    ollama_health_check_timeout: float = 3.0     # fast probe before routing
+    ollama_request_timeout: float = 120.0        # actual inference timeout
+    ollama_health_check_interval: float = 15.0   # cache health result this long
+
+    # Routing
+    ollama_cloud_fallback_model: str = "groq/llama-3.3-70b-versatile"
+    ollama_cloud_fallback_embed_model: str = "text-embedding-004"
+    llm_routing_strategy: str = "local-first"    # local-only | local-first | cloud-only | cloud-first
 
     # ── Per-provider default models — override in .env to swap models ──────────
     # These control which model a provider uses when no explicit model is given.

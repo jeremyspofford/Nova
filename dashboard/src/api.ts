@@ -387,6 +387,17 @@ export const testProvider = (slug: string) =>
   apiFetch<{ ok: boolean; latency_ms: number; error?: string }>(
     `/v1/health/providers/${slug}/test`, { method: 'POST' })
 
+export interface OllamaStatus {
+  healthy: boolean
+  base_url: string
+  routing_strategy: string
+  wol_configured: boolean
+  wol_last_sent_seconds_ago: number | null
+}
+
+export const getOllamaStatus = () =>
+  apiFetch<OllamaStatus>('/v1/health/providers/ollama/status')
+
 // ── Tool catalog ──────────────────────────────────────────────────────────────
 
 export interface ToolInfo { name: string; description: string }

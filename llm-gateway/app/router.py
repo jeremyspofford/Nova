@@ -49,7 +49,7 @@ async def complete(request: CompleteRequest):
         if cached:
             return CompleteResponse(**cached)
 
-    provider = get_provider(request.model)
+    provider = await get_provider(request.model)
     response = await provider.complete(request)
     log.info(
         "complete model=%s in=%d out=%d cost=$%.4f",
@@ -69,7 +69,7 @@ async def stream(request: CompleteRequest):
     Each chunk is a JSON line; the final chunk has finish_reason set.
     """
     await _enforce_rate_limit(request.model)
-    provider = get_provider(request.model)
+    provider = await get_provider(request.model)
 
     async def generate() -> AsyncIterator[bytes]:
         try:
@@ -98,7 +98,7 @@ async def embed(request: EmbedRequest):
     if cached:
         return EmbedResponse(**cached)
 
-    provider = get_provider(request.model)
+    provider = await get_provider(request.model)
     response = await provider.embed(request)
 
     await set_cached("embed", cache_body, response.model_dump())

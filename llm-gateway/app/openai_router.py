@@ -56,7 +56,7 @@ async def chat_completions(req: OAIChatCompletionRequest):
     if not allowed:
         return {"error": {"message": f"Daily quota exhausted for provider '{prefix}'.", "type": "rate_limit_error"}}
     nova_req = oai_request_to_nova(req)
-    provider = get_provider(req.model)
+    provider = await get_provider(req.model)
 
     if req.stream:
         chunk_id = f"chatcmpl-{uuid4().hex[:24]}"

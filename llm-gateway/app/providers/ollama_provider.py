@@ -1,11 +1,14 @@
 """
-Ollama provider — direct HTTP client for local model serving.
-Ideal for development: instant setup, hot-swapping models, Apple Silicon support.
+Ollama provider — direct HTTP client for local/remote model serving.
+Health-aware: probes Ollama with a fast 3s check before routing requests.
+When unreachable, fires Wake-on-LAN in the background and raises immediately.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from typing import AsyncIterator
 
 import httpx
@@ -28,13 +31,17 @@ log = logging.getLogger(__name__)
 class OllamaProvider(ModelProvider):
     """
     Direct Ollama integration — OpenAI-compatible API at /api/chat.
-    Not used for production (41 TPS peak vs vLLM's 793 TPS), but
-    invaluable for local development with zero cloud cost.
+    Includes health gating: a fast probe prevents 120s hangs when offline.
     """
 
     def __init__(self, base_url: str = settings.ollama_base_url, default_model: str = "llama3.2"):
         self._base_url = base_url
         self._default_model = default_model
+        # Health state
+        self._healthy: bool = True  # optimistic on startup
+        self._last_health_check: float = 0.0
+        self._wol_sent_at: float = 0.0
+        self._health_lock = asyncio.Lock()
 
     @property
     def name(self) -> str:
@@ -48,10 +55,56 @@ class OllamaProvider(ModelProvider):
             ModelCapability.embeddings,
         }
 
+    @property
+    def healthy(self) -> bool:
+        """Current cached health status."""
+        return self._healthy
+
+    async def _ensure_healthy(self) -> None:
+        """
+        Fast health gate: check if Ollama is reachable before sending real requests.
+        Caches result for ollama_health_check_interval seconds.
+        On failure, fires WoL in the background and raises RuntimeError.
+        """
+        now = time.monotonic()
+        if self._healthy and (now - self._last_health_check) < settings.ollama_health_check_interval:
+            return  # recently checked and healthy — 0ms overhead
+
+        async with self._health_lock:
+            # Re-check after acquiring lock (another coroutine may have updated)
+            now = time.monotonic()
+            if self._healthy and (now - self._last_health_check) < settings.ollama_health_check_interval:
+                return
+
+            try:
+                async with httpx.AsyncClient(
+                    base_url=self._base_url,
+                    timeout=settings.ollama_health_check_timeout,
+                ) as client:
+                    r = await client.get("/api/tags")
+                    r.raise_for_status()
+                self._healthy = True
+                self._last_health_check = now
+                return
+            except Exception as e:
+                self._healthy = False
+                self._last_health_check = now
+                log.warning("Ollama unreachable at %s: %s", self._base_url, e)
+
+                # Fire WoL if configured and not recently sent
+                if settings.wol_mac_address and (now - self._wol_sent_at) > settings.wol_boot_wait_seconds:
+                    self._wol_sent_at = now
+                    from app.wol import send_wol
+                    asyncio.create_task(send_wol(settings.wol_mac_address, settings.wol_broadcast_ip))
+                    log.info("WoL packet sent to %s (broadcast %s)", settings.wol_mac_address, settings.wol_broadcast_ip)
+
+                raise RuntimeError(f"Ollama unreachable at {self._base_url}") from e
+
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
+        await self._ensure_healthy()
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=120.0) as client:
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
             resp = await client.post("/api/chat", json={
                 "model": request.model or self._default_model,
                 "messages": messages,
@@ -72,9 +125,10 @@ class OllamaProvider(ModelProvider):
         )
 
     async def stream(self, request: CompleteRequest) -> AsyncIterator[StreamChunk]:
+        await self._ensure_healthy()
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=120.0) as client:
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
             async with client.stream("POST", "/api/chat", json={
                 "model": request.model or self._default_model,
                 "messages": messages,
@@ -103,7 +157,8 @@ class OllamaProvider(ModelProvider):
                     )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=60.0) as client:
+        await self._ensure_healthy()
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
             resp = await client.post("/api/embed", json={
                 "model": request.model or self._default_model,
                 "input": request.texts,
