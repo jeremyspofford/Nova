@@ -33,8 +33,11 @@ services:
     ports:
       - "5432:5432"
     healthcheck:
-      <<: *nova-healthcheck
       test: ["CMD-SHELL", "pg_isready -U nova -d nova"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 15s
     deploy:
       resources:
         limits:
@@ -272,7 +275,7 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Networks
