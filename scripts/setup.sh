@@ -36,7 +36,7 @@ fi
 # ── Parse models to pull from models.yaml ────────────────────────────────────
 if [ ! -f "${MODELS_YAML}" ]; then
   echo "⚠ models.yaml not found at ${MODELS_YAML} — using defaults"
-  MODELS_TO_PULL=("nomic-embed-text" "llama3.2")
+  MODELS_TO_PULL=("nomic-embed-text" "qwen2.5:1.5b" "llama3.2")
 else
   # Use Python (guaranteed present in any environment) to parse the YAML.
   # Write the parser to a temp file first — combining <<'EOF' inside <(...)

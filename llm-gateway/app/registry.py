@@ -318,6 +318,7 @@ MODEL_REGISTRY: dict[str, ModelProvider] = {
     "chatgpt/gpt-5.3-codex":             _chatgpt_subscription,
 
     # ── Local (Ollama) — will be overridden per-request by routing strategy ───
+    "qwen2.5:1.5b":                       _ollama,
     "llama3.2":                           _ollama,
     "llama3.2:3b":                        _ollama,
     "llama3.1":                           _ollama,

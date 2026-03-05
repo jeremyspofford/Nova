@@ -12,6 +12,11 @@ ollama:
       required: true
       description: "768-dim text embeddings (memory service depends on this)"
 
+    # ── Starter model (CPU-friendly, auto-pulled on first setup) ─────────────
+    - name: qwen2.5:1.5b
+      required: false
+      description: "1.5B params, ~1 GB — CPU-friendly starter, 32k context"
+
     # ── Chat models (optional — comment out any you don't need locally) ──────
     # These are only needed if you want local inference.
     # If you've configured Cerebras, Groq, Claude Max, etc. in .env, you can
