@@ -204,6 +204,59 @@ export const MCP_CATALOG: CatalogEntry[] = [
     tags: ['communication'],
     docs: 'https://github.com/modelcontextprotocol/servers/tree/main/src/slack',
   },
+  {
+    id: 'cloudflare',
+    name: 'cloudflare',
+    displayName: 'Cloudflare',
+    description: 'Manage Cloudflare Workers, KV, R2, D1, DNS, and Tunnels via the Cloudflare API.',
+    command: 'npx',
+    args: ['-y', '@cloudflare/mcp-server-cloudflare'],
+    env: [
+      {
+        key: 'CLOUDFLARE_API_TOKEN',
+        label: 'Cloudflare API Token',
+        description: 'Create a token at https://dash.cloudflare.com/profile/api-tokens with appropriate permissions.',
+        placeholder: '',
+        required: true,
+      },
+      {
+        key: 'CLOUDFLARE_ACCOUNT_ID',
+        label: 'Cloudflare Account ID',
+        description: 'Found on the right side of your Cloudflare dashboard overview page.',
+        placeholder: '',
+        required: true,
+      },
+    ],
+    tags: ['infrastructure', 'networking'],
+    docs: 'https://github.com/cloudflare/mcp-server-cloudflare',
+  },
+  {
+    id: 'tailscale',
+    name: 'tailscale',
+    displayName: 'Tailscale',
+    description: 'Manage Tailscale devices, ACLs, DNS, and network configuration.',
+    command: 'npx',
+    args: ['-y', '@hexsleeves/tailscale-mcp-server'],
+    env: [
+      {
+        key: 'TAILSCALE_API_KEY',
+        label: 'Tailscale API Key',
+        description: 'Create an API key at https://login.tailscale.com/admin/settings/keys.',
+        placeholder: 'tskey-api-...',
+        required: true,
+      },
+      {
+        key: 'TAILSCALE_TAILNET',
+        label: 'Tailnet Name',
+        description: 'Your tailnet name (e.g. your-org.ts.net or email). Use "-" for the default tailnet.',
+        placeholder: '-',
+        required: true,
+        default: '-',
+      },
+    ],
+    tags: ['infrastructure', 'networking'],
+    docs: 'https://github.com/hexsleeves/tailscale-mcp-server',
+  },
 ]
 
 export const ALL_TAGS = Array.from(

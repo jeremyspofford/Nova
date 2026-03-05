@@ -17,6 +17,7 @@ import { Pods } from './pages/Pods'
 import { AgentEndpoints } from './pages/AgentEndpoints'
 import { MemoryInspector } from './pages/MemoryInspector'
 import { Recovery } from './pages/Recovery'
+import { RemoteAccess } from './pages/RemoteAccess'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,6 +77,7 @@ function AppShell() {
             <Route path="/models"   element={<Models />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/recovery" element={<Recovery />} />
+            <Route path="/remote-access" element={<RemoteAccess />} />
           </Routes>
         </main>
       </div>

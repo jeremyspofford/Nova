@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Activity, Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, ShieldAlert, Lock, Unlock } from 'lucide-react'
+import { Activity, Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, ShieldAlert, Globe, Lock, Unlock } from 'lucide-react'
 import clsx from 'clsx'
 
 const links = [
@@ -55,6 +55,9 @@ export function NavBar() {
               <span title="Insecure connection — not using HTTPS" className="text-amber-500"><Unlock size={14} /></span>
             ) : null
           )}
+          <button onClick={() => navigate('/remote-access')} title="Remote Access" className="text-neutral-400 hover:text-teal-600 dark:hover:text-teal-400 transition-colors">
+            <Globe size={16} />
+          </button>
           <button onClick={() => navigate('/recovery')} title="Recovery" className="text-neutral-400 hover:text-amber-600 dark:hover:text-amber-400 transition-colors">
             <ShieldAlert size={16} />
           </button>
