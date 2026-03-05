@@ -319,6 +319,15 @@ async def revoke_key(key_id: UUID, _admin: AdminDep):
         raise HTTPException(status_code=404, detail="Key not found or already revoked")
 
 
+@router.get("/api/v1/keys/validate")
+async def validate_key(key: ApiKeyDep):
+    """Validate an API key. Returns 200 if valid, 401 if not.
+
+    Used internally by chat-api to authenticate WebSocket connections.
+    """
+    return {"valid": True, "name": key.name}
+
+
 # ── Platform configuration (admin-only) ──────────────────────────────────────
 
 class ConfigUpdateRequest(BaseModel):

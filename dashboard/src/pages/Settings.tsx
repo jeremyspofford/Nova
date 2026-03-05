@@ -418,11 +418,17 @@ function LLMRoutingSection({
   const wolMac = useConfigValue(entries, 'llm.wol_mac', '')
   const wolBroadcast = useConfigValue(entries, 'llm.wol_broadcast', '255.255.255.255')
 
+  const [strategySaved, setStrategySaved] = useState(false)
+
+  const usesOllama = strategy !== 'cloud-only'
+  const usesCloud = strategy !== 'local-only'
+
   const { data: ollamaStatus } = useQuery({
     queryKey: ['ollama-status'],
     queryFn: getOllamaStatus,
     staleTime: 10_000,
     refetchInterval: 15_000,
+    enabled: usesOllama,
   })
 
   const [testing, setTesting] = useState(false)
@@ -441,6 +447,12 @@ function LLMRoutingSection({
     }
   }, [])
 
+  const handleStrategyChange = (value: string) => {
+    onSave('llm.routing_strategy', JSON.stringify(value))
+    setStrategySaved(true)
+    setTimeout(() => setStrategySaved(false), 1500)
+  }
+
   return (
     <Section
       icon={Radio}
@@ -449,12 +461,17 @@ function LLMRoutingSection({
     >
       {/* Strategy selector */}
       <div>
-        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Routing Strategy</label>
+        <div className="mb-2 flex items-center gap-2">
+          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Routing Strategy</label>
+          {strategySaved && (
+            <span className="text-xs text-emerald-600 dark:text-emerald-400 animate-pulse">Saved</span>
+          )}
+        </div>
         <div className="inline-flex flex-wrap rounded-lg border border-neutral-200 dark:border-neutral-700 p-0.5">
           {ROUTING_STRATEGIES.map(({ value, label }) => (
             <button
               key={value}
-              onClick={() => onSave('llm.routing_strategy', JSON.stringify(value))}
+              onClick={() => handleStrategyChange(value)}
               disabled={saving}
               className={
                 'rounded-md px-3 py-1.5 text-xs font-medium transition-colors ' +
@@ -472,92 +489,100 @@ function LLMRoutingSection({
         </p>
       </div>
 
-      {/* Ollama status indicator */}
-      <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {ollamaStatus?.healthy ? (
-              <Wifi size={14} className="text-emerald-500" />
-            ) : (
-              <WifiOff size={14} className="text-red-500" />
+      {/* Ollama settings — hidden when cloud-only */}
+      {usesOllama && (
+        <>
+          {/* Ollama status indicator */}
+          <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {ollamaStatus?.healthy ? (
+                  <Wifi size={14} className="text-emerald-500" />
+                ) : (
+                  <WifiOff size={14} className="text-red-500" />
+                )}
+                <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                  Ollama {ollamaStatus?.healthy ? 'Online' : 'Offline'}
+                </span>
+              </div>
+              <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
+                {ollamaStatus?.base_url ?? '...'}
+              </span>
+            </div>
+
+            {ollamaStatus?.wol_configured && (
+              <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                <Power size={12} />
+                <span>
+                  WoL {ollamaStatus.wol_last_sent_seconds_ago != null
+                    ? `sent ${ollamaStatus.wol_last_sent_seconds_ago}s ago`
+                    : 'ready'}
+                </span>
+              </div>
             )}
-            <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
-              Ollama {ollamaStatus?.healthy ? 'Online' : 'Offline'}
-            </span>
+
+            <div className="flex items-center justify-between">
+              <button
+                onClick={handleTest}
+                disabled={testing}
+                className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline disabled:opacity-40"
+              >
+                {testing ? 'Testing…' : 'Test Connection'}
+              </button>
+              {testResult && (
+                <span className={`text-xs ${testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                  {testResult.ok ? `${testResult.latency_ms}ms` : testResult.error ?? 'Failed'}
+                </span>
+              )}
+            </div>
           </div>
-          <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
-            {ollamaStatus?.base_url ?? '...'}
-          </span>
-        </div>
 
-        {ollamaStatus?.wol_configured && (
-          <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-            <Power size={12} />
-            <span>
-              WoL {ollamaStatus.wol_last_sent_seconds_ago != null
-                ? `sent ${ollamaStatus.wol_last_sent_seconds_ago}s ago`
-                : 'ready'}
-            </span>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between">
-          <button
-            onClick={handleTest}
-            disabled={testing}
-            className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline disabled:opacity-40"
-          >
-            {testing ? 'Testing…' : 'Test Connection'}
-          </button>
-          {testResult && (
-            <span className={`text-xs ${testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {testResult.ok ? `${testResult.latency_ms}ms` : testResult.error ?? 'Failed'}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Remote Ollama config */}
-      <ConfigField
-        label="Ollama URL"
-        configKey="llm.ollama_url"
-        value={ollamaUrl}
-        placeholder="http://192.168.1.50:11434"
-        description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var. Requires container restart to take effect."
-        onSave={onSave}
-        saving={saving}
-      />
-
-      <CloudFallbackModelPicker
-        value={cloudFallback}
-        onSave={onSave}
-        saving={saving}
-      />
-
-      {/* Wake-on-LAN config */}
-      <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
-        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Wake-on-LAN</label>
-        <div className="grid gap-3 sm:grid-cols-2">
+          {/* Remote Ollama config */}
           <ConfigField
-            label="MAC Address"
-            configKey="llm.wol_mac"
-            value={wolMac}
-            placeholder="AA:BB:CC:DD:EE:FF"
-            description="MAC of the remote Ollama host."
+            label="Ollama URL"
+            configKey="llm.ollama_url"
+            value={ollamaUrl}
+            placeholder="http://192.168.1.50:11434"
+            description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var. Requires container restart to take effect."
             onSave={onSave}
             saving={saving}
           />
-          <ConfigField
-            label="Broadcast IP"
-            configKey="llm.wol_broadcast"
-            value={wolBroadcast}
-            placeholder="192.168.1.255"
-            description="LAN broadcast address."
-            onSave={onSave}
-            saving={saving}
-          />
-        </div>
-      </div>
+
+          {/* Wake-on-LAN config */}
+          <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+            <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Wake-on-LAN</label>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ConfigField
+                label="MAC Address"
+                configKey="llm.wol_mac"
+                value={wolMac}
+                placeholder="AA:BB:CC:DD:EE:FF"
+                description="MAC of the remote Ollama host."
+                onSave={onSave}
+                saving={saving}
+              />
+              <ConfigField
+                label="Broadcast IP"
+                configKey="llm.wol_broadcast"
+                value={wolBroadcast}
+                placeholder="192.168.1.255"
+                description="LAN broadcast address."
+                onSave={onSave}
+                saving={saving}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Cloud fallback model — hidden when local-only */}
+      {usesCloud && (
+        <CloudFallbackModelPicker
+          value={cloudFallback}
+          onSave={onSave}
+          saving={saving}
+        />
+      )}
     </Section>
   )
 }
@@ -851,6 +876,61 @@ function AdminSecretSection() {
           className="rounded-md bg-accent-700 px-3 py-1.5 text-sm text-white hover:bg-accent-500"
         >
           {saved ? 'Saved' : 'Save'}
+        </button>
+      </div>
+    </Section>
+  )
+}
+
+// ── Notifications section ─────────────────────────────────────────────────────
+
+function NotificationsSection() {
+  const [enabled, setEnabled] = useState(() => localStorage.getItem('nova-notifications-enabled') === 'true')
+  const [permission, setPermission] = useState<NotificationPermission | 'unsupported'>(
+    'Notification' in window ? Notification.permission : 'unsupported'
+  )
+
+  const toggle = async () => {
+    if (!enabled) {
+      // Enabling — request permission first
+      if ('Notification' in window && Notification.permission !== 'granted') {
+        const result = await Notification.requestPermission()
+        setPermission(result)
+        if (result !== 'granted') return
+      }
+      localStorage.setItem('nova-notifications-enabled', 'true')
+      setEnabled(true)
+    } else {
+      localStorage.setItem('nova-notifications-enabled', 'false')
+      setEnabled(false)
+    }
+  }
+
+  return (
+    <Section
+      icon={Radio}
+      title="Notifications"
+      description="Desktop notifications for task completion (coming soon)"
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-stone-700 dark:text-stone-300">Enable notifications</p>
+          <p className="text-xs text-stone-500 dark:text-stone-400">
+            {permission === 'unsupported' ? 'Not supported in this browser' :
+             permission === 'denied' ? 'Blocked by browser — check site permissions' :
+             'Push notifications will be available when async tasks are implemented'}
+          </p>
+        </div>
+        <button
+          onClick={toggle}
+          disabled={permission === 'unsupported' || permission === 'denied'}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+            enabled ? 'bg-accent-600' : 'bg-stone-300 dark:bg-stone-600'
+          } ${(permission === 'unsupported' || permission === 'denied') ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+            enabled ? 'translate-x-6' : 'translate-x-1'
+          }`} />
         </button>
       </div>
     </Section>
@@ -1224,6 +1304,9 @@ export function Settings() {
 
       {/* ── Appearance ────────────────────────────────────────────────────── */}
       <AppearanceSection />
+
+      {/* ── Notifications ──────────────────────────────────────────────────── */}
+      <NotificationsSection />
 
       {/* ── Developer Resources ────────────────────────────────────────────── */}
       <DeveloperResourcesSection />

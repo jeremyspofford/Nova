@@ -32,7 +32,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Tighten in production
+    allow_origins=[o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -292,6 +292,14 @@ async def test_ui():
   </span>
 </header>
 
+<div id="token-bar" style="display:none; padding:8px 16px; background:#f5f5f4; border-bottom:1px solid #e7e5e0; font-size:13px;">
+  <label style="display:flex;align-items:center;gap:8px;">
+    <span style="color:#78716c;">API Key:</span>
+    <input id="token-input" type="password" placeholder="sk-nova-..." style="flex:1;padding:6px 10px;border:1px solid #d6d3d1;border-radius:6px;font-size:13px;background:#fff;" />
+    <button onclick="connectWithToken()" style="padding:6px 12px;background:#0f766e;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;">Connect</button>
+  </label>
+</div>
+
 <div id="messages"></div>
 
 <div id="composer">
@@ -307,7 +315,10 @@ async def test_ui():
   const sendBtn = document.getElementById('send');
   const dot     = document.getElementById('status-dot');
   const statusTxt = document.getElementById('status-text');
+  const tokenBar = document.getElementById('token-bar');
+  const tokenInput = document.getElementById('token-input');
   let ws, sessionId, streamDiv, streamRaw = '';
+  let authToken = localStorage.getItem('nova-chat-token') || '';
 
   marked.setOptions({ breaks: true });
 
@@ -317,13 +328,27 @@ async def test_ui():
     inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + 'px';
   });
 
+  /* ── Token helpers ── */
+  function connectWithToken() {
+    authToken = tokenInput.value.trim();
+    if (authToken) {
+      localStorage.setItem('nova-chat-token', authToken);
+    }
+    if (ws) ws.close();
+    connect();
+  }
+
   /* ── WebSocket ── */
   function connect() {
-    ws = new WebSocket(`ws://${location.host}/ws/chat`);
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let url = `${proto}//${location.host}/ws/chat`;
+    if (authToken) url += `?token=${encodeURIComponent(authToken)}`;
+    ws = new WebSocket(url);
 
     ws.onopen = () => {
       dot.className = 'connected';
       statusTxt.textContent = 'Connected';
+      tokenBar.style.display = 'none';
       sendBtn.disabled = false;
     };
 
@@ -357,11 +382,19 @@ async def test_ui():
         if (streamDiv) { streamDiv.classList.remove('streaming'); streamDiv = null; }
         addMsg('error', data.content || 'Unknown error');
         sendBtn.disabled = false;
+        if (data.content && data.content.includes('Authentication')) {
+          tokenBar.style.display = 'block';
+        }
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (e) => {
       dot.className = '';
+      if (e.code === 4001) {
+        statusTxt.textContent = 'Auth required';
+        tokenBar.style.display = 'block';
+        return; // Don't auto-reconnect on auth failure
+      }
       statusTxt.textContent = 'Reconnecting…';
       sendBtn.disabled = true;
       setTimeout(connect, 2000);

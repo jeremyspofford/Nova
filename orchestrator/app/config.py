@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     nova_admin_secret: str = "nova-admin-secret-change-me"
     # Phase 2: Set False in .env during local dev to skip API key validation entirely
     require_auth: bool = True
+    cors_allowed_origins: str = "http://localhost:3001,http://localhost:5173,http://localhost:8080"
 
     # Phase 3: Code & Terminal Tools
     workspace_root: str = "/workspace"

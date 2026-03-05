@@ -72,11 +72,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Allow the dashboard (and Vite dev server) to call the orchestrator from
-# a different origin. This is a local dev tool — wide-open CORS is fine.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )

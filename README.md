@@ -23,31 +23,30 @@ Built by [Aria Labs](https://arialabs.ai).
 
 ## Quick Start
 
-**1. Copy and configure environment:**
+### Prerequisites
+- [Docker Desktop](https://docker.com/products/docker-desktop) (includes Docker Compose)
 
+### Install
 ```bash
-cp .env.example .env
-# Edit .env with your API keys and secrets
+git clone https://github.com/arialabs/nova.git
+cd nova
+./setup
 ```
 
-**2. Start all services:**
+The setup wizard asks a few questions and starts everything.
+Open **http://localhost:3001** when it's done.
 
+### Remote GPU (optional)
+If you have a separate machine with a GPU for AI inference:
 ```bash
-make dev
-# or: docker compose up --build --watch
+# Run this ON the GPU machine:
+bash <(curl -s https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh)
 ```
+Then re-run `./setup` on the Nova machine and choose "Remote GPU".
 
-**3. Open the dashboard:** http://localhost:3000
-
----
-
-## Environment
-
-See [.env.example](.env.example) for all configurable values. Required fields:
-
-- `POSTGRES_PASSWORD` — database password
-- `NOVA_ADMIN_SECRET` — dashboard admin password (default insecure, change before deployment)
-- At least one model provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.)
+### Manual configuration
+If you prefer to skip the wizard, copy `.env.example` to `.env`, edit it, and run `make dev`.
+See [.env.example](.env.example) for all configurable values.
 
 ---
 

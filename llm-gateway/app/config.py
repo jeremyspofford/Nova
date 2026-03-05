@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     # Cost tracking
     track_costs: bool = True
 
+    cors_allowed_origins: str = "http://localhost:3001,http://localhost:5173,http://localhost:8080"
+
     service_host: str = "0.0.0.0"
     service_port: int = 8001
     log_level: str = "INFO"

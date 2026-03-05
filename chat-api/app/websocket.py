@@ -2,12 +2,15 @@
 WebSocket handler — the user-facing real-time chat interface.
 
 Protocol (JSON over WebSocket):
+  Client → Server: {"type": "auth", "token": "sk-nova-..."}  (if REQUIRE_AUTH=true)
   Client → Server: {"type": "user", "content": "Hello!", "session_id": "optional-uuid"}
   Server → Client: {"type": "stream_chunk", "delta": "Hi", "session_id": "..."}
   Server → Client: {"type": "stream_end", "session_id": "..."}
   Server → Client: {"type": "error", "content": "...", "session_id": "..."}
 
 session_id persists across reconnects — conversation continuity survives disconnects.
+Auth: token can be passed as ?token= query param, or as the first message with type "auth".
+When REQUIRE_AUTH=false (dev mode), auth is skipped entirely.
 """
 from __future__ import annotations
 
@@ -25,9 +28,70 @@ from app.session import get_or_create_session
 log = logging.getLogger(__name__)
 
 
+async def _validate_token(token: str) -> bool:
+    """Validate an API key against the orchestrator's key lookup."""
+    try:
+        async with httpx.AsyncClient(base_url=settings.orchestrator_url, timeout=5.0) as client:
+            resp = await client.get(
+                "/api/v1/keys/validate",
+                headers={"X-API-Key": token},
+            )
+            return resp.status_code == 200
+    except Exception as e:
+        log.warning("Token validation failed: %s", e)
+        return False
+
+
+async def _authenticate(websocket: WebSocket) -> bool:
+    """Authenticate the WebSocket connection. Returns True if auth succeeds or is not required."""
+    if not settings.require_auth:
+        return True
+
+    # Check query param first: ws://host/ws/chat?token=sk-nova-...
+    token = websocket.query_params.get("token")
+    if token:
+        if await _validate_token(token):
+            return True
+        await websocket.send_json({
+            "type": ChatMessageType.error,
+            "content": "Authentication failed — invalid token",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        return False
+
+    # Wait for first message to be an auth message
+    try:
+        raw = await websocket.receive_text()
+        msg = json.loads(raw)
+        if msg.get("type") == "auth" and msg.get("token"):
+            if await _validate_token(msg["token"]):
+                return True
+            await websocket.send_json({
+                "type": ChatMessageType.error,
+                "content": "Authentication failed — invalid token",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+            return False
+    except (json.JSONDecodeError, Exception):
+        pass
+
+    await websocket.send_json({
+        "type": ChatMessageType.error,
+        "content": "Authentication required — send token as ?token= query param or {type: 'auth', token: '...'}",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+    return False
+
+
 async def handle_websocket(websocket: WebSocket):
     await websocket.accept()
     log.info("WebSocket connection accepted from %s", websocket.client)
+
+    # Authenticate before processing messages
+    if not await _authenticate(websocket):
+        log.warning("WebSocket auth failed from %s", websocket.client)
+        await websocket.close(code=4001, reason="Authentication required")
+        return
 
     session_id: str | None = None
     agent_id: str | None = None

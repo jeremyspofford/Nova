@@ -1,4 +1,4 @@
-.PHONY: help up dev build down logs ps watch migrate backup restore
+.PHONY: help setup up dev build down logs ps watch migrate backup restore
 
 DASHBOARD    = dashboard
 
@@ -20,6 +20,9 @@ COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY)
 help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*?## "}; /^[a-zA-Z_-]+:.*?## / \
 	  {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+setup: ## Interactive setup wizard (first-time or reconfigure)
+	@./setup
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 up: ## Start all services detached (production / staging)
