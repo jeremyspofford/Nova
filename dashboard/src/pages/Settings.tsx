@@ -863,6 +863,7 @@ const SERVICES = [
   { name: 'Orchestrator',   port: 8000, healthPath: '/api/health/live', desc: 'Agent lifecycle, pipeline execution, task queue' },
   { name: 'LLM Gateway',    port: 8001, healthPath: '/v1/health/live',  desc: 'Multi-provider model routing, completions, embeddings' },
   { name: 'Memory Service', port: 8002, healthPath: '/mem/health/live', desc: 'Semantic memory storage and hybrid retrieval' },
+  { name: 'Recovery',       port: 8888, healthPath: '/recovery-api/health/live', desc: 'Backup, restore, factory reset, service management' },
 ] as const
 
 /** Build a direct URL to a service's Swagger docs (bypasses nginx prefix issues). */
@@ -875,6 +876,7 @@ const ENDPOINTS = [
   { name: 'LLM Gateway',    port: 8001, desc: 'Model routing, completions, embeddings' },
   { name: 'Memory Service', port: 8002, desc: 'Semantic memory, retrieval' },
   { name: 'Chat API',       port: 8080, desc: 'WebSocket streaming bridge' },
+  { name: 'Recovery',       port: 8888, desc: 'Backup, restore, factory reset, service management' },
   { name: 'Dashboard',      port: '5173 / 3000', desc: 'Dev (Vite) / Prod (nginx)' },
   { name: 'PostgreSQL',     port: 5432, desc: 'pgvector-enabled database' },
   { name: 'Redis',          port: 6379, desc: 'State, task queue, rate limiting' },
@@ -908,7 +910,7 @@ function DeveloperResourcesSection() {
       description="API documentation, service health, and endpoint reference."
     >
       {/* Service cards */}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {SERVICES.map(s => {
           const alive = health?.[s.name]
           return (

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is Nova
 
-Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks it into subtasks, executes them through a coordinated agent pipeline, and re-plans as needed. It runs as a 7-service Docker Compose stack.
+Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks it into subtasks, executes them through a coordinated agent pipeline, and re-plans as needed. It runs as an 8-service Docker Compose stack.
 
 ## Architecture
 
@@ -15,9 +15,10 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 - **chat-api** (8080) — WebSocket streaming bridge for external clients (FastAPI)
 - **dashboard** (3000/5173) — React admin UI (Vite dev / nginx prod)
 - **postgres** (5432) — pgvector-enabled PostgreSQL 16
+- **recovery** (8888) — Backup/restore, factory reset, service management (FastAPI + asyncpg + Docker SDK). Only depends on postgres — stays alive when other services crash.
 - **redis** (6379) — State, task queue (BRPOP), rate limiting, session memory
 
-**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/memories/*`). Dashboard proxies to orchestrator (`/api`) and llm-gateway (`/v1`). Chat-api forwards to orchestrator's streaming endpoint.
+**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/memories/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), and recovery (`/recovery-api`). Chat-api forwards to orchestrator's streaming endpoint. Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
 
 **Shared contracts:** `nova-contracts/` is a Pydantic-only package defining the API contract between services (chat, llm, memory, orchestrator models). Any service satisfying these models is a drop-in replacement.
 
@@ -45,6 +46,11 @@ make down         # stop all
 # GPU overlays (auto-detected by setup.sh)
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d   # NVIDIA
 docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d  # AMD ROCm
+
+# Backup / Restore (emergency CLI — normally use the Recovery UI at /recovery)
+make backup               # create a database backup to ./backups/
+make restore              # list available backups
+make restore F=<file>     # restore a specific backup
 ```
 
 **Dashboard dev server:** Runs on port 5173 via Vite with proxy to backend services. Production uses nginx on port 3000.
