@@ -240,6 +240,196 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 
 ---
 
+## 🔜 Phase 5c — Skills & Rules (Agent Extensibility)
+
+> **Prerequisite:** Phase 4 (Quartet Pipeline) and Phase 5b (Pod Management UI) must be functional.
+> Skills and Rules make agents configurable without code changes. Skills are reusable prompt
+> templates shared across agents/pods. Rules are declarative behavior constraints that complement
+> the Guardrail Agent with user-defined policies and pre-execution enforcement.
+
+### Why this phase exists
+
+Nova's existing extensibility is more mature than expected: `mcp_servers` table, per-agent `allowed_tools`, `platform_config` key-value store, and `agent_endpoints` for external agent delegation. But two things are genuinely missing:
+
+1. **Skills** — `pod_agents.system_prompt` allows per-agent custom prompts, but skills can't be **shared** across agents/pods without duplicating text. The interactive chat path has no mechanism to pull in reusable prompt templates. No versioning, enable/disable, or parameterization.
+
+2. **Rules** — The Guardrail Agent does post-hoc LLM-based review, but its checks are **hardcoded** in Python (prompt injection, PII, credential leak, spec drift). There's no **pre-execution** enforcement (can't block `rm -rf` before it runs). Users can't add custom rules without modifying source code.
+
+### A. Skills System — Reusable Prompt Templates
+
+**Schema: Migration `010_skills_rules.sql`**
+
+```sql
+CREATE TABLE IF NOT EXISTS skills (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    content     TEXT NOT NULL,                -- prompt text, may have {{param}} placeholders
+    scope       TEXT NOT NULL DEFAULT 'global', -- global | pod | agent
+    parameters  JSONB NOT NULL DEFAULT '[]',  -- [{name, default, description}]
+    category    TEXT NOT NULL DEFAULT 'custom', -- workflow | coding | review | safety | custom
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    priority    INTEGER NOT NULL DEFAULT 0,   -- higher = injected earlier
+    is_system   BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Scope join tables
+CREATE TABLE IF NOT EXISTS skills_pods (
+    skill_id UUID REFERENCES skills(id) ON DELETE CASCADE,
+    pod_id   UUID REFERENCES pods(id) ON DELETE CASCADE,
+    PRIMARY KEY (skill_id, pod_id)
+);
+CREATE TABLE IF NOT EXISTS skills_agents (
+    skill_id     UUID REFERENCES skills(id) ON DELETE CASCADE,
+    pod_agent_id UUID REFERENCES pod_agents(id) ON DELETE CASCADE,
+    PRIMARY KEY (skill_id, pod_agent_id)
+);
+```
+
+**API endpoints (in `pipeline_router.py`):**
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/v1/skills` | List all skills |
+| POST | `/api/v1/skills` | Create skill |
+| PATCH | `/api/v1/skills/{id}` | Update skill |
+| DELETE | `/api/v1/skills/{id}` | Delete skill |
+| PUT | `/api/v1/skills/{id}/pods` | Set pod assignments |
+| PUT | `/api/v1/skills/{id}/agents` | Set agent assignments |
+
+**Integration: `orchestrator/app/pipeline/skills.py` (new)**
+
+- `resolve_skills(pod_id, pod_agent_id)` → returns formatted `## Active Skills` prompt section
+- Resolution order: global skills + pod-scoped skills + agent-scoped skills, ordered by priority
+- **Pipeline path**: inject into `executor.py` `_run_agent()` before agent instantiation
+- **Chat path**: inject global skills into `runner.py` `_build_nova_context()`
+- Cache with 30s TTL (skills change rarely)
+
+### B. Rules System — Declarative Behavior Constraints
+
+**Schema (same migration `010_skills_rules.sql`):**
+
+```sql
+CREATE TABLE IF NOT EXISTS rules (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         TEXT NOT NULL UNIQUE,
+    description  TEXT NOT NULL DEFAULT '',
+    rule_text    TEXT NOT NULL,                   -- human-readable constraint
+    enforcement  TEXT NOT NULL DEFAULT 'soft',     -- soft | hard | both
+    pattern      TEXT,                             -- regex for hard enforcement
+    target_tools TEXT[],                           -- which tools pattern applies to (NULL = all)
+    action       TEXT NOT NULL DEFAULT 'block',    -- block | warn | require_approval
+    scope        TEXT NOT NULL DEFAULT 'global',
+    category     TEXT NOT NULL DEFAULT 'custom',   -- safety | quality | compliance | workflow
+    severity     TEXT NOT NULL DEFAULT 'high',     -- low | medium | high | critical
+    enabled      BOOLEAN NOT NULL DEFAULT TRUE,
+    is_system    BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Scope join tables (same pattern as skills)
+CREATE TABLE IF NOT EXISTS rules_pods (...);
+CREATE TABLE IF NOT EXISTS rules_agents (...);
+```
+
+**Two enforcement paths:**
+
+1. **Soft (LLM-based)**: Rules injected into Guardrail Agent's system prompt via `resolve_guardrail_rules()`. Guardrail checks compliance as part of normal review.
+
+2. **Hard (pre-execution)**: Rules with `pattern` checked in `execute_tool()` BEFORE tool runs. On match: block (return error to LLM), warn (run but log), or require_approval (pause for human).
+
+**Seed rules (3 system defaults):**
+
+| Rule | Enforcement | Action |
+|------|-------------|--------|
+| `no-rm-rf` — block recursive force delete | hard | block |
+| `workspace-boundary` — stay within /workspace | soft | block |
+| `no-secret-in-output` — no API keys in responses | soft | block |
+
+**API endpoints:** Same CRUD pattern as skills: `GET/POST/PATCH/DELETE /api/v1/rules`, plus scope assignment endpoints.
+
+**Integration: `orchestrator/app/pipeline/rules.py` (new)**
+
+- `resolve_guardrail_rules(pod_id)` → formatted rules section for guardrail prompt
+- `check_hard_rules(tool_name, arguments)` → `(allowed, violation_msg)`, called from `execute_tool()`
+- Cache compiled regexes keyed on `rule.id + rule.updated_at`
+
+### C. MCP Catalog Additions
+
+Three new entries for Nova's MCP server catalog (agents can use these conversationally):
+
+| Server | Why Nova's agents need it | Package |
+|--------|--------------------------|---------|
+| **Sentry** | Production error tracking — agents investigate errors, create issues | `@sentry/mcp-server-sentry` |
+| **Playwright** | Agents test their own web output, scrape pages | `@anthropic-ai/mcp-playwright` |
+| **Docker** | Agents inspect Nova's own containers, check logs | community `docker-mcp-server` |
+
+### Dashboard Pages
+
+**Skills page (`/skills`):**
+- List all skills with scope badges (global / pod / agent)
+- Create/edit with content editor (markdown-capable textarea)
+- Parameter definition UI (name, default, description)
+- Pod/agent assignment via multi-select
+- System skills shown as non-editable
+- Enable/disable toggle
+
+**Rules page (`/rules`):**
+- List all rules with enforcement type and severity badges
+- Create/edit with regex pattern tester (live validation)
+- Tool targeting (select which tools the rule applies to)
+- System rules shown as non-deletable
+- Enable/disable toggle
+- "Test rule" button — paste a sample tool call, see if rule matches
+
+### Files to Create/Modify
+
+| File | Action |
+|------|--------|
+| `orchestrator/app/migrations/010_skills_rules.sql` | **New** — schema + seed rules |
+| `orchestrator/app/pipeline/skills.py` | **New** — skill resolution + injection |
+| `orchestrator/app/pipeline/rules.py` | **New** — rule resolution + hard enforcement |
+| `orchestrator/app/pipeline_router.py` | Add CRUD endpoints for skills + rules |
+| `orchestrator/app/pipeline/executor.py` | Inject skills into system prompts, rules into guardrail |
+| `orchestrator/app/agents/runner.py` | Inject global skills into interactive chat context |
+| `orchestrator/app/tools/__init__.py` | Add `check_hard_rules()` call in `execute_tool()` |
+| `dashboard/src/api.ts` | Add skills + rules API functions |
+| `dashboard/src/pages/Skills.tsx` | **New** — skill management page |
+| `dashboard/src/pages/Rules.tsx` | **New** — rule management page |
+| `dashboard/src/App.tsx` | Add `/skills` and `/rules` routes |
+| `dashboard/src/components/NavBar.tsx` | Add Skills + Rules nav links |
+| `dashboard/src/lib/mcp-catalog.ts` | Add Sentry, Playwright, Docker entries |
+
+### Implementation Order
+
+| Step | Deliverable |
+|------|-------------|
+| **1** | Migration `010_skills_rules.sql` (schema + seeds) |
+| **2** | Backend: `skills.py` + `rules.py` modules |
+| **3** | Backend: CRUD endpoints in `pipeline_router.py` |
+| **4** | Backend: Pipeline integration (executor.py, runner.py, tools/__init__.py) |
+| **5** | Dashboard: API functions |
+| **6** | Dashboard: Skills page |
+| **7** | Dashboard: Rules page |
+| **8** | Dashboard: Route + nav registration |
+| **9** | MCP catalog entries (Sentry, Playwright, Docker) |
+
+### Testing & Validation
+
+- [ ] `POST /api/v1/skills` creates a global skill → appears in agent system prompt
+- [ ] Pod-scoped skill only applies to agents in that pod
+- [ ] `POST /api/v1/rules` with `enforcement=hard` blocks matching tool calls
+- [ ] Seed rules (`no-rm-rf`, `workspace-boundary`, `no-secret-in-output`) present after migration
+- [ ] Skills page renders, CRUD works
+- [ ] Rules page renders, system rules show as non-deletable
+- [ ] MCP catalog shows Sentry, Playwright, Docker entries
+- [ ] `cd dashboard && npm run build` passes
+
+---
+
 ## ✅ Phase 5.5 — Hardening
 
 > Operational maturity before adding memory complexity.
