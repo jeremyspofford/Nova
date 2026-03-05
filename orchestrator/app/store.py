@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
@@ -33,7 +33,7 @@ def get_redis() -> aioredis.Redis:
 
 async def create_agent(config: AgentConfig) -> AgentInfo:
     agent_id = str(uuid4())
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     info = AgentInfo(
         id=UUID(agent_id),
         config=config,
@@ -62,7 +62,7 @@ async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     if not agent:
         return
     agent.status = status
-    agent.last_active = datetime.utcnow()
+    agent.last_active = datetime.now(timezone.utc)
     redis = get_redis()
     await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json())
 
@@ -138,7 +138,7 @@ async def update_agent_config(
     if system_prompt:
         agent.config.system_prompt = system_prompt
     agent.config.fallback_models = fallback_models
-    agent.last_active = datetime.utcnow()
+    agent.last_active = datetime.now(timezone.utc)
     redis = get_redis()
     await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json())
     log.info("Updated config for agent %s (%s)", agent_id, agent.config.name)

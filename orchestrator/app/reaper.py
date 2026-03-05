@@ -1,7 +1,7 @@
 """
 Reaper: periodic background task that detects and recovers from failures.
 
-Runs every REAPER_INTERVAL_SECONDS as asyncio.create_task in main.py lifespan.
+Runs every settings.reaper_interval_seconds as asyncio.create_task in main.py lifespan.
 Replaces the startup-only recover_stale_agents() with continuous monitoring.
 
 What it catches:
@@ -19,12 +19,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-logger = logging.getLogger(__name__)
+from .config import settings
 
-REAPER_INTERVAL_SECONDS = 60       # how often the reaper wakes up
-STALE_HEARTBEAT_SECONDS = 150      # task is stale if heartbeat silent for this long
-STALE_QUEUED_SECONDS    = 120      # task is stuck if queued but not started within this
-SESSION_TIMEOUT_BUFFER  = 30       # extra seconds before declaring a session timed out
+logger = logging.getLogger(__name__)
 
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
@@ -32,12 +29,12 @@ SESSION_TIMEOUT_BUFFER  = 30       # extra seconds before declaring a session ti
 async def reaper_loop() -> None:
     """
     Entry point. Started as asyncio.create_task in main.py lifespan.
-    Wakes every REAPER_INTERVAL_SECONDS, runs all reap checks, sleeps again.
+    Wakes every settings.reaper_interval_seconds, runs all reap checks, sleeps again.
     """
     logger.info("Reaper started")
     while True:
         try:
-            await asyncio.sleep(REAPER_INTERVAL_SECONDS)
+            await asyncio.sleep(settings.reaper_interval_seconds)
             await _reap_stale_running_tasks()
             await _reap_stuck_queued_tasks()
             await _reap_timed_out_sessions()
@@ -66,7 +63,7 @@ async def _reap_stale_running_tasks() -> None:
 
     ACTIVE_STATES = (
         "context_running", "task_running", "guardrail_running",
-        "review_running", "completing",
+        "code_review_running", "decision_running", "completing",
     )
 
     pool = get_pool()
@@ -82,7 +79,7 @@ async def _reap_stale_running_tasks() -> None:
               )
             """,
             list(ACTIVE_STATES),
-            str(STALE_HEARTBEAT_SECONDS),
+            str(settings.task_stale_seconds),
         )
 
         for task in stale_tasks:
@@ -92,8 +89,8 @@ async def _reap_stale_running_tasks() -> None:
 
             if retry_count < max_retries:
                 logger.warning(
-                    f"Reaper: task {task_id} stale in state '{task['status']}' "
-                    f"(attempt {retry_count + 1}/{max_retries}) — re-queuing"
+                    "Reaper: task %s stale in state '%s' (attempt %d/%d) — re-queuing",
+                    task_id, task["status"], retry_count + 1, max_retries,
                 )
                 updated = await conn.fetchval(
                     """
@@ -110,14 +107,14 @@ async def _reap_stale_running_tasks() -> None:
                     list(ACTIVE_STATES),
                 )
                 if not updated:
-                    logger.info(f"Reaper: task {task_id} already handled by another process — skipping")
+                    logger.info("Reaper: task %s already handled by another process — skipping", task_id)
                     continue
                 await enqueue_task(task_id)
                 await _audit(conn, "task_requeued", "warning", task_id=task_id,
                              data={"retry_count": retry_count + 1, "reason": "heartbeat_timeout"})
             else:
                 logger.error(
-                    f"Reaper: task {task_id} exhausted {max_retries} retries — failing"
+                    "Reaper: task %s exhausted %d retries — failing", task_id, max_retries,
                 )
                 await conn.execute(
                     """
@@ -150,29 +147,22 @@ async def _reap_stuck_queued_tasks() -> None:
 
     pool = get_pool()
     async with pool.acquire() as conn:
+        # CAS UPDATE: atomically claim stuck tasks by bumping queued_at.
+        # Only one reaper wins the row — prevents double-enqueue races.
         stuck = await conn.fetch(
             """
-            SELECT id FROM tasks
+            UPDATE tasks
+            SET queued_at = now()
             WHERE status = 'queued'
               AND queued_at < now() - ($1 || ' seconds')::interval
+            RETURNING id
             """,
-            str(STALE_QUEUED_SECONDS),
+            str(settings.stale_queued_seconds),
         )
 
         for task in stuck:
             task_id = str(task["id"])
-            # Guard: confirm task is still queued before re-pushing
-            still_queued = await conn.fetchval(
-                """
-                SELECT id FROM tasks
-                WHERE id = $1 AND status = 'queued'
-                """,
-                task["id"],
-            )
-            if not still_queued:
-                logger.info(f"Reaper: task {task_id} no longer queued — skipping")
-                continue
-            logger.warning(f"Reaper: task {task_id} stuck in queued state — re-pushing to queue")
+            logger.warning("Reaper: task %s stuck in queued state — re-pushing to queue", task_id)
             await enqueue_task(task_id)
             await _audit(conn, "task_requeued", "warning", task_id=task_id,
                          data={"reason": "stuck_in_queued"})
@@ -201,15 +191,15 @@ async def _reap_timed_out_sessions() -> None:
                   COALESCE(pa.timeout_seconds, 60) + $1
               ) * interval '1 second'
             """,
-            SESSION_TIMEOUT_BUFFER,
+            settings.session_timeout_buffer_seconds,
         )
 
         for session in timed_out:
             session_id = str(session["id"])
             task_id    = str(session["task_id"])
             logger.warning(
-                f"Reaper: agent session {session_id} (role={session['role']}) "
-                f"timed out on task {task_id}"
+                "Reaper: agent session %s (role=%s) timed out on task %s",
+                session_id, session["role"], task_id,
             )
             await conn.execute(
                 """
@@ -237,18 +227,12 @@ async def _audit(
     data: dict | None = None,
 ) -> None:
     """Write a reaper event to the immutable audit log."""
-    import json
-    try:
-        await conn.execute(
-            """
-            INSERT INTO audit_log (event_type, severity, task_id, message, data)
-            VALUES ($1, $2, $3::uuid, $4, $5::jsonb)
-            """,
-            event_type,
-            severity,
-            task_id,
-            f"Reaper: {event_type}",
-            json.dumps(data or {}),
-        )
-    except Exception:
-        logger.exception("Failed to write reaper audit log entry")
+    from .audit import write_audit_log
+    await write_audit_log(
+        conn,
+        event_type=event_type,
+        severity=severity,
+        task_id=task_id,
+        message=f"Reaper: {event_type}",
+        data=data,
+    )

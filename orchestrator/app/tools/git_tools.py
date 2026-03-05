@@ -117,7 +117,7 @@ GIT_TOOLS: list[ToolDefinition] = [
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _resolve_repo(repo_path: str | None) -> Path:
-    """Resolve repo_path inside workspace, defaulting to workspace root."""
+    """Resolve repo_path inside the current sandbox root, defaulting to sandbox root."""
     from app.tools.code_tools import _resolve_path
     return _resolve_path(repo_path or ".")
 

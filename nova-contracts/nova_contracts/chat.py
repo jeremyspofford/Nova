@@ -3,10 +3,9 @@ Chat API contracts — WebSocket message protocol.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +24,7 @@ class ChatMessage(BaseModel):
     content: str
     session_id: str
     agent_id: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -33,7 +32,7 @@ class StreamChunkMessage(BaseModel):
     type: ChatMessageType = ChatMessageType.stream_chunk
     session_id: str
     delta: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class SessionInfo(BaseModel):

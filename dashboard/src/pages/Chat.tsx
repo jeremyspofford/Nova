@@ -6,6 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { streamChat, getModels, type ChatMessage } from '../api'
 import { useChatStore, type Message } from '../stores/chat-store'
+import Card from '../components/Card'
 
 // ── Message bubble ────────────────────────────────────────────────────────────
 
@@ -171,7 +172,7 @@ export function Chat() {
 
   return (
     <div className="px-4 py-6 sm:px-6 h-[calc(100vh-57px)]">
-     <div className="flex flex-col h-full rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+     <Card className="flex flex-col h-full overflow-hidden">
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-4 py-3 sm:px-6 shrink-0">
@@ -272,7 +273,7 @@ export function Chat() {
           )}
         </div>
       </div>
-     </div>
+     </Card>
     </div>
   )
 }

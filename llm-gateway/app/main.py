@@ -28,6 +28,10 @@ async def lifespan(app: FastAPI):
     log.info("LLM Gateway ready")
     yield
     log.info("LLM Gateway shutting down")
+    from app.rate_limiter import close as close_rate_limiter
+    from app.response_cache import close as close_response_cache
+    await close_rate_limiter()
+    await close_response_cache()
 
 
 app = FastAPI(
@@ -38,5 +42,6 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(health_router, prefix="/v1")  # also expose at /v1/health/* for dashboard proxy
 app.include_router(router)
 app.include_router(openai_router)  # mounts at /v1/chat/completions, /v1/models

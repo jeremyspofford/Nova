@@ -4,10 +4,10 @@ Any implementation satisfying these models can replace the Memory Service.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -71,7 +71,7 @@ class GetContextResponse(BaseModel):
     agent_id: str
     memories: list[MemoryResult]
     total_tokens_estimated: int
-    assembled_at: datetime = Field(default_factory=datetime.utcnow)
+    assembled_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 class UpdateMemoryRequest(BaseModel):
@@ -86,3 +86,48 @@ class BulkStoreRequest(BaseModel):
 class BulkStoreResponse(BaseModel):
     stored: list[UUID]
     failed: list[int]  # indices of failed items
+
+
+class SaveFactRequest(BaseModel):
+    agent_id: str
+    project_id: str
+    category: str
+    key: str
+    content: str
+    base_confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SaveFactResponse(BaseModel):
+    id: UUID
+    project_id: str
+    category: str
+    key: str
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    is_new: bool
+
+
+class BrowseMemoryItem(BaseModel):
+    id: UUID
+    content: str
+    tier: MemoryTier
+    agent_id: str
+    metadata: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime | None = None
+    # Semantic-specific fields
+    project_id: str | None = None
+    category: str | None = None
+    key: str | None = None
+    base_confidence: float | None = None
+    effective_confidence: float | None = None
+    last_accessed_at: datetime | None = None
+
+
+class BrowseMemoryResponse(BaseModel):
+    items: list[BrowseMemoryItem]
+    total: int
+    offset: int
+    limit: int

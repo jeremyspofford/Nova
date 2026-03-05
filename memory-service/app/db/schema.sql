@@ -108,3 +108,20 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
     model        TEXT NOT NULL,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Phase 6: ACT-R confidence decay + fact deduplication columns on semantic_memories
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS project_id TEXT;
+ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS category TEXT;
+ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS key TEXT;
+ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS base_confidence FLOAT NOT NULL DEFAULT 1.0;
+ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_semantic_project_category_key') THEN
+    ALTER TABLE semantic_memories ADD CONSTRAINT uq_semantic_project_category_key UNIQUE (project_id, category, key);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS semantic_mem_last_accessed_idx ON semantic_memories (last_accessed_at);
+CREATE INDEX IF NOT EXISTS semantic_mem_project_idx ON semantic_memories (project_id) WHERE project_id IS NOT NULL;

@@ -142,11 +142,7 @@ class ChatGPTSubscriptionProvider(ModelProvider):
         return bool(self._access_token)
 
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
-        if not self.is_available:
-            raise RuntimeError(
-                "ChatGPT subscription provider unavailable: "
-                "run `codex login` or set CHATGPT_ACCESS_TOKEN"
-            )
+        self._assert_available()
 
         model = _MODEL_MAP.get(request.model, self._default_model)
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
@@ -185,8 +181,7 @@ class ChatGPTSubscriptionProvider(ModelProvider):
         )
 
     async def stream(self, request: CompleteRequest) -> AsyncIterator[StreamChunk]:
-        if not self.is_available:
-            raise RuntimeError("ChatGPT subscription provider unavailable")
+        self._assert_available()
 
         model = _MODEL_MAP.get(request.model, self._default_model)
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
@@ -196,14 +191,34 @@ class ChatGPTSubscriptionProvider(ModelProvider):
             messages=messages,
             temperature=request.temperature,
             stream=True,
+            stream_options={"include_usage": True},
             api_key=self._access_token,
         )
 
         async for chunk in response:
-            delta = chunk.choices[0].delta
-            finish_reason = chunk.choices[0].finish_reason
-            content = delta.content or ""
-            yield StreamChunk(delta=content, finish_reason=finish_reason)
+            choice = chunk.choices[0] if chunk.choices else None
+            content = ""
+            finish_reason = None
+            if choice:
+                content = choice.delta.content or ""
+                finish_reason = choice.finish_reason
+
+            # Extract usage from final chunk (sent by LiteLLM when include_usage=True)
+            input_tokens = None
+            output_tokens = None
+            cost = None
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                input_tokens = getattr(usage, "prompt_tokens", None)
+                output_tokens = getattr(usage, "completion_tokens", None)
+
+            yield StreamChunk(
+                delta=content,
+                finish_reason=finish_reason,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+            )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
         raise NotImplementedError(

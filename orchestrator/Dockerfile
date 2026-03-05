@@ -1,5 +1,11 @@
 FROM python:3.12-slim
 
+# Node.js is needed for npx-based MCP servers (e.g. puppeteer, brave-search)
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY nova-contracts /nova-contracts

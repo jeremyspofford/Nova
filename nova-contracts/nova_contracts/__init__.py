@@ -10,6 +10,10 @@ from .memory import (
     UpdateMemoryRequest,
     BulkStoreRequest,
     BulkStoreResponse,
+    SaveFactRequest,
+    SaveFactResponse,
+    BrowseMemoryItem,
+    BrowseMemoryResponse,
 )
 from .llm import (
     ModelCapability,
@@ -46,6 +50,7 @@ __all__ = [
     "SearchMemoryRequest", "MemoryResult", "SearchMemoryResponse",
     "GetContextRequest", "GetContextResponse", "UpdateMemoryRequest",
     "BulkStoreRequest", "BulkStoreResponse",
+    "SaveFactRequest", "SaveFactResponse", "BrowseMemoryItem", "BrowseMemoryResponse",
     "ModelCapability", "Message", "ToolCallRef", "ToolDefinition",
     "CompleteRequest", "CompleteResponse", "StreamChunk",
     "EmbedRequest", "EmbedResponse", "ModelInfo", "ToolCall",

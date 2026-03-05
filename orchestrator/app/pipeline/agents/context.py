@@ -56,11 +56,13 @@ Return ONLY valid JSON matching this exact schema — no markdown, no preamble:
         # We call the runner as a sub-invocation rather than re-implementing
         # the tool loop here.
         from ...agents.runner import run_agent_turn_raw
-        from ...tools import ALL_TOOLS
+        from ...tools import get_all_tools
 
-        # Filter to read-only operations — context agent must never write files
+        # Filter to read-only operations — context agent must never write files.
+        # Also allow any MCP tool (mcp__* prefix) so registered MCP servers
+        # (search, browse, read) are available for context gathering.
         READ_ONLY = {"list_dir", "read_file", "search_codebase", "git_status", "git_log"}
-        tools = [t for t in ALL_TOOLS if t.name in READ_ONLY]
+        tools = [t for t in get_all_tools() if t.name in READ_ONLY or t.name.startswith("mcp__")]
 
         prompt = (
             f"The Task Agent needs to complete the following request:\n\n"

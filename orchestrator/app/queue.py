@@ -19,27 +19,33 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from .config import settings
 from .store import get_redis
 
 logger = logging.getLogger(__name__)
 
 # ── Redis key constants ────────────────────────────────────────────────────────
 TASK_QUEUE_KEY       = "nova:queue:tasks"
+TASK_QUEUE_SET_KEY   = "nova:queue:tasks:set"
 DEAD_LETTER_KEY      = "nova:queue:dead_letter"
 HEARTBEAT_KEY_FMT    = "nova:heartbeat:task:{task_id}"
-HEARTBEAT_TTL        = 120   # seconds — reaper considers task stale after 2× this
 
 
 # ── Producer ───────────────────────────────────────────────────────────────────
 
 async def enqueue_task(task_id: str) -> None:
     """
-    Push a task onto the work queue.
+    Push a task onto the work queue with dedup.
+    SADD to the dedup set first — if the task is already queued, skip LPUSH.
     LPUSH so newest tasks go to the front; BRPOP pops from the right (FIFO).
     """
     redis = get_redis()
+    added = await redis.sadd(TASK_QUEUE_SET_KEY, task_id)
+    if not added:
+        logger.info("Task %s already in queue — skipping duplicate enqueue", task_id)
+        return
     await redis.lpush(TASK_QUEUE_KEY, task_id)
-    logger.debug(f"Enqueued task {task_id}")
+    logger.debug("Enqueued task %s", task_id)
 
 
 async def queue_depth() -> int:
@@ -58,7 +64,7 @@ async def write_heartbeat(task_id: str) -> None:
     """
     redis = get_redis()
     key = HEARTBEAT_KEY_FMT.format(task_id=task_id)
-    await redis.set(key, "alive", ex=HEARTBEAT_TTL)
+    await redis.set(key, "alive", ex=settings.task_heartbeat_ttl_seconds)
 
 
 async def is_heartbeat_alive(task_id: str) -> bool:
@@ -89,7 +95,7 @@ async def move_to_dead_letter(task_id: str, reason: str) -> None:
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
     await redis.lpush(DEAD_LETTER_KEY, entry)
-    logger.warning(f"Task {task_id} moved to dead letter: {reason}")
+    logger.warning("Task %s moved to dead letter: %s", task_id, reason)
 
 
 async def dead_letter_depth() -> int:
@@ -127,7 +133,9 @@ async def queue_worker() -> None:
             _key, task_id_bytes = result
             task_id = task_id_bytes.decode() if isinstance(task_id_bytes, bytes) else task_id_bytes
 
-            logger.info(f"Dequeued task {task_id}")
+            # Remove from dedup set so the task can be re-enqueued if needed later
+            await redis.srem(TASK_QUEUE_SET_KEY, task_id)
+            logger.info("Dequeued task %s", task_id)
             # Fire-and-forget: pipeline runs in background, worker picks up next task immediately
             asyncio.create_task(
                 _run_with_error_guard(task_id, execute_pipeline),
@@ -150,10 +158,10 @@ async def _run_with_error_guard(task_id: str, execute_fn) -> None:
     try:
         await execute_fn(task_id)
     except Exception:
-        logger.exception(f"Unhandled exception executing pipeline for task {task_id}")
+        logger.exception("Unhandled exception executing pipeline for task %s", task_id)
         # Best-effort: mark task failed in DB so it doesn't stay stuck in queued
         try:
             from .pipeline.executor import mark_task_failed
             await mark_task_failed(task_id, error="Unhandled pipeline exception — see logs")
         except Exception:
-            logger.exception(f"Could not mark task {task_id} as failed after pipeline crash")
+            logger.exception("Could not mark task %s as failed after pipeline crash", task_id)

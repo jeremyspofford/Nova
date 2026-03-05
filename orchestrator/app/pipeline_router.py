@@ -6,6 +6,9 @@ Endpoints:
   GET    /api/v1/pipeline/tasks                  List recent tasks (with filters)
   GET    /api/v1/pipeline/tasks/{task_id}        Get task status + output
   POST   /api/v1/pipeline/tasks/{task_id}/cancel Cancel a queued/pending task
+  GET    /api/v1/pipeline/tasks/{task_id}/findings  Guardrail findings for a task
+  GET    /api/v1/pipeline/tasks/{task_id}/reviews   Code review verdicts for a task
+  GET    /api/v1/pipeline/tasks/{task_id}/artifacts Artifacts produced by a task
 
   GET    /api/v1/pods                            List all pods
   POST   /api/v1/pods                            Create a new pod (admin)
@@ -71,6 +74,7 @@ class PodRequest(BaseModel):
     max_execution_seconds: int = 300
     require_human_review: str = "on_escalation"   # always | never | on_escalation
     escalation_threshold: str = "high"            # low | medium | high | critical
+    sandbox: str = "workspace"                    # workspace | nova | host | isolated
     metadata: dict[str, Any] = {}
 
 
@@ -85,6 +89,7 @@ class PodResponse(BaseModel):
     max_execution_seconds: int
     require_human_review: str
     escalation_threshold: str
+    sandbox: str
     metadata: dict[str, Any]
     created_at: datetime
 
@@ -195,7 +200,7 @@ async def list_pipeline_tasks(
 
 @router.get("/api/v1/pipeline/tasks/{task_id}")
 async def get_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
-    """Get the full status and output of a pipeline task."""
+    """Get the full status and output of a pipeline task, including record counts."""
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -203,7 +208,10 @@ async def get_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
             SELECT t.id, t.status, t.pod_id, p.name AS pod_name,
                    t.user_input, t.output, t.error, t.current_stage,
                    t.retry_count, t.max_retries,
-                   t.queued_at, t.started_at, t.completed_at, t.metadata
+                   t.queued_at, t.started_at, t.completed_at, t.metadata,
+                   (SELECT COUNT(*) FROM guardrail_findings gf WHERE gf.task_id = t.id) AS findings_count,
+                   (SELECT COUNT(*) FROM code_reviews cr WHERE cr.task_id = t.id) AS reviews_count,
+                   (SELECT COUNT(*) FROM artifacts a WHERE a.task_id = t.id) AS artifacts_count
             FROM tasks t
             LEFT JOIN pods p ON p.id = t.pod_id
             WHERE t.id = $1::uuid
@@ -212,7 +220,11 @@ async def get_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
         )
     if not row:
         raise HTTPException(status_code=404, detail="Task not found")
-    return _task_dict(row)
+    d = _task_dict(row)
+    d["findings_count"] = row["findings_count"]
+    d["reviews_count"] = row["reviews_count"]
+    d["artifacts_count"] = row["artifacts_count"]
+    return d
 
 
 @router.post("/api/v1/pipeline/tasks/{task_id}/cancel", status_code=200)
@@ -235,6 +247,73 @@ async def cancel_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
             detail="Task cannot be cancelled in its current state",
         )
     return {"task_id": task_id, "status": "cancelled"}
+
+
+@router.get("/api/v1/pipeline/tasks/{task_id}/findings")
+async def list_task_findings(task_id: str, _key: ApiKeyDep) -> list[dict]:
+    """List guardrail findings for a pipeline task."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, task_id, agent_session_id, finding_type, severity,
+                   description, evidence, status, resolved_by,
+                   resolution_notes, created_at, resolved_at
+            FROM guardrail_findings
+            WHERE task_id = $1::uuid
+            ORDER BY created_at
+            """,
+            task_id,
+        )
+    return [
+        _row_to_dict(r, uuid_fields=("id", "task_id", "agent_session_id"),
+                     dt_fields=("created_at", "resolved_at"))
+        for r in rows
+    ]
+
+
+@router.get("/api/v1/pipeline/tasks/{task_id}/reviews")
+async def list_task_reviews(task_id: str, _key: ApiKeyDep) -> list[dict]:
+    """List code review verdicts for a pipeline task, ordered by iteration."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, task_id, agent_session_id, iteration, verdict,
+                   issues, summary, created_at
+            FROM code_reviews
+            WHERE task_id = $1::uuid
+            ORDER BY iteration
+            """,
+            task_id,
+        )
+    return [
+        _row_to_dict(r, uuid_fields=("id", "task_id", "agent_session_id"),
+                     dt_fields=("created_at",))
+        for r in rows
+    ]
+
+
+@router.get("/api/v1/pipeline/tasks/{task_id}/artifacts")
+async def list_task_artifacts(task_id: str, _key: ApiKeyDep) -> list[dict]:
+    """List artifacts produced during a pipeline task."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, task_id, agent_session_id, artifact_type, name,
+                   content, content_hash, file_path, metadata, created_at
+            FROM artifacts
+            WHERE task_id = $1::uuid
+            ORDER BY created_at
+            """,
+            task_id,
+        )
+    return [
+        _row_to_dict(r, uuid_fields=("id", "task_id", "agent_session_id"),
+                     dt_fields=("created_at",))
+        for r in rows
+    ]
 
 
 class ReviewDecisionRequest(BaseModel):
@@ -287,16 +366,15 @@ async def review_pending_task(
         log.info("Task %s approved by human reviewer — re-queued", task_id)
 
         # Audit trail
-        pool2 = get_pool()
-        async with pool2.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO audit_log (event_type, severity, task_id, message, data)
-                VALUES ('human_review_approved', 'info', $1::uuid, $2, $3::jsonb)
-                """,
-                task_id,
-                "Human reviewer approved task — resuming from checkpoint",
-                {"comment": req.comment},
+        from app.audit import write_audit_log
+        async with get_pool().acquire() as conn:
+            await write_audit_log(
+                conn,
+                event_type="human_review_approved",
+                severity="info",
+                task_id=task_id,
+                message="Human reviewer approved task — resuming from checkpoint",
+                data={"comment": req.comment},
             )
 
         return {"task_id": task_id, "status": "queued", "decision": "approve"}
@@ -324,16 +402,15 @@ async def review_pending_task(
             )
         log.info("Task %s rejected by human reviewer", task_id)
 
-        pool2 = get_pool()
-        async with pool2.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO audit_log (event_type, severity, task_id, message, data)
-                VALUES ('human_review_rejected', 'warning', $1::uuid, $2, $3::jsonb)
-                """,
-                task_id,
-                "Human reviewer rejected task — cancelled",
-                {"comment": req.comment},
+        from app.audit import write_audit_log
+        async with get_pool().acquire() as conn:
+            await write_audit_log(
+                conn,
+                event_type="human_review_rejected",
+                severity="warning",
+                task_id=task_id,
+                message="Human reviewer rejected task — cancelled",
+                data={"comment": req.comment},
             )
 
         return {"task_id": task_id, "status": "cancelled", "decision": "reject"}
@@ -402,15 +479,15 @@ async def create_pod(req: PodRequest, _admin: AdminDep) -> dict:
             INSERT INTO pods
                 (name, description, enabled, routing_keywords, default_model,
                  max_cost_usd, max_execution_seconds, require_human_review,
-                 escalation_threshold, metadata)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+                 escalation_threshold, sandbox, metadata)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
             RETURNING *
             """,
             req.name, req.description, req.enabled,
             req.routing_keywords, req.default_model,
             req.max_cost_usd, req.max_execution_seconds,
             req.require_human_review, req.escalation_threshold,
-            req.metadata,
+            req.sandbox, req.metadata,
         )
     return dict(row)
 
@@ -447,7 +524,8 @@ async def update_pod(pod_id: str, req: PodRequest, _admin: AdminDep) -> dict:
                 max_execution_seconds = $8,
                 require_human_review = $9,
                 escalation_threshold = $10,
-                metadata             = $11::jsonb
+                sandbox              = $11,
+                metadata             = $12::jsonb
             WHERE id = $1::uuid
             RETURNING *
             """,
@@ -455,7 +533,7 @@ async def update_pod(pod_id: str, req: PodRequest, _admin: AdminDep) -> dict:
             req.routing_keywords, req.default_model,
             req.max_cost_usd, req.max_execution_seconds,
             req.require_human_review, req.escalation_threshold,
-            req.metadata,
+            req.sandbox, req.metadata,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Pod not found")
@@ -588,10 +666,25 @@ class MCPServerRequest(BaseModel):
     metadata: dict[str, Any] = {}
 
 
-def _mcp_row_to_dict(row) -> dict:
+def _row_to_dict(
+    row,
+    *,
+    uuid_fields: tuple[str, ...] = ("id",),
+    dt_fields: tuple[str, ...] = ("created_at",),
+) -> dict:
+    """Convert an asyncpg Record to a JSON-safe dict."""
     d = dict(row)
-    d["id"] = str(d["id"])
-    d["created_at"] = d["created_at"].isoformat()
+    for f in uuid_fields:
+        if f in d and d[f] is not None:
+            d[f] = str(d[f])
+    for f in dt_fields:
+        if f in d and d[f] is not None:
+            d[f] = d[f].isoformat()
+    return d
+
+
+def _mcp_row_to_dict(row) -> dict:
+    d = _row_to_dict(row)
     d["args"] = list(d.get("args") or [])
     d["env"] = dict(d.get("env") or {})
     d["metadata"] = dict(d.get("metadata") or {})
@@ -743,9 +836,7 @@ class AgentEndpointRequest(BaseModel):
 
 
 def _endpoint_row_to_dict(row) -> dict:
-    d = dict(row)
-    d["id"] = str(d["id"])
-    d["created_at"] = d["created_at"].isoformat()
+    d = _row_to_dict(row)
     d["input_schema"] = dict(d.get("input_schema") or {})
     d["output_schema"] = dict(d.get("output_schema") or {})
     d["metadata"] = dict(d.get("metadata") or {})
@@ -850,12 +941,8 @@ async def delete_agent_endpoint_route(
 
 def _task_dict(row) -> dict:
     """Convert a task DB row to a JSON-serialisable dict."""
-    d = dict(row)
-    # Timestamps → ISO strings for clean JSON output
-    for ts_field in ("queued_at", "started_at", "completed_at"):
-        if d.get(ts_field) is not None:
-            d[ts_field] = d[ts_field].isoformat()
-    # Convert UUID to string
-    d["id"] = str(d["id"]) if d.get("id") else None
-    d["pod_id"] = str(d["pod_id"]) if d.get("pod_id") else None
-    return d
+    return _row_to_dict(
+        row,
+        uuid_fields=("id", "pod_id"),
+        dt_fields=("queued_at", "started_at", "completed_at"),
+    )

@@ -13,6 +13,7 @@ import {
   type MCPServer,
 } from '../api'
 import { MCP_CATALOG, ALL_TAGS, type CatalogEntry } from '../lib/mcp-catalog'
+import Card from '../components/Card'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -117,7 +118,7 @@ function ServerForm({
     .map(p => p.key)
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-5 space-y-4">
+    <Card className="p-5 space-y-4">
       <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
         {title}
       </p>
@@ -298,7 +299,7 @@ function ServerForm({
       {mutation.isError && (
         <p className="text-xs text-red-600 dark:text-red-400">{String(mutation.error)}</p>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -341,7 +342,7 @@ function ServerCard({
   }
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+    <Card className="overflow-hidden">
       {/* Header row */}
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
@@ -465,7 +466,7 @@ function ServerCard({
           )}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -479,7 +480,7 @@ function CatalogCard({
   onInstall: (entry: CatalogEntry) => void
 }) {
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4 flex flex-col gap-3">
+    <Card className="p-4 flex flex-col gap-3">
       <div className="flex-1">
         <div className="flex items-start justify-between gap-2">
           <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{entry.displayName}</span>
@@ -514,7 +515,7 @@ function CatalogCard({
       >
         Install
       </button>
-    </div>
+    </Card>
   )
 }
 
@@ -580,7 +581,11 @@ export function MCP() {
   // Auto-open catalog when no servers
   const effectiveCatalogOpen = catalogOpen || (servers.length === 0 && !isLoading)
 
+  // Hide catalog entries that are already installed (match by name)
+  const installedNames = new Set(servers.map(s => s.name.toLowerCase()))
+
   const filteredCatalog = MCP_CATALOG.filter(entry => {
+    if (installedNames.has(entry.name.toLowerCase())) return false
     const matchesTag = !tagFilter || entry.tags.includes(tagFilter)
     const q = search.toLowerCase()
     const matchesSearch = !q ||
@@ -660,17 +665,17 @@ export function MCP() {
         ))}
 
         {servers.length === 0 && !isLoading && (
-          <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-10 text-center">
+          <Card className="p-10 text-center">
             <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">No MCP servers registered yet</p>
             <p className="mt-1 text-xs text-neutral-300 dark:text-neutral-600">
               Browse the catalog below or add a server manually.
             </p>
-          </div>
+          </Card>
         )}
       </div>
 
       {/* MCP Catalog */}
-      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+      <Card className="overflow-hidden">
         {/* Catalog header */}
         <button
           className="w-full flex items-center justify-between px-4 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
@@ -738,7 +743,7 @@ export function MCP() {
             )}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   )
 }

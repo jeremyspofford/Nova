@@ -4,6 +4,7 @@ Ideal for development: instant setup, hot-swapping models, Apple Silicon support
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import AsyncIterator
 
@@ -81,7 +82,6 @@ class OllamaProvider(ModelProvider):
                 "options": {"temperature": request.temperature},
             }) as resp:
                 resp.raise_for_status()
-                import json
                 async for line in resp.aiter_lines():
                     if not line:
                         continue
@@ -103,20 +103,16 @@ class OllamaProvider(ModelProvider):
                     )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
-        embeddings = []
-
         async with httpx.AsyncClient(base_url=self._base_url, timeout=60.0) as client:
-            for text in request.texts:
-                resp = await client.post("/api/embeddings", json={
-                    "model": request.model or self._default_model,
-                    "prompt": text,
-                })
-                resp.raise_for_status()
-                data = resp.json()
-                embeddings.append(data["embedding"])
+            resp = await client.post("/api/embed", json={
+                "model": request.model or self._default_model,
+                "input": request.texts,
+            })
+            resp.raise_for_status()
+            data = resp.json()
 
         return EmbedResponse(
-            embeddings=embeddings,
+            embeddings=data["embeddings"],
             model=request.model,
             input_tokens=0,  # Ollama doesn't report token counts for embeddings
         )

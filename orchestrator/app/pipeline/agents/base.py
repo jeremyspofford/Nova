@@ -136,7 +136,7 @@ class BaseAgent:
                     "temperature": self.temperature,
                     "max_tokens":  self.max_tokens,
                 }
-                response = await client.post("/v1/chat/completions", json=payload)
+                response = await client.post("/complete", json=payload)
                 response.raise_for_status()
                 data = response.json()
                 if model != self.model:
@@ -144,7 +144,7 @@ class BaseAgent:
                         "[%s] Primary model '%s' failed — used fallback '%s'",
                         self.ROLE, self.model, model,
                     )
-                return data["choices"][0]["message"]["content"]
+                return data["content"]
             except Exception as exc:
                 last_exc = exc
                 logger.warning("[%s] Model '%s' failed: %s", self.ROLE, model, exc)

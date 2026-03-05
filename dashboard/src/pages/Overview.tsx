@@ -3,13 +3,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Bot, RefreshCw, ListTodo, AlertCircle, CheckCircle2, ArrowRight,
-  Pencil, Loader2, FileText, Cpu, Layers, Plug,
+  Pencil, FileText, Cpu, Layers, Plug,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { getAgents, getPipelineTasks, patchAgentConfig, getQueueStats, getMCPServers } from '../api'
 import { StatusBadge } from '../components/StatusBadge'
 import { ModelPicker } from '../components/ModelPicker'
+import { SaveCancelButtons } from '../components/SaveCancelButtons'
+import { ACTIVE_TASK_STATUSES } from '../constants'
 import type { AgentInfo } from '../types'
+import Card from '../components/Card'
 
 // ── Pipeline summary strip ────────────────────────────────────────────────────
 
@@ -21,15 +24,12 @@ function PipelineSummary() {
     staleTime: 5_000,
   })
 
-  const ACTIVE = new Set(['queued','running','context_running','task_running',
-    'guardrail_running','code_review_running','decision_running'])
-
-  const activeTasks  = tasks.filter(t => ACTIVE.has(t.status)).length
+  const activeTasks  = tasks.filter(t => ACTIVE_TASK_STATUSES.has(t.status)).length
   const reviewTasks  = tasks.filter(t => t.status === 'pending_human_review').length
   const recentDone   = tasks.filter(t => t.status === 'complete').length
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-5 py-4">
+    <Card className="px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
           <ListTodo size={12} /> Pipeline
@@ -70,7 +70,7 @@ function PipelineSummary() {
           <ArrowRight size={11} className="ml-auto" />
         </Link>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -136,7 +136,7 @@ function SystemServices() {
     connectedServers.length === enabledServers.length ? 'ok' : 'degraded'
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-5 py-4">
+    <Card className="px-5 py-4">
       <div className="mb-3 flex items-center justify-between">
         <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
           <Cpu size={12} /> System Services
@@ -170,7 +170,7 @@ function SystemServices() {
           }
         />
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -242,24 +242,12 @@ function AgentEditor({ agent }: { agent: AgentInfo }) {
       </div>
 
       {/* Actions */}
-      <div className="flex items-center justify-end gap-1.5">
-        <button
-          onClick={cancel}
-          disabled={save.isPending}
-          className="rounded-md border border-neutral-200 dark:border-neutral-800 px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={() => save.mutate()}
-          disabled={save.isPending}
-          className="flex items-center gap-1.5 rounded-md bg-accent-700 px-3 py-1 text-xs font-medium text-white hover:bg-accent-600 disabled:opacity-40"
-        >
-          {save.isPending
-            ? <><Loader2 size={11} className="animate-spin" /> Saving…</>
-            : 'Save changes'}
-        </button>
-      </div>
+      <SaveCancelButtons
+        onSave={() => save.mutate()}
+        onCancel={cancel}
+        isPending={save.isPending}
+        saveLabel="Save changes"
+      />
       {save.isError && (
         <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
       )}
@@ -316,7 +304,7 @@ export function Overview() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {active.map(agent => (
-          <div key={agent.id} className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-5 space-y-3">
+          <Card key={agent.id} className="p-5 space-y-3">
             {/* Header */}
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -364,7 +352,7 @@ export function Overview() {
 
             {/* Inline editor */}
             <AgentEditor agent={agent} />
-          </div>
+          </Card>
         ))}
       </div>
     </div>

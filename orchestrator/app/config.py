@@ -39,14 +39,11 @@ class Settings(BaseSettings):
     # Phase 3: Code & Terminal Tools
     workspace_root: str = "/workspace"
     shell_timeout_seconds: int = 30
-    # "host" — runs directly in the orchestrator container (default for dev).
-    # "docker" — isolated container per command (Phase 3b).
-    shell_sandbox: str = "host"
+    # Sandbox tier: workspace | nova | host | isolated (Phase 3b)
+    shell_sandbox: str = "workspace"
+    nova_root: str = "/nova"
 
     # Phase 4: Task Queue + Failure Recovery
-    # Redis keys for the async task queue and dead letter queue
-    task_queue_key: str = "nova:queue:tasks"
-    task_dead_letter_key: str = "nova:queue:dead_letter"
     # Running tasks write a heartbeat every N seconds
     task_heartbeat_interval_seconds: int = 30
     # Reaper wakes up every N seconds to scan for stale tasks
@@ -55,6 +52,12 @@ class Settings(BaseSettings):
     task_stale_seconds: int = 150
     # Default maximum retries before a task goes to dead letter
     task_default_max_retries: int = 2
+    # Tasks stuck in queued state longer than this are re-pushed
+    stale_queued_seconds: int = 120
+    # Extra buffer before declaring an agent session timed out
+    session_timeout_buffer_seconds: int = 30
+    # Redis heartbeat key TTL — should be < task_stale_seconds
+    task_heartbeat_ttl_seconds: int = 120
     # Default pod name used when no routing match is found
     default_pod_name: str = "Quartet"
 

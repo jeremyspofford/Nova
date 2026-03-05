@@ -17,11 +17,13 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import time
 from dataclasses import dataclass
 from typing import Any
 
+from ..audit import write_audit_log
 from ..config import settings
 from ..db import get_pool
 from ..queue import clear_heartbeat, write_heartbeat
@@ -57,6 +59,7 @@ class PodRow:
     max_execution_seconds: int
     require_human_review: str
     escalation_threshold: str
+    sandbox: str = "workspace"
 
 @dataclass
 class AgentRow:
@@ -134,10 +137,8 @@ async def _run_pipeline(task_id: str) -> None:
         logger.error(f"Task {task_id} not found in DB — skipping")
         return
 
-    # Select pod
-    pod = await _load_pod(task.pod_id)
-    if not pod:
-        pod = await _load_default_pod()
+    # Select pod — falls back to default pod if task.pod_id is None or not found
+    pod = await _load_pod(task.pod_id) or await _load_pod(None)
     if not pod:
         await mark_task_failed(task_id, "No pod configured and no default pod found")
         return
@@ -178,6 +179,35 @@ async def _run_pipeline(task_id: str) -> None:
     while i < len(agents):
         agent = agents[i]
 
+        # ── Parallel group detection ──────────────────────────────────
+        # If this agent has a parallel_group, collect all consecutive agents
+        # sharing the same group and run them concurrently.
+        if agent.parallel_group and agent.enabled:
+            group_name = agent.parallel_group
+            group_agents = []
+            j = i
+            while j < len(agents) and agents[j].parallel_group == group_name:
+                group_agents.append(agents[j])
+                j += 1
+
+            if len(group_agents) > 1:
+                logger.info(
+                    f"Task {task_id}: Running parallel group '{group_name}' "
+                    f"({len(group_agents)} agents: {[a.role for a in group_agents]})"
+                )
+                abort = await _run_parallel_group(
+                    group_agents, task_id, state, pod, checkpoint,
+                    code_review_iterations, model_override,
+                )
+                if abort:
+                    await mark_task_failed(task_id, f"Parallel group '{group_name}' had a fatal agent failure")
+                    return
+
+                # Post-group compaction + checkpoint
+                await _maybe_compact_state(state, task_id)
+                i = j
+                continue
+
         # Track task agent index for refactor looping
         if agent.role == "task":
             task_agent_idx = i
@@ -200,7 +230,7 @@ async def _run_pipeline(task_id: str) -> None:
             continue
 
         # ── Run this agent ─────────────────────────────────────────────
-        result = await _run_agent(agent, task_id, state, pod, code_review_iterations, model_override=model_override)
+        result, session_id = await _run_agent(agent, task_id, state, pod, code_review_iterations, model_override=model_override)
 
         if result is None:
             # Agent failed with on_failure=abort → task fails
@@ -253,6 +283,14 @@ async def _run_pipeline(task_id: str) -> None:
         await _audit(task_id, f"stage_{agent.role}_complete", "info",
                      {"verdict": result.get("verdict"), "blocked": result.get("blocked")})
 
+        # ── Context compaction check ──────────────────────────────────
+        # If pipeline state is growing large, compact prior stage outputs
+        # to a summary so downstream agents don't exceed context windows.
+        await _maybe_compact_state(state, task_id)
+
+        # Persist structured records (guardrail findings, code reviews, artifacts)
+        await _persist_stage_records(task_id, agent, session_id, result, code_review_iterations)
+
         # Check if human review needed after this stage
         if _should_pause_for_review(state, pod, result, agent.role):
             escalation_msg = result.get("escalation_message", "Task requires human review.")
@@ -263,7 +301,86 @@ async def _run_pipeline(task_id: str) -> None:
 
     # ── Pipeline complete ──────────────────────────────────────────────────
     final_output = state.completed.get("task", {}).get("output", "Task completed.")
+
+    # Best-effort memory extraction — fire-and-forget, never blocks completion
+    asyncio.create_task(
+        _extract_task_memory(task_id, task.user_input, final_output, state),
+        name=f"memory:{task_id}",
+    )
+
     await _complete_task(task_id, final_output, state)
+
+
+# ── Parallel group runner ──────────────────────────────────────────────────────
+
+async def _run_parallel_group(
+    group_agents: list[AgentRow],
+    task_id: str,
+    state: PipelineState,
+    pod: PodRow,
+    checkpoint: dict,
+    code_review_iterations: int,
+    model_override: str | None,
+) -> bool:
+    """
+    Run a group of agents concurrently via asyncio.gather.
+    All agents in the group share the same PipelineState snapshot — they
+    cannot see each other's outputs (by design: parallel agents are independent).
+
+    Returns True if the pipeline should abort (any agent with on_failure=abort failed).
+    """
+    # Filter to eligible agents (enabled, run_condition met, not checkpointed)
+    eligible = []
+    for agent in group_agents:
+        if not agent.enabled:
+            continue
+        if not should_agent_run(agent.run_condition, state):
+            logger.debug(f"Parallel group: skipping {agent.role} (run_condition not met)")
+            continue
+        if agent.role in checkpoint and not _needs_rerun(agent.role, state):
+            logger.debug(f"Parallel group: skipping {agent.role} (already checkpointed)")
+            continue
+        eligible.append(agent)
+
+    if not eligible:
+        return False
+
+    async def _run_one(agent: AgentRow) -> tuple[AgentRow, dict | None, str | None]:
+        result, session_id = await _run_agent(
+            agent, task_id, state, pod, code_review_iterations,
+            model_override=model_override,
+        )
+        return agent, result, session_id
+
+    # Launch all agents concurrently
+    results = await asyncio.gather(
+        *[_run_one(a) for a in eligible],
+        return_exceptions=True,
+    )
+
+    # Process results — merge into state
+    abort = False
+    for outcome in results:
+        if isinstance(outcome, Exception):
+            logger.error(f"Task {task_id}: Parallel agent raised exception: {outcome}")
+            continue
+
+        agent, result, session_id = outcome
+
+        if result is None:
+            # on_failure=abort
+            logger.error(f"Task {task_id}: Parallel agent '{agent.role}' failed (abort)")
+            abort = True
+            continue
+
+        # Merge into state
+        state.completed[agent.role] = result
+        await save_checkpoint(task_id, agent.role, result)
+        await _audit(task_id, f"stage_{agent.role}_complete", "info",
+                     {"verdict": result.get("verdict"), "blocked": result.get("blocked")})
+        await _persist_stage_records(task_id, agent, session_id, result, code_review_iterations)
+
+    return abort
 
 
 # ── Agent runner ───────────────────────────────────────────────────────────────
@@ -275,17 +392,18 @@ async def _run_agent(
     pod: PodRow,
     code_review_iteration: int = 0,
     model_override: str | None = None,
-) -> dict | None:
+) -> tuple[dict | None, str | None]:
     """
-    Instantiate and run a single agent. Returns output dict on success.
-    Returns None if the agent failed and on_failure=abort.
-    On on_failure=skip, returns an empty dict so the pipeline continues.
+    Instantiate and run a single agent. Returns (output_dict, session_id).
+    Returns (None, session_id) if the agent failed and on_failure=abort.
+    On on_failure=skip, returns ({}, session_id) so the pipeline continues.
     """
     from .agents.context     import ContextAgent
     from .agents.task        import TaskAgent
     from .agents.guardrail   import GuardrailAgent
     from .agents.code_review import CodeReviewAgent
     from .agents.decision    import DecisionAgent
+    from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox
 
     # Resolve model: per-task override → agent → pod default → service default
     model = model_override or agent.model or pod.default_model or settings.default_model
@@ -316,6 +434,10 @@ async def _run_agent(
     session_id = await _create_session(task_id, agent)
     await _set_task_status(task_id, f"{agent.role}_running", current_stage=agent.role)
 
+    # Set sandbox tier from pod config for this agent execution
+    tier = SandboxTier(pod.sandbox) if pod.sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    sandbox_token = set_sandbox(tier)
+
     start = time.monotonic()
     try:
         if agent.role == "task":
@@ -328,7 +450,7 @@ async def _run_agent(
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         await _complete_session(session_id, result, elapsed_ms)
-        return result
+        return result, session_id
 
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -337,12 +459,91 @@ async def _run_agent(
 
         if agent.on_failure == "skip":
             logger.info(f"Agent '{agent.role}' failed with on_failure=skip — continuing")
-            return {}
+            return {}, session_id
         if agent.on_failure == "escalate":
             await _pause_for_human_review(task_id, f"Agent '{agent.role}' failed: {exc}")
-            return None
+            return None, session_id
         # on_failure == "abort" (default)
-        return None
+        return None, session_id
+    finally:
+        reset_sandbox(sandbox_token)
+
+
+# ── Stage record persistence ───────────────────────────────────────────────────
+
+async def _persist_stage_records(
+    task_id: str,
+    agent: AgentRow,
+    session_id: str | None,
+    result: dict,
+    iteration: int,
+) -> None:
+    """
+    Best-effort persistence of guardrail findings, code reviews, and artifacts
+    into their respective tables. Never blocks the pipeline on failure.
+    """
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            # ── Guardrail findings ────────────────────────────────────
+            if agent.role == "guardrail":
+                for finding in result.get("findings", []):
+                    await conn.execute(
+                        """
+                        INSERT INTO guardrail_findings
+                            (task_id, agent_session_id, finding_type, severity, description, evidence)
+                        VALUES ($1, $2::uuid, $3, $4, $5, $6)
+                        """,
+                        task_id,
+                        session_id,
+                        finding.get("type", "other"),
+                        finding.get("severity", "medium"),
+                        finding.get("description", ""),
+                        finding.get("evidence"),
+                    )
+
+            # ── Code review verdicts ──────────────────────────────────
+            if agent.role == "code_review":
+                import json as _json
+                await conn.execute(
+                    """
+                    INSERT INTO code_reviews
+                        (task_id, agent_session_id, iteration, verdict, issues, summary)
+                    VALUES ($1, $2::uuid, $3, $4, $5::jsonb, $6)
+                    """,
+                    task_id,
+                    session_id,
+                    iteration + 1,
+                    result.get("verdict", "pass"),
+                    _json.dumps(result.get("issues", [])),
+                    result.get("summary"),
+                )
+
+            # ── Artifacts ─────────────────────────────────────────────
+            if agent.artifact_type:
+                content = result.get("output") or result.get("adr") or result.get("content", "")
+                if content:
+                    content_str = content if isinstance(content, str) else str(content)
+                    content_hash = hashlib.sha256(content_str.encode()).hexdigest()
+                    import json as _json
+                    await conn.execute(
+                        """
+                        INSERT INTO artifacts
+                            (task_id, agent_session_id, artifact_type, name, content,
+                             content_hash, file_path, metadata)
+                        VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8::jsonb)
+                        """,
+                        task_id,
+                        session_id,
+                        agent.artifact_type,
+                        f"{agent.role}_{task_id[:8]}",
+                        content_str,
+                        content_hash,
+                        result.get("file_path"),
+                        _json.dumps(result.get("metadata", {})),
+                    )
+    except Exception as exc:
+        logger.warning("Failed to persist stage records for %s/%s: %s", task_id, agent.role, exc)
 
 
 # ── Status / DB helpers ────────────────────────────────────────────────────────
@@ -370,29 +571,23 @@ async def _load_task(task_id: str) -> TaskRow | None:
 
 
 async def _load_pod(pod_id: str | None) -> PodRow | None:
-    if not pod_id:
-        return None
+    """Load a pod by ID, or the default pod if pod_id is None."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, name, default_model, max_cost_usd, max_execution_seconds, "
-            "require_human_review, escalation_threshold FROM pods WHERE id = $1 AND enabled = true",
-            pod_id,
-        )
-    if not row:
-        return None
-    return PodRow(**{k: (str(v) if k == "id" else v) for k, v in dict(row).items()})
-
-
-async def _load_default_pod() -> PodRow | None:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            "SELECT id, name, default_model, max_cost_usd, max_execution_seconds, "
-            "require_human_review, escalation_threshold "
-            "FROM pods WHERE name = $1 AND enabled = true",
-            settings.default_pod_name,
-        )
+        if pod_id:
+            row = await conn.fetchrow(
+                "SELECT id, name, default_model, max_cost_usd, max_execution_seconds, "
+                "require_human_review, escalation_threshold, sandbox "
+                "FROM pods WHERE id = $1 AND enabled = true",
+                pod_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                "SELECT id, name, default_model, max_cost_usd, max_execution_seconds, "
+                "require_human_review, escalation_threshold, sandbox "
+                "FROM pods WHERE name = $1 AND enabled = true",
+                settings.default_pod_name,
+            )
     if not row:
         return None
     return PodRow(**{k: (str(v) if k == "id" else v) for k, v in dict(row).items()})
@@ -591,6 +786,175 @@ async def _heartbeat_loop(task_id: str) -> None:
             await asyncio.sleep(interval)
 
 
+async def _extract_task_memory(
+    task_id: str,
+    user_input: str,
+    final_output: str,
+    state: PipelineState,
+) -> None:
+    """
+    Post-pipeline: store a structured episode in memory-service so the
+    Planning Agent (Phase 7) can learn from prior task runs.
+
+    Stores two memories per completed task:
+      - semantic  : task summary (what was asked, what was produced, key flags)
+      - procedural: code review findings (if any) — "how to avoid this next time"
+
+    Uses agent_id="nova" so all memories are queryable under a single namespace.
+    Failure is logged as a warning; the pipeline result is never affected.
+    """
+    from ..clients import get_memory_client
+
+    memories = []
+
+    # ── Semantic memory: task summary ─────────────────────────────────────
+    flags = sorted(state.flags)
+    summary_lines = [
+        f"Task: {user_input[:300]}",
+        f"Output: {final_output[:400]}",
+    ]
+    if flags:
+        summary_lines.append(f"Flags: {', '.join(flags)}")
+
+    guardrail = state.completed.get("guardrail", {})
+    if guardrail.get("blocked"):
+        findings = guardrail.get("findings", [])
+        if findings:
+            top = findings[0]
+            summary_lines.append(
+                f"Guardrail blocked: {top.get('type', 'unknown')} — {top.get('description', '')}"
+            )
+
+    memories.append({
+        "agent_id": "nova",
+        "content": "\n".join(summary_lines),
+        "tier": "semantic",
+        "metadata": {
+            "task_id": task_id,
+            "source": "pipeline_completion",
+            "flags": flags,
+        },
+    })
+
+    # ── Procedural memory: code review lessons ────────────────────────────
+    review = state.completed.get("code_review", {})
+    issues = review.get("issues", [])
+    if issues:
+        issue_lines = [
+            f"[{iss.get('severity', 'info').upper()}] {iss.get('description', '')}"
+            + (f" in {iss['file']}:{iss.get('line', '')}" if iss.get("file") else "")
+            for iss in issues[:5]
+        ]
+        memories.append({
+            "agent_id": "nova",
+            "content": f"Code review findings for task '{user_input[:100]}':\n" + "\n".join(issue_lines),
+            "tier": "procedural",
+            "metadata": {
+                "task_id": task_id,
+                "source": "code_review_agent",
+                "verdict": review.get("verdict", "unknown"),
+            },
+        })
+
+    try:
+        client = get_memory_client()
+        resp = await client.post("/api/v1/memories/bulk", json={"memories": memories}, timeout=10.0)
+        if resp.is_success:
+            logger.debug("Extracted %d memories for task %s", len(memories), task_id)
+        else:
+            logger.warning("Memory extraction HTTP %s for task %s", resp.status_code, task_id)
+    except Exception as exc:
+        logger.warning("Memory extraction failed for task %s: %s", task_id, exc)
+
+
+async def _maybe_compact_state(state: PipelineState, task_id: str) -> None:
+    """
+    Check if pipeline state has grown beyond context_compaction_threshold.
+    If so, summarize prior stage outputs into a compact string and replace
+    the verbose originals.
+
+    Token estimation: 1 token ~ 4 characters (same heuristic as memory service).
+    Default context budget: 128k tokens. Threshold: 80% = ~102k tokens.
+    """
+    import json as _json
+
+    # Estimate total tokens in pipeline state
+    try:
+        state_json = _json.dumps(state.completed, default=str)
+    except (TypeError, ValueError):
+        return
+    estimated_tokens = len(state_json) // 4
+
+    # Use a generous context budget — most models are 128k+
+    context_budget = 128_000
+    threshold = int(context_budget * settings.context_compaction_threshold)
+
+    if estimated_tokens < threshold:
+        return
+
+    logger.info(
+        "Task %s: state ~%d tokens exceeds compaction threshold (%d) — compacting",
+        task_id, estimated_tokens, threshold,
+    )
+
+    # Roles that are safe to compact (context output is verbose, task output can be large)
+    # Never compact _refactor_feedback or the most recent stage
+    compactable = {"context", "task", "guardrail", "code_review"}
+    roles_to_compact = [
+        role for role in state.completed
+        if role in compactable and not role.startswith("_")
+    ]
+
+    if not roles_to_compact:
+        return
+
+    # Build a summarization prompt
+    sections = []
+    for role in roles_to_compact:
+        output = state.completed[role]
+        output_str = _json.dumps(output, default=str) if isinstance(output, dict) else str(output)
+        # Truncate very large outputs to avoid blowing the summarization call itself
+        if len(output_str) > 8000:
+            output_str = output_str[:8000] + "... [truncated]"
+        sections.append(f"## {role} agent output:\n{output_str}")
+
+    summary_prompt = (
+        "You are a pipeline state compactor. Summarize the following agent outputs "
+        "into a concise summary preserving all key decisions, findings, file paths, "
+        "verdicts, and actionable information. Return plain text, not JSON.\n\n"
+        + "\n\n".join(sections)
+    )
+
+    try:
+        from ..clients import get_llm_client
+        client = get_llm_client()
+        resp = await client.post(
+            "/complete",
+            json={
+                "model": settings.default_model,
+                "messages": [
+                    {"role": "system", "content": "You compress information concisely without losing key details."},
+                    {"role": "user", "content": summary_prompt},
+                ],
+                "temperature": 0.1,
+                "max_tokens": 2048,
+            },
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            summary = resp.json()["content"]
+            # Replace verbose outputs with compact summary
+            for role in roles_to_compact:
+                del state.completed[role]
+            state.completed["_compacted_summary"] = summary
+            logger.info("Task %s: compacted %d stages into summary (%d chars)",
+                        task_id, len(roles_to_compact), len(summary))
+        else:
+            logger.warning("Task %s: compaction LLM call failed HTTP %s", task_id, resp.status_code)
+    except Exception as exc:
+        logger.warning("Task %s: compaction failed (non-fatal): %s", task_id, exc)
+
+
 async def _audit(
     task_id: str,
     event_type: str,
@@ -598,17 +962,13 @@ async def _audit(
     data: dict | None = None,
 ) -> None:
     """Best-effort write to the immutable audit log."""
-    try:
-        pool = get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                INSERT INTO audit_log (event_type, severity, task_id, message, data)
-                VALUES ($1, $2, $3::uuid, $4, $5::jsonb)
-                """,
-                event_type, severity, task_id,
-                f"Pipeline: {event_type}",
-                data or {},
-            )
-    except Exception:
-        logger.exception("Failed to write pipeline audit log entry")
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await write_audit_log(
+            conn,
+            event_type=event_type,
+            severity=severity,
+            task_id=task_id,
+            message=f"Pipeline: {event_type}",
+            data=data,
+        )

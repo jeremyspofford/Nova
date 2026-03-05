@@ -48,6 +48,8 @@ from app.providers import (
 
 log = logging.getLogger(__name__)
 
+DEFAULT_MODEL_KEY = "__default__"
+
 
 def _inject_litellm_env_keys() -> None:
     """Inject configured API keys into environment for LiteLLM auto-detection."""
@@ -224,13 +226,102 @@ MODEL_REGISTRY: dict[str, ModelProvider] = {
     "text-embedding-3-small":             _litellm,    # OpenAI paid
 
     # ── Catch-all: smart fallback across all configured providers ──────────────
-    "__default__":                        _default_fallback,
+    DEFAULT_MODEL_KEY:                    _default_fallback,
 }
 
 
+# ── Per-model specs (context window, max output) ────────────────────────────
+# Only models with non-default values need entries here.
+# Default fallback: context_window=128000, max_output_tokens=8096.
+
+_DEFAULT_CONTEXT_WINDOW = 128_000
+_DEFAULT_MAX_OUTPUT_TOKENS = 8_096
+
+MODEL_SPECS: dict[str, dict[str, int]] = {
+    "claude-max/claude-sonnet-4-6":      {"context_window": 200_000, "max_output_tokens": 16_000},
+    "claude-max/claude-opus-4-6":        {"context_window": 200_000, "max_output_tokens": 32_000},
+    "claude-max/claude-haiku-4-5":       {"context_window": 200_000, "max_output_tokens": 8_192},
+    "claude-sonnet-4-6":                 {"context_window": 200_000, "max_output_tokens": 16_000},
+    "claude-opus-4-6":                   {"context_window": 200_000, "max_output_tokens": 32_000},
+    "claude-haiku-4-5-20251001":         {"context_window": 200_000, "max_output_tokens": 8_192},
+    "chatgpt/gpt-4o":                    {"context_window": 128_000, "max_output_tokens": 16_384},
+    "chatgpt/gpt-4o-mini":               {"context_window": 128_000, "max_output_tokens": 16_384},
+    "chatgpt/o3":                        {"context_window": 200_000, "max_output_tokens": 100_000},
+    "chatgpt/o4-mini":                   {"context_window": 200_000, "max_output_tokens": 100_000},
+    "groq/llama-3.3-70b-versatile":      {"context_window": 128_000, "max_output_tokens": 32_768},
+    "groq/llama-3.1-8b-instant":         {"context_window": 128_000, "max_output_tokens": 8_192},
+    "groq/mixtral-8x7b-32768":           {"context_window": 32_768,  "max_output_tokens": 4_096},
+    "gemini/gemini-2.5-flash":           {"context_window": 1_048_576, "max_output_tokens": 65_536},
+    "gemini/gemini-2.5-pro":             {"context_window": 1_048_576, "max_output_tokens": 65_536},
+}
+
+
+def get_model_spec(model_id: str) -> tuple[int, int]:
+    """Return (context_window, max_output_tokens) for a model, with sensible defaults."""
+    spec = MODEL_SPECS.get(model_id, {})
+    return (
+        spec.get("context_window", _DEFAULT_CONTEXT_WINDOW),
+        spec.get("max_output_tokens", _DEFAULT_MAX_OUTPUT_TOKENS),
+    )
+
+
+def get_provider_catalog() -> list[dict]:
+    """Return a summary of each provider: slug, name, type, availability, model count, default model."""
+    _PROVIDER_META: list[dict] = [
+        {"slug": "ollama",      "name": "Ollama",              "type": "local",        "instance": _ollama,
+         "available": True,     "default_model": settings.default_ollama_model},
+        {"slug": "claude-max",  "name": "Claude Max/Pro",      "type": "subscription", "instance": _claude_subscription,
+         "available": _claude_subscription.is_available, "default_model": settings.default_claude_max_model},
+        {"slug": "chatgpt",     "name": "ChatGPT Plus/Pro",    "type": "subscription", "instance": _chatgpt_subscription,
+         "available": _chatgpt_subscription.is_available, "default_model": settings.default_chatgpt_model},
+        {"slug": "groq",        "name": "Groq",                "type": "free",         "instance": _groq,
+         "available": bool(settings.groq_api_key),        "default_model": settings.default_groq_model},
+        {"slug": "gemini",      "name": "Gemini",              "type": "free",         "instance": _gemini,
+         "available": bool(settings.gemini_api_key or settings.gemini_use_adc), "default_model": settings.default_gemini_model},
+        {"slug": "cerebras",    "name": "Cerebras",            "type": "free",         "instance": _cerebras,
+         "available": bool(settings.cerebras_api_key),    "default_model": settings.default_cerebras_model},
+        {"slug": "openrouter",  "name": "OpenRouter",          "type": "free",         "instance": _openrouter,
+         "available": bool(settings.openrouter_api_key),  "default_model": settings.default_openrouter_model},
+        {"slug": "github",      "name": "GitHub Models",       "type": "free",         "instance": _github,
+         "available": bool(settings.github_token),        "default_model": settings.default_github_model},
+        {"slug": "anthropic",   "name": "Anthropic API",       "type": "paid",         "instance": _litellm,
+         "available": bool(settings.anthropic_api_key),   "default_model": "claude-sonnet-4-6"},
+        {"slug": "openai",      "name": "OpenAI API",          "type": "paid",         "instance": _litellm,
+         "available": bool(settings.openai_api_key),      "default_model": "gpt-4o"},
+    ]
+
+    # Count models per provider
+    result = []
+    for meta in _PROVIDER_META:
+        instance = meta["instance"]
+        slug = meta["slug"]
+
+        # Special-case: anthropic/openai share _litellm but route by prefix
+        if slug == "anthropic":
+            count = sum(1 for k, v in MODEL_REGISTRY.items()
+                        if v is _litellm and k.startswith(("claude-", "claude_")))
+        elif slug == "openai":
+            count = sum(1 for k, v in MODEL_REGISTRY.items()
+                        if v is _litellm and k.startswith(("gpt-",)))
+        else:
+            count = sum(1 for k, v in MODEL_REGISTRY.items()
+                        if v is instance and k != DEFAULT_MODEL_KEY)
+
+        result.append({
+            "slug": slug,
+            "name": meta["name"],
+            "type": meta["type"],
+            "available": meta["available"],
+            "model_count": count,
+            "default_model": meta["default_model"],
+        })
+
+    return result
+
+
 def get_provider(model: str) -> ModelProvider:
-    """Look up the provider for a model ID, falling back to __default__."""
-    provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY["__default__"]
+    """Look up the provider for a model ID, falling back to DEFAULT_MODEL_KEY."""
+    provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY[DEFAULT_MODEL_KEY]
     if model not in MODEL_REGISTRY:
         log.warning("Unknown model '%s', using default fallback provider", model)
     return provider

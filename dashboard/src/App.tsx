@@ -13,6 +13,7 @@ import { Models } from './pages/Models'
 import { Tasks } from './pages/Tasks'
 import { Pods } from './pages/Pods'
 import { AgentEndpoints } from './pages/AgentEndpoints'
+import { MemoryInspector } from './pages/MemoryInspector'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,7 @@ export default function App() {
               <Route path="/keys"    element={<Keys />} />
               <Route path="/mcp"     element={<MCP />} />
               <Route path="/agents"  element={<AgentEndpoints />} />
+              <Route path="/memory"  element={<MemoryInspector />} />
               <Route path="/models"   element={<Models />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>

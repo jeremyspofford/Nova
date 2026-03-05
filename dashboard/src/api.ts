@@ -369,6 +369,24 @@ export const saveFact = (data: SaveFactRequest) =>
     body: JSON.stringify(data),
   })
 
+// ── Provider status ──────────────────────────────────────────────────────────
+
+export interface ProviderStatus {
+  slug: string
+  name: string
+  type: 'subscription' | 'free' | 'paid' | 'local'
+  available: boolean
+  model_count: number
+  default_model: string
+}
+
+export const getProviderStatus = () =>
+  apiFetch<ProviderStatus[]>('/v1/health/providers')
+
+export const testProvider = (slug: string) =>
+  apiFetch<{ ok: boolean; latency_ms: number; error?: string }>(
+    `/v1/health/providers/${slug}/test`, { method: 'POST' })
+
 // ── Tool catalog ──────────────────────────────────────────────────────────────
 
 export interface ToolInfo { name: string; description: string }

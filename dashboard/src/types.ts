@@ -114,6 +114,7 @@ export interface Pod {
   max_execution_seconds: number
   require_human_review: string
   escalation_threshold: string
+  sandbox: string
   metadata: Record<string, unknown>
   created_at: string
   active_agent_count?: number

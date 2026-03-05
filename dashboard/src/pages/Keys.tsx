@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { Plus, Trash2, Copy, Check } from 'lucide-react'
 import { getKeys, createKey, revokeKey } from '../api'
+import Card from '../components/Card'
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
@@ -40,8 +41,6 @@ export function Keys() {
           <code className="rounded bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">/v1/chat/completions</code>.
           Any tool that speaks the OpenAI API format — IDE plugins, n8n, other AI apps — can send requests
           through Nova using one of these keys. Each key has its own rate limit and usage tracking.
-          The <span className="font-medium text-neutral-600 dark:text-neutral-400">dev-key</span> entries are the default
-          development keys created automatically on first startup.
         </p>
       </div>
 
@@ -58,7 +57,7 @@ export function Keys() {
       )}
 
       {/* Create form */}
-      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4">
+      <Card className="p-4">
         <p className="mb-3 text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Create Key</p>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
           <div className="flex-1">
@@ -79,10 +78,10 @@ export function Keys() {
           </div>
         </div>
         {createMutation.isError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{String(createMutation.error)}</p>}
-      </div>
+      </Card>
 
       {/* Keys table */}
-      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+      <Card className="overflow-hidden">
         {isLoading && <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
         {error && <p className="p-4 text-sm text-red-600 dark:text-red-400">{String(error)}</p>}
         <div className="overflow-x-auto">
@@ -123,7 +122,7 @@ export function Keys() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

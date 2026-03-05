@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { getModels } from '../api'
+import Card from '../components/Card'
 
 // Group models by the provider prefix (everything before the first '/')
 function groupByProvider(ids: string[]): Record<string, string[]> {
@@ -40,7 +41,7 @@ export function Models() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {sorted.map(provider => (
-          <div key={provider} className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4">
+          <Card key={provider} className="p-4">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-accent-700 dark:text-accent-400">{provider}</p>
             <ul className="space-y-1.5">
               {groups[provider].map(id => (
@@ -49,7 +50,7 @@ export function Models() {
                 </li>
               ))}
             </ul>
-          </div>
+          </Card>
         ))}
       </div>
     </div>

@@ -31,6 +31,7 @@ from nova_contracts import (
 )
 
 from app.providers.base import ModelProvider
+from app.providers.utils import serialize_messages
 
 log = logging.getLogger(__name__)
 
@@ -132,25 +133,9 @@ class ClaudeSubscriptionProvider(ModelProvider):
         return _MODEL_MAP.get(requested, self._default_api_model)
 
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
-        if not self.is_available:
-            raise RuntimeError(
-                "Claude subscription unavailable: set CLAUDE_CODE_OAUTH_TOKEN"
-            )
+        self._assert_available()
 
-        import json as _j
-        messages = []
-        for m in request.messages:
-            msg: dict = {"role": m.role, "content": m.content}
-            if m.tool_calls:
-                msg["tool_calls"] = [
-                    {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": _j.dumps(tc.arguments)}}
-                    for tc in m.tool_calls
-                ]
-            if m.tool_call_id:
-                msg["tool_call_id"] = m.tool_call_id
-            if m.name:
-                msg["name"] = m.name
-            messages.append(msg)
+        messages = serialize_messages(request.messages)
         tools = [
             {"type": "function", "function": {"name": t.name, "description": t.description, "parameters": t.parameters}}
             for t in request.tools
@@ -195,23 +180,9 @@ class ClaudeSubscriptionProvider(ModelProvider):
         )
 
     async def stream(self, request: CompleteRequest) -> AsyncIterator[StreamChunk]:
-        if not self.is_available:
-            raise RuntimeError("Claude subscription unavailable: set CLAUDE_CODE_OAUTH_TOKEN")
+        self._assert_available()
 
-        import json as _j
-        messages = []
-        for m in request.messages:
-            msg: dict = {"role": m.role, "content": m.content}
-            if m.tool_calls:
-                msg["tool_calls"] = [
-                    {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": _j.dumps(tc.arguments)}}
-                    for tc in m.tool_calls
-                ]
-            if m.tool_call_id:
-                msg["tool_call_id"] = m.tool_call_id
-            if m.name:
-                msg["name"] = m.name
-            messages.append(msg)
+        messages = serialize_messages(request.messages)
 
         response = await litellm.acompletion(
             model=self._api_model(request.model),
@@ -219,13 +190,38 @@ class ClaudeSubscriptionProvider(ModelProvider):
             temperature=request.temperature,
             max_tokens=request.max_tokens,
             stream=True,
+            stream_options={"include_usage": True},
             api_key=self._oauth_token,
         )
 
         async for chunk in response:
-            delta        = chunk.choices[0].delta
-            finish_reason = chunk.choices[0].finish_reason
-            yield StreamChunk(delta=delta.content or "", finish_reason=finish_reason)
+            choice = chunk.choices[0] if chunk.choices else None
+            content = ""
+            finish_reason = None
+            if choice:
+                content = choice.delta.content or ""
+                finish_reason = choice.finish_reason
+
+            # Extract usage from final chunk (sent by LiteLLM when include_usage=True)
+            input_tokens = None
+            output_tokens = None
+            cost = None
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                input_tokens = getattr(usage, "prompt_tokens", None)
+                output_tokens = getattr(usage, "completion_tokens", None)
+                try:
+                    cost = litellm.completion_cost(completion_response=chunk)
+                except Exception:
+                    pass
+
+            yield StreamChunk(
+                delta=content,
+                finish_reason=finish_reason,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+            )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
         raise NotImplementedError(

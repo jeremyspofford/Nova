@@ -15,6 +15,7 @@ import {
 } from '../lib/aggregations'
 import clsx from 'clsx'
 import { useTheme } from '../stores/theme-store'
+import Card from '../components/Card'
 
 /** Read a CSS variable as an rgb() string for use in inline chart styles */
 function cssVar(name: string): string {
@@ -82,15 +83,15 @@ export function Usage() {
           { label: 'Total tokens (all time)', value: totalTokens.toLocaleString()         },
           { label: 'Total calls (all time)',  value: totalCalls.toLocaleString()          },
         ].map(({ label, value }) => (
-          <div key={label} className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4">
+          <Card key={label} className="p-4">
             <p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p>
             <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
-          </div>
+          </Card>
         ))}
       </div>
 
       {/* ── Drill-down chart ─────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+      <Card className="overflow-hidden">
 
         {/* Tab bar */}
         <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 px-4 pt-3 pb-0">
@@ -228,10 +229,10 @@ export function Usage() {
             </div>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* ── Recent events table ──────────────────────────────────────────── */}
-      <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+      <Card className="overflow-hidden">
         <div className="border-b border-neutral-200 dark:border-neutral-800 px-4 py-3 flex items-center justify-between">
           <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Recent Events</p>
           <p className="text-xs text-neutral-500 dark:text-neutral-400">showing last 50 of {totalCalls}</p>
@@ -272,7 +273,7 @@ export function Usage() {
             </tbody>
           </table>
         </div>
-      </div>
+      </Card>
     </div>
   )
 }

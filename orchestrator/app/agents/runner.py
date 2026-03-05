@@ -9,7 +9,8 @@ AgentRunner — executes a single agent turn:
 """
 from __future__ import annotations
 
-import json as _json
+import asyncio
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -24,7 +25,7 @@ from nova_contracts import (
 
 from app.clients import get_llm_client, get_memory_client
 from app.config import settings
-from app.tools import ALL_TOOLS, execute_tool
+from app.tools import ALL_TOOLS, execute_tool, get_all_tools
 
 log = logging.getLogger(__name__)
 
@@ -48,8 +49,7 @@ async def run_agent_turn(
         query = user_messages[-1]["content"] if user_messages else ""
 
         # 1. Fetch context concurrently
-        import asyncio as _asyncio
-        nova_ctx, memory_ctx = await _asyncio.gather(
+        nova_ctx, memory_ctx = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id),
             _get_memory_context(agent_id, query),
         )
@@ -119,18 +119,14 @@ async def run_agent_turn_streaming(
     Tool-use strategy: resolve tool-call rounds non-streaming (fast, tool calls
     rarely produce large output), then stream the final answer turn. This keeps
     the UI responsive without complex mid-stream interruption handling.
-
-    Known Phase 2 limitation: token counts are 0 for streaming responses because
-    StreamChunk carries no usage data. Usage event still writes for the audit trail.
     """
     from app.usage import log_usage
-    import asyncio as _asyncio
 
     started_at = datetime.now(timezone.utc)
     user_messages = [m for m in messages if m.get("role") == "user"]
     query = user_messages[-1]["content"] if user_messages else ""
 
-    nova_ctx, memory_ctx = await _asyncio.gather(
+    nova_ctx, memory_ctx = await asyncio.gather(
         _build_nova_context(model, agent_id, session_id),
         _get_memory_context(agent_id, query),
     )
@@ -148,7 +144,7 @@ async def run_agent_turn_streaming(
     complete_req = CompleteRequest(
         model=model,
         messages=streaming_messages,
-        tools=ALL_TOOLS if used_tools else [],
+        tools=get_all_tools() if used_tools else [],
         stream=True,
         metadata={"agent_id": agent_id, "session_id": session_id},
     )
@@ -163,7 +159,7 @@ async def run_agent_turn_streaming(
             if not line or line == "data: [DONE]":
                 continue
             if line.startswith("data: "):
-                chunk_data = _json.loads(line[6:])
+                chunk_data = json.loads(line[6:])
                 if "error" in chunk_data:
                     raise RuntimeError(
                         f"LLM Gateway error ({chunk_data.get('provider', 'unknown')}): "
@@ -232,7 +228,6 @@ async def _get_platform_persona() -> str:
     This is intentionally fault-tolerant: persona is a nice-to-have overlay,
     not load-bearing infrastructure.
     """
-    import json as _json
     from app.db import get_pool
     try:
         pool = get_pool()
@@ -241,7 +236,7 @@ async def _get_platform_persona() -> str:
                 "SELECT value FROM platform_config WHERE key = 'nova.persona'"
             )
         if row and row["value"]:
-            persona = _json.loads(row["value"])
+            persona = json.loads(row["value"])
             return str(persona).strip() if persona else ""
         return ""
     except Exception as exc:
@@ -321,49 +316,16 @@ async def _resolve_tool_rounds(
     message list ready for the final streaming turn.
 
     Returns (messages_with_tool_history, used_tools_flag).
-    If the LLM makes no tool calls, returns the original messages immediately.
+    Delegates to _run_tool_loop and discards token counts.
     """
-    llm_client = get_llm_client()
-    current = list(messages)
-    used_tools = False
-
-    for round_num in range(max_rounds):
-        req = CompleteRequest(
-            model=model,
-            messages=current,
-            tools=ALL_TOOLS,
-            metadata=metadata,
-        )
-        resp = await llm_client.post("/complete", json=req.model_dump())
-        resp.raise_for_status()
-        completion = resp.json()
-
-        tool_calls = completion.get("tool_calls", [])
-        if not tool_calls:
-            break
-
-        used_tools = True
-        log.info("Tool-use round %d: %d tool call(s)", round_num + 1, len(tool_calls))
-
-        assistant_msg = Message(
-            role="assistant",
-            content=completion.get("content") or "",
-            tool_calls=[
-                ToolCallRef(id=tc["id"], name=tc["name"], arguments=tc.get("arguments", {}))
-                for tc in tool_calls
-            ],
-        )
-        current.append(assistant_msg)
-
-        for tc in tool_calls:
-            result = await execute_tool(tc["name"], tc.get("arguments", {}))
-            current.append(Message(
-                role="tool",
-                name=tc["name"],
-                tool_call_id=tc["id"],
-                content=result,
-            ))
-
+    content, _, _, _, current, used_tools = await _run_tool_loop(
+        messages=messages,
+        model=model,
+        metadata=metadata,
+        tools=None,
+        max_rounds=max_rounds,
+        return_messages=True,
+    )
     return current, used_tools
 
 
@@ -422,19 +384,21 @@ async def _run_tool_loop(
     temperature: float = 0.7,
     max_tokens: int | None = None,
     max_rounds: int = 5,
-) -> tuple[str, int, int, float | None]:
+    return_messages: bool = False,
+) -> tuple[str, int, int, float | None] | tuple[str, int, int, float | None, list[Message], bool]:
     """
-    Non-streaming tool loop — used by run_agent_turn and run_agent_turn_raw.
+    Non-streaming tool loop — used by run_agent_turn, run_agent_turn_raw, and _resolve_tool_rounds.
     Returns (content, input_tokens, output_tokens, cost_usd) from the final completion.
-    Token counts come from the last LLM response in the loop.
+    When return_messages=True, also returns (messages, used_tools) for streaming pre-resolution.
 
     Args:
         tools:  None → ALL_TOOLS; [] → no tools; [...] → explicit subset.
     """
-    effective_tools = ALL_TOOLS if tools is None else tools
+    effective_tools = get_all_tools() if tools is None else tools
     llm_client = get_llm_client()
     current = list(messages)
     last_completion: dict = {}
+    used_tools = False
 
     for round_num in range(max_rounds):
         req = CompleteRequest(
@@ -453,17 +417,18 @@ async def _run_tool_loop(
         if not tool_calls:
             break
 
+        used_tools = True
         log.info("Tool-use round %d: %d tool call(s)", round_num + 1, len(tool_calls))
 
-        assistant_msg = Message(
+        # Set assistant content from completion before delegating to helper
+        current.append(Message(
             role="assistant",
             content=last_completion.get("content") or "",
             tool_calls=[
                 ToolCallRef(id=tc["id"], name=tc["name"], arguments=tc.get("arguments", {}))
                 for tc in tool_calls
             ],
-        )
-        current.append(assistant_msg)
+        ))
 
         for tc in tool_calls:
             result = await execute_tool(tc["name"], tc.get("arguments", {}))
@@ -474,12 +439,15 @@ async def _run_tool_loop(
                 content=result,
             ))
 
-    return (
+    base = (
         last_completion.get("content", ""),
         last_completion.get("input_tokens", 0),
         last_completion.get("output_tokens", 0),
         last_completion.get("cost_usd"),
     )
+    if return_messages:
+        return base + (current, used_tools)
+    return base
 
 
 def _build_prompt(

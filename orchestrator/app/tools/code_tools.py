@@ -148,16 +148,24 @@ CODE_TOOLS: list[ToolDefinition] = [
 # ─── Path helpers ─────────────────────────────────────────────────────────────
 
 def _resolve_path(relative: str) -> Path:
-    """Resolve a relative workspace path to an absolute path.
+    """Resolve a relative path to an absolute path within the current sandbox root.
 
-    Raises ValueError if the resolved path escapes workspace_root.
+    Raises ValueError if the resolved path escapes the sandbox root.
+    Raises PermissionError if the sandbox tier is 'isolated'.
     """
-    from app.config import settings
-    root = Path(settings.workspace_root).resolve()
+    from app.tools.sandbox import get_root, get_sandbox, SandboxTier
+
+    root = get_root()  # raises PermissionError for isolated tier
+
+    # In host mode, allow absolute paths and skip containment check
+    if get_sandbox() == SandboxTier.host:
+        candidate = Path(relative).resolve() if relative.startswith("/") else (root / relative).resolve()
+        return candidate
+
     candidate = (root / relative).resolve()
     if not str(candidate).startswith(str(root)):
         raise ValueError(
-            f"Path '{relative}' resolves outside workspace root '{root}'. "
+            f"Path '{relative}' resolves outside sandbox root '{root}'. "
             "Directory traversal is not permitted."
         )
     return candidate
@@ -249,14 +257,24 @@ def _execute_write_file(path: str, content: str) -> str:
 
 async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     from app.config import settings
+    from app.tools.sandbox import get_sandbox, SandboxTier
+
+    tier = get_sandbox()
+
+    # Isolated tier blocks shell entirely
+    if tier == SandboxTier.isolated:
+        return "Command blocked: shell access is disabled in isolated sandbox tier."
 
     # Resolve working directory
-    cwd = _resolve_path(working_dir) if working_dir else _resolve_path(".")
+    try:
+        cwd = _resolve_path(working_dir) if working_dir else _resolve_path(".")
+    except PermissionError as e:
+        return f"Command blocked: {e}"
     if not cwd.exists():
-        return f"Working directory '{working_dir}' does not exist in workspace."
+        return f"Working directory '{working_dir}' does not exist."
 
-    # Security check — defined below
-    blocked, reason = _is_command_blocked(command)
+    # Security check — tier-aware
+    blocked, reason = _is_command_blocked(command, tier)
     if blocked:
         return f"Command blocked: {reason}"
 
@@ -290,38 +308,55 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     return "\n".join(parts)
 
 
-def _is_command_blocked(command: str) -> tuple[bool, str]:
+def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
     """
     Return (True, reason) if the command should be blocked, (False, "") otherwise.
 
     This is the security boundary for shell access. The rules below block the
     most obviously destructive commands while keeping the tool useful for
     real development work (running tests, builds, linters, etc.).
+
+    In host tier, only the most dangerous hard blocks are enforced.
+    In workspace/nova tiers, all hard blocks apply.
     """
+    from app.tools.sandbox import SandboxTier
+
+    if tier is None:
+        tier = SandboxTier.workspace
+
     cmd_lower = command.lower().strip()
 
-    # Absolute hard blocks — no exceptions
-    _HARD_BLOCKS: list[tuple[str, str]] = [
+    # Absolute hard blocks — always enforced regardless of tier
+    _CRITICAL_BLOCKS: list[tuple[str, str]] = [
         ("rm -rf /",        "recursive delete of filesystem root"),
         ("rm -rf /*",       "recursive delete of filesystem root"),
         (":(){:|:&};:",     "fork bomb"),
         ("mkfs",            "filesystem format"),
         ("dd if=",          "raw disk write"),
         ("> /dev/sd",       "raw disk overwrite"),
-        ("chmod -r /",      "recursive permission change on root"),
-        ("chown -r /",      "recursive ownership change on root"),
-        ("sudo",            "privilege escalation"),
-        ("su -",            "privilege escalation"),
-        ("curl | sh",       "remote code execution via pipe"),
-        ("wget | sh",       "remote code execution via pipe"),
-        ("curl | bash",     "remote code execution via pipe"),
-        ("wget | bash",     "remote code execution via pipe"),
-        ("base64 -d | sh",  "obfuscated remote code execution"),
     ]
 
-    for fragment, reason in _HARD_BLOCKS:
+    for fragment, reason in _CRITICAL_BLOCKS:
         if fragment in cmd_lower:
             return True, reason
+
+    # Additional blocks for workspace and nova tiers
+    if tier in (SandboxTier.workspace, SandboxTier.nova):
+        _TIER_BLOCKS: list[tuple[str, str]] = [
+            ("chmod -r /",      "recursive permission change on root"),
+            ("chown -r /",      "recursive ownership change on root"),
+            ("sudo",            "privilege escalation"),
+            ("su -",            "privilege escalation"),
+            ("curl | sh",       "remote code execution via pipe"),
+            ("wget | sh",       "remote code execution via pipe"),
+            ("curl | bash",     "remote code execution via pipe"),
+            ("wget | bash",     "remote code execution via pipe"),
+            ("base64 -d | sh",  "obfuscated remote code execution"),
+        ]
+
+        for fragment, reason in _TIER_BLOCKS:
+            if fragment in cmd_lower:
+                return True, reason
 
     return False, ""
 

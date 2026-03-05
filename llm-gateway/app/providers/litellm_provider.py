@@ -4,6 +4,7 @@ Trade-off: ~500µs overhead per request, acceptable for <1000 RPS.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import AsyncIterator
 
@@ -19,6 +20,7 @@ from nova_contracts import (
 )
 
 from app.providers.base import ModelProvider
+from app.providers.utils import serialize_messages
 
 log = logging.getLogger(__name__)
 
@@ -50,37 +52,8 @@ class LiteLLMProvider(ModelProvider):
             ModelCapability.structured_output,
         }
 
-    @staticmethod
-    def _serialize_messages(request_messages) -> list[dict]:
-        """Convert nova-contracts Message objects to the dict format LiteLLM expects.
-        Handles tool_calls on assistant messages and tool_call_id on tool result messages."""
-        import json as _json
-        out = []
-        for m in request_messages:
-            msg: dict = {"role": m.role, "content": m.content}
-            # Assistant messages that made tool calls need the tool_calls list
-            if m.tool_calls:
-                msg["tool_calls"] = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": _json.dumps(tc.arguments),
-                        },
-                    }
-                    for tc in m.tool_calls
-                ]
-            # Tool result messages need tool_call_id (and optionally name)
-            if m.tool_call_id:
-                msg["tool_call_id"] = m.tool_call_id
-            if m.name:
-                msg["name"] = m.name
-            out.append(msg)
-        return out
-
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
-        messages = self._serialize_messages(request.messages)
+        messages = serialize_messages(request.messages)
         tools = [
             {
                 "type": "function",
@@ -111,7 +84,6 @@ class LiteLLMProvider(ModelProvider):
         tool_calls = []
         if hasattr(message, "tool_calls") and message.tool_calls:
             for tc in message.tool_calls:
-                import json
                 tool_calls.append(ToolCall(
                     id=tc.id,
                     name=tc.function.name,
@@ -132,7 +104,7 @@ class LiteLLMProvider(ModelProvider):
         )
 
     async def stream(self, request: CompleteRequest) -> AsyncIterator[StreamChunk]:
-        messages = self._serialize_messages(request.messages)
+        messages = serialize_messages(request.messages)
 
         response = await litellm.acompletion(
             model=request.model or self._default_model,

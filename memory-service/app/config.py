@@ -24,6 +24,18 @@ class Settings(BaseSettings):
     # Cleanup
     working_memory_cleanup_interval_seconds: int = 300
 
+    # Compaction pipeline
+    compaction_enabled: bool = True
+    compaction_interval_seconds: int = 600
+    compaction_batch_size: int = 50
+    compaction_lookback_days: int = 7
+    compaction_model: str = "claude-haiku-4-5-20251001"
+
+    # Embedding resilience
+    embedding_fallback_model: str = "text-embedding-004"
+    embedding_max_retries: int = 2
+    embedding_retry_delay: float = 1.0
+
     # Service
     service_host: str = "0.0.0.0"
     service_port: int = 8002
@@ -31,3 +43,5 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+SECONDS_PER_DAY = 86_400

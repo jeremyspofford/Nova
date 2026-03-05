@@ -42,7 +42,8 @@ from app.openai_compat import (
     nova_response_to_oai,
     oai_request_to_nova,
 )
-from app.registry import MODEL_REGISTRY, get_provider
+from app.rate_limiter import check_rate_limit
+from app.registry import MODEL_REGISTRY, DEFAULT_MODEL_KEY, get_provider
 
 log = logging.getLogger(__name__)
 openai_router = APIRouter(prefix="/v1", tags=["openai-compat"])
@@ -51,6 +52,9 @@ openai_router = APIRouter(prefix="/v1", tags=["openai-compat"])
 @openai_router.post("/chat/completions")
 async def chat_completions(req: OAIChatCompletionRequest):
     """OpenAI-compatible chat completion endpoint (streaming and non-streaming)."""
+    allowed, prefix, _remaining = await check_rate_limit(req.model)
+    if not allowed:
+        return {"error": {"message": f"Daily quota exhausted for provider '{prefix}'.", "type": "rate_limit_error"}}
     nova_req = oai_request_to_nova(req)
     provider = get_provider(req.model)
 
@@ -110,6 +114,6 @@ async def list_models_oai():
         "data": [
             {"id": model_id, "object": "model", "created": now, "owned_by": "nova"}
             for model_id in MODEL_REGISTRY
-            if model_id != "__default__"
+            if model_id != DEFAULT_MODEL_KEY
         ],
     }

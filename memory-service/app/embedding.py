@@ -14,6 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.retrieval import to_pg_vector
 
 log = logging.getLogger(__name__)
 
@@ -36,14 +37,14 @@ def _hash_text(text: str, model: str) -> str:
 
 
 async def get_embedding(
-    text: str,
+    content: str,
     session: AsyncSession,
     model: str = settings.embedding_model,
 ) -> list[float]:
     """
     Get embedding for text. Cache hit order: Redis (1ms) → PostgreSQL → LLM Gateway.
     """
-    text_hash = _hash_text(text, model)
+    text_hash = _hash_text(content, model)
     redis_key = _cache_key(text_hash)
 
     # L1: Redis cache
@@ -64,18 +65,17 @@ async def get_embedding(
         return embedding
 
     # L3: LLM Gateway
-    embedding = await _call_llm_gateway(text, model)
+    embedding = await _call_llm_gateway(content, model)
 
     # Write-through to both caches
     await redis.setex(redis_key, settings.redis_embedding_cache_ttl, json.dumps(embedding))
-    embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
     await session.execute(
         text("""
             INSERT INTO embedding_cache (content_hash, embedding, model)
             VALUES (:h, :e::halfvec, :m)
             ON CONFLICT (content_hash) DO NOTHING
         """),
-        {"h": text_hash, "e": embedding_str, "m": model},
+        {"h": text_hash, "e": to_pg_vector(embedding), "m": model},
     )
 
     return embedding
@@ -116,16 +116,13 @@ async def get_embeddings_batch(
 
         miss_indices.append(i)
 
-    # L3: Batch-call gateway for cache misses only
+    # L3: Batch-call gateway for cache misses only (with retry + fallback)
     if miss_indices:
         miss_texts = [texts[i] for i in miss_indices]
-        async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
-            resp = await client.post("/embed", json={"model": model, "texts": miss_texts})
-            resp.raise_for_status()
-            data = resp.json()
+        batch_embeddings = await _call_llm_gateway_batch(miss_texts, model)
 
         for j, idx in enumerate(miss_indices):
-            embedding = data["embeddings"][j]
+            embedding = batch_embeddings[j]
             results[idx] = embedding
 
             # Write-through to both caches
@@ -133,25 +130,57 @@ async def get_embeddings_batch(
             text_hash = _hash_text(t, model)
             redis_key = _cache_key(text_hash)
             await redis.setex(redis_key, settings.redis_embedding_cache_ttl, json.dumps(embedding))
-            embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
             await session.execute(
                 text("""
                     INSERT INTO embedding_cache (content_hash, embedding, model)
                     VALUES (:h, :e::halfvec, :m)
                     ON CONFLICT (content_hash) DO NOTHING
                 """),
-                {"h": text_hash, "e": embedding_str, "m": model},
+                {"h": text_hash, "e": to_pg_vector(embedding), "m": model},
             )
 
     return [results[i] for i in range(len(texts))]
 
 
-async def _call_llm_gateway(text: str, model: str) -> list[float]:
-    async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
-        resp = await client.post("/embed", json={"model": model, "texts": [text]})
-        resp.raise_for_status()
-        data = resp.json()
-    return data["embeddings"][0]
+async def _call_with_retry_fallback(
+    payload: dict,
+    model: str,
+    extract: str,  # "single" → embeddings[0], "batch" → embeddings
+) -> list[float] | list[list[float]]:
+    """Call LLM gateway /embed with retry + fallback model."""
+    import asyncio as _aio
+    models_to_try = [model]
+    if model != settings.embedding_fallback_model:
+        models_to_try.append(settings.embedding_fallback_model)
+
+    for model_to_try in models_to_try:
+        is_fallback = model_to_try != model
+        if is_fallback:
+            log.warning("Falling back to embedding model: %s", model_to_try)
+        for attempt in range(settings.embedding_max_retries):
+            try:
+                async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
+                    resp = await client.post("/embed", json={"model": model_to_try, **payload})
+                    resp.raise_for_status()
+                    data = resp.json()
+                    return data["embeddings"][0] if extract == "single" else data["embeddings"]
+            except Exception:
+                if attempt < settings.embedding_max_retries - 1:
+                    await _aio.sleep(settings.embedding_retry_delay)
+                elif not is_fallback:
+                    log.warning("Primary embedding model %s failed after %d retries", model_to_try, settings.embedding_max_retries)
+
+    raise RuntimeError(f"All embedding attempts failed for model {model} and fallback {settings.embedding_fallback_model}")
+
+
+async def _call_llm_gateway(input_text: str, model: str) -> list[float]:
+    """Single-text embedding with retry + fallback."""
+    return await _call_with_retry_fallback({"texts": [input_text]}, model, "single")
+
+
+async def _call_llm_gateway_batch(texts: list[str], model: str) -> list[list[float]]:
+    """Batch embedding with retry + fallback."""
+    return await _call_with_retry_fallback({"texts": texts}, model, "batch")
 
 
 def _parse_pg_vector(vec_str: str) -> list[float]:

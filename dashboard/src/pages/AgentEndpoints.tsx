@@ -9,6 +9,7 @@ import {
   type AgentEndpoint,
   type AgentEndpointWrite,
 } from '../api'
+import Card from '../components/Card'
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ function EndpointForm({
   const isValid = form.name.trim() && form.url.trim()
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-5 space-y-4">
+    <Card className="p-5 space-y-4">
       <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
         {title}
       </p>
@@ -217,7 +218,7 @@ function EndpointForm({
       {mutation.isError && (
         <p className="text-xs text-red-600 dark:text-red-400">{String(mutation.error)}</p>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -261,7 +262,7 @@ function EndpointCard({
   }
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 overflow-hidden">
+    <Card className="overflow-hidden">
       {/* Header row */}
       <div
         className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
@@ -369,7 +370,7 @@ function EndpointCard({
           )}
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
@@ -446,14 +447,14 @@ export function AgentEndpoints() {
         ))}
 
         {endpoints.length === 0 && !isLoading && (
-          <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-10 text-center">
+          <Card className="p-10 text-center">
             <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
               No agent endpoints registered yet
             </p>
             <p className="mt-1 text-xs text-neutral-300 dark:text-neutral-600">
               Add an A2A or ACP endpoint to delegate tasks to external agent systems.
             </p>
-          </div>
+          </Card>
         )}
       </div>
     </div>

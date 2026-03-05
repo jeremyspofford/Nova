@@ -46,5 +46,15 @@ class ModelProvider(ABC):
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
         """Generate embeddings for a list of texts."""
 
+    @property
+    def is_available(self) -> bool:
+        """Override in providers that require credentials. Default: always available."""
+        return True
+
+    def _assert_available(self) -> None:
+        """Raise RuntimeError if the provider is not available. Call at start of complete()/stream()."""
+        if not self.is_available:
+            raise RuntimeError(f"{self.name} provider is not available")
+
     def supports(self, capability: ModelCapability) -> bool:
         return capability in self.capabilities

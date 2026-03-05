@@ -11,6 +11,8 @@ import {
   reviewPipelineTask, getQueueStats, getPods, getModels,
 } from '../api'
 import type { PipelineTask, TaskStatus } from '../types'
+import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
+import Card from '../components/Card'
 
 // ── Stage pipeline definition ──────────────────────────────────────────────────
 
@@ -42,24 +44,10 @@ function resolveStageState(task: PipelineTask): { completedUpTo: number; activeI
   return { completedUpTo: idx, activeIndex: idx }
 }
 
-// ── Status badge ───────────────────────────────────────────────────────────────
+// ── Task status badge (distinct from agent StatusBadge in components/) ────────
 
-const STATUS_CONFIG: Record<string, { label: string; className: string; pulse?: boolean }> = {
-  queued:              { label: 'Queued',        className: 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300' },
-  running:             { label: 'Running',       className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
-  context_running:     { label: 'Context',       className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
-  task_running:        { label: 'Task',          className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
-  guardrail_running:   { label: 'Guardrail',     className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
-  code_review_running: { label: 'Code Review',   className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
-  decision_running:    { label: 'Decision',      className: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400', pulse: true },
-  complete:            { label: 'Complete',      className: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' },
-  failed:              { label: 'Failed',        className: 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' },
-  cancelled:           { label: 'Cancelled',     className: 'bg-neutral-400/30 dark:bg-neutral-600/30 text-neutral-500 dark:text-neutral-400' },
-  pending_human_review:{ label: 'Needs Review',  className: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400', pulse: true },
-}
-
-function StatusBadge({ status }: { status: TaskStatus }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, className: 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300' }
+function TaskStatusBadge({ status }: { status: TaskStatus }) {
+  const cfg = TASK_STATUS_CONFIG[status] ?? { label: status, className: 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300' }
   return (
     <span className={clsx('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium', cfg.className)}>
       {cfg.pulse && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
@@ -163,8 +151,7 @@ function TaskCard({ task }: { task: PipelineTask }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
   })
 
-  const isActive    = ['queued','running','context_running','task_running',
-                        'guardrail_running','code_review_running','decision_running'].includes(task.status)
+  const isActive    = ACTIVE_TASK_STATUSES.has(task.status)
   const needsReview = task.status === 'pending_human_review'
   const isTerminal  = ['complete','failed','cancelled'].includes(task.status)
 
@@ -181,7 +168,7 @@ function TaskCard({ task }: { task: PipelineTask }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-2">
-            <StatusBadge status={task.status} />
+            <TaskStatusBadge status={task.status} />
             {task.pod_name && (
               <span className="rounded-full bg-accent-50 dark:bg-accent-900/30 px-2 py-0.5 text-xs text-accent-700 dark:text-accent-400">
                 {task.pod_name}
@@ -299,7 +286,7 @@ function SubmitForm() {
   })
 
   return (
-    <div className="rounded-xl border border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 p-4">
+    <Card className="p-4">
       <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Submit Task</h2>
       <div className="space-y-2">
         <textarea
@@ -353,7 +340,7 @@ function SubmitForm() {
           <p className="text-xs text-red-600 dark:text-red-400">Failed to submit: {String(submit.error)}</p>
         )}
       </div>
-    </div>
+    </Card>
   )
 }
 
@@ -380,11 +367,6 @@ function QueueStats() {
 
 type Tab = 'active' | 'review' | 'history'
 
-const ACTIVE_STATUSES = new Set([
-  'queued', 'running', 'context_running', 'task_running',
-  'guardrail_running', 'code_review_running', 'decision_running',
-])
-
 export function Tasks() {
   const [tab, setTab] = useState<Tab>('active')
   const qc = useQueryClient()
@@ -397,7 +379,7 @@ export function Tasks() {
   })
 
   // Partition into tabs
-  const activeTasks  = tasks.filter(t => ACTIVE_STATUSES.has(t.status))
+  const activeTasks  = tasks.filter(t => ACTIVE_TASK_STATUSES.has(t.status))
   const reviewTasks  = tasks.filter(t => t.status === 'pending_human_review')
   const historyTasks = tasks.filter(t => ['complete','failed','cancelled'].includes(t.status))
 

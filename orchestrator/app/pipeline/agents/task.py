@@ -65,7 +65,7 @@ After completing your work, return ONLY valid JSON matching this exact schema:
         Agent's issues list so the Task Agent knows exactly what to fix.
         """
         from ...agents.runner import run_agent_turn_raw
-        from ...tools import ALL_TOOLS
+        from ...tools import get_all_tools
 
         context = state.completed.get("context", {})
 
@@ -100,7 +100,7 @@ After completing your work, return ONLY valid JSON matching this exact schema:
             user_message=prompt,
             model=self.model,
             tools=None if self.allowed_tools is None else [
-                t for t in ALL_TOOLS
+                t for t in get_all_tools()
                 if t.name in self.allowed_tools
             ],
             temperature=self.temperature,
