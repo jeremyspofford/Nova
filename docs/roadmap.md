@@ -995,6 +995,23 @@ User: "Improve test coverage in auth module to 80%"
 
 ---
 
+## 🔜 Remote Access + Mobile
+
+Secure remote access and PWA support — access Nova from your phone or any device.
+
+| Feature | Status |
+|---|---|
+| WebSocket auth (API key on `/ws/chat`) | ✅ |
+| CORS lockdown (configurable `CORS_ALLOWED_ORIGINS`) | ✅ |
+| HTTPS indicator in NavBar | ✅ |
+| Cloudflare Tunnel sidecar (`profiles: ["cloudflare-tunnel"]`) | ✅ |
+| Tailscale sidecar (`profiles: ["tailscale"]`) | ✅ |
+| PWA manifest + service worker (installable to home screen) | ✅ |
+| Setup wizard remote access selection | ✅ |
+| Web Push notifications for task completion | 🔜 Phase 4+ |
+
+---
+
 ## 🔜 Phase 9 — Infrastructure + Triggers + Computer Use
 
 **Infrastructure hardening:**
@@ -1162,10 +1179,444 @@ Assuming the recommended options (CDP Screencast, watch-only, per-task ephemeral
 
 ---
 
+## 🔜 Phase 10 — Edge Computing & Single-Board Deployment (Raspberry Pi)
+
+**Motivation:** Compete with open-source platforms like OpenClaw that can run on constrained hardware. Enable Nova to run on a Raspberry Pi 4 (4GB RAM) or similar single-board computers by providing multiple deployment profiles, resource optimization, and intelligent fallback strategies.
+
+**Target users:**
+- Hobbyists with Pi 4 / Pi 5 who want local orchestration + cloud LLMs
+- Users in bandwidth-constrained regions who can't run full compute locally
+- Educational / maker communities (Pi is cheap, accessible)
+- Anyone who wants to avoid buying expensive hardware
+
+### Deployment Profiles
+
+Nova setup script detects hardware and offers three profiles:
+
+**Profile 1: Cloud-only (minimal local footprint)**
+- Runs: orchestrator, llm-gateway, recovery, dashboard
+- Skips: memory-service (no local embeddings), ollama (no local models)
+- Database: RDS or other cloud-hosted PostgreSQL
+- Resource usage: ~800MB RAM
+- Trade-off: No semantic memory (keyword-only search), all LLM calls → cloud APIs
+- Use case: Pi 4 with 2-4GB RAM, no local compute
+
+**Profile 2: Cloud-first with local memory (balanced)**
+- Runs: orchestrator, llm-gateway, memory-service, recovery, dashboard
+- Skips: ollama
+- Database: RDS or cloud PostgreSQL
+- memory-service: Works against cloud DB, handles embedding inference locally
+- Resource usage: ~1.2GB RAM (postgres now remote)
+- Trade-off: Memory/semantic search works, but queries go to cloud DB; LLMs go to cloud
+- Use case: Pi 4 with 4GB RAM, wants semantic search but no local model serving
+- Environment: `LLM_ROUTING_STRATEGY=cloud-only`, `DATABASE_URL=<RDS>`
+
+**Profile 3: Distributed architecture (full-featured)**
+- Pi runs: dashboard, recovery (UI layer only)
+- Another machine (laptop, NUC, VPS) runs: orchestrator, llm-gateway, memory-service
+- Database: Shared PostgreSQL (local or cloud)
+- Resource usage on Pi: ~300MB (just HTTP proxy + recovery sidecar)
+- Trade-off: Requires second device, but gets full Nova features locally on that device
+- Use case: User has multiple machines and wants lightweight UI on Pi, powerful compute elsewhere
+- Environment: Dashboard API proxies to remote orchestrator + llm-gateway
+
+### Hardware Detection & Setup Flow
+
+**New setup.sh logic:**
+
+```bash
+# Detect hardware
+TOTAL_RAM=$(free -h | awk 'NR==2 {print $2}')
+CPU_CORES=$(nproc)
+
+# Recommend profile
+if [ "$TOTAL_RAM" -lt "4GB" ]; then
+  echo "Detected <4GB RAM. Recommend Cloud-only profile."
+  echo "Available profiles:"
+  echo "  1. Cloud-only (minimal, ~800MB)"
+  echo "  2. Distributed (run compute on another machine)"
+  read -p "Choose profile (1 or 2): " PROFILE
+elif [ "$TOTAL_RAM" -lt "8GB" ]; then
+  echo "Detected <8GB RAM. Recommend Cloud-first with memory."
+  echo "Available profiles:"
+  echo "  1. Cloud-first (local memory, cloud LLM, ~1.2GB)"
+  echo "  2. Distributed (UI on Pi, compute elsewhere)"
+  echo "  3. Local (full local, may be slow)"
+  read -p "Choose profile (1-3): " PROFILE
+else
+  echo "Sufficient RAM for full local deployment."
+  read -p "Use full local (y) or distributed (n)? " LOCAL_MODE
+fi
+
+# Generate appropriate docker-compose overlay
+case $PROFILE in
+  1) cp docker-compose.cloud-only.yml docker-compose.override.yml ;;
+  2) cp docker-compose.cloud-first.yml docker-compose.override.yml ;;
+  3) cp docker-compose.distributed.yml docker-compose.override.yml ;;
+esac
+
+# Prompt for cloud config (RDS, cloud fallback, etc.)
+if [ "$PROFILE" != "3" ]; then
+  read -p "Use AWS RDS for database? (y/n): " USE_RDS
+  if [ "$USE_RDS" = "y" ]; then
+    read -p "RDS endpoint (e.g., nova.xxxxx.us-east-1.rds.amazonaws.com): " RDS_HOST
+    echo "DATABASE_URL=postgresql+asyncpg://nova:${POSTGRES_PASSWORD}@${RDS_HOST}:5432/nova" >> .env
+  fi
+fi
+```
+
+### Docker Compose Overlays
+
+**docker-compose.cloud-only.yml**
+- Excludes: memory-service, ollama
+- postgres: replaced with environment variable pointing to RDS
+- orchestrator, llm-gateway, recovery, dashboard only
+- All services use `LLM_ROUTING_STRATEGY=cloud-only`
+
+**docker-compose.cloud-first.yml**
+- Excludes: ollama
+- postgres: can be local or RDS
+- memory-service uses local pgvector but queries hit RDS
+- llm-gateway: `LLM_ROUTING_STRATEGY=cloud-first`
+
+**docker-compose.distributed.yml**
+- Pi runs: dashboard + recovery
+- Environment: `ORCHESTRATOR_URL=http://<remote-machine>:8000`
+- dashboard proxies `/api/*` to remote orchestrator
+- memory-service & llm-gateway run on remote machine
+
+### Settings Page Updates
+
+**New "Deployment" section in Settings:**
+- Display current profile (Cloud-only / Cloud-first / Distributed)
+- Show hardware specs (RAM, CPU cores) for user awareness
+- "Migrate to different profile" button (guides through RDS setup, etc.)
+
+**LLM Routing section conditional rendering:**
+- Cloud-only: Hide Ollama, WoL, local model options
+- Cloud-first: Show Ollama status but mark as "disabled" (optional), show local memory config
+- Distributed: Show "remote orchestrator" status instead of local services
+
+### Database Configuration
+
+**Option A: Local PostgreSQL (default for full-featured)**
+- Works on Pi 4+ with 4GB RAM
+- Setup: `docker-compose up postgres`
+- Backup: Via recovery service UI
+
+**Option B: AWS RDS (recommended for Pi)**
+- Setup: One-time AWS account + RDS creation
+- Cost: ~$15-20/month for micro instance (eligible for free tier first year)
+- Benefit: 2GB local memory freed up; automatic backups; high availability
+- Setup flow: User provides RDS endpoint, Nova adds it to `.env`
+- Connection pooling: Use RDS Proxy to avoid connection exhaustion (Pi has limited resources)
+
+**Option C: Other cloud databases**
+- Supabase (managed Postgres), CockroachDB, PlanetScale, etc.
+- Any PostgreSQL-compatible service works
+- `DATABASE_URL` is agnostic to provider
+
+### Memory-Service Optimization for Pi
+
+- Disable embedding model caching (saves RAM)
+- Use smaller embedding model if available (e.g., DistilBERT instead of nomic-embed-text)
+- Keyword-only retrieval in cloud-only profile (skip vector search entirely)
+- Connection pooling: Limit to 2-3 DB connections instead of default 5
+
+### Testing & Validation
+
+- [ ] Deploy on actual Pi 4 (4GB) with each profile
+- [ ] Measure startup time, memory usage, latency
+- [ ] Test cold-start (Pi offline, comes back online) with cloud DB
+- [ ] Verify dashboard loads and proxies to remote orchestrator (distributed mode)
+- [ ] Stress test: 5 concurrent tasks on cloud-only profile
+
+### Documentation
+
+- **docs/deployment-edge.md** — Pi-specific guide, profile selection flowchart, hardware requirements
+- **docs/deployment-rds.md** — Step-by-step AWS RDS setup (terraform config optional)
+- **docs/deployment-distributed.md** — How to run dashboard on Pi, orchestrator elsewhere
+- Update CLAUDE.md: Mention profiles, RDS option, deployment topology
+
+### Success Criteria
+
+- [ ] Pi 4 with 4GB RAM can run cloud-only profile with <15s startup
+- [ ] Dashboard responsive with remote orchestrator (latency <200ms)
+- [ ] Setup script detects hardware and recommends profile (>95% accuracy)
+- [ ] RDS migration is documented and tested
+
+---
+
+## 🔜 Phase 11 — Multi-Cloud Deployment & Scaling
+
+**Motivation:** Nova currently assumes single-machine or single-datacenter deployment. This phase enables:
+1. Running Nova services across multiple cloud providers (AWS, GCP, Azure, Hetzner, Linode, DigitalOcean, etc.)
+2. Horizontal scaling of stateless services (orchestrator, llm-gateway, memory-service)
+3. Multi-region redundancy
+4. Load balancing across instances
+5. Kubernetes-first deployment (eventually)
+
+**Target users:**
+- Teams running Nova for production workloads
+- Users wanting geographic distribution (low latency, data sovereignty)
+- Organizations scaling from hobby → production
+- Companies leveraging existing cloud infrastructure
+
+### Deployment Targets
+
+**Target clouds (in priority order):**
+1. **AWS** (widest adoption, mature tooling) — ECS, RDS, ElastiCache, ALB
+2. **DigitalOcean** (affordable, simple, popular with developers) — Droplets, Managed Postgres, Managed Redis, Load Balancer
+3. **Linode / Akamai** (good price-to-performance, API-first) — Linode Kubernetes Engine, Managed DB
+4. **Hetzner** (European datacenter, cost-effective) — Cloud Servers, volumes, load balancer
+5. **GCP** (strong if user already in ecosystem) — Cloud Run, Cloud SQL, Memorystore
+6. **Azure** (enterprise adoption) — Container Instances, Database for PostgreSQL, Cache for Redis
+7. **Heroku** (simplicity-first, smallest setup friction) — Apps, Postgres, Redis add-ons
+
+### Deployment Patterns
+
+#### Pattern 1: Single Cloud, Single Machine (Status Quo)
+- All 8 services on one VM (or Docker Compose stack)
+- Current architecture
+- Works for hobby / small-scale use
+
+#### Pattern 2: Single Cloud, Horizontally Scaled
+- Stateless services (orchestrator, llm-gateway, memory-service) behind load balancer
+- Shared stateful services (postgres, redis, recovery) on managed services
+- Example: 3x orchestrator instances, 1x shared RDS, 1x managed Redis
+- Cost: ~$50-100/month on DigitalOcean / Linode
+- Cloud provider: supports docker / kubernetes
+
+#### Pattern 3: Multi-Region, Single Cloud
+- Primary region: Full deployment
+- Secondary regions: Read replicas, failover orchestrators
+- Database: Read replicas in each region; primary writes to main region
+- LLM gateway: Local instances in each region for lower latency
+- Use case: Global user base, data residency requirements
+- Cost: ~$200-300/month for 2-region setup
+
+#### Pattern 4: Multi-Cloud Hybrid
+- Production on AWS (stability, scale)
+- Failover on DigitalOcean (cost-effective backup)
+- Database: Primary on AWS RDS, replica on DigitalOcean Postgres
+- LLM gateway routes to both clouds (cost optimization)
+- Use case: Hedge provider risk, lock-in avoidance
+- Cost: ~$150-250/month
+
+#### Pattern 5: Kubernetes (Future, Phase 12)
+- Nova services as Helm chart
+- Deploy to any K8s cluster (EKS, GKE, AKS, DigitalOcean K8s, Linode K8s)
+- Horizontal pod autoscaling based on task queue length
+- Service mesh (Istio optional) for inter-service routing
+- Not in Phase 11 — Phase 11 focuses on Docker-based single-cloud scaling
+
+### Infrastructure-as-Code
+
+**Terraform modules (one per provider):**
+
+```
+terraform/
+  ├── aws/
+  │   ├── main.tf               # ECS, RDS, ElastiCache, ALB
+  │   ├── variables.tf          # Instance type, region, availability zones
+  │   └── outputs.tf            # Load balancer DNS, RDS endpoint, etc.
+  ├── digitalocean/
+  │   ├── main.tf               # Droplets, Managed Postgres, Managed Redis
+  │   └── variables.tf
+  ├── gcp/
+  │   ├── main.tf               # Cloud Run, Cloud SQL, Memorystore
+  │   └── variables.tf
+  ├── azure/
+  │   ├── main.tf               # Container Instances, Azure Database for PostgreSQL
+  │   └── variables.tf
+  ├── hetzner/
+  │   ├── main.tf               # Cloud Servers, managed services
+  │   └── variables.tf
+  └── common/
+      ├── docker-compose.tf      # Shared Docker Compose overlay
+      ├── networking.tf          # Load balancer, DNS
+      └── monitoring.tf          # Prometheus, Grafana (optional Phase 11.5)
+```
+
+**Example: Terraform for DigitalOcean (single region, horizontally scaled)**
+
+```hcl
+# terraform/digitalocean/main.tf
+resource "digitalocean_app" "nova_orchestrator" {
+  name             = "nova-orchestrator"
+  instance_count   = var.orchestrator_replicas  # 3
+  instance_size_slug = "basic-xs"               # ~$5/month each
+}
+
+resource "digitalocean_database_cluster" "postgres" {
+  name       = "nova-postgres"
+  engine     = "pg"
+  version    = "16"
+  size       = "db-s-1vcpu-1gb"                 # ~$15/month
+  region     = var.region
+  node_count = 1
+}
+
+resource "digitalocean_redis_cluster" "cache" {
+  name       = "nova-redis"
+  size       = "db-s-1vcpu-1gb"                 # ~$15/month
+  region     = var.region
+  num_nodes  = 1
+}
+
+resource "digitalocean_loadbalancer" "nova" {
+  name   = "nova-lb"
+  region = var.region
+
+  forwarding_rule {
+    entry_protocol  = "http"
+    entry_port      = 80
+    target_protocol = "http"
+    target_port     = 8000  # orchestrator
+  }
+
+  healthcheck {
+    protocol = "http"
+    port     = 8000
+    path     = "/health/live"
+  }
+}
+```
+
+### Setup & Deployment
+
+**New setup flow for multi-cloud:**
+
+```bash
+./setup --cloud
+
+# Prompts:
+# 1. Which cloud? (aws / do / gcp / azure / hetzner / linode)
+# 2. Deployment pattern? (single-machine / horizontally-scaled / multi-region)
+# 3. Region / availability zone?
+# 4. Number of orchestrator replicas? (1, 3, 5)
+# 5. Postgres size? (micro / small / medium)
+# 6. Redis size?
+
+# Generates:
+# - terraform/chosen-cloud/terraform.tfvars
+# - .env with cloud-specific database URLs
+# - shell script to run terraform apply + docker-compose pull
+
+# User runs:
+# bash ./deploy-to-cloud.sh
+```
+
+### Service Discovery & Load Balancing
+
+**Challenge:** In a multi-machine setup, services need to find each other.
+
+**Solution 1: Cloud Load Balancer (recommended for Phase 11)**
+- Provider's load balancer sits in front of orchestrator, llm-gateway, memory-service
+- Services use provider-specific DNS names (e.g., `postgres.c.example.com`)
+- Drawback: Load balancer cost, latency, limited session affinity
+
+**Solution 2: Consul / Etcd (Phase 12, advanced)**
+- Service mesh for inter-service discovery and routing
+- Phase 11 explicitly skips this (keep it simple)
+
+**Solution 3: Fixed IPs & ENV (simplest)**
+- Terraform outputs fixed IPs for each service
+- docker-compose gets IPs injected via `.env`
+- Works well for small clusters (up to 10 instances)
+- Recommended for Phase 11
+
+### Managed Services Configuration
+
+Each cloud provider has different names and configurations:
+
+| Service | AWS | DigitalOcean | GCP | Azure |
+|---|---|---|---|---|
+| **PostgreSQL** | RDS | Managed Postgres | Cloud SQL | Database for PostgreSQL |
+| **Redis** | ElastiCache | Managed Redis | Memorystore | Cache for Redis |
+| **Load Balancer** | ALB / NLB | Load Balancer | Cloud Load Balancing | Azure Load Balancer |
+| **Container Orchestration** | ECS (Docker) | App Platform (Docker) | Cloud Run (containers) | Container Instances |
+| **Cost monitoring** | AWS Cost Explorer | Billing API | GCP Billing | Azure Cost Management |
+
+### Scaling Metrics & Auto-Scaling
+
+**When to scale orchestrator:**
+- Task queue depth > 10
+- CPU utilization > 70%
+- Memory usage > 80%
+
+**When to scale llm-gateway:**
+- Concurrent requests > 20
+- Response latency > 2s
+- Provider rate-limit errors increasing
+
+**When to scale memory-service:**
+- Database query latency > 500ms
+- Embedding queue size > 100
+
+**Implementation (Phase 11):**
+- Manual scaling (update Terraform, re-apply)
+- Phase 12: Auto-scaling groups (AWS ASG, DigitalOcean App Platform scaling)
+
+### Cost Estimation & Monitoring
+
+**Add cost estimation to dashboard:**
+- Display current deployment topology
+- Show estimated monthly cost
+- "Cost breakdown" — per service, per region, per provider
+- "Scale scenario" tool — what if we add 1 more region? +$X/month
+
+**Providers to track:**
+- Managed database costs
+- Load balancer costs
+- Data transfer (cross-region is expensive!)
+- Compute instance costs
+
+### Backup & Disaster Recovery
+
+**Backup strategy (cloud-native):**
+- PostgreSQL: Managed provider backup (AWS RDS automated backup, GCP Cloud SQL backup)
+- Redis: Snapshot daily, stored in object storage (S3, Cloud Storage, Azure Blob)
+- Recovery service: Still runs on a sidecar instance, provides manual restore UI
+
+**Disaster recovery targets:**
+- RTO (Recovery Time Objective): 15 minutes
+- RPO (Recovery Point Objective): 1 hour (latest backup)
+
+**Testing:**
+- Quarterly DR drill: Destroy prod cluster, restore from backup, verify data integrity
+
+### Documentation
+
+- **docs/deployment-cloud.md** — Cloud provider comparison table, choosing a provider
+- **docs/deployment-terraform.md** — Terraform usage, customizing variables, dry-run
+- **docs/scaling.md** — When to scale, how to scale, cost optimization
+- **docs/disaster-recovery.md** — Backup strategy, restore process, DR testing
+- Update CLAUDE.md: Add "Multi-Cloud" section, mention Terraform
+
+### Testing & Validation
+
+- [ ] Deploy on AWS ECS with 2x orchestrator, 1x RDS
+- [ ] Deploy on DigitalOcean App Platform (simplest cloud)
+- [ ] Deploy on GCP Cloud Run (serverless, different model)
+- [ ] Run load test: 100 concurrent tasks across 3-orchestrator cluster
+- [ ] Verify failover: Kill 1 orchestrator, tasks re-queue correctly
+- [ ] Test database failover: Simulate RDS outage, recovery behavior
+
+### Success Criteria
+
+- [ ] Cloud setup (Terraform) takes <30 minutes from zero to running
+- [ ] Cost per month on DigitalOcean is <$50 (3x app, managed DB, managed Redis)
+- [ ] Horizontal scaling of orchestrator is transparent to users (no code changes)
+- [ ] Disaster recovery tested and documented
+- [ ] At least 2 cloud providers fully supported (AWS, DigitalOcean)
+
+---
+
 ## 🧊 Icebox / Future
 
 - **Capability-based YAML routing** — once Planning Agent assigns agents by role, formalize model requirements per role in a config file
-- **Telegram / mobile client** — conversational interface via Telegram or React Native
+- **Web Push notifications** — notify on task completion when accessing via PWA (requires Phase 4 async tasks)
 - **Key-level model restrictions** — `sk-nova-*` keys scoped to specific providers
 - **Multi-model A/B testing** — run two models on same subtask, Evaluation Agent picks the better output
 - **Self-hosted Ollama parity** — full tool support for local models
