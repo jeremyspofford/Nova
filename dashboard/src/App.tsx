@@ -41,23 +41,22 @@ async function checkBackendReady(): Promise<boolean> {
 }
 
 function AppShell() {
-  const [ready, setReady] = useState<boolean | null>(null) // null = checking
+  // Optimistic: assume backend is up. Normal refreshes render instantly.
+  // Only show startup screen if the health check actually fails.
+  const [ready, setReady] = useState(true)
 
   const handleReady = useCallback(() => setReady(true), [])
 
   useEffect(() => {
-    checkBackendReady().then(ok => setReady(ok))
+    checkBackendReady().then(ok => {
+      if (!ok) setReady(false)
+    })
   }, [])
 
-  // Still checking initial status
-  if (ready === null) return null
-
-  // Backend is down — show startup screen (talks to recovery service)
   if (!ready) {
     return <StartupScreen onReady={handleReady} />
   }
 
-  // Normal operation
   return (
     <ChatProvider>
     <BrowserRouter>
