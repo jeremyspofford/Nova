@@ -46,7 +46,7 @@ Operational maturity improvements: fixed MCP tool visibility for agents, test fo
 
 ### Phase 6 -- Memory Overhaul
 
-Three-tier memory architecture (semantic, procedural, episodic) with hybrid retrieval (70% cosine similarity + 30% ts_rank), ACT-R confidence decay, fact upserts, embedding fallback chain, and Memory Inspector dashboard page.
+Three-tier memory architecture (semantic, procedural, episodic) with hybrid retrieval (70% cosine similarity + 30% ts_rank), ACT-R confidence decay, fact upserts, embedding fallback chain, and Memory Inspector dashboard page. Upcoming: auto fact extraction from conversations, "what do I know about X?" knowledge queries, cross-session consolidation, and persistent task history with full reasoning traces.
 
 ## Current and upcoming
 
@@ -62,6 +62,24 @@ Typed Python SDK (`nova-sdk`), CLI with Typer + Rich (`nova-cli`), interactive T
 
 Planning Agent that decomposes goals into subtask DAGs, executes them through the pipeline, evaluates results, and re-plans. This is the core of Nova's autonomous operation.
 
+### Phase 8b -- MCP Integrations Hub (planned)
+
+One-click integrations connecting Nova to your self-hosted services and developer tools via MCP servers. Browse, enable, and configure integrations from the dashboard with minimal setup.
+
+**Homelab:** Home Assistant (device control), n8n (workflow orchestration), Nextcloud (files/calendar), Paperless-ngx (documents), Immich (photos), Gitea (local git), Uptime Kuma (monitoring), Portainer (containers).
+
+**Developer:** GitHub (repos/PRs/issues), Linear (project tracking), Notion (knowledge base), Slack/Discord (messaging).
+
+**System:** Filesystem (host file access), Docker (container management), Cloudflare (DNS, tunnels, custom domain deployment), SSH (remote execution), Prometheus/Grafana (metrics).
+
+**Knowledge:** Brave Search (web search), Playwright (browser automation), external vector DBs, arbitrary SQL databases.
+
+Each integration ships as a Docker Compose profile or connects to an existing service via URL + API key. Dashboard provides an Integrations page with enable/disable toggles, config modals, connection testing, and real-time health status.
+
+**Devices & Infrastructure:** A dashboard page showing all physical machines connected to Nova -- real-time status (online/sleeping/offline), hardware specs, running services, installed models, resource utilization, and Wake-on-LAN controls. Nova uses device awareness for smart inference routing (auto-wake GPU box when needed, fall back to cloud when offline).
+
+**Custom Domain Self-Deployment:** With the Cloudflare MCP integration, Nova can deploy itself at a user's custom domain (e.g., `nova.mydomain.com`). Nova creates the Cloudflare Tunnel, DNS record, and SSL configuration automatically -- zero manual DNS setup required.
+
 ### Phase 9 -- Triggered Execution (planned)
 
 External event triggers: git webhooks, cron schedules, Slack commands, and custom webhook endpoints that automatically submit tasks to the pipeline.
@@ -69,6 +87,10 @@ External event triggers: git webhooks, cron schedules, Slack commands, and custo
 ### Phase 9b -- Integrated Web IDE (planned)
 
 Browser-based code editor with git workspace management, integrated with Nova's agent pipeline for AI-assisted development.
+
+### Remote Access + Multi-Device Gateway (planned)
+
+Nova as a distributed personal AI network. Each device (mini-PC, desktop, laptop) runs its own Nova gateway with different LLM backends, sharing one memory service. Chat through the same PWA from your phone regardless of which gateway you're hitting. Per-device routing: cloud-only on low-power devices, local Ollama on GPU boxes, hybrid elsewhere.
 
 ### Phase 10 -- Edge Computing (planned)
 

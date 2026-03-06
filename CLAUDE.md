@@ -59,12 +59,18 @@ make restore F=<file>     # restore a specific backup
 
 ## Testing
 
-No centralized test suite. Validation approaches:
+```bash
+make test          # Full integration suite (35 tests, ~2 min, requires services running)
+make test-quick    # Health endpoints only (~0.4s)
+```
+
+Integration tests live in `tests/` at the repo root. They hit real running services over HTTP/WebSocket — no mocks. Pipeline tests are opt-in (skipped unless an LLM provider is configured). Tests create resources with `nova-test-` prefix and clean up via fixture teardown.
+
+Additional validation:
 - Dashboard: `cd dashboard && npm run build` (TypeScript compilation check)
 - Each FastAPI service: `/health/live` and `/health/ready` endpoints
 - Interactive: chat-api serves a test UI at `http://localhost:8080/`
 - API docs: FastAPI auto-docs at `/docs` on each service
-- memory-service has optional pytest/schemathesis dev dependencies
 
 ## Code Conventions
 

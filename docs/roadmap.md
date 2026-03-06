@@ -476,6 +476,14 @@ Three new entries for Nova's MCP server catalog (agents can use these conversati
 
 5. **Memory Inspector page** (in dashboard) — browse facts, episodes, project context; manually flag or delete stale entries.
 
+6. **Auto fact extraction** — after each conversation or pipeline task, automatically extract entities, decisions, and lessons learned from the output. Store as semantic facts so knowledge compounds across sessions without manual curation.
+
+7. **"What do I know about X?" query endpoint** — `POST /api/v1/memories/knowledge` that combines semantic search, fact lookup, and cross-session consolidation into a single natural-language answer about a topic. Transforms memory from a retrieval system into a knowledge system.
+
+8. **Cross-session consolidation** — background task that finds related episodic memories across sessions, merges overlapping facts, and promotes recurring patterns to higher-confidence semantic facts.
+
+9. **Task history persistence** — completed task trees stored permanently with full reasoning traces: which agents ran, what they produced, what decisions were made, and why. Enables auditing how Nova reasoned through any task. Surfaced in the dashboard Task Board as "session replay".
+
 ---
 
 ## ✅ Phase 6b — Code Quality & DRY Cleanup
@@ -1199,6 +1207,280 @@ Secure remote access and PWA support — access Nova from your phone or any devi
 | PWA manifest + service worker (installable to home screen) | ✅ |
 | Setup wizard remote access selection | ✅ |
 | Web Push notifications for task completion | 🔜 Phase 4+ |
+
+### Multi-Device Gateway Network
+
+> Nova as a distributed personal AI network. Each device runs its own Nova gateway
+> with different LLM backends, sharing one memory backend. Chat through the same
+> PWA regardless of which gateway you're hitting.
+
+**Architecture:**
+
+```
+Phone (PWA)
+↓ HTTPS (Cloudflare Tunnel / Tailscale)
+├── Mini-PC Nova  → Cloud APIs + WoL → Dell Ollama
+├── Work Laptop Nova → Cloud APIs + Dell Ollama via Tailscale
+└── Dell Nova → Local Ollama only
+↑
+All instances share one memory-service (on mini-PC)
+```
+
+**Per-device LLM routing config:**
+
+| Device | `LLM_ROUTING_STRATEGY` | Ollama endpoint | Notes |
+|---|---|---|---|
+| Mini-PC (Beelink) | `cloud-first` | Dell via WoL | Always-on gateway, wakes Dell on demand |
+| Dell Desktop | `local-only` | `localhost:11434` | GPU box, no cloud spend |
+| Work Laptop | `cloud-first` | Dell via Tailscale | Remote Ollama when Dell is awake |
+
+**What exists:**
+- LiteLLM gateway already routes by strategy (`local-only`/`local-first`/`cloud-only`/`cloud-first`)
+- WoL integration already wakes Dell on demand
+- Cloudflare Tunnel and Tailscale profiles in docker-compose
+- PWA manifest + service worker already shipped
+
+**What's needed:**
+- [ ] Mobile-responsive chat UI (dashboard is desktop-optimized)
+- [ ] Per-instance `.env` templates for each device profile
+- [ ] Shared memory: all instances point `NOVA_MEMORY_URL` at mini-PC's memory-service via Tailscale
+- [ ] Device-aware inference routing in llm-gateway or orchestrator
+- [ ] Documentation: `docs/deployment-distributed.md`
+
+**Minimal viable path:** Run Nova on mini-PC with `cloud-only` routing. No Ollama needed. Chat via PWA from phone. Validate the pattern, then add Dell Ollama routing.
+
+---
+
+## 🔜 Phase 8b — MCP Integrations Hub (Self-Hosted Ecosystem)
+
+**Motivation:** Nova already has MCP tool dispatch in the orchestrator. The next step is making it trivial to connect Nova to the self-hosted services and developer tools people already run — turning Nova into the AI brain of your homelab. Goal: **one-click install with minimal configuration** for each integration.
+
+**Architecture:**
+
+- `mcp-servers.yaml` config file listing enabled MCP servers with connection details
+- Dashboard UI page to browse, enable/disable, and configure MCP servers
+- Each integration ships as a Docker Compose profile or sidecar container with a pre-configured MCP bridge
+- Auto-discovery: on startup, orchestrator reads `mcp-servers.yaml` and registers all tools from enabled servers
+- Health checks: orchestrator periodically pings MCP server endpoints, dashboard shows status
+
+**One-click install flow:**
+
+1. User browses "Integrations" page in the dashboard
+2. Clicks "Enable" on an integration (e.g., Home Assistant)
+3. Dashboard prompts for minimal config (e.g., HA URL + long-lived access token)
+4. Config written to `mcp-servers.yaml`, orchestrator hot-reloads
+5. Integration tools immediately available to agents
+
+### Homelab Integrations (Priority Tier)
+
+| MCP Server | What Nova Gets | Config Required | Priority |
+|---|---|---|---|
+| **Home Assistant** | Device control, automations, sensor queries, scene management | HA URL + long-lived access token | High |
+| **n8n** | Trigger/build workflows, check execution status, bidirectional orchestration | n8n URL + API key | High |
+| **Nextcloud** | File management, calendar, contacts, notes | Nextcloud URL + app password | Medium |
+| **Paperless-ngx** | Document search, tagging, OCR'd content retrieval | Paperless URL + API token | Medium |
+| **Immich** | Photo search, album management, facial recognition queries | Immich URL + API key | Medium |
+| **Gitea / Forgejo** | Local repo management, issues, PRs, code search | Gitea URL + API token | Medium |
+| **Uptime Kuma** | Service health monitoring, downtime alerts, status pages | Uptime Kuma URL + API key | Low |
+| **Portainer** | Container lifecycle management, stack deployment, resource monitoring | Portainer URL + API key | Low |
+
+### Developer Productivity Integrations
+
+| MCP Server | What Nova Gets | Config Required | Priority |
+|---|---|---|---|
+| **GitHub** | Issues, PRs, repos, actions, code search | GitHub PAT | High |
+| **Linear** | Project/task tracking, issue management, sprint planning | Linear API key | Medium |
+| **Notion** | Knowledge base queries, page creation, database operations | Notion integration token | Medium |
+| **Slack** | Send/read messages, channel management, notifications | Slack bot token | Medium |
+| **Discord** | Send/read messages, channel management, bot interactions | Discord bot token | Low |
+
+### System & Infrastructure Integrations
+
+| MCP Server | What Nova Gets | Config Required | Priority |
+|---|---|---|---|
+| **Filesystem** | Direct file read/write on the host (beyond workspace) | Mount path(s) | High |
+| **Docker** | Container lifecycle, image management, log access | Docker socket mount | High |
+| **Cloudflare** | DNS management, tunnel configuration, custom domain self-deployment | Cloudflare API token + zone ID | High |
+| **SSH** | Remote command execution on other machines (e.g., Dell GPU box) | SSH key path + host list | Medium |
+| **Prometheus / Grafana** | Metrics queries, dashboard creation, alert management | Prometheus/Grafana URL | Low |
+
+### Knowledge & Research Integrations
+
+| MCP Server | What Nova Gets | Config Required | Priority |
+|---|---|---|---|
+| **Brave Search** | Web search without API key hassles | Brave API key | High |
+| **Playwright** | Browser automation, web scraping, page interaction | None (bundled container) | High |
+| **Qdrant** | External vector search (supplement to Nova's built-in memory) | Qdrant URL | Low |
+| **SQLite / PostgreSQL** | Query arbitrary databases, data analysis | Connection string(s) | Low |
+
+### Recommendations
+
+**Start with these 5** — they cover the most common self-hosted + dev workflows:
+
+1. **Filesystem + Docker** — immediate utility, Nova can inspect and manage its own environment
+2. **Home Assistant** — killer demo for personal AI; "turn off the lights when I say goodnight"
+3. **GitHub** — already using it for Nova development; mature MCP server exists
+4. **Brave Search** — gives Nova web access for research tasks
+5. **n8n** — bidirectional orchestration; n8n triggers Nova tasks, Nova triggers n8n workflows
+
+**n8n bidirectional pattern:**
+- Nova → n8n: Nova calls n8n's webhook/API to trigger workflows (e.g., "deploy this", "notify me", "run this ETL")
+- n8n → Nova: n8n workflow hits Nova's webhook endpoint (Phase 9) to submit tasks (e.g., "new PR opened → Nova reviews it")
+- Combined: n8n handles the plumbing (email, webhooks, data transforms), Nova handles the intelligence (analysis, generation, decisions)
+
+### Devices & Infrastructure Dashboard
+
+**Motivation:** Nova runs across multiple physical machines (Beelink always-on, Dell GPU box via WoL, potentially Pi or NAS). There's currently no visibility into what's connected, what's available, and what capabilities each device brings. The Devices page makes Nova aware of its own physical infrastructure.
+
+**Dashboard page: "Devices"**
+
+Displays all registered devices in a grid/list with real-time status:
+
+| Column | Description |
+|---|---|
+| **Device name** | User-defined label (e.g., "Beelink", "Dell GPU Box") |
+| **Status** | Online / Sleeping / Offline (with last-seen timestamp) |
+| **Role** | Primary host, GPU inference, edge sensor, storage, etc. |
+| **Hardware** | CPU, RAM, GPU (if any), disk capacity |
+| **Services** | Running containers/services with health indicators |
+| **Models** | Installed inference models (for GPU/inference devices) |
+| **Network** | IP address, latency from Nova, WoL MAC address |
+| **Resources** | Live CPU%, RAM%, GPU VRAM% utilization |
+
+**Per-device actions:**
+- **Wake** button for WoL-capable sleeping devices
+- **SSH terminal** (if SSH MCP integration is enabled)
+- **View containers** (if Docker MCP integration is enabled)
+- **Browse files** (if Filesystem MCP integration is enabled)
+
+**Device registration:**
+- Lightweight heartbeat agent (single binary or Python script) runs on each device
+- Reports hardware specs, running services, resource usage every 30s to Nova's orchestrator
+- Alternative: agentless mode — Nova polls devices via SSH or Docker API (no software install on remote devices)
+- Devices stored in a `devices` table in postgres
+- First-time registration: device appears as "New" in dashboard, user assigns name/role
+
+**Smart routing integration:**
+- Orchestrator checks device status before routing inference requests
+- If Dell GPU box is sleeping and a task needs GPU inference → auto-wake via WoL, wait for Ollama ready, then route
+- If a device goes offline → orchestrator falls back to cloud providers or queues the task
+- MCP server availability tied to device status: if device hosting an MCP server goes offline, those tools are marked unavailable
+
+**Implementation:**
+- [ ] `devices` table in postgres: id, name, role, hardware_specs (JSONB), network_info (JSONB), last_heartbeat, status, wol_mac
+- [ ] Heartbeat endpoint: `POST /api/devices/heartbeat` (device agent calls this periodically)
+- [ ] Agentless polling: orchestrator pings devices via SSH/Docker API on a schedule
+- [ ] WoL integration: `POST /api/devices/{id}/wake` sends magic packet
+- [ ] Dashboard Devices page with real-time status grid
+- [ ] Device-aware inference routing in llm-gateway or orchestrator
+
+### Custom Domain Self-Deployment (via Cloudflare MCP)
+
+**Motivation:** Nova already supports Cloudflare Tunnel for remote access, but setup requires manual `cloudflared` configuration. With the Cloudflare MCP server, Nova can configure its own public access — a user who owns a domain can tell Nova to deploy itself at `nova.mydomain.com` and Nova handles the rest.
+
+**User experience:**
+
+1. User enables Cloudflare integration on the Integrations page (API token + zone ID)
+2. In Settings → Remote Access, user sees a new "Custom Domain" option
+3. User enters desired subdomain (e.g., `nova`) — Nova shows it will create `nova.mydomain.com`
+4. User confirms → Nova uses Cloudflare MCP to:
+   - Create a Cloudflare Tunnel pointing to Nova's dashboard (port 3000)
+   - Create a DNS CNAME record: `nova.mydomain.com` → tunnel
+   - Configure SSL (Cloudflare provides automatic HTTPS)
+   - Store tunnel credentials in Nova's config
+5. Nova is now accessible at `https://nova.mydomain.com` with zero manual DNS/tunnel config
+
+**What Nova configures via Cloudflare MCP:**
+
+| Action | Cloudflare API | Purpose |
+|---|---|---|
+| Create tunnel | `POST /tunnels` | Encrypted tunnel from Nova host to Cloudflare edge |
+| Add DNS record | `POST /dns_records` | CNAME pointing subdomain to tunnel |
+| Configure ingress | Tunnel config | Route `nova.mydomain.com` → `localhost:3000` |
+| Enable SSL | Zone settings | Full (strict) SSL mode |
+| Optional: Access policy | Cloudflare Access | Add email-based auth in front of Nova |
+
+**Configuration in `.env` / Settings:**
+
+```
+# Cloudflare integration
+CLOUDFLARE_API_TOKEN=...
+CLOUDFLARE_ZONE_ID=...
+NOVA_CUSTOM_DOMAIN=nova.mydomain.com    # set by Nova after deployment
+```
+
+**Safety:**
+- Nova only modifies DNS records it created (tagged with `nova-managed: true` in record comments)
+- "Undeploy" button in Settings removes the tunnel + DNS record
+- Dry-run mode: shows what Nova would configure before doing it
+- Never touches existing DNS records or other tunnels
+
+**Integration with setup.sh:**
+- If Cloudflare API token is provided during setup, offer custom domain configuration
+- `setup.sh` can prompt: "Do you want Nova accessible at a custom domain? (requires Cloudflare-managed domain)"
+
+### Implementation
+
+**Step 1: MCP server config system**
+- [ ] `mcp-servers.yaml` schema: name, transport (stdio/HTTP/SSE), command/URL, env vars, enabled flag
+- [ ] Orchestrator loads config at startup, registers tools from each enabled server
+- [ ] Hot-reload: orchestrator watches config file or exposes `POST /api/mcp/reload`
+- [ ] Health check endpoint per MCP server: `GET /api/mcp/servers` returns status of each
+
+**Step 2: Dashboard Integrations page**
+- [ ] Grid/list view of available integrations with icons, descriptions, status (enabled/disabled/error)
+- [ ] Enable/disable toggle per integration
+- [ ] Config modal: minimal form fields per integration (URL, API key, etc.)
+- [ ] Connection test button: verify credentials and connectivity before saving
+- [ ] Tool browser: show which tools each integration provides
+
+**Step 3: Docker Compose profiles for bundled servers**
+- [ ] `profiles: ["mcp-filesystem"]` — filesystem MCP server with configurable mount paths
+- [ ] `profiles: ["mcp-playwright"]` — Playwright MCP server with Chromium
+- [ ] `profiles: ["mcp-docker"]` — Docker MCP server with socket mount
+- [ ] Each profile adds a lightweight sidecar container running the MCP server
+- [ ] `setup.sh` integration: detect available services, offer to enable integrations
+
+**Step 4: Community integration docs**
+- [ ] `docs/integrations/` directory with per-integration setup guides
+- [ ] Each guide: what it does, prerequisites, config, example prompts, troubleshooting
+- [ ] Template for community-contributed integrations
+
+### Testing & Validation
+
+**MCP Integrations:**
+- [ ] Enable 3+ MCP servers simultaneously, verify all tools register without conflicts
+- [ ] Hot-reload: add a new server to `mcp-servers.yaml`, verify tools appear without restart
+- [ ] Dashboard: enable/disable/configure an integration, verify config persists
+- [ ] Connection test: verify failure feedback for bad credentials
+- [ ] Agent can use tools from multiple MCP servers in a single task
+- [ ] Health check correctly reports server status (up/down/error)
+
+**Devices & Infrastructure:**
+- [ ] Device heartbeat agent registers a new device, appears in dashboard within 30s
+- [ ] Device goes offline → status updates to "Offline" within 2 heartbeat intervals
+- [ ] WoL: "Wake" button sends magic packet, device comes online, status updates
+- [ ] Agentless mode: Nova polls a device via SSH, correctly reports hardware specs and running services
+- [ ] Inference routing: task needing GPU routes to Dell when online, falls back to cloud when offline
+- [ ] Device detail view shows live resource utilization (CPU%, RAM%, GPU%)
+
+**Custom Domain:**
+- [ ] Cloudflare MCP creates tunnel + DNS record, Nova accessible at custom domain within 60s
+- [ ] SSL works automatically (HTTPS with valid cert)
+- [ ] "Undeploy" removes tunnel + DNS record cleanly
+- [ ] Dry-run mode shows planned changes without executing
+- [ ] Existing DNS records are never modified or deleted
+
+### Success Criteria
+
+- [ ] User can enable a new integration in <60 seconds from the dashboard (one-click + config)
+- [ ] At least 5 integrations working end-to-end (Filesystem, Docker, GitHub, Brave Search, Home Assistant or n8n)
+- [ ] MCP server failures don't crash the orchestrator — graceful degradation
+- [ ] Dashboard shows real-time status of all configured integrations
+- [ ] Adding a new community integration requires only a YAML entry + optional Docker profile (no code changes)
+- [ ] Devices page shows accurate real-time status of all registered devices
+- [ ] User with a Cloudflare-managed domain can deploy Nova at a custom subdomain with zero manual DNS config
+- [ ] WoL + smart routing: sleeping GPU device auto-wakes when inference is needed, task completes without manual intervention
 
 ---
 
@@ -2201,6 +2483,15 @@ llama-cpp:
 
 **This phase has two sub-phases: planning (13a) and implementation (13b).**
 
+> **Early scaffolding strategy:** Add `tenant_id` columns and Redis key prefixes *before* this phase,
+> defaulting to a single value. This makes the data layer tenant-aware without building the full
+> multi-tenancy UI/auth. When Phase 13 arrives, the schema is already partitioned — only the auth
+> layer, UI scoping, and migration logic need building. Key areas to scaffold early:
+> - `tenant_id` column on: conversations, tasks, memories, api_keys, usage_events, pods
+> - Redis key namespace: prefix all keys with `tenant:{id}:`
+> - nova-contracts: tenant context flows through shared Pydantic models
+> - Memory service: pgvector similarity search filters by tenant (critical for isolation)
+
 ### Phase 13a — Multi-Tenancy Design
 
 Before writing code, produce a design document (`docs/plans/multi-tenancy-design.md`) covering:
@@ -2545,11 +2836,15 @@ Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGra
 - **Admin secret default not rejected in production** — `nova-admin-secret-change-me` is accepted without warning
 - **`parallel_group` field exists but is ignored** — pipeline executor runs stages sequentially within a task. Note: multiple *tasks* already run in parallel via Redis BRPOP; the bottleneck is Ollama serializing inference requests (addressed in Phase 12)
 - **Contracts not enforced** — `nova-contracts` Pydantic models exist but aren't validated at service boundaries; agent responses are unchecked dicts
-- **Embedding cache unused** — `embedding_cache` table exists in memory-service schema but is never queried or written to
+- **Embedding cache fixed** — `embedding_cache` write-through was broken by SQLAlchemy `::cast` syntax; fixed with `CAST(x AS type)` syntax (2026-03-06)
 
-### Phase 3 — End-to-End Tool Testing (deferred)
+### Phase 3 — End-to-End Tool Testing (partially addressed)
 
-Not yet validated with integration tests:
+Integration test suite added (2026-03-06): 35 tests covering health probes, agent CRUD, task submission,
+memory CRUD/search/facts, LLM gateway model listing, recovery backups, and pipeline execution.
+Run via `make test` or `make test-quick`.
+
+Still not yet validated with integration tests:
 1. `list_dir` root — confirm it sees actual files
 2. `read_file` — confirm content + truncation behavior
 3. `write_file` — verify changes appear on host filesystem
@@ -2578,7 +2873,7 @@ Four named access levels (isolated → nova → workspace → host). Only `works
 
 ### Where Nova Lags
 
-- **Testing** — zero tests vs. mature test suites in all major platforms
+- **Testing** — integration test suite exists (35 tests across all services) but no unit tests, property tests, or CI pipeline yet
 - **Observability** — no structured logging, tracing, or metrics vs. LangGraph's built-in tracing
 - **Tool sandboxing** — host execution vs. IronClaw's WASM and NanoClaw's container isolation
 - **Dynamic agent composition** — fixed pipeline vs. NanoClaw's Agent Swarms and CrewAI's dynamic crews
