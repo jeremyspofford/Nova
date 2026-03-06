@@ -78,6 +78,18 @@ Edge deployment capabilities for running Nova agents closer to data sources and 
 
 Multi-cloud deployment support for distributing Nova across cloud providers.
 
+### Phase 12 -- Inference Backends (planned)
+
+Multiple local inference backends (Ollama, vLLM, llama.cpp, SGLang) for concurrent serving, GPU upgrade path, and optimized multi-user performance.
+
+### Phase 13 -- Multi-Tenancy (planned)
+
+User isolation for multi-person deployments: separate chat histories, memory spaces, API keys, preferences, and usage tracking. Includes authentication, role-based access, and per-user data scoping.
+
+### Phase 14 -- SaaS & Hosted Offering (planned)
+
+Nova Cloud at `nova.arialabs.ai` -- a hosted version where users sign up and use Nova without self-hosting. Three tiers (Free, Pro, Enterprise), Stripe billing, Kubernetes infrastructure, and full data portability between SaaS and self-hosted. Builds on Phase 12 (concurrent inference) and Phase 13 (multi-tenancy).
+
 ## Contributing
 
 Nova is open source. Check the full [roadmap](https://github.com/arialabs/nova/blob/main/docs/roadmap.md) for detailed implementation plans, or dive into the codebase to start contributing.

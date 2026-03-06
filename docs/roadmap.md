@@ -2263,17 +2263,252 @@ Implement the design from 13a. Likely deliverables:
 
 ---
 
-## 🧊 Icebox / Future
+## 🔜 Phase 14 — SaaS & Hosted Offering (Nova Cloud)
+
+**Motivation:** Self-hosting is a barrier. Many potential users want to try Nova without provisioning hardware, managing Docker Compose, or configuring GPU drivers. A hosted offering at `nova.arialabs.ai` unlocks three revenue streams: casual users who want a quick AI assistant (Free), power users who want the full pipeline without ops work (Pro), and enterprise teams evaluating before self-hosting (Enterprise). The hosted version also serves as a live demo — users who outgrow it self-host, driving adoption of both paths.
+
+**Prerequisites:** Phase 12 (concurrent inference backends) + Phase 13 (multi-tenancy). Phase 12 provides the serving infrastructure for multiple concurrent users. Phase 13 provides user isolation, auth, and per-user data scoping.
+
+**This phase has two sub-phases: architecture design (14a) and implementation (14b).**
+
+### Phase 14a — SaaS Architecture Design
+
+Before writing code, produce a design document (`docs/plans/saas-architecture-design.md`) covering:
+
+**Platform Identity:**
+- App URL: `nova.arialabs.ai`
+- Branding: "Nova Cloud" (hosted) vs "Nova" (self-hosted)
+- Same codebase — not a fork. SaaS-specific behavior gated by `NOVA_SAAS=true` environment variable
+
+**Infrastructure Architecture:**
+
+| Component | Self-Hosted (current) | Nova Cloud (SaaS) |
+|---|---|---|
+| **Orchestration** | Docker Compose | Kubernetes (managed — DigitalOcean DOKS or similar) |
+| **Database** | Local PostgreSQL container | Managed PostgreSQL (DO Managed DB or Supabase) |
+| **Redis** | Local Redis container | Managed Redis (DO Managed Redis or Upstash) |
+| **Object Storage** | Docker volumes | S3-compatible (DO Spaces or R2) |
+| **LLM Inference** | Self-hosted Ollama/vLLM/SGLang | Cloud providers (Anthropic, OpenAI, Groq, etc.) — no self-hosted GPU initially |
+| **Ingress** | Direct port access | Kubernetes Ingress + Cloudflare (already on arialabs.ai) |
+| **TLS** | Optional (Cloudflare tunnel) | Required — cert-manager + Let's Encrypt |
+| **Monitoring** | Docker logs | Prometheus + Grafana + OpenTelemetry |
+
+**Kubernetes Justification:**
+This is the "real need" for Kubernetes identified earlier — multi-tenant SaaS requires horizontal scaling, rolling deployments, health-based restart, resource limits per service, and namespace isolation for enterprise tenants. Docker Compose cannot provide these at SaaS scale.
+
+**Helm Chart Structure:**
+Single Helm chart deploys Nova in both modes. Values files control the difference:
+
+```
+nova-helm/
+├── Chart.yaml
+├── values.yaml                  # defaults (self-hosted)
+├── values-saas.yaml             # SaaS overrides
+├── values-saas-staging.yaml     # staging overrides
+├── templates/
+│   ├── orchestrator/
+│   ├── llm-gateway/
+│   ├── memory-service/
+│   ├── chat-api/
+│   ├── dashboard/
+│   ├── recovery/
+│   ├── billing/                 # SaaS only (conditional)
+│   ├── ingress.yaml
+│   └── _helpers.tpl
+```
+
+Self-hosted users can deploy via `helm install nova ./nova-helm` as an alternative to Docker Compose. SaaS deploys via `helm install nova ./nova-helm -f values-saas.yaml`.
+
+**Tenant Isolation Model:**
+- **Free / Pro tiers:** Shared infrastructure — all users on the same Kubernetes namespace, isolated at the database level (row-level security via `user_id` from Phase 13)
+- **Enterprise tier:** Dedicated Kubernetes namespace per organization — separate DB schema or database, separate Redis namespace, resource quotas. Enables data residency requirements
+
+**Plan Tiers:**
+
+| Feature | Free | Pro ($20/mo) | Enterprise (custom) |
+|---|---|---|---|
+| **Messages/month** | 100 | Unlimited | Unlimited |
+| **Pipeline tasks/month** | 10 | 200 | Unlimited |
+| **Models** | GPT-4o-mini, Claude Haiku | All cloud models | All + custom fine-tunes |
+| **Memory storage** | 50 MB | 5 GB | Unlimited |
+| **File uploads** | 10 MB | 500 MB | Unlimited |
+| **API access** | No | Yes (rate-limited) | Yes (higher limits) |
+| **Concurrent tasks** | 1 | 5 | Configurable |
+| **Pods** | Default only | Custom pods | Custom + shared org pods |
+| **Support** | Community | Email (48h) | Dedicated (SLA) |
+| **Data export** | Manual | One-click | API + scheduled |
+
+**Billing & Metering:**
+
+Extend the existing `usage_events` table from Phase 2:
+- Add `billable_units` and `billing_category` columns
+- Categories: `llm_tokens`, `pipeline_task`, `memory_storage`, `file_storage`
+- Metering service aggregates usage per user per billing period
+
+Stripe integration:
+- `stripe_customer_id` and `stripe_subscription_id` on users table
+- Stripe Checkout for subscription creation
+- Stripe webhooks for: `invoice.paid`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`
+- Dunning: 3 retry attempts over 7 days → downgrade to Free (preserve data for 30 days)
+
+Plan enforcement middleware:
+- Check plan limits on each API request (message count, task count, storage)
+- Return `402 Payment Required` with upgrade prompt when limit exceeded
+- Cache plan limits in Redis (TTL 60s) to avoid DB lookup on every request
+
+**Onboarding Flow:**
+
+1. **Registration:** Email + password, or OAuth (Google, GitHub). Email verification required. CAPTCHA on registration form
+2. **Welcome wizard (3 steps):**
+   - Step 1: "What will you use Nova for?" (coding, research, writing, general) — sets default pod
+   - Step 2: Choose display name and avatar
+   - Step 3: First chat message (pre-filled prompt based on Step 1 selection)
+3. **First chat:** Lands in chat with the selected pod, system sends a welcome message explaining capabilities
+
+**Security & Compliance:**
+
+- Row-level security (RLS) on all tenant tables — enforced at DB level, not just application level
+- Encryption: TLS in transit (required), AES-256 at rest for stored files, bcrypt for passwords
+- JWT auth with short-lived access tokens (15 min) + refresh tokens (7 days)
+- Audit log: all admin actions, auth events, data access logged to append-only table
+- GDPR compliance:
+  - Data export: user can download all their data as JSON/ZIP
+  - Data deletion: "Delete my account" removes all user data within 30 days (immediate soft-delete, hard-delete via scheduled job)
+  - Cookie consent banner (minimal — only auth cookies, no tracking)
+- SOC 2 Type II: target for Year 2 (not launch requirement, but design with it in mind)
+- Rate limiting: per-user, per-IP, and global circuit breakers
+
+**Ops & Monitoring:**
+
+- Prometheus: scrape all service `/metrics` endpoints (request latency, error rate, queue depth, active users)
+- Grafana dashboards: service health, user activity, billing metrics, LLM provider latency
+- OpenTelemetry: distributed tracing across all services (correlate a user request through orchestrator → llm-gateway → memory-service)
+- Alerting: PagerDuty or Opsgenie for P1 (service down, data loss risk), Slack for P2 (high error rate, provider degradation)
+- Status page: `status.arialabs.ai` — Upptime or Betteruptime, shows service health and incident history
+- Cost tracking: per-user LLM cost attribution, monthly cost report, alerts when spend exceeds thresholds
+
+**Self-Hosted ↔ SaaS Relationship:**
+
+- Separate instances — SaaS is not a "managed version" of a user's self-hosted install
+- Same codebase, same Docker images, different config
+- Data portability: users can export all data from Nova Cloud and import into self-hosted (and vice versa)
+- Export format: JSON archive (conversations, memories, pods, settings, API keys without secrets)
+- Import tool in recovery service: `POST /api/v1/import` accepts the export archive
+- No "sync" between SaaS and self-hosted — intentionally one-way export/import to keep architecture simple
+
+### Phase 14b — SaaS Implementation
+
+Implement the design from 14a in 7 steps:
+
+**Step 1: Kubernetes migration**
+- [ ] Create Helm chart with templates for all 8 services
+- [ ] HPA (Horizontal Pod Autoscaler) on orchestrator and llm-gateway (CPU/memory + custom metrics)
+- [ ] PDB (Pod Disruption Budget) — at least 1 replica of each service always running
+- [ ] Managed PostgreSQL and Redis (connection string via Helm values)
+- [ ] S3-compatible storage for file uploads and backups
+- [ ] CI/CD pipeline: GitHub Actions → build images → push to registry → helm upgrade (staging → production)
+- [ ] Staging environment: `staging.nova.arialabs.ai` with synthetic test data
+
+**Step 2: Billing & metering**
+- [ ] `billing` service (new microservice or module within orchestrator — decide in 14a)
+- [ ] `usage_events` extension: `billable_units`, `billing_category` columns
+- [ ] Stripe integration: customer creation, checkout session, webhook handler
+- [ ] Plan enforcement middleware on orchestrator API routes
+- [ ] Billing dashboard page: current plan, usage meters, invoices, upgrade/downgrade
+- [ ] Dunning flow: failed payment → retry → downgrade → data retention
+
+**Step 3: Registration & onboarding**
+- [ ] Registration endpoint with email verification (SendGrid or Resend)
+- [ ] OAuth providers: Google, GitHub (via Passport.js or custom)
+- [ ] Welcome wizard UI (3-step flow)
+- [ ] CAPTCHA integration (hCaptcha or Turnstile)
+- [ ] Account settings: change password, manage OAuth connections, delete account
+
+**Step 4: Landing page & marketing site**
+- [ ] Pricing page at `nova.arialabs.ai/pricing` with tier comparison table
+- [ ] "Get Started" CTA → registration flow
+- [ ] Status page at `status.arialabs.ai`
+- [ ] SEO: meta tags, OpenGraph, structured data
+- [ ] Update existing website to link to Nova Cloud
+
+**Step 5: Security hardening**
+- [ ] Row-level security policies on PostgreSQL
+- [ ] Audit log table and middleware
+- [ ] GDPR: data export endpoint, account deletion flow, cookie consent
+- [ ] Penetration test (self-administered or contracted)
+- [ ] Incident response runbook (`docs/runbooks/incident-response.md`)
+
+**Step 6: Ops & observability**
+- [ ] Prometheus + Grafana deployed via Helm (or managed — Grafana Cloud)
+- [ ] OpenTelemetry SDK integrated into all Python services
+- [ ] Centralized logging (Loki or managed equivalent)
+- [ ] Alerting rules: service health, error rate, billing failures
+- [ ] Cost tracking dashboard: per-user LLM spend, infrastructure cost
+
+**Step 7: Launch sequence**
+
+| Stage | Audience | Duration | Plan Tiers | Purpose |
+|---|---|---|---|---|
+| **Alpha** | Invite-only (10-20 users) | 4-6 weeks | Free only | Stability testing, UX feedback, find data isolation bugs |
+| **Beta** | Open registration | 4-8 weeks | Free only | Scale testing, onboarding flow validation, marketing site live |
+| **GA** | Public | Ongoing | Free + Pro | Revenue starts, billing fully operational |
+| **Enterprise** | Outbound sales | GA + 3 months | All tiers | Dedicated namespaces, SLA, custom integrations |
+
+**Cost Estimation (DigitalOcean baseline):**
+
+| Resource | Spec | Monthly Cost |
+|---|---|---|
+| DOKS cluster | 3-node, 2 vCPU / 4 GB each | ~$72 |
+| Managed PostgreSQL | 1 GB RAM, 10 GB storage | ~$15 |
+| Managed Redis | 1 GB RAM | ~$15 |
+| DO Spaces (S3) | 250 GB | ~$5 |
+| Container Registry | Basic | ~$5 |
+| Monitoring (Grafana Cloud) | Free tier | $0 |
+| Domain + Cloudflare | Existing | $0 |
+| LLM API costs | Pass-through to providers | Variable (billed to users) |
+| SendGrid (email) | Free tier (100/day) | $0 |
+| Stripe fees | 2.9% + $0.30 per transaction | Variable |
+| **Total base infrastructure** | | **~$112/month** |
+| **With 3090 GPU node (optional)** | 1 GPU droplet for local models | **+$62/month** |
+| **Total (with GPU)** | | **~$174/month** |
+
+Break-even: ~9 Pro subscribers ($20 × 9 = $180/month) covers base infrastructure. LLM API costs are passed through (metered per-token, marked up ~20%).
+
+### Testing & Validation
+
+- [ ] Helm chart deploys successfully to staging cluster (`helm install --dry-run` + actual deploy)
+- [ ] HPA scales orchestrator from 1 → 3 replicas under load
+- [ ] Full billing lifecycle: register → subscribe (Pro) → use → invoice → pay → renew
+- [ ] Data isolation: User A's data is invisible to User B at DB level (not just UI)
+- [ ] Load test: 50 concurrent users, 10 concurrent pipeline tasks — response times <2s for chat, <30s for pipeline
+- [ ] Failover: kill a pod, verify auto-restart and zero downtime
+- [ ] OWASP ZAP scan: no critical/high findings
+- [ ] Data export → import round-trip: export from SaaS, import to local Docker Compose, verify all data present
+
+### Success Criteria
+
+- [ ] New user can register, verify email, complete onboarding, and send first chat message in <2 minutes
+- [ ] Stripe billing works end-to-end: subscribe, use, get invoiced, pay, see receipt
+- [ ] 50 concurrent users with acceptable performance (<2s chat latency, <30s pipeline)
+- [ ] Plan limits enforced: Free user hitting 100 message limit gets 402 with upgrade prompt
+- [ ] Zero data leakage: penetration test confirms tenant isolation
+- [ ] Auto-scaling: HPA responds to load within 60 seconds
+- [ ] Infrastructure cost stays under $200/month at launch (before GPU node)
+- [ ] Launch sequence completed: Alpha → Beta → GA with documented learnings at each stage
+- [ ] Data export/import works: user can move from Nova Cloud to self-hosted (and back) without data loss
+
+---
 
 - **Capability-based YAML routing** — once Planning Agent assigns agents by role, formalize model requirements per role in a config file
 - **Web Push notifications** — notify on task completion when accessing via PWA (requires Phase 4 async tasks)
 - **Key-level model restrictions** — `sk-nova-*` keys scoped to specific providers
 - **Multi-model A/B testing** — run two models on same subtask, Evaluation Agent picks the better output
 - **Self-hosted Ollama parity** — full tool support for local models
-- **Collaborative goals** — multiple users contributing context to a shared goal (prerequisite: Phase 13 multi-tenancy)
+- **Collaborative goals** — multiple users contributing context to a shared goal (prerequisite: Phase 13 multi-tenancy, Phase 14 SaaS for cross-instance collaboration)
 - **ClaudeCode provider** — spawn `claude -p` subprocess using Claude Max subscription for zero API cost per call (designed in Phase 4, not yet implemented)
 - **Post-pipeline agents** — Documentation Agent, Diagramming Agent, Security Review Agent, Memory Extraction Agent (designed, not built)
 - **Default pods** — Quick Reply, Research, Code Generation, Analysis (designed in Phase 4, only Quartet default shipped)
+- **Nova Cloud as inference/memory backend for self-hosted instances** — self-hosted Nova connects to Nova Cloud via API key for cloud model access and remote memory sync, without migrating fully to SaaS (prerequisite: Phase 14 SaaS)
 - **Skills framework** (from NanoClaw) — modular instruction sets stored as files, loaded per-task context
 - **VS Code Extension** — sidebar panel, "Ask Nova" command, diff view → **Moved to Phase 9b**
 
