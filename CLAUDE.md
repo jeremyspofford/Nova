@@ -91,3 +91,47 @@ No centralized test suite. Validation approaches:
 - `.env` — DB password, admin secret, API keys for providers, `DEFAULT_CHAT_MODEL`, `NOVA_WORKSPACE`, `LOG_LEVEL`, `REQUIRE_AUTH`
 - `models.yaml` — Ollama models to auto-pull on startup
 - Context budgets in orchestrator config: system=10%, tools=15%, memory=40%, history=20%, working=15%
+
+## Website & Documentation
+
+Nova's website lives at `website/` (Astro/Starlight, nova.arialabs.ai). After completing feature work, check if any website content needs updating.
+
+**Website structure:**
+- `website/src/content/docs/` — Documentation pages (Starlight)
+- `website/src/content/changelog/` — Release changelog entries
+- `website/src/data/features.ts` — Landing page feature list and differentiators
+- `website/src/components/` — Landing page components (Hero, FeatureCard, PipelineDiagram, etc.)
+- `website/astro.config.mjs` — Sidebar structure (update when adding/removing docs)
+
+**Code-to-docs mapping:**
+
+| Changed area | Website content to check |
+|---|---|
+| `orchestrator/app/pipeline/` | `docs/pipeline.md` |
+| `orchestrator/app/tools/`, MCP integration | `docs/mcp-tools.md` |
+| `orchestrator/app/router.py`, API endpoints, `nova-contracts/` | `docs/api-reference.md` |
+| `orchestrator/app/auth.py`, secrets, `REQUIRE_AUTH` | `docs/security.md` |
+| `orchestrator/app/config.py`, `.env.example`, `models.yaml` | `docs/configuration.md` |
+| `llm-gateway/` | `docs/services/llm-gateway.md`, `docs/inference-backends.md` |
+| `memory-service/` | `docs/services/memory-service.md` |
+| `chat-api/` | `docs/services/chat-api.md` |
+| `dashboard/` | `docs/services/dashboard.md` |
+| `recovery/` | `docs/services/recovery.md` |
+| `orchestrator/` (general) | `docs/services/orchestrator.md` |
+| `docker-compose*.yml`, `Makefile`, `scripts/setup.sh` | `docs/deployment.md`, `docs/quickstart.md` |
+| GPU overlays, inference backends | `docs/inference-backends.md` |
+| Service ports, inter-service URLs, new services | `docs/architecture.md` |
+| Remote access (Cloudflare, Tailscale) | `docs/remote-access.md` |
+| IDE integration (Continue, Cursor, Aider) | `docs/ide-integration.md` |
+| Skills framework, `.claude/` config | `docs/skills-rules.md` |
+| `docs/roadmap.md` | `docs/roadmap.md` |
+| New major feature or capability | `data/features.ts` (landing page), `changelog/` (new entry) |
+| New service or architectural change | `components/PipelineDiagram.astro`, `docs/architecture.md` |
+
+**When to update docs:** New features, changed APIs/endpoints, new/changed env vars, new CLI commands, new services, changed ports, changed setup steps, new providers/backends.
+
+**When to add a changelog entry:** After shipping a cohesive set of features (not every commit — group related changes into a release entry in `website/src/content/changelog/`).
+
+**When to update landing page:** New differentiating capabilities, major architectural changes, new platform integrations. Update `features.ts` and relevant components.
+
+**Skip** for internal refactors with no user-visible change.
