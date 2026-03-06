@@ -119,7 +119,7 @@ async def _run_compaction_cycle() -> None:
                     text("""
                         UPDATE episodic_memories
                         SET metadata = metadata || '{"compacted": true}'::jsonb
-                        WHERE id = ANY(:ids::uuid[])
+                        WHERE id = ANY(CAST(:ids AS uuid[]))
                     """),
                     {"ids": [str(eid) for eid in episode_ids]},
                 )

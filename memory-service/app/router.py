@@ -4,6 +4,7 @@ All endpoints accept text, return text. Embeddings are internal.
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -144,17 +145,17 @@ async def store_memory(req: StoreMemoryRequest):
             "agent_id": req.agent_id,
             "content": req.content,
             "embedding": embedding_str,
-            "metadata": req.metadata,
+            "metadata": json.dumps(req.metadata) if isinstance(req.metadata, dict) else req.metadata,
         }
 
         # working_memories is the only tier with expires_at — add it to INSERT when TTL set
         if req.ttl_seconds and req.tier == MemoryTier.working:
             cols = "agent_id, content, embedding, metadata, expires_at"
-            vals = ":agent_id, :content, :embedding::halfvec, :metadata::jsonb, now() + make_interval(secs => :ttl)"
+            vals = ":agent_id, :content, CAST(:embedding AS halfvec), CAST(:metadata AS jsonb), now() + make_interval(secs => :ttl)"
             params["ttl"] = req.ttl_seconds
         else:
             cols = "agent_id, content, embedding, metadata"
-            vals = ":agent_id, :content, :embedding::halfvec, :metadata::jsonb"
+            vals = ":agent_id, :content, CAST(:embedding AS halfvec), CAST(:metadata AS jsonb)"
 
         result = await session.execute(
             text(f"""
@@ -244,7 +245,7 @@ async def update_memory(memory_id: UUID, req: UpdateMemoryRequest):
                 # Only semantic_memories and procedural_memories have updated_at;
                 # working_memories uses expires_at, episodic_memories is append-only
                 has_updated_at = table in ("semantic_memories", "procedural_memories")
-                set_clause = "content = :content, embedding = :emb::halfvec"
+                set_clause = "content = :content, embedding = CAST(:emb AS halfvec)"
                 if has_updated_at:
                     set_clause += ", updated_at = now()"
                 await session.execute(
@@ -253,8 +254,8 @@ async def update_memory(memory_id: UUID, req: UpdateMemoryRequest):
                 )
             if req.metadata is not None:
                 await session.execute(
-                    text(f"UPDATE {table} SET metadata = :meta::jsonb WHERE id = :id"),
-                    {"meta": req.metadata, "id": str(memory_id)},
+                    text(f"UPDATE {table} SET metadata = CAST(:meta AS jsonb) WHERE id = :id"),
+                    {"meta": json.dumps(req.metadata) if isinstance(req.metadata, dict) else req.metadata, "id": str(memory_id)},
                 )
             return
 
@@ -291,14 +292,14 @@ async def bulk_store(req: BulkStoreRequest):
                 result = await session.execute(
                     text(f"""
                         INSERT INTO {table} (agent_id, content, embedding, metadata)
-                        VALUES (:agent_id, :content, :embedding::halfvec, :metadata::jsonb)
+                        VALUES (:agent_id, :content, CAST(:embedding AS halfvec), CAST(:metadata AS jsonb))
                         RETURNING id
                     """),
                     {
                         "agent_id": mem_req.agent_id,
                         "content": mem_req.content,
                         "embedding": to_pg_vector(embedding),
-                        "metadata": mem_req.metadata,
+                        "metadata": json.dumps(mem_req.metadata) if isinstance(mem_req.metadata, dict) else mem_req.metadata,
                     },
                 )
                 stored.append(result.fetchone().id)

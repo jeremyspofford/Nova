@@ -3,6 +3,7 @@ Memory service business logic — shared by router and background tasks.
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from sqlalchemy import text
@@ -32,7 +33,7 @@ async def save_fact_internal(
             INSERT INTO semantic_memories
                 (agent_id, project_id, category, key, content, embedding, base_confidence, metadata)
             VALUES
-                (:agent_id, :project_id, :category, :key, :content, :embedding::halfvec, :base_confidence, :metadata::jsonb)
+                (:agent_id, :project_id, :category, :key, :content, CAST(:embedding AS halfvec), :base_confidence, CAST(:metadata AS jsonb))
             ON CONFLICT (project_id, category, key) DO UPDATE SET
                 content = EXCLUDED.content,
                 embedding = EXCLUDED.embedding,
@@ -49,7 +50,7 @@ async def save_fact_internal(
             "content": content,
             "embedding": embedding_str,
             "base_confidence": base_confidence,
-            "metadata": metadata,
+            "metadata": json.dumps(metadata) if isinstance(metadata, dict) else metadata,
         },
     )
     row = result.fetchone()

@@ -1,4 +1,4 @@
-.PHONY: help setup up dev build down logs ps watch migrate backup restore website
+.PHONY: help setup up dev build down logs ps watch migrate backup restore website test test-quick
 
 DASHBOARD    = dashboard
 
@@ -56,6 +56,16 @@ ps: ## Show container status
 migrate: ## Apply pending SQL migrations (runs inside orchestrator container)
 	$(COMPOSE) exec orchestrator python -c \
 	  "import asyncio; from app.db import init_db; asyncio.run(init_db())"
+
+# ── Backup / Restore ─────────────────────────────────────────────────────────
+# ── Testing ──────────────────────────────────────────────────────────────────
+test: ## Run integration tests against running services
+	@cd tests && uv run --with pytest --with pytest-asyncio --with httpx --with websockets --with python-dotenv \
+	  pytest -v --tb=short
+
+test-quick: ## Smoke test (health endpoints only)
+	@cd tests && uv run --with pytest --with pytest-asyncio --with httpx --with websockets --with python-dotenv \
+	  pytest -v --tb=short -k "health"
 
 # ── Backup / Restore ─────────────────────────────────────────────────────────
 backup: ## Create a database backup (emergency — normally use the Recovery UI)

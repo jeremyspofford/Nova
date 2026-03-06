@@ -139,7 +139,7 @@ async def _vector_search(
         return []
 
     extra_cols = ", base_confidence, last_accessed_at" if table == "semantic_memories" else ""
-    meta_clause = " AND metadata @> :meta_filter::jsonb" if metadata_filter else ""
+    meta_clause = " AND metadata @> CAST(:meta_filter AS jsonb)" if metadata_filter else ""
     sql = text(f"""
         SELECT id::text, content, metadata, created_at{extra_cols},
                row_number() OVER (ORDER BY embedding <=> :embedding) AS rank
@@ -183,7 +183,7 @@ async def _keyword_search(
 ) -> list[RawResult]:
     """Full-text search using PostgreSQL tsvector/GIN with ts_rank scoring."""
     extra_cols = ", base_confidence, last_accessed_at" if table == "semantic_memories" else ""
-    meta_clause = " AND metadata @> :meta_filter::jsonb" if metadata_filter else ""
+    meta_clause = " AND metadata @> CAST(:meta_filter AS jsonb)" if metadata_filter else ""
     sql = text(f"""
         SELECT id::text, content, metadata, created_at{extra_cols},
                row_number() OVER (ORDER BY ts_rank(tsv, query) DESC) AS rank
@@ -274,7 +274,7 @@ async def _touch_last_accessed(session: AsyncSession, ids: list[str]) -> None:
         return
     try:
         await session.execute(
-            text("UPDATE semantic_memories SET last_accessed_at = now() WHERE id = ANY(:ids::uuid[])"),
+            text("UPDATE semantic_memories SET last_accessed_at = now() WHERE id = ANY(CAST(:ids AS uuid[]))"),
             {"ids": ids},
         )
     except Exception:

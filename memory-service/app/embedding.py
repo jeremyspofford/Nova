@@ -72,7 +72,7 @@ async def get_embedding(
     await session.execute(
         text("""
             INSERT INTO embedding_cache (content_hash, embedding, model)
-            VALUES (:h, :e::halfvec, :m)
+            VALUES (:h, CAST(:e AS halfvec), :m)
             ON CONFLICT (content_hash) DO NOTHING
         """),
         {"h": text_hash, "e": to_pg_vector(embedding), "m": model},
@@ -133,7 +133,7 @@ async def get_embeddings_batch(
             await session.execute(
                 text("""
                     INSERT INTO embedding_cache (content_hash, embedding, model)
-                    VALUES (:h, :e::halfvec, :m)
+                    VALUES (:h, CAST(:e AS halfvec), :m)
                     ON CONFLICT (content_hash) DO NOTHING
                 """),
                 {"h": text_hash, "e": to_pg_vector(embedding), "m": model},
