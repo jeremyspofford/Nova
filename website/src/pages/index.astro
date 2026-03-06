@@ -1,0 +1,45 @@
+---
+import Landing from '../layouts/Landing.astro';
+import Hero from '../components/Hero.astro';
+import FeatureCard from '../components/FeatureCard.astro';
+import PipelineDiagram from '../components/PipelineDiagram.astro';
+import InstallBlock from '../components/InstallBlock.astro';
+import Footer from '../components/Footer.astro';
+import { differentiators, features } from '../data/features';
+---
+
+<Landing title="Nova — Autonomous AI Platform" description="Self-directed autonomous AI that runs on your hardware. Private, secure, extensible.">
+  <nav class="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto">
+    <a href="/" class="text-xl font-bold text-stone-50">Nova</a>
+    <div class="flex items-center gap-6">
+      <a href="/docs/quickstart/" class="text-sm text-stone-400 hover:text-stone-200 transition-colors">Docs</a>
+      <a href="/changelog/" class="text-sm text-stone-400 hover:text-stone-200 transition-colors">Changelog</a>
+      <a href="https://github.com/arialabs/nova" target="_blank" rel="noopener noreferrer" class="text-sm text-stone-400 hover:text-stone-200 transition-colors">GitHub</a>
+    </div>
+  </nav>
+
+  <Hero />
+
+  <!-- Differentiators -->
+  <section class="px-6 py-16 max-w-7xl mx-auto">
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {differentiators.map((d) => (
+        <FeatureCard title={d.title} description={d.description} />
+      ))}
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="px-6 py-16 max-w-7xl mx-auto">
+    <h2 class="text-2xl font-bold text-stone-100 mb-8 text-center">Everything You Need</h2>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {features.map((f) => (
+        <FeatureCard title={f.title} description={f.description} />
+      ))}
+    </div>
+  </section>
+
+  <PipelineDiagram />
+  <InstallBlock />
+  <Footer />
+</Landing>
