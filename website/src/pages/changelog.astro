@@ -1,0 +1,43 @@
+---
+import Landing from '../layouts/Landing.astro';
+import Footer from '../components/Footer.astro';
+import { getCollection } from 'astro:content';
+import { render } from 'astro:content';
+
+const entries = (await getCollection('changelog'))
+  .sort((a, b) => new Date(b.data.date).getTime() - new Date(a.data.date).getTime());
+---
+
+<Landing title="Changelog — Nova" description="What's new in Nova.">
+  <nav class="flex items-center justify-between px-6 py-4 max-w-7xl mx-auto">
+    <a href="/" class="text-xl font-bold text-stone-50">Nova</a>
+    <div class="flex items-center gap-6">
+      <a href="/docs/quickstart/" class="text-sm text-stone-400 hover:text-stone-200 transition-colors">Docs</a>
+      <a href="/changelog/" class="text-sm text-teal-400 transition-colors">Changelog</a>
+      <a href="https://github.com/arialabs/nova" target="_blank" rel="noopener noreferrer" class="text-sm text-stone-400 hover:text-stone-200 transition-colors">GitHub</a>
+    </div>
+  </nav>
+
+  <main class="px-6 py-16 max-w-3xl mx-auto">
+    <h1 class="text-3xl font-bold text-stone-100 mb-8">Changelog</h1>
+
+    <div class="space-y-12">
+      {await Promise.all(entries.map(async (entry) => {
+        const { Content } = await render(entry);
+        return (
+          <article class="border-l-2 border-stone-800 pl-6">
+            <time class="text-xs font-medium text-stone-500 uppercase tracking-wide">
+              {new Date(entry.data.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+            </time>
+            <h2 class="text-lg font-semibold text-stone-200 mt-1">{entry.data.title}</h2>
+            <div class="mt-2 prose prose-invert prose-sm prose-stone max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_li]:text-stone-400">
+              <Content />
+            </div>
+          </article>
+        );
+      }))}
+    </div>
+  </main>
+
+  <Footer />
+</Landing>
