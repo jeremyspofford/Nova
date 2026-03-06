@@ -95,6 +95,15 @@ export const reviewPipelineTask = (task_id: string, decision: 'approve' | 'rejec
 export const getQueueStats = () =>
   apiFetch<{ queue_depth: number; dead_letter_depth: number }>('/api/v1/pipeline/queue-stats')
 
+export const deletePipelineTask = (task_id: string) =>
+  apiFetch<void>(`/api/v1/pipeline/tasks/${task_id}`, { method: 'DELETE' })
+
+export const bulkDeletePipelineTasks = (statuses = 'complete,failed,cancelled') =>
+  apiFetch<{ deleted: number; statuses: string[] }>(
+    `/api/v1/pipeline/tasks?status=${encodeURIComponent(statuses)}`,
+    { method: 'DELETE' },
+  )
+
 // ── Pods ───────────────────────────────────────────────────────────────────────
 
 export const getPods = () => apiFetch<Pod[]>('/api/v1/pods')

@@ -1158,6 +1158,7 @@ export function Settings() {
   const novaPersona = useConfigValue(entries, 'nova.persona', '')
   const novaGreeting = useConfigValue(entries, 'nova.greeting', '')
   const defaultModel = useConfigValue(entries, 'nova.default_model', '')
+  const retentionDays = useConfigValue(entries, 'task_history_retention_days', '')
 
   if (isLoading) return <div className="px-4 py-6 sm:px-6 text-sm text-neutral-500 dark:text-neutral-400">Loading…</div>
   if (error)     return <div className="px-4 py-6 sm:px-6 text-sm text-red-600 dark:text-red-400">{String(error)}</div>
@@ -1230,6 +1231,15 @@ export function Settings() {
           value={defaultModel}
           placeholder="Leave blank to use the NOVA_DEFAULT_MODEL env var"
           description="When set, overrides the NOVA_DEFAULT_MODEL environment variable without a restart. Use the exact model ID from the Models page (e.g. claude-sonnet-4-5)."
+          onSave={handleSave}
+          saving={saveMutation.isPending}
+        />
+        <ConfigField
+          label="Task history retention (days)"
+          configKey="task_history_retention_days"
+          value={retentionDays}
+          placeholder="0 (keep forever)"
+          description="Automatically delete completed/failed/cancelled tasks older than this many days. Set to 0 or leave blank to keep forever. Common values: 7, 30, 60, 90."
           onSave={handleSave}
           saving={saveMutation.isPending}
         />

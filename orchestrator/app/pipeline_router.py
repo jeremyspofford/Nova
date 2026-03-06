@@ -249,6 +249,66 @@ async def cancel_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
     return {"task_id": task_id, "status": "cancelled"}
 
 
+@router.delete("/api/v1/pipeline/tasks/{task_id}", status_code=204)
+async def delete_pipeline_task(task_id: str, _admin: AdminDep) -> None:
+    """
+    Delete a single terminal task (complete/failed/cancelled) and all related records.
+    FK CASCADE handles guardrail_findings, code_reviews, artifacts, agent_sessions.
+    Admin-only.
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM tasks
+            WHERE id = $1::uuid
+              AND status IN ('complete', 'failed', 'cancelled')
+            """,
+            task_id,
+        )
+    if result == "DELETE 0":
+        raise HTTPException(
+            status_code=409,
+            detail="Task not found or not in a terminal state (complete/failed/cancelled)",
+        )
+
+
+@router.delete("/api/v1/pipeline/tasks")
+async def bulk_delete_pipeline_tasks(
+    _admin: AdminDep,
+    status: str = Query(
+        default="complete,failed,cancelled",
+        description="Comma-separated terminal statuses to delete",
+    ),
+) -> dict:
+    """
+    Bulk delete terminal tasks matching the given statuses.
+    Only allows terminal statuses (complete, failed, cancelled).
+    Admin-only.
+    """
+    ALLOWED = {"complete", "failed", "cancelled"}
+    requested = {s.strip() for s in status.split(",")}
+    invalid = requested - ALLOWED
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Can only bulk-delete terminal statuses. Invalid: {invalid}",
+        )
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            DELETE FROM tasks
+            WHERE status = ANY($1::text[])
+            """,
+            list(requested),
+        )
+    deleted = int(result.split()[-1])
+    log.info("Bulk deleted %d tasks (statuses=%s)", deleted, requested)
+    return {"deleted": deleted, "statuses": list(requested)}
+
+
 @router.get("/api/v1/pipeline/tasks/{task_id}/findings")
 async def list_task_findings(task_id: str, _key: ApiKeyDep) -> list[dict]:
     """List guardrail findings for a pipeline task."""

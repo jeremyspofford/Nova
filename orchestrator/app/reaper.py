@@ -32,12 +32,17 @@ async def reaper_loop() -> None:
     Wakes every settings.reaper_interval_seconds, runs all reap checks, sleeps again.
     """
     logger.info("Reaper started")
+    _cycle = 0
     while True:
         try:
             await asyncio.sleep(settings.reaper_interval_seconds)
             await _reap_stale_running_tasks()
             await _reap_stuck_queued_tasks()
             await _reap_timed_out_sessions()
+            # Run task history cleanup once per ~60 cycles (~hourly at 60s interval)
+            _cycle += 1
+            if _cycle % 60 == 0:
+                await _cleanup_expired_tasks()
         except asyncio.CancelledError:
             logger.info("Reaper shutting down")
             break
@@ -214,6 +219,45 @@ async def _reap_timed_out_sessions() -> None:
             await _audit(conn, "session_timeout", "warning",
                          task_id=task_id,
                          data={"session_id": session_id, "role": session["role"]})
+
+
+# ── Auto-cleanup expired task history ─────────────────────────────────────────
+
+async def _cleanup_expired_tasks() -> None:
+    """
+    Delete terminal tasks older than the configured retention period.
+    Reads `task_history_retention_days` from platform config.
+    0 or missing = disabled (keep forever).
+    """
+    from .db import get_pool
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT value FROM platform_config WHERE key = 'task_history_retention_days'"
+        )
+        if not row:
+            return
+        try:
+            days = int(row["value"].strip('"'))
+        except (ValueError, TypeError, AttributeError):
+            return
+        if days <= 0:
+            return
+
+        result = await conn.execute(
+            """
+            DELETE FROM tasks
+            WHERE status IN ('complete', 'failed', 'cancelled')
+              AND completed_at < now() - ($1 || ' days')::interval
+            """,
+            str(days),
+        )
+        deleted = int(result.split()[-1])
+        if deleted > 0:
+            logger.info("Auto-cleanup: deleted %d tasks older than %d days", deleted, days)
+            await _audit(conn, "task_history_cleanup", "info",
+                         data={"deleted": deleted, "retention_days": days})
 
 
 # ── Audit helper ──────────────────────────────────────────────────────────────

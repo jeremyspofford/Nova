@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Send, RefreshCw, X, CheckCircle, AlertCircle, Clock,
-  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Loader2,
+  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Loader2, Trash2,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
   reviewPipelineTask, getQueueStats, getPods, getModels,
+  deletePipelineTask, bulkDeletePipelineTasks,
 } from '../api'
 import type { PipelineTask, TaskStatus } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
@@ -63,28 +64,38 @@ function StageProgress({ task }: { task: PipelineTask }) {
   const { completedUpTo, activeIndex } = resolveStageState(task)
 
   return (
-    <div className="flex items-center gap-0.5 sm:gap-1">
+    <div className="flex items-center gap-0">
       {STAGES.map((stage, i) => {
         const done    = i < completedUpTo
         const active  = i === activeIndex
         const failed  = task.status === 'failed' && i === activeIndex
 
         return (
-          <div key={stage} className="flex items-center gap-0.5 sm:gap-1">
+          <div key={stage} className="flex items-center">
             {i > 0 && (
-              <div className={clsx('h-px flex-1 w-3 sm:w-5', done ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700')} />
+              <div className={clsx('h-px w-3 sm:w-5', done ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700')} />
             )}
-            <div
-              title={STAGE_LABELS[stage]}
-              className={clsx(
-                'flex size-5 sm:size-6 items-center justify-center rounded-full text-[10px] font-bold border transition-all',
-                done   && 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-600 text-emerald-700 dark:text-emerald-400',
-                active && !failed && 'border-amber-400 text-amber-700 dark:text-amber-400 animate-pulse bg-amber-50 dark:bg-amber-900/30',
-                failed && 'border-red-500 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30',
-                !done && !active && 'border-neutral-300 dark:border-neutral-600 text-neutral-500 dark:text-neutral-400 bg-card dark:bg-neutral-900',
-              )}
-            >
-              {done   ? '✓' : i + 1}
+            <div className="flex flex-col items-center gap-0.5" title={STAGE_LABELS[stage]}>
+              <div
+                className={clsx(
+                  'flex size-5 sm:size-6 items-center justify-center rounded-full text-[10px] font-bold border transition-all',
+                  done   && 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-600 text-emerald-700 dark:text-emerald-400',
+                  active && !failed && 'border-amber-400 text-amber-700 dark:text-amber-400 animate-pulse bg-amber-50 dark:bg-amber-900/30',
+                  failed && 'border-red-500 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30',
+                  !done && !active && 'border-neutral-300 dark:border-neutral-600 text-neutral-500 dark:text-neutral-400 bg-card dark:bg-neutral-900',
+                )}
+              >
+                {done ? '✓' : i + 1}
+              </div>
+              <span className={clsx(
+                'text-[9px] leading-none font-medium hidden sm:block',
+                done   && 'text-emerald-600 dark:text-emerald-400',
+                active && !failed && 'text-amber-600 dark:text-amber-400',
+                failed && 'text-red-500 dark:text-red-400',
+                !done && !active && 'text-neutral-400 dark:text-neutral-500',
+              )}>
+                {STAGE_LABELS[stage]}
+              </span>
             </div>
           </div>
         )
@@ -152,6 +163,11 @@ function TaskCard({ task }: { task: PipelineTask }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
   })
 
+  const deleteMutation = useMutation({
+    mutationFn: () => deletePipelineTask(task.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
+  })
+
   const isActive    = ACTIVE_TASK_STATUSES.has(task.status)
   const needsReview = task.status === 'pending_human_review'
   const isTerminal  = ['complete','failed','cancelled'].includes(task.status)
@@ -189,6 +205,16 @@ function TaskCard({ task }: { task: PipelineTask }) {
               className="rounded-md p-1 text-neutral-500 dark:text-neutral-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
             >
               <X size={14} />
+            </button>
+          )}
+          {isTerminal && (
+            <button
+              onClick={() => deleteMutation.mutate()}
+              disabled={deleteMutation.isPending}
+              title="Delete task"
+              className="rounded-md p-1 text-neutral-400 dark:text-neutral-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
+            >
+              <Trash2 size={14} />
             </button>
           )}
           <button
@@ -373,11 +399,21 @@ export function Tasks() {
   const [tab, setTab] = useState<Tab>('active')
   const qc = useQueryClient()
 
+  const [confirmClear, setConfirmClear] = useState(false)
+
   const { data: tasks = [], isFetching } = useQuery({
     queryKey: ['pipeline-tasks'],
     queryFn: () => getPipelineTasks({ limit: 100 }),
     // Poll aggressively when on active/review tabs; slow down for history
     refetchInterval: tab === 'history' ? 30_000 : 3_000,
+  })
+
+  const bulkDelete = useMutation({
+    mutationFn: () => bulkDeletePipelineTasks(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+      setConfirmClear(false)
+    },
   })
 
   // Partition into tabs
@@ -446,6 +482,36 @@ export function Tasks() {
 
       {/* Task list */}
       <div className="space-y-3">
+        {tab === 'history' && historyTasks.length > 0 && (
+          <div className="flex justify-end">
+            {confirmClear ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-500 dark:text-neutral-400">Delete all history?</span>
+                <button
+                  onClick={() => bulkDelete.mutate()}
+                  disabled={bulkDelete.isPending}
+                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50"
+                >
+                  {bulkDelete.isPending ? 'Deleting...' : 'Confirm'}
+                </button>
+                <button
+                  onClick={() => setConfirmClear(false)}
+                  className="rounded-md px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmClear(true)}
+                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400"
+              >
+                <Trash2 size={12} /> Clear All History
+              </button>
+            )}
+          </div>
+        )}
+
         {tabTasks[tab].length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-neutral-500 dark:text-neutral-400">
             {tab === 'active'  && <><Clock size={24} /><p className="text-sm">No active tasks</p></>}
