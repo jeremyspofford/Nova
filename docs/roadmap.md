@@ -2,7 +2,7 @@
 
 > Living document. Keep up to date as work progresses.
 >
-> **Last updated:** 2026-03-03
+> **Last updated:** 2026-03-06
 >
 > **Vision:** A self-directed autonomous AI platform. You define a goal. Nova breaks it into
 > subtasks, executes them through a coordinated pipeline of specialized agents with built-in
@@ -2036,6 +2036,173 @@ Each cloud provider has different names and configurations:
 
 ---
 
+## 🔜 Phase 12 — High-Throughput Local Inference (vLLM + GPU Upgrade)
+
+**Motivation:** Nova is designed for parallel autonomous workflows — multiple tasks execute concurrently via Redis BRPOP. But Ollama serializes inference requests: when 5 tasks call the LLM simultaneously, they queue behind each other. For Nova to be an always-on AI replacement (chat + autonomous workflows + coding sessions concurrently), the inference layer must handle parallel requests efficiently. This phase also addresses multi-tenancy inference needs (Phase 13).
+
+**Hardware:**
+- Current: Dell PC with NVIDIA RTX 3060 Ti (8 GB VRAM) — runs Ollama over LAN, woken via WoL
+- Target: Upgrade to NVIDIA RTX 3090 (24 GB VRAM, same PCIe slot, same power connector style)
+- The 3090 fits standard ATX cases, uses a 2-slot design (verify Dell case clearance), and draws 350W (ensure PSU is 750W+)
+- 24 GB VRAM enables 70B Q4 models or multiple concurrent 13B-30B model contexts
+
+**Why RTX 3090 over alternatives:**
+| GPU | VRAM | Price (used) | Why / Why Not |
+|-----|------|-------------|---------------|
+| RTX 3090 | 24 GB | ~$700-800 | Best VRAM/dollar. Widely available used. Same generation as 3060 Ti — guaranteed driver compatibility. |
+| RTX 3090 Ti | 24 GB | ~$800-900 | Marginal perf gain, higher power draw (450W). Not worth the premium. |
+| RTX 4090 | 24 GB | ~$1600-1800 | Faster compute but same VRAM. 2x the price for ~40% more throughput. Overkill for 2-user household. |
+| RTX 4080 | 16 GB | ~$900 | Less VRAM than 3090 for more money. Bad value for inference. |
+| RTX A5000 | 24 GB | ~$1200 | Workstation card, no gaming. Same VRAM as 3090 at higher cost. |
+| 2x RTX 3060 Ti | 16 GB (split) | ~$400 | vLLM doesn't tensor-parallel well across consumer cards. Model must fit in one GPU. |
+
+**Why vLLM over Ollama for this use case:**
+| Capability | Ollama | vLLM |
+|-----------|--------|------|
+| Concurrent request handling | Sequential queue (OLLAMA_NUM_PARALLEL is limited) | Continuous batching — interleaves tokens across requests in one forward pass |
+| Multi-user serving | Requests serialize; latency degrades linearly | Designed for multi-tenant serving; near-constant latency up to batch capacity |
+| VRAM efficiency | Loads/unloads full models | PagedAttention — packs multiple KV caches efficiently, more concurrent contexts |
+| Model switching | Evicts model from VRAM, cold-start latency | Typically runs one model but serves it to many users efficiently |
+| Quantization | GGUF (great variety) | GPTQ, AWQ, GGUF (via recent updates) |
+| Setup complexity | Single binary, trivial | Python environment, more configuration |
+| Best for | Single user, model variety, experimentation | Multi-user, high throughput, production serving |
+
+### Implementation
+
+**Step 1: Hardware upgrade**
+- Purchase RTX 3090 (used/refurbished)
+- Verify Dell case dimensions and PSU wattage before purchasing
+- Install GPU, verify with `nvidia-smi`
+
+**Step 2: vLLM container**
+- Add `vllm` service to `docker-compose.yml` behind a profile (like Ollama)
+- Image: `vllm/vllm-openai:latest` (provides OpenAI-compatible API out of the box)
+- Mount model cache volume
+- Configure: `--model`, `--max-model-len`, `--gpu-memory-utilization 0.90`
+- Expose on port 8003 (or configurable)
+
+**Step 3: LLM Gateway integration**
+- LiteLLM already supports vLLM as a provider (`openai`-compatible with custom base URL)
+- Add vLLM as a provider in `llm-gateway` config alongside Ollama
+- Routing strategy: vLLM for concurrent/production workloads, Ollama retained for model experimentation and GGUF variety
+
+**Step 4: Ollama coexistence**
+- Keep Ollama for quick model testing and GGUF models not available in vLLM formats
+- vLLM runs the "primary" model (e.g., one 30B-70B model always loaded)
+- Ollama runs ad-hoc models on remaining VRAM or CPU fallback
+- Dashboard model page shows which backend serves each model
+
+### Configuration
+
+```yaml
+# docker-compose.yml (new service, behind profile)
+vllm:
+  image: vllm/vllm-openai:latest
+  profiles: ["local-vllm"]
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+  volumes:
+    - vllm-models:/root/.cache/huggingface
+  environment:
+    - MODEL=${VLLM_MODEL:-meta-llama/Llama-3.1-70B-Instruct-AWQ}
+    - MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
+    - GPU_MEMORY_UTILIZATION=0.90
+  ports:
+    - "8003:8000"
+```
+
+### Testing & Validation
+
+- [ ] RTX 3090 installed, `nvidia-smi` shows 24 GB VRAM
+- [ ] vLLM container starts and loads a 30B+ model
+- [ ] LLM Gateway routes requests to vLLM correctly
+- [ ] Benchmark: 5 concurrent chat completions — compare latency Ollama vs vLLM
+- [ ] Benchmark: 3 parallel pipeline tasks — measure total completion time improvement
+- [ ] Verify Ollama still works alongside vLLM for ad-hoc models
+- [ ] Dashboard shows vLLM as a provider with model status
+
+### Success Criteria
+
+- [ ] 5 concurrent inference requests complete with <2x single-request latency (vs Ollama's ~5x)
+- [ ] 70B Q4 model loads and serves on RTX 3090
+- [ ] Nova pipeline runs 3 parallel tasks without inference bottleneck
+- [ ] Setup script offers vLLM profile option
+
+---
+
+## 🔜 Phase 13 — Multi-Tenancy
+
+**Motivation:** Nova is currently single-user. To support multiple people (starting with a 2-person household — Jeremy and wife), Nova needs user isolation: separate chat histories, memory spaces, API keys, preferences, and usage tracking. Wife's use case: personal chatbot + UX Designer workflow assistant.
+
+**This phase has two sub-phases: planning (13a) and implementation (13b).**
+
+### Phase 13a — Multi-Tenancy Design
+
+Before writing code, produce a design document (`docs/plans/multi-tenancy-design.md`) covering:
+
+**Identity & Auth:**
+- How do users authenticate? Options: local username/password, OAuth (Google), passkey, or invite-link with shared admin secret
+- Session management: JWT tokens? Cookie-based sessions? How do they interact with existing `X-Admin-Secret` admin auth?
+- User roles: admin (full access, can manage other users) vs. user (own data only)
+
+**Data Isolation:**
+- Chat history: per-user conversations (currently global in orchestrator DB)
+- Memory: per-user memory spaces in memory-service (currently shared pgvector collection)
+- API keys: keys already have no user association — add `user_id` FK
+- Usage tracking: per-user usage reports and cost attribution
+- Tasks/pipelines: per-user task queues, or shared queue with user context?
+- Pods: shared pod definitions (admin-managed) vs. per-user custom pods
+- Settings: which settings are global (admin) vs. per-user (appearance, default model, notification prefs)?
+
+**UX Design:**
+- Login screen / user switcher
+- Dashboard scoped to current user's data
+- Admin panel for user management
+- Wife's UX Designer persona: should this be a pre-configured pod with UX-specific system prompts, tools, and memory?
+
+**Infrastructure Impact:**
+- Database schema changes (add `users` table, add `user_id` FK to conversations, memories, tasks, api_keys, usage_events)
+- Memory service: tenant-scoped embedding collections
+- Redis: namespace keys by user ID
+- LLM Gateway: per-user rate limits? Per-user provider preferences?
+- Recovery service: per-user backup scope or global only?
+
+**Migration Strategy:**
+- How to migrate existing single-user data to the first user account
+- Backwards compatibility: single-user mode should still work (no login required when only 1 user)
+
+### Phase 13b — Multi-Tenancy Implementation
+
+Implement the design from 13a. Likely deliverables:
+
+- [ ] `users` table with hashed passwords, roles, preferences
+- [ ] Login/registration UI in dashboard
+- [ ] JWT or session-based auth middleware across all services
+- [ ] `user_id` column added to: conversations, tasks, memories, api_keys, usage_events
+- [ ] Dashboard scoped to authenticated user's data
+- [ ] Admin panel: user CRUD, usage-per-user, global settings
+- [ ] Per-user settings (appearance, default model, notifications)
+- [ ] Memory service tenant isolation (user-scoped collections)
+- [ ] Redis key namespacing by user ID
+- [ ] Migration: existing data assigned to initial admin user
+- [ ] Pre-built "UX Designer" pod with relevant system prompts and tools
+- [ ] Single-user mode preserved: if only 1 user exists, skip login
+
+### Success Criteria
+
+- [ ] Two users can chat simultaneously with isolated histories
+- [ ] User A cannot see User B's conversations, memories, or tasks
+- [ ] Admin can view all users' usage and manage accounts
+- [ ] Existing single-user installations upgrade seamlessly (data migrated to first user)
+- [ ] Wife can use a UX Designer-optimized pod with relevant context and tools
+
+---
+
 ## 🧊 Icebox / Future
 
 - **Capability-based YAML routing** — once Planning Agent assigns agents by role, formalize model requirements per role in a config file
@@ -2043,7 +2210,7 @@ Each cloud provider has different names and configurations:
 - **Key-level model restrictions** — `sk-nova-*` keys scoped to specific providers
 - **Multi-model A/B testing** — run two models on same subtask, Evaluation Agent picks the better output
 - **Self-hosted Ollama parity** — full tool support for local models
-- **Collaborative goals** — multiple users contributing context to a shared goal
+- **Collaborative goals** — multiple users contributing context to a shared goal (prerequisite: Phase 13 multi-tenancy)
 - **ClaudeCode provider** — spawn `claude -p` subprocess using Claude Max subscription for zero API cost per call (designed in Phase 4, not yet implemented)
 - **Post-pipeline agents** — Documentation Agent, Diagramming Agent, Security Review Agent, Memory Extraction Agent (designed, not built)
 - **Default pods** — Quick Reply, Research, Code Generation, Analysis (designed in Phase 4, only Quartet default shipped)
@@ -2081,7 +2248,7 @@ Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGra
 - **No circuit breaker for LLM providers** — if a provider is down, requests fail immediately instead of routing to fallback
 - **DB connection pool has no idle validation** — stale connections after Postgres restarts aren't detected
 - **Admin secret default not rejected in production** — `nova-admin-secret-change-me` is accepted without warning
-- **`parallel_group` field exists but is ignored** — pipeline executor runs everything sequentially regardless
+- **`parallel_group` field exists but is ignored** — pipeline executor runs stages sequentially within a task. Note: multiple *tasks* already run in parallel via Redis BRPOP; the bottleneck is Ollama serializing inference requests (addressed in Phase 12)
 - **Contracts not enforced** — `nova-contracts` Pydantic models exist but aren't validated at service boundaries; agent responses are unchecked dicts
 - **Embedding cache unused** — `embedding_cache` table exists in memory-service schema but is never queried or written to
 
