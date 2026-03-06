@@ -92,6 +92,10 @@ Browser-based code editor with git workspace management, integrated with Nova's 
 
 Nova as a distributed personal AI network. Each device (mini-PC, desktop, laptop) runs its own Nova gateway with different LLM backends, sharing one memory service. Chat through the same PWA from your phone regardless of which gateway you're hitting. Per-device routing: cloud-only on low-power devices, local Ollama on GPU boxes, hybrid elsewhere.
 
+### Domain Restructuring (planned)
+
+Migration from `nova.arialabs.ai` (docs site) to a split architecture: `arialabs.ai` becomes the Aria Labs company site with Nova docs at `arialabs.ai/nova/docs/`, while `nova.arialabs.ai` becomes a live private Nova instance accessible from any device via Cloudflare Tunnel + Access. When SaaS launches, the personal instance moves to a personal subdomain and `nova.arialabs.ai` becomes the SaaS endpoint.
+
 ### Phase 10 -- Edge Computing (planned)
 
 Edge deployment capabilities for running Nova agents closer to data sources and event triggers.

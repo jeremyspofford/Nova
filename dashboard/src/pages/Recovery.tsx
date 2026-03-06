@@ -16,7 +16,7 @@ import {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function StatusDot({ status, health }: { status: string; health: string }) {
+export function StatusDot({ status, health }: { status: string; health: string }) {
   const isUp = status === 'running' && (health === 'healthy' || health === 'none')
   const color = status === 'not_found' || status === 'unknown'
     ? 'bg-neutral-400'
@@ -42,7 +42,7 @@ function StatusDot({ status, health }: { status: string; health: string }) {
 
 // ── Service Status Section ───────────────────────────────────────────────────
 
-function ServiceStatusSection() {
+export function ServiceStatusSection() {
   const qc = useQueryClient()
   const { data: services, isLoading } = useQuery({
     queryKey: ['recovery-services'],
@@ -140,7 +140,7 @@ function ServiceStatusSection() {
 
 // ── Backup Section ───────────────────────────────────────────────────────────
 
-function BackupSection() {
+export function BackupSection() {
   const qc = useQueryClient()
   const { data: backups, isLoading } = useQuery({
     queryKey: ['recovery-backups'],
@@ -317,7 +317,7 @@ function BackupSection() {
 
 // ── Factory Reset Section ────────────────────────────────────────────────────
 
-function FactoryResetSection() {
+export function FactoryResetSection() {
   const { data: categories, isLoading } = useQuery({
     queryKey: ['recovery-reset-categories'],
     queryFn: getResetCategories,
@@ -443,7 +443,7 @@ function FactoryResetSection() {
 
 // ── Overview Banner ──────────────────────────────────────────────────────────
 
-function OverviewBanner() {
+export function OverviewBanner() {
   const { data: overview, isLoading, error } = useQuery({
     queryKey: ['recovery-overview'],
     queryFn: getRecoveryOverview,

@@ -1251,6 +1251,56 @@ All instances share one memory-service (on mini-PC)
 
 ---
 
+## 🔜 Domain Restructuring & Website Migration
+
+**Current state:** `nova.arialabs.ai` hosts the Astro/Starlight documentation site.
+
+**Target state:**
+
+| Domain | Purpose |
+|---|---|
+| `arialabs.ai` | Aria Labs company website — landing page, about, team. Nova is the main product section. |
+| `arialabs.ai/nova/` | Nova product pages — features, quickstart, docs, changelog, roadmap |
+| `arialabs.ai/nova/docs/...` | All current documentation migrated here |
+| `nova.arialabs.ai` | Live Nova instance (private, behind Cloudflare Access with email auth) |
+
+**Why this change:**
+- `arialabs.ai` is the company — it should be the company site, not blank/parked
+- `nova.arialabs.ai` as a live instance is more valuable than as a docs site
+- Docs belong under the company domain where they can grow with additional products
+- Dogfooding: accessing your own Nova from your phone at `nova.arialabs.ai` validates the product
+
+**`nova.arialabs.ai` — Private instance:**
+- Cloudflare Tunnel from Beelink → `nova.arialabs.ai`
+- Cloudflare Access policy: email-based auth (whitelist your email)
+- PWA installable to phone home screen
+- When SaaS launches (Phase 14), personal instance moves to `home.nova.arialabs.ai` or `jeremy.nova.arialabs.ai`, and `nova.arialabs.ai` becomes the SaaS app. This is a 2-minute DNS swap.
+
+**`arialabs.ai` — Company site:**
+- Migrate existing Astro/Starlight site from `nova.arialabs.ai` to `arialabs.ai`
+- Add company-level landing page (Aria Labs branding, mission, link to Nova)
+- Nova docs at `arialabs.ai/nova/docs/...`
+- Starlight base path config: `base: '/nova'` in `astro.config.mjs`
+- Can host future products under `arialabs.ai/other-product/` if needed
+
+**Migration steps:**
+- [ ] Update `astro.config.mjs`: set `base: '/nova'`, update `site` to `https://arialabs.ai`
+- [ ] Create company landing page at `arialabs.ai` root (can be minimal — logo, tagline, link to Nova)
+- [ ] Set up redirects from `nova.arialabs.ai/docs/*` → `arialabs.ai/nova/docs/*` (Cloudflare Page Rules or `_redirects`)
+- [ ] Update all internal links and references to the new URL structure
+- [ ] Deploy company site to `arialabs.ai` (Cloudflare Pages or similar)
+- [ ] Set up Cloudflare Tunnel: Beelink → `nova.arialabs.ai`
+- [ ] Configure Cloudflare Access policy on `nova.arialabs.ai` (email whitelist)
+- [ ] Install PWA on phone, verify full access from mobile
+- [ ] Update GitHub repo links, README, CLAUDE.md references
+
+**Order of operations:**
+1. Migrate docs site first (ensure no broken links)
+2. Then point `nova.arialabs.ai` at Beelink
+3. These can happen in either order, but docs migration is lower risk
+
+---
+
 ## 🔜 Phase 8b — MCP Integrations Hub (Self-Hosted Ecosystem)
 
 **Motivation:** Nova already has MCP tool dispatch in the orchestrator. The next step is making it trivial to connect Nova to the self-hosted services and developer tools people already run — turning Nova into the AI brain of your homelab. Goal: **one-click install with minimal configuration** for each integration.

@@ -43,7 +43,7 @@ const initialTsState: TsWizardState = {
 
 // ── Status Badge ─────────────────────────────────────────────────────────────
 
-function StatusBadge({ configured, running }: { configured: boolean; running: boolean }) {
+export function StatusBadge({ configured, running }: { configured: boolean; running: boolean }) {
   if (running) return (
     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
       <CheckCircle2 size={12} /> Running
@@ -63,7 +63,7 @@ function StatusBadge({ configured, running }: { configured: boolean; running: bo
 
 // ── Cloudflare Wizard ────────────────────────────────────────────────────────
 
-function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatus['cloudflare']; onDone: () => void }) {
+export function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatus['cloudflare']; onDone: () => void }) {
   const [s, setS] = useState<CfWizardState>(initialCfState)
   const set = (patch: Partial<CfWizardState>) => setS(prev => ({ ...prev, ...patch }))
 
@@ -281,7 +281,7 @@ function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatus['clou
 
 // ── Tailscale Wizard ─────────────────────────────────────────────────────────
 
-function TailscaleWizard({ status, onDone }: { status: RemoteAccessStatus['tailscale']; onDone: () => void }) {
+export function TailscaleWizard({ status, onDone }: { status: RemoteAccessStatus['tailscale']; onDone: () => void }) {
   const [s, setS] = useState<TsWizardState>(initialTsState)
   const set = (patch: Partial<TsWizardState>) => setS(prev => ({ ...prev, ...patch }))
 
