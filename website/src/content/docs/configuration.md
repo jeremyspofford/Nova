@@ -1,6 +1,129 @@
 ---
 title: "Configuration"
-description: "Coming soon."
+description: "Environment variables, provider API keys, model routing, and context budgets."
 ---
 
-Content coming soon.
+Nova is configured primarily through a `.env` file and a `models.yaml` file. Run `./setup` for interactive configuration, or edit these files manually.
+
+## Environment file
+
+Copy `.env.example` to `.env` and edit:
+
+```bash
+cp .env.example .env
+```
+
+### Core settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGRES_PASSWORD` | Database password (required) | *(empty -- set during setup)* |
+| `NOVA_ADMIN_SECRET` | Secret for admin API access via `X-Admin-Secret` header | `nova-admin-secret-change-me` |
+| `LOG_LEVEL` | Logging verbosity | `INFO` |
+| `REQUIRE_AUTH` | Require API key for all requests | `false` |
+| `SHELL_TIMEOUT_SECONDS` | Timeout for shell command execution | `30` |
+
+### Deployment mode
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `COMPOSE_PROFILES` | Comma-separated Docker Compose profiles (e.g., `local-ollama`, `local-vllm`) | *(empty)* |
+| `OLLAMA_BASE_URL` | URL for remote Ollama instance | *(empty)* |
+| `LLM_ROUTING_STRATEGY` | Model routing strategy (see below) | `local-first` |
+| `DEFAULT_CHAT_MODEL` | Default model for chat interactions | `llama3.2` |
+
+### Wake-on-LAN (remote GPU)
+
+| Variable | Description |
+|----------|-------------|
+| `WOL_MAC_ADDRESS` | MAC address of the remote GPU machine |
+| `WOL_BROADCAST_IP` | Broadcast IP for Wake-on-LAN packets |
+
+### CORS
+
+| Variable | Description |
+|----------|-------------|
+| `CORS_ALLOWED_ORIGINS` | Comma-separated origins (default covers local dev ports) |
+
+## Provider API keys
+
+Nova supports many LLM providers. Configure the ones you want to use:
+
+### Subscription providers (use your existing subscription)
+
+| Variable | Provider | Setup |
+|----------|----------|-------|
+| `CLAUDE_CODE_OAUTH_TOKEN` | Claude Max/Pro | Run: `claude auth login && claude setup-token` |
+| `CHATGPT_ACCESS_TOKEN` | ChatGPT Plus/Pro | Run: `codex login` |
+
+### Free tier providers (no credit card required)
+
+| Variable | Provider | Sign up |
+|----------|----------|---------|
+| `GROQ_API_KEY` | Groq | [console.groq.com](https://console.groq.com) |
+| `CEREBRAS_API_KEY` | Cerebras | [cloud.cerebras.ai](https://cloud.cerebras.ai) |
+| `GEMINI_API_KEY` | Gemini | [aistudio.google.com](https://aistudio.google.com) |
+| `OPENROUTER_API_KEY` | OpenRouter | [openrouter.ai](https://openrouter.ai) |
+| `GITHUB_TOKEN` | GitHub Models | [github.com/settings/tokens](https://github.com/settings/tokens) |
+
+### Paid API providers (billed per token)
+
+| Variable | Provider | Sign up |
+|----------|----------|---------|
+| `ANTHROPIC_API_KEY` | Anthropic | [console.anthropic.com](https://console.anthropic.com) |
+| `OPENAI_API_KEY` | OpenAI | [platform.openai.com](https://platform.openai.com) |
+
+### Per-provider default models (optional)
+
+Override the default model for each provider:
+
+| Variable | Example |
+|----------|---------|
+| `DEFAULT_OLLAMA_MODEL` | `llama3.2` |
+| `DEFAULT_GROQ_MODEL` | `groq/llama-3.3-70b-versatile` |
+| `DEFAULT_GEMINI_MODEL` | `gemini/gemini-2.5-flash` |
+| `DEFAULT_CEREBRAS_MODEL` | `cerebras/llama-3.3-70b` |
+| `DEFAULT_CLAUDE_MAX_MODEL` | `claude-max/claude-sonnet-4-6` |
+| `DEFAULT_CHATGPT_MODEL` | `chatgpt/gpt-4o` |
+| `DEFAULT_OPENROUTER_MODEL` | `openrouter/meta-llama/llama-3.1-8b-instruct:free` |
+| `DEFAULT_GITHUB_MODEL` | `github/gpt-4o-mini` |
+
+## Remote access
+
+Nova supports two options for accessing the dashboard remotely:
+
+| Option | Variable | Description |
+|--------|----------|-------------|
+| **Cloudflare Tunnel** | `CLOUDFLARE_TUNNEL_TOKEN` | Browser access from anywhere with automatic HTTPS. Add `cloudflare-tunnel` to `COMPOSE_PROFILES`. |
+| **Tailscale** | `TAILSCALE_AUTHKEY` | Fully private VPN mesh with encrypted WireGuard tunnel. Add `tailscale` to `COMPOSE_PROFILES`. |
+
+## models.yaml
+
+The `models.yaml` file defines which Ollama models to auto-pull on startup when running with a local Ollama instance. Edit this file to control which models are available locally.
+
+## LLM routing strategies
+
+The `LLM_ROUTING_STRATEGY` variable controls how Nova selects between local and cloud providers:
+
+| Strategy | Behavior |
+|----------|----------|
+| `local-only` | Only use local inference backends (Ollama, vLLM, SGLang, llama.cpp). Fails if no local backend is available. |
+| `local-first` | Try local backends first, fall back to cloud providers if unavailable. |
+| `cloud-only` | Only use cloud API providers. No local inference. |
+| `cloud-first` | Try cloud providers first, fall back to local backends if unavailable. |
+
+This setting is runtime-configurable from the dashboard Settings page.
+
+## Context budgets
+
+The orchestrator allocates context window space across different purposes to prevent any single source from consuming the entire context:
+
+| Category | Budget | Purpose |
+|----------|--------|---------|
+| **System** | 10% | System prompts and agent instructions |
+| **Tools** | 15% | MCP tool definitions and schemas |
+| **Memory** | 40% | Retrieved memories and semantic context |
+| **History** | 20% | Conversation history |
+| **Working** | 15% | Current task working space |
+
+These budgets ensure that long conversation histories or large memory retrievals don't crowd out tool definitions or system prompts.
