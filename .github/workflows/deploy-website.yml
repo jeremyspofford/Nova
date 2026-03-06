@@ -37,4 +37,5 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Custom domain: arialabs.ai (update in Cloudflare Pages dashboard)
           command: pages deploy website/dist --project-name=nova-website

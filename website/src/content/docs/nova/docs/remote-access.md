@@ -79,7 +79,7 @@ Both wizards run entirely in the browser. API tokens are used client-side to cal
 
 ## Technical details
 
-Both remote access methods use Docker Compose profiles managed by the [Recovery Service](/services/recovery/). The profiles are:
+Both remote access methods use Docker Compose profiles managed by the [Recovery Service](/nova/docs/services/recovery/). The profiles are:
 
 | Profile | Container | Purpose |
 |---------|-----------|---------|

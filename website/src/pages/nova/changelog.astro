@@ -1,6 +1,6 @@
 ---
-import Landing from '../layouts/Landing.astro';
-import Footer from '../components/Footer.astro';
+import Landing from '../../layouts/Landing.astro';
+import Footer from '../../components/Footer.astro';
 import { getCollection, render } from 'astro:content';
 
 const entries = (await getCollection('changelog'))
@@ -11,10 +11,10 @@ const entries = (await getCollection('changelog'))
   <!-- Nav -->
   <nav class="fixed top-0 left-0 right-0 z-50 border-b border-stone-800/40 bg-[#0a0a0b]/80 backdrop-blur-xl">
     <div class="flex items-center justify-between px-6 py-3.5 max-w-7xl mx-auto">
-      <a href="/" class="text-base font-bold text-white tracking-tight">Nova</a>
+      <a href="/" class="text-base font-bold text-white tracking-tight">Aria Labs</a>
       <div class="flex items-center gap-8">
-        <a href="/quickstart/" class="text-xs text-stone-500 hover:text-stone-200 transition-colors tracking-wide">Docs</a>
-        <a href="/changelog/" class="text-xs text-teal-400 transition-colors tracking-wide">Changelog</a>
+        <a href="/nova/docs/quickstart/" class="text-xs text-stone-500 hover:text-stone-200 transition-colors tracking-wide">Docs</a>
+        <a href="/nova/changelog/" class="text-xs text-teal-400 transition-colors tracking-wide">Changelog</a>
         <a href="https://github.com/arialabs/nova" target="_blank" rel="noopener noreferrer" class="text-xs text-stone-500 hover:text-stone-200 transition-colors tracking-wide">GitHub</a>
       </div>
     </div>

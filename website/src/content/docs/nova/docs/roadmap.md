@@ -52,7 +52,7 @@ Three-tier memory architecture (semantic, procedural, episodic) with hybrid retr
 
 ### Phase 5c -- Skills & Rules (planned)
 
-Reusable prompt templates (skills) shared across agents/pods, and declarative behavior constraints (rules) with soft (LLM-based) and hard (pre-execution regex) enforcement. See [Skills & Rules](/skills-rules/) for details.
+Reusable prompt templates (skills) shared across agents/pods, and declarative behavior constraints (rules) with soft (LLM-based) and hard (pre-execution regex) enforcement. See [Skills & Rules](/nova/docs/skills-rules/) for details.
 
 ### Phase 6c -- SDK, CLI/TUI & Documentation (planned)
 

@@ -100,10 +100,10 @@ Additional validation:
 
 ## Website & Documentation
 
-Nova's website lives at `website/` (Astro/Starlight, nova.arialabs.ai). After completing feature work, check if any website content needs updating.
+Nova's website lives at `website/` (Astro/Starlight, arialabs.ai). The site serves both the Aria Labs company landing page and Nova product pages/docs. After completing feature work, check if any website content needs updating.
 
 **Website structure:**
-- `website/src/content/docs/` — Documentation pages (Starlight)
+- `website/src/content/docs/nova/docs/` — Documentation pages (Starlight, served at arialabs.ai/nova/docs/)
 - `website/src/content/changelog/` — Release changelog entries
 - `website/src/data/features.ts` — Landing page feature list and differentiators
 - `website/src/components/` — Landing page components (Hero, FeatureCard, PipelineDiagram, etc.)
@@ -113,26 +113,26 @@ Nova's website lives at `website/` (Astro/Starlight, nova.arialabs.ai). After co
 
 | Changed area | Website content to check |
 |---|---|
-| `orchestrator/app/pipeline/` | `docs/pipeline.md` |
-| `orchestrator/app/tools/`, MCP integration | `docs/mcp-tools.md` |
-| `orchestrator/app/router.py`, API endpoints, `nova-contracts/` | `docs/api-reference.md` |
-| `orchestrator/app/auth.py`, secrets, `REQUIRE_AUTH` | `docs/security.md` |
-| `orchestrator/app/config.py`, `.env.example`, `models.yaml` | `docs/configuration.md` |
-| `llm-gateway/` | `docs/services/llm-gateway.md`, `docs/inference-backends.md` |
-| `memory-service/` | `docs/services/memory-service.md` |
-| `chat-api/` | `docs/services/chat-api.md` |
-| `dashboard/` | `docs/services/dashboard.md` |
-| `recovery/` | `docs/services/recovery.md` |
-| `orchestrator/` (general) | `docs/services/orchestrator.md` |
-| `docker-compose*.yml`, `Makefile`, `scripts/setup.sh` | `docs/deployment.md`, `docs/quickstart.md` |
-| GPU overlays, inference backends | `docs/inference-backends.md` |
-| Service ports, inter-service URLs, new services | `docs/architecture.md` |
-| Remote access (Cloudflare, Tailscale) | `docs/remote-access.md` |
-| IDE integration (Continue, Cursor, Aider) | `docs/ide-integration.md` |
-| Skills framework, `.claude/` config | `docs/skills-rules.md` |
-| `docs/roadmap.md` | `docs/roadmap.md` |
+| `orchestrator/app/pipeline/` | `nova/docs/pipeline.md` |
+| `orchestrator/app/tools/`, MCP integration | `nova/docs/mcp-tools.md` |
+| `orchestrator/app/router.py`, API endpoints, `nova-contracts/` | `nova/docs/api-reference.md` |
+| `orchestrator/app/auth.py`, secrets, `REQUIRE_AUTH` | `nova/docs/security.md` |
+| `orchestrator/app/config.py`, `.env.example`, `models.yaml` | `nova/docs/configuration.md` |
+| `llm-gateway/` | `nova/docs/services/llm-gateway.md`, `nova/docs/inference-backends.md` |
+| `memory-service/` | `nova/docs/services/memory-service.md` |
+| `chat-api/` | `nova/docs/services/chat-api.md` |
+| `dashboard/` | `nova/docs/services/dashboard.md` |
+| `recovery/` | `nova/docs/services/recovery.md` |
+| `orchestrator/` (general) | `nova/docs/services/orchestrator.md` |
+| `docker-compose*.yml`, `Makefile`, `scripts/setup.sh` | `nova/docs/deployment.md`, `nova/docs/quickstart.md` |
+| GPU overlays, inference backends | `nova/docs/inference-backends.md` |
+| Service ports, inter-service URLs, new services | `nova/docs/architecture.md` |
+| Remote access (Cloudflare, Tailscale) | `nova/docs/remote-access.md` |
+| IDE integration (Continue, Cursor, Aider) | `nova/docs/ide-integration.md` |
+| Skills framework, `.claude/` config | `nova/docs/skills-rules.md` |
+| `docs/roadmap.md` | `nova/docs/roadmap.md` |
 | New major feature or capability | `data/features.ts` (landing page), `changelog/` (new entry) |
-| New service or architectural change | `components/PipelineDiagram.astro`, `docs/architecture.md` |
+| New service or architectural change | `components/PipelineDiagram.astro`, `nova/docs/architecture.md` |
 
 **When to update docs:** New features, changed APIs/endpoints, new/changed env vars, new CLI commands, new services, changed ports, changed setup steps, new providers/backends.
 

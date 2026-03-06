@@ -3,7 +3,7 @@ import starlight from '@astrojs/starlight';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  site: 'https://nova.arialabs.ai',
+  site: 'https://arialabs.ai',
   integrations: [
     starlight({
       title: 'Nova',
@@ -12,36 +12,36 @@ export default defineConfig({
       ],
       customCss: ['./src/styles/global.css'],
       sidebar: [
-        { label: 'Quick Start', slug: 'quickstart' },
+        { label: 'Quick Start', slug: 'nova/docs/quickstart' },
         {
           label: 'Core Concepts',
           items: [
-            { slug: 'architecture' },
-            { slug: 'pipeline' },
-            { slug: 'configuration' },
+            { slug: 'nova/docs/architecture' },
+            { slug: 'nova/docs/pipeline' },
+            { slug: 'nova/docs/configuration' },
           ],
         },
         {
           label: 'Services',
-          autogenerate: { directory: 'services' },
+          autogenerate: { directory: 'nova/docs/services' },
         },
         {
           label: 'Guides',
           items: [
-            { slug: 'inference-backends' },
-            { slug: 'deployment' },
-            { slug: 'remote-access' },
-            { slug: 'ide-integration' },
-            { slug: 'mcp-tools' },
-            { slug: 'skills-rules' },
+            { slug: 'nova/docs/inference-backends' },
+            { slug: 'nova/docs/deployment' },
+            { slug: 'nova/docs/remote-access' },
+            { slug: 'nova/docs/ide-integration' },
+            { slug: 'nova/docs/mcp-tools' },
+            { slug: 'nova/docs/skills-rules' },
           ],
         },
         {
           label: 'Reference',
           items: [
-            { slug: 'api-reference' },
-            { slug: 'security' },
-            { slug: 'roadmap' },
+            { slug: 'nova/docs/api-reference' },
+            { slug: 'nova/docs/security' },
+            { slug: 'nova/docs/roadmap' },
           ],
         },
       ],

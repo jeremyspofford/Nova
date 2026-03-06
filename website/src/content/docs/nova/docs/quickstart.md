@@ -53,7 +53,7 @@ cp .env.example .env
 make dev
 ```
 
-See [Configuration](/configuration) for all available settings.
+See [Configuration](/nova/docs/configuration) for all available settings.
 
 ## Verify everything is running
 
@@ -78,6 +78,6 @@ You can also test the chat interface at `http://localhost:8080/` for an interact
 
 ## Next steps
 
-- [Architecture](/architecture) -- understand how the services fit together
-- [Configuration](/configuration) -- configure providers, models, and routing
-- [Deployment](/deployment) -- production commands, GPU overlays, backups
+- [Architecture](/nova/docs/architecture) -- understand how the services fit together
+- [Configuration](/nova/docs/configuration) -- configure providers, models, and routing
+- [Deployment](/nova/docs/deployment) -- production commands, GPU overlays, backups

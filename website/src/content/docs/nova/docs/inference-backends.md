@@ -128,4 +128,4 @@ All backends are registered as providers in the LLM Gateway via LiteLLM. The gat
 - Routing requests to the correct backend based on model name
 - Translating between OpenAI-compatible format and Nova's internal format
 - Health checking and fallback between backends
-- The [LLM routing strategy](/configuration#llm-routing-strategies) (`local-first`, `cloud-first`, etc.) applies across all backends
+- The [LLM routing strategy](/nova/docs/configuration#llm-routing-strategies) (`local-first`, `cloud-first`, etc.) applies across all backends

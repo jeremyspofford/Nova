@@ -11,7 +11,7 @@ cd nova
 ./setup
 ```
 
-The setup wizard configures everything and starts all services. See [Quick Start](/quickstart) for details.
+The setup wizard configures everything and starts all services. See [Quick Start](/nova/docs/quickstart) for details.
 
 ## Development commands
 
@@ -79,7 +79,7 @@ This topology is ideal when you have a low-power always-on server (like a mini P
 
 Nova supports multiple local inference backends beyond Ollama: vLLM, SGLang, and llama.cpp. Each has different strengths for concurrent workloads, CPU-only deployments, or agent pipeline optimization.
 
-See [Inference Backends](/inference-backends) for a full comparison and configuration guide.
+See [Inference Backends](/nova/docs/inference-backends) for a full comparison and configuration guide.
 
 Enable backends via Docker Compose profiles in `.env`:
 
