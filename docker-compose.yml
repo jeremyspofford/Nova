@@ -320,6 +320,19 @@ services:
       <<: *nova-healthcheck
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
 
+  website:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: website/Dockerfile
+    ports:
+      - "4000:4000"
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000"]
+    profiles:
+      - website
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Remote Access Sidecars (optional — enable via COMPOSE_PROFILES)
 # ─────────────────────────────────────────────────────────────────────────────
