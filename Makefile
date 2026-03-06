@@ -1,4 +1,4 @@
-.PHONY: help setup up dev build down logs ps watch migrate backup restore
+.PHONY: help setup up dev build down logs ps watch migrate backup restore website
 
 DASHBOARD    = dashboard
 
@@ -41,6 +41,9 @@ dev: ## Start backend detached + Vite dashboard with hot-reload  [1-line dev]
 
 watch: ## Sync Python source into running containers for backend hot-reload
 	$(COMPOSE) watch
+
+website: ## Build and start the Nova website at http://localhost:4000
+	$(COMPOSE) --profile website up -d --build website
 
 # ── Observe ──────────────────────────────────────────────────────────────────
 logs: ## Tail logs for all services
