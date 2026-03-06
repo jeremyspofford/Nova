@@ -6,8 +6,10 @@ description: "Get Nova running in under five minutes with Docker Compose."
 ## Prerequisites
 
 - [Docker Desktop](https://docker.com/products/docker-desktop) (includes Docker Compose)
+- [GNU Make](https://www.gnu.org/software/make/) (pre-installed on most Linux/macOS systems; on Windows use WSL or install via `choco install make`)
+- [Git](https://git-scm.com/)
 
-That's it. No Python, Node.js, or database installs required -- everything runs in containers.
+No Python, Node.js, or database installs required -- everything runs in containers.
 
 ## Install
 
