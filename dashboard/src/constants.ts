@@ -8,14 +8,31 @@ export interface RecommendedModel {
 }
 
 export const RECOMMENDED_OLLAMA_MODELS: RecommendedModel[] = [
-  { name: 'qwen2.5:1.5b',       category: 'general',   description: 'Starter — 1.5B, ~1 GB, CPU-friendly' },
-  { name: 'llama3.2:3b',        category: 'general',   description: '3B params, ~1.9 GB, fast' },
-  { name: 'llama3.1:8b',        category: 'general',   description: '8B params, ~4.7 GB, high quality' },
-  { name: 'qwen2.5:7b',         category: 'general',   description: '7B params, ~4.4 GB, multilingual' },
-  { name: 'deepseek-r1:8b',     category: 'reasoning', description: '8B, ~4.7 GB, chain-of-thought' },
-  { name: 'qwen2.5-coder:7b',   category: 'code',      description: '7B, ~4.4 GB, code generation' },
-  { name: 'nomic-embed-text',   category: 'embedding', description: '768-dim embeddings for memory service', required: true },
-  { name: 'llava:7b',           category: 'vision',    description: '7B, ~4.5 GB, image understanding' },
+  // Embedding (required)
+  { name: 'nomic-embed-text',      category: 'embedding', description: '768-dim embeddings for memory service', required: true },
+
+  // General — small to large
+  { name: 'qwen2.5:1.5b',          category: 'general',   description: 'Starter — 1.5B, ~1 GB, CPU-friendly' },
+  { name: 'llama3.2:3b',           category: 'general',   description: '3B params, ~1.9 GB, fast' },
+  { name: 'gemma3:4b',             category: 'general',   description: '4B params, ~3 GB, Google' },
+  { name: 'phi4:14b',              category: 'general',   description: '14B params, ~9 GB, Microsoft' },
+  { name: 'llama3.1:8b',           category: 'general',   description: '8B params, ~4.7 GB, high quality' },
+  { name: 'qwen2.5:7b',            category: 'general',   description: '7B params, ~4.4 GB, multilingual' },
+  { name: 'mistral:7b',            category: 'general',   description: '7B params, ~4.1 GB, Mistral AI' },
+  { name: 'gemma3:12b',            category: 'general',   description: '12B params, ~8 GB, Google' },
+  { name: 'gemma3:27b',            category: 'general',   description: '27B params, ~17 GB, needs GPU' },
+
+  // Reasoning
+  { name: 'deepseek-r1:8b',        category: 'reasoning', description: '8B, ~4.7 GB, chain-of-thought' },
+  { name: 'deepseek-r1:14b',       category: 'reasoning', description: '14B, ~9 GB, stronger reasoning' },
+
+  // Code
+  { name: 'qwen2.5-coder:7b',      category: 'code',      description: '7B, ~4.4 GB, code generation' },
+  { name: 'devstral-small-2:24b',   category: 'code',      description: '24B, ~14 GB, Mistral code agent' },
+
+  // Vision
+  { name: 'llava:7b',              category: 'vision',    description: '7B, ~4.5 GB, image understanding' },
+  { name: 'llava:13b',             category: 'vision',    description: '13B, ~8 GB, better image understanding' },
 ]
 
 /** Provider display order for the Models page. */

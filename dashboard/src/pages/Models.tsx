@@ -244,7 +244,17 @@ export function Models() {
 
           {/* Recommended models grid */}
           <div>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mb-3">Recommended models</p>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">Recommended models</p>
+              <a
+                href="https://ollama.com/library"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-[11px] text-teal-600 dark:text-teal-400 hover:underline"
+              >
+                Browse all models <ExternalLink className="h-3 w-3" />
+              </a>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               {RECOMMENDED_OLLAMA_MODELS.map(rec => {
                 const isPulled = pulledNames.has(rec.name)
