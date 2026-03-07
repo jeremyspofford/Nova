@@ -21,7 +21,8 @@
 | **2 — Async execution** | Tasks run in the background. Submit and come back. Push notification on complete. | 🔜 Phase 4 |
 | **3 — Self-aware** | Nova understands its own architecture, config, health; can inspect and modify its own platform. | 🔜 Phase 7a |
 | **4 — Triggered execution** | Tasks start from external events — git push, cron, webhook, Slack. | 🔜 Phase 9 |
-| **5 — Self-directed** | Nova breaks goals into subtasks, executes them, evaluates results, re-plans, loops to completion. **This is the goal.** | 🔜 Phase 7 |
+| **5 — Reactive** | Nova watches continuous streams (cameras, sensors, services), applies AI judgment, acts autonomously. | 🔜 Phase 9a |
+| **6 — Self-directed** | Nova breaks goals into subtasks, executes them, evaluates results, re-plans, loops to completion. **This is the goal.** | 🔜 Phase 7 |
 
 ---
 
@@ -1759,7 +1760,7 @@ Allow users to interact with Nova through their preferred messaging platform ins
 - Docker Compose profiles — `--profile mac`, `--profile gpu`, `--profile cpu`
 - Webhook system — outbound POST on task/goal lifecycle events; persistent retry queue
 
-**Triggered execution (Autonomy Level 3):**
+**Triggered execution (Autonomy Level 4):**
 - Inbound webhooks — GitHub PR opened → Nova reviews it automatically
 - Cron scheduling — "run a security audit every Monday at 9am"
 - Event subscriptions — watch a file path, a Slack channel, an email inbox
@@ -1916,6 +1917,116 @@ Assuming the recommended options (CDP Screencast, watch-only, per-task ephemeral
 | **6** | Action recording — structured event log stored as task artifacts, viewable post-task |
 | **7** | DevTools tools — `browser_devtools`, `browser_evaluate` for DOM/network/console inspection |
 | **8** | Action replay — dashboard component to step through recorded browser sessions |
+
+---
+
+## 🔜 Phase 9a — Reactive Event System & Scheduling
+
+> **Nova doesn't just wait for commands — it watches, reacts, and acts on schedule.**
+> This is the difference between a tool you use and an agent that works alongside you.
+> Combines scheduled tasks (cron-like) with real-time event processing from external
+> sources — cameras, sensors, services, APIs, message queues.
+
+### Why This Matters
+
+Phase 9 adds basic triggers (webhooks, cron, file watchers). Phase 9a goes further:
+Nova becomes an **event-driven reactive agent** that can subscribe to continuous streams,
+apply AI judgment to incoming events, and take autonomous action — notifications, UI alerts,
+tool calls, or kicking off full pipeline tasks.
+
+Example: Nova has access to security cameras via an integration. A person appears on camera
+at 2 AM. Nova classifies the event, sends a push notification to your phone, pops up the
+camera feed in a dashboard modal, and logs the incident — all without being asked.
+
+### Architecture
+
+```
+Event Sources                    Nova Event Bus                    Actions
+─────────────                    ──────────────                    ───────
+                                      │
+Camera feed ─────┐                    │                    ┌──── Push notification
+Sensor data ─────┤                    │                    ├──── Dashboard alert modal
+Cron schedule ───┤    ┌───────────────┴────────────────┐   ├──── Slack/Telegram message
+Webhook ─────────┼───►│        Event Router             │──►├──── Pipeline task
+File watcher ────┤    │                                 │   ├──── Tool execution
+Service health ──┤    │  1. Receive event               │   ├──── Email
+MQTT/IoT ────────┤    │  2. Match against subscriptions │   ├──── Store to memory
+RSS/API poll ────┘    │  3. AI classification (optional)│   └──── Custom action (webhook)
+                      │  4. Execute registered actions  │
+                      └─────────────────────────────────┘
+```
+
+### A. Event Bus & Subscriptions
+
+| Feature | Description |
+|---|---|
+| **Event bus** | Redis Streams-based event bus — producers push events, consumers subscribe to patterns |
+| **Event schema** | Typed events: `{ source, type, payload, timestamp, severity }` |
+| **Subscription rules** | Declarative rules: "when source=camera AND type=person_detected, then notify + show_modal" |
+| **Rule editor** | Dashboard UI to create/edit/disable event subscriptions and actions |
+| **Event log** | Persistent event history in PostgreSQL — searchable, filterable, dashboard viewable |
+
+### B. Scheduling Engine
+
+| Feature | Description |
+|---|---|
+| **Cron scheduler** | Persistent cron-like scheduler using APScheduler or custom Redis-based scheduler |
+| **Schedule UI** | Dashboard page: create/edit/disable scheduled tasks with natural language ("every Monday at 9am") |
+| **Natural language parsing** | Nova interprets "remind me to check backups every Friday" → cron expression |
+| **Missed job handling** | Jobs missed during downtime are either skipped or run-once on recovery (configurable) |
+| **Schedule-to-pipeline** | Scheduled tasks can trigger full pipeline runs, not just simple actions |
+
+### C. AI-Powered Event Processing
+
+| Feature | Description |
+|---|---|
+| **Event classification** | Cheap classifier (like intelligent routing) categorizes events by severity and type |
+| **Context-aware reactions** | Nova considers time-of-day, recent events, user preferences when deciding how to react |
+| **Escalation logic** | Low-severity → log only. Medium → notification. High → notification + dashboard modal + action |
+| **Event correlation** | Group related events ("3 motion alerts in 5 minutes" → single "sustained activity" event) |
+| **User preference learning** | Nova learns which events you care about based on which notifications you dismiss vs. act on |
+
+### D. Dashboard Integration
+
+| Feature | Description |
+|---|---|
+| **Alert modal** | Full-screen or overlay modal triggered by high-severity events (e.g. camera feed popup) |
+| **Event feed** | Real-time SSE event stream on dashboard — filterable by source, type, severity |
+| **Notification center** | Bell icon with unread count, expandable panel showing recent events and actions taken |
+| **Live source viewer** | Embeddable viewer for event sources (camera streams, log tails, metric charts) |
+| **Action history** | Timeline of all autonomous actions Nova took in response to events |
+
+### E. Event Source Adapters
+
+| Adapter | Description |
+|---|---|
+| **Webhook receiver** | Generic POST endpoint — any service can push events to Nova |
+| **MQTT subscriber** | Connect to MQTT brokers for IoT device events (temperature, motion, door sensors) |
+| **Camera/RTSP** | Connect to RTSP camera streams, run frame sampling + vision model for event detection |
+| **File system watcher** | inotify-based file change detection (config changes, log file alerts) |
+| **Service health poller** | Periodic HTTP health checks on configured endpoints — detect outages |
+| **RSS/Atom feed** | Poll feeds for new entries — news alerts, blog posts, release notifications |
+| **API poller** | Configurable HTTP polling with JSONPath extraction — monitor any REST API |
+| **System metrics** | CPU, memory, disk, network from host and containers — alert on thresholds |
+
+### Implementation Order
+
+1. **Event bus + schema** — Redis Streams event bus, PostgreSQL event log, basic event types
+2. **Cron scheduler** — persistent schedules, dashboard UI, natural language parsing
+3. **Webhook receiver adapter** — generic inbound events, subscription rules, basic actions
+4. **Dashboard event feed + notifications** — real-time event stream, notification center
+5. **AI event classification** — classifier for severity/type, context-aware escalation
+6. **Alert modals** — high-severity events trigger dashboard overlays with embedded content
+7. **Additional adapters** — MQTT, camera/RTSP, file watcher, API poller, system metrics
+8. **Event correlation + learning** — group related events, learn user preferences
+
+### Safety Mechanisms
+
+- **Rate limiting** — max actions per minute per subscription (prevent notification storms)
+- **Quiet hours** — configurable do-not-disturb windows (suppress non-critical notifications)
+- **Action confirmation** — destructive actions (restart service, deploy code) always require human approval
+- **Circuit breaker** — if an event source generates excessive events, auto-disable and alert
+- **Audit trail** — every autonomous action logged with event source, rule matched, and action taken
 
 ---
 
