@@ -207,10 +207,23 @@ async def get_task(task_id: str, _key: ApiKeyDep):
 
 # ── Direct chat (admin dashboard) ────────────────────────────────────────────
 
+STYLE_PROMPTS = {
+    "concise": "Be concise and brief. Give short, direct answers without unnecessary elaboration.",
+    "detailed": "Give thorough, detailed answers with examples and explanations.",
+    "technical": "Use precise technical language. Include code examples, specifications, and implementation details where relevant.",
+    "creative": "Be creative and expressive. Use metaphors, analogies, and engaging language.",
+    "eli5": "Explain like I'm 5. Use simple words, analogies, and avoid jargon.",
+}
+
+
 class ChatRequest(BaseModel):
     messages: list[dict]
     model: str | None = None
     session_id: str | None = None
+    output_style: str | None = None
+    custom_instructions: str | None = None
+    web_search: bool = False
+    deep_research: bool = False
 
 
 @router.post("/api/v1/chat/stream")
@@ -240,6 +253,20 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
     task_id = uuid4()
     session_id = req.session_id or str(uuid4())
 
+    # Build style/research modifiers for system prompt
+    system_prompt = agent.config.system_prompt
+    modifiers: list[str] = []
+    if req.output_style and req.output_style in STYLE_PROMPTS:
+        modifiers.append(STYLE_PROMPTS[req.output_style])
+    if req.custom_instructions:
+        modifiers.append(req.custom_instructions.strip())
+    if req.web_search:
+        modifiers.append("You have web search available. Use it when the question benefits from current information.")
+    if req.deep_research:
+        modifiers.append("Perform thorough multi-step research. Search multiple queries, cross-reference sources, synthesize findings, and cite sources.")
+    if modifiers:
+        system_prompt = (system_prompt or "") + "\n\n" + "\n\n".join(modifiers)
+
     await update_agent_status(str(agent.id), AgentStatus.running)
 
     # Set sandbox tier from global config for interactive turns
@@ -256,7 +283,7 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
                 session_id=session_id,
                 messages=req.messages,
                 model=model,
-                system_prompt=agent.config.system_prompt,
+                system_prompt=system_prompt,
                 api_key_id=None,
                 skip_tool_preresolution=True,
                 explicit_model=explicit_model,

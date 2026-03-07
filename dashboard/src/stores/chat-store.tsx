@@ -1,5 +1,22 @@
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 
+export interface ActivityStep {
+  step: string
+  state: 'running' | 'done'
+  detail?: string
+  elapsed_ms?: number
+  model?: string
+  category?: string | null
+  startedAt?: number  // Date.now(), set client-side for live timer
+}
+
+export interface AttachedFile {
+  id: string
+  file: File
+  previewUrl: string | null  // blob URL for images, null for text files
+  type: 'image' | 'text'
+}
+
 export interface Message {
   id: string
   role: 'user' | 'assistant'
@@ -8,6 +25,9 @@ export interface Message {
   isStreaming?: boolean
   modelUsed?: string
   category?: string
+  activitySteps?: ActivityStep[]
+  activityCollapsed?: boolean
+  attachments?: AttachedFile[]
 }
 
 interface ChatStore {
@@ -20,6 +40,20 @@ interface ChatStore {
   error: string | null
   setError: React.Dispatch<React.SetStateAction<string | null>>
   resetConversation: () => void
+
+  // Drawer & input controls
+  pendingFiles: AttachedFile[]
+  setPendingFiles: React.Dispatch<React.SetStateAction<AttachedFile[]>>
+  drawerOpen: boolean
+  setDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>
+  outputStyle: string
+  setOutputStyle: React.Dispatch<React.SetStateAction<string>>
+  customInstructions: string
+  setCustomInstructions: React.Dispatch<React.SetStateAction<string>>
+  webSearchEnabled: boolean
+  setWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>
+  deepResearchEnabled: boolean
+  setDeepResearchEnabled: React.Dispatch<React.SetStateAction<boolean>>
 }
 
 const ChatContext = createContext<ChatStore | null>(null)
@@ -30,10 +64,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [modelId, setModelId] = useState('')
   const [error, setError] = useState<string | null>(null)
 
+  const [pendingFiles, setPendingFiles] = useState<AttachedFile[]>([])
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [outputStyle, setOutputStyle] = useState(
+    () => localStorage.getItem('nova_output_style') ?? ''
+  )
+  const [customInstructions, setCustomInstructions] = useState(
+    () => localStorage.getItem('nova_custom_instructions') ?? ''
+  )
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false)
+  const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+
   const resetConversation = useCallback(() => {
     setMessages([])
     setSessionId(undefined)
     setError(null)
+    setPendingFiles([])
   }, [])
 
   return (
@@ -43,6 +89,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       modelId, setModelId,
       error, setError,
       resetConversation,
+      pendingFiles, setPendingFiles,
+      drawerOpen, setDrawerOpen,
+      outputStyle, setOutputStyle,
+      customInstructions, setCustomInstructions,
+      webSearchEnabled, setWebSearchEnabled,
+      deepResearchEnabled, setDeepResearchEnabled,
     }}>
       {children}
     </ChatContext.Provider>

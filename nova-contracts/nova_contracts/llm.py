@@ -28,12 +28,37 @@ class ToolCallRef(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class ContentBlock(BaseModel):
+    """A single block within a multimodal message content array."""
+    type: str  # "text" | "image_url"
+    text: str | None = None
+    image_url: dict[str, str] | None = None  # {"url": "data:image/...;base64,..."}
+
+
 class Message(BaseModel):
     role: str  # system | user | assistant | tool
-    content: str = ""          # empty is valid for pure tool-call assistant turns
+    content: str | list[ContentBlock] = ""  # Union: str for text-only, list for multimodal
     name: str | None = None    # identifies which tool produced a result (role=tool)
     tool_call_id: str | None = None   # ties a tool result back to a ToolCallRef
     tool_calls: list[ToolCallRef] | None = None  # present on assistant turns that invoke tools
+
+
+def extract_text_content(content: str | list) -> str:
+    """Extract plain text from content (string or content blocks).
+
+    Handles both Pydantic ContentBlock instances and raw dicts,
+    since messages flow as dicts through the orchestrator before parsing.
+    """
+    if isinstance(content, str):
+        return content
+    parts = []
+    for b in content:
+        if isinstance(b, dict):
+            if b.get("type") == "text":
+                parts.append(b.get("text", ""))
+        elif hasattr(b, "type") and b.type == "text":
+            parts.append(b.text or "")
+    return " ".join(parts)
 
 
 class ToolDefinition(BaseModel):

@@ -9,7 +9,9 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import base64
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -345,3 +347,78 @@ async def get_agent_context(agent_id: str, req: GetContextRequest):
         memories=selected,
         total_tokens_estimated=tokens_used,
     )
+
+
+# ── File upload ──────────────────────────────────────────────────────────────
+
+IMAGE_MIME = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+TEXT_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".md", ".txt", ".json", ".csv", ".html", ".css", ".yaml", ".yml", ".toml", ".sh"}
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_TEXT_BYTES = 10 * 1024 * 1024
+
+
+@router.post("/files", response_model=StoreMemoryResponse)
+async def upload_file(
+    file: UploadFile = File(...),
+    agent_id: str = Form(default="nova"),
+    session_id: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a file (text or image) and store it as a memory."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+
+    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    mime = file.content_type or ""
+    is_image = mime in IMAGE_MIME
+    is_text = ext in TEXT_EXTENSIONS or mime.startswith("text/")
+
+    if not is_image and not is_text:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {mime or ext}")
+
+    max_size = MAX_IMAGE_BYTES if is_image else MAX_TEXT_BYTES
+    data = await file.read()
+    if len(data) > max_size:
+        raise HTTPException(status_code=413, detail=f"File too large ({len(data)} bytes, max {max_size})")
+
+    if is_image:
+        content = base64.b64encode(data).decode("ascii")
+        content_type = "image"
+    else:
+        try:
+            content = data.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File is not valid UTF-8 text")
+        content_type = "text"
+
+    metadata = {
+        "type": "file_upload",
+        "filename": file.filename,
+        "mime_type": mime,
+        "size": len(data),
+        "content_type": content_type,
+        **({"session_id": session_id} if session_id else {}),
+    }
+
+    # Store as a working-memory entry
+    memory_id = str(uuid4())
+    embedding = await get_embedding(content[:2000])  # Embed first 2k chars for searchability
+    vec_literal = to_pg_vector(embedding)
+
+    await db.execute(
+        text("""
+            INSERT INTO working_memory (id, agent_id, content, metadata, embedding, created_at)
+            VALUES (:id, :agent_id, :content, :metadata, :embedding, :now)
+        """),
+        {
+            "id": memory_id,
+            "agent_id": agent_id,
+            "content": content,
+            "metadata": json.dumps(metadata),
+            "embedding": vec_literal,
+            "now": datetime.now(timezone.utc),
+        },
+    )
+    await db.commit()
+
+    return StoreMemoryResponse(id=memory_id, tier="working")

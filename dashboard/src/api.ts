@@ -139,9 +139,22 @@ export const patchAgentConfig = (
 
 // ── Direct chat (admin stream) ────────────────────────────────────────────────
 
+export interface ContentBlock {
+  type: 'text' | 'image_url'
+  text?: string
+  image_url?: { url: string }
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
-  content: string
+  content: string | ContentBlock[]
+}
+
+export interface StreamChatOptions {
+  output_style?: string
+  custom_instructions?: string
+  web_search?: boolean
+  deep_research?: boolean
 }
 
 /** Metadata emitted by intelligent routing before content deltas. */
@@ -150,7 +163,17 @@ export interface StreamMeta {
   category?: string
 }
 
-export type StreamEvent = string | { meta: StreamMeta }
+/** Activity step emitted during processing (before content deltas). */
+export interface ActivityStep {
+  step: string       // "classifying" | "memory" | "model" | "generating"
+  state: 'running' | 'done'
+  detail?: string
+  elapsed_ms?: number
+  model?: string
+  category?: string | null
+}
+
+export type StreamEvent = string | { meta: StreamMeta } | { status: ActivityStep }
 
 /**
  * Stream a chat turn directly with the primary Nova agent.
@@ -163,6 +186,7 @@ export async function* streamChat(
   messages: ChatMessage[],
   model?: string,
   sessionId?: string,
+  options?: StreamChatOptions,
 ): AsyncGenerator<StreamEvent, void, unknown> {
   const resp = await fetch('/api/v1/chat/stream', {
     method: 'POST',
@@ -170,7 +194,12 @@ export async function* streamChat(
       'Content-Type': 'application/json',
       'X-Admin-Secret': getAdminSecret(),
     },
-    body: JSON.stringify({ messages, model, session_id: sessionId }),
+    body: JSON.stringify({
+      messages,
+      model,
+      session_id: sessionId,
+      ...options,
+    }),
   })
 
   if (!resp.ok) {
@@ -197,6 +226,10 @@ export async function* streamChat(
         try {
           const parsed = JSON.parse(data) as Record<string, unknown>
           if (parsed.error) throw new Error(String(parsed.error))
+          if (parsed.status) {
+            yield { status: parsed.status as ActivityStep }
+            continue
+          }
           if (parsed.meta) {
             yield { meta: parsed.meta as StreamMeta }
             continue
@@ -209,6 +242,31 @@ export async function* streamChat(
       }
     }
   }
+}
+
+// ── File upload ──────────────────────────────────────────────────────────────
+
+export interface FileUploadResponse {
+  id: string
+  tier: string
+}
+
+export async function uploadFile(file: File, sessionId?: string): Promise<FileUploadResponse> {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('agent_id', 'nova')
+  if (sessionId) form.append('session_id', sessionId)
+
+  const resp = await fetch('/mem/api/v1/memories/files', {
+    method: 'POST',
+    headers: { 'X-Admin-Secret': getAdminSecret() },
+    body: form,
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => resp.statusText)
+    throw new Error(`Upload failed: ${resp.status}: ${text}`)
+  }
+  return resp.json()
 }
 
 // ── MCP Servers ────────────────────────────────────────────────────────────────

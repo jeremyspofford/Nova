@@ -17,7 +17,9 @@ from .memory import (
 )
 from .llm import (
     ModelCapability,
+    ContentBlock,
     Message,
+    extract_text_content,
     ToolCallRef,
     ToolDefinition,
     CompleteRequest,
@@ -51,7 +53,8 @@ __all__ = [
     "GetContextRequest", "GetContextResponse", "UpdateMemoryRequest",
     "BulkStoreRequest", "BulkStoreResponse",
     "SaveFactRequest", "SaveFactResponse", "BrowseMemoryItem", "BrowseMemoryResponse",
-    "ModelCapability", "Message", "ToolCallRef", "ToolDefinition",
+    "ModelCapability", "ContentBlock", "Message", "extract_text_content",
+    "ToolCallRef", "ToolDefinition",
     "CompleteRequest", "CompleteResponse", "StreamChunk",
     "EmbedRequest", "EmbedResponse", "ModelInfo", "ToolCall",
     "AgentStatus", "AgentConfig", "CreateAgentRequest", "AgentInfo",

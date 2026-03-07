@@ -47,8 +47,10 @@ async def run_agent_turn(
     started_at = datetime.now(timezone.utc)
 
     try:
+        from nova_contracts import extract_text_content
+
         user_messages = [m for m in messages if m.get("role") == "user"]
-        query = user_messages[-1]["content"] if user_messages else ""
+        query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
 
         # 1. Fetch context concurrently (+ intelligent routing when auto-model)
         from app.model_classifier import classify_and_resolve
@@ -142,9 +144,11 @@ async def run_agent_turn_streaming(
     """
     from app.usage import log_usage
 
+    from nova_contracts import extract_text_content
+
     started_at = datetime.now(timezone.utc)
     user_messages = [m for m in messages if m.get("role") == "user"]
-    query = user_messages[-1]["content"] if user_messages else ""
+    query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
 
     # Intelligent routing: classify in parallel with context retrieval
     from app.model_classifier import classify_and_resolve
