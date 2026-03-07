@@ -171,16 +171,20 @@ export function Chat() {
   }
 
   return (
-    <div className="px-4 py-6 sm:px-6 h-[calc(100vh-57px)]">
-     <Card className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-[calc(100dvh-57px)]">
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 px-4 py-3 sm:px-6 shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 shrink-0">Nova Chat</h1>
-          <span className="hidden sm:inline text-xs text-neutral-500 dark:text-neutral-400 truncate">
-            Direct conversation with the Nova agent — has memory and tools
-          </span>
+      <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2.5 sm:px-6 sm:py-3 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-700 text-white">
+            <Bot size={15} />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">Nova</h1>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-tight truncate">
+              {isStreaming ? 'typing…' : 'online'}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -189,9 +193,9 @@ export function Chat() {
             onChange={e => setModelId(e.target.value)}
             disabled={isStreaming}
             title="Override Nova's default model for this conversation"
-            className="w-28 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
+            className="w-24 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
           >
-            <option value="">Default model</option>
+            <option value="">Default</option>
             {models.map(m => (
               <option key={m.id} value={m.id}>{m.id}</option>
             ))}
@@ -200,25 +204,23 @@ export function Chat() {
           <button
             onClick={startNewConversation}
             disabled={isStreaming || messages.length === 0}
-            title="Start a new conversation (clears history)"
-            className="flex items-center gap-1.5 rounded-md border border-neutral-300 dark:border-neutral-600 px-2 sm:px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40 transition-colors"
+            title="Start a new conversation"
+            className="flex items-center justify-center rounded-md border border-neutral-300 dark:border-neutral-600 p-1.5 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 transition-colors"
           >
-            <RefreshCw size={11} />
-            <span className="hidden sm:inline">New</span>
+            <RefreshCw size={14} />
           </button>
         </div>
       </div>
 
       {/* ── Messages ──────────────────────────────────────────────────────── */}
-      <div className={`flex-1 min-h-0 px-4 py-4 sm:px-6 sm:py-6 ${messages.length > 0 ? 'overflow-y-auto space-y-5' : 'flex items-center justify-center'}`}>
+      <div className={`flex-1 min-h-0 px-3 py-3 sm:px-6 sm:py-6 bg-neutral-50 dark:bg-neutral-950 ${messages.length > 0 ? 'overflow-y-auto space-y-4' : 'flex items-center justify-center'}`}>
         {messages.length === 0 && (
           <div className="flex flex-col items-center gap-4 text-neutral-400 dark:text-neutral-600 select-none">
             <MessageSquare size={44} strokeWidth={1} />
             <div className="text-center space-y-1">
               <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Start a conversation with Nova</p>
               <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-sm">
-                Nova has persistent memory, can use tools (filesystem, shell, git),
-                and remembers previous sessions.
+                Nova has persistent memory, can use tools, and remembers previous sessions.
               </p>
             </div>
           </div>
@@ -238,8 +240,8 @@ export function Chat() {
       </div>
 
       {/* ── Input ─────────────────────────────────────────────────────────── */}
-      <div className="border-t border-neutral-200 dark:border-neutral-800 px-4 py-3 sm:px-6 sm:py-4 shrink-0">
-        <div className="flex items-end gap-2 sm:gap-3">
+      <div className="border-t border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2 sm:px-6 sm:py-3 shrink-0 safe-area-pb">
+        <div className="flex items-end gap-2">
           <textarea
             ref={textareaRef}
             value={input}
@@ -247,33 +249,19 @@ export function Chat() {
             onKeyDown={handleKeyDown}
             placeholder="Message Nova…"
             rows={1}
-            className="flex-1 resize-none overflow-hidden rounded-xl border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-4 py-2.5 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors"
-            style={{ minHeight: '42px', maxHeight: '160px' }}
+            className="flex-1 resize-none overflow-hidden rounded-2xl border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-4 py-2.5 text-base text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors"
+            style={{ minHeight: '42px', maxHeight: '120px', fontSize: '16px' }}
           />
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || isStreaming}
-            className="flex items-center justify-center rounded-xl bg-accent-700 p-2.5 text-white hover:bg-accent-500 disabled:opacity-40 transition-colors shrink-0"
+            className="flex items-center justify-center rounded-full bg-accent-700 p-2.5 text-white hover:bg-accent-500 disabled:opacity-40 transition-colors shrink-0"
             style={{ height: '42px', width: '42px' }}
           >
-            <Send size={15} />
+            <Send size={16} />
           </button>
         </div>
-
-        <div className="mt-2 flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-          <span className="min-w-0 truncate">
-            {isStreaming
-              ? 'Nova is responding…'
-              : sessionId
-                ? `${messages.filter(m => m.role === 'user').length} messages`
-                : 'Enter to send · Shift+Enter for newline'}
-          </span>
-          {modelId && (
-            <span className="font-mono text-accent-600 dark:text-accent-400">{modelId}</span>
-          )}
-        </div>
       </div>
-     </Card>
     </div>
   )
 }

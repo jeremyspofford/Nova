@@ -46,6 +46,11 @@
   }
 }
 
+/* ── Safe area for mobile (iPhone home indicator) ─────────────────────────── */
+.safe-area-pb {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
 /* ── Markdown rendering in chat bubbles ──────────────────────────────────── */
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child  { margin-bottom: 0; }
