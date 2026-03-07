@@ -2840,6 +2840,23 @@ Break-even: ~9 Pro subscribers ($20 × 9 = $180/month) covers base infrastructur
 
 ---
 
+### Phase 15 — Smart Hardware-Aware Model Recommendations (Optional)
+
+Auto-detect Ollama host hardware (GPU VRAM, system RAM) and tailor the recommended models list to what will actually run well.
+
+**Requirements:**
+- [ ] New llm-gateway endpoint: `GET /v1/hardware` — queries Ollama host for GPU info (VRAM, GPU name) and system RAM
+- [ ] Ollama doesn't expose this natively; options: parse `nvidia-smi` output via Ollama container, use `/api/ps` `size_vram` when a model is loaded, or add a lightweight system probe sidecar
+- [ ] Dashboard Models page reads hardware info and annotates recommended models: "Fits in VRAM", "CPU only (slow)", "Too large"
+- [ ] Sort recommended models by fit: models that fit in VRAM first, then CPU-capable, then too-large (grayed out)
+- [ ] Show hardware summary badge: "NVIDIA RTX 3090 · 24 GB VRAM" or "CPU only · 16 GB RAM"
+
+**Nice to have:**
+- [ ] Auto-suggest optimal quantization level based on available VRAM (e.g., Q4_K_M for 8GB, Q8_0 for 24GB)
+- [ ] Warn if pulling a model that won't fit in available memory
+
+---
+
 - **Capability-based YAML routing** — once Planning Agent assigns agents by role, formalize model requirements per role in a config file
 - **Web Push notifications** — notify on task completion when accessing via PWA (requires Phase 4 async tasks)
 - **Key-level model restrictions** — `sk-nova-*` keys scoped to specific providers

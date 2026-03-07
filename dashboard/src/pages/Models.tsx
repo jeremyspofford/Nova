@@ -35,6 +35,7 @@ export function Models() {
   const [pullInput, setPullInput] = useState('')
   const [pullingModels, setPullingModels] = useState<Set<string>>(new Set())
   const [deletingModels, setDeletingModels] = useState<Set<string>>(new Set())
+  const [categoryFilter, setCategoryFilter] = useState<string>('all')
   const [onboardingDismissed, setOnboardingDismissed] = useState(
     () => localStorage.getItem(ONBOARDING_DISMISSED_KEY) === 'true'
   )
@@ -245,7 +246,24 @@ export function Models() {
           {/* Recommended models grid */}
           <div>
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">Recommended models</p>
+              <div className="flex items-center gap-3">
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">Recommended models</p>
+                <div className="flex gap-1">
+                  {['all', 'general', 'reasoning', 'code', 'vision', 'embedding'].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setCategoryFilter(cat)}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                        categoryFilter === cat
+                          ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400'
+                          : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                      }`}
+                    >
+                      {cat === 'all' ? 'All' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <a
                 href="https://ollama.com/library"
                 target="_blank"
@@ -256,7 +274,9 @@ export function Models() {
               </a>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-              {RECOMMENDED_OLLAMA_MODELS.map(rec => {
+              {RECOMMENDED_OLLAMA_MODELS
+                .filter(rec => categoryFilter === 'all' || rec.category === categoryFilter)
+                .map(rec => {
                 const isPulled = pulledNames.has(rec.name)
                 const isPulling = pullingModels.has(rec.name)
                 const isDeleting = deletingModels.has(rec.name)
@@ -285,9 +305,22 @@ export function Models() {
                     </div>
                     <p className="mt-1 text-neutral-500 dark:text-neutral-400 leading-tight">{rec.description}</p>
                     <div className="mt-2 flex items-center justify-between">
-                      <span className="inline-block rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
-                        {rec.category}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="inline-block rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+                          {rec.category}
+                        </span>
+                        <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-mono ${
+                          rec.sizeGB <= 2
+                            ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+                            : rec.sizeGB <= 5
+                            ? 'bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400'
+                            : rec.sizeGB <= 10
+                            ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400'
+                            : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                        }`}>
+                          {rec.sizeGB < 1 ? `${Math.round(rec.sizeGB * 1000)} MB` : `${rec.sizeGB} GB`}
+                        </span>
+                      </div>
                       {isPulled ? (
                         <button
                           onClick={() => handleDelete(rec.name)}
