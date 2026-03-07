@@ -405,12 +405,16 @@ async def update_platform_config(
     if not row:
         raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
 
-    # Publish llm.* config changes to Redis so llm-gateway can read them at runtime
+    # Publish llm.* config changes to Redis db1 (llm-gateway's db) for runtime pickup
     if key.startswith("llm."):
         try:
-            from app.store import get_redis
-            redis = get_redis()
-            await redis.set(f"nova:config:{key}", req.value)
+            import redis.asyncio as aioredis
+            gateway_redis = aioredis.from_url(
+                settings.redis_url.rsplit("/", 1)[0] + "/1",
+                decode_responses=True,
+            )
+            await gateway_redis.set(f"nova:config:{key}", req.value)
+            await gateway_redis.aclose()
         except Exception as e:
             log.warning("Failed to publish config %s to Redis: %s", key, e)
 
