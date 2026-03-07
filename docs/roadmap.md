@@ -19,8 +19,9 @@
 |---|---|---|
 | **1 — Pipeline autonomy** | Quartet runs all 4 agents without human input. Escalates only on critical flags. | ✅ Designed (Phase 4) |
 | **2 — Async execution** | Tasks run in the background. Submit and come back. Push notification on complete. | 🔜 Phase 4 |
-| **3 — Triggered execution** | Tasks start from external events — git push, cron, webhook, Slack. | 🔜 Phase 9 |
-| **4 — Self-directed** | Nova breaks goals into subtasks, executes them, evaluates results, re-plans, loops to completion. **This is the goal.** | 🔜 Phase 7 |
+| **3 — Self-aware** | Nova understands its own architecture, config, health; can inspect and modify its own platform. | 🔜 Phase 7a |
+| **4 — Triggered execution** | Tasks start from external events — git push, cron, webhook, Slack. | 🔜 Phase 9 |
+| **5 — Self-directed** | Nova breaks goals into subtasks, executes them, evaluates results, re-plans, loops to completion. **This is the goal.** | 🔜 Phase 7 |
 
 ---
 
@@ -1238,6 +1239,107 @@ User: "Improve test coverage in auth module to 80%"
 - **Guardrail Agent** on every subtask — autonomous ≠ unchecked
 - **Evaluation Agent** determines if a subtask genuinely advanced the goal — prevents runaway loops
 - **Human review queue** — escalation point, not a failure state
+
+---
+
+## 🔜 Phase 7a — Platform Self-Introspection (Nova Knows Itself)
+
+> **Nova should understand its own platform, inspect its own health, read its own configs, and modify its own behavior.**
+> This is the foundation that separates a chatbot from an autonomous agent. OpenHands/OpenClaw demonstrate
+> this: agents that can inspect and update their own environment are dramatically more capable.
+> Phase 7 (self-directed autonomy) requires this — Nova can't direct itself if it doesn't know itself.
+
+### Why This Matters
+
+Today Nova answers "Do I have intelligent routing?" with "No, not natively" — even though it does. Nova has
+tools to read files, run shell commands, and manage agents, but it has no awareness of:
+- Its own architecture (what services exist, how they connect)
+- Its own configuration (what settings are available, what's enabled)
+- Its own health (which providers are up, what models are available)
+- Its own capabilities (what tools it has, what features are deployed)
+
+### Architecture
+
+```
+Nova agent
+    │
+    ├─── Introspection Tools ────────────────────────────┐
+    │                                                     │
+    │  platform_info()     → architecture, services,      │
+    │                        ports, version                │
+    │  get_config()        → read platform_config values  │
+    │  set_config()        → update platform_config       │
+    │  health_check()      → service health, provider     │
+    │                        availability, model list      │
+    │  get_capabilities()  → enabled features, tools,     │
+    │                        MCP servers                   │
+    │  get_own_source()    → read Nova's own code         │
+    │                        (architecture understanding)  │
+    │                                                     │
+    └─────────────────────────────────────────────────────┘
+    │
+    ├─── Self-Modification (guarded) ────────────────────┐
+    │                                                     │
+    │  update_config()     → change routing, models,      │
+    │                        timeouts, persona             │
+    │  manage_service()    → restart service, clear cache  │
+    │  install_mcp()       → add/remove MCP servers       │
+    │                                                     │
+    └─────────────────────────────────────────────────────┘
+```
+
+### A. Platform Awareness (system prompt enrichment)
+
+| Feature | Description |
+|---|---|
+| **Architecture context block** | Inject a concise platform summary into system prompt: services, ports, enabled features, current config |
+| **Capability manifest** | Auto-generated list of what Nova can do: tools, MCP servers, enabled features, available models |
+| **Version & deployment info** | Nova knows its own version, when it was last deployed, what changed |
+| **Dynamic prompt updates** | Platform context refreshes each turn — Nova always has current state |
+
+### B. Introspection Tools (read-only)
+
+| Tool | Description |
+|---|---|
+| **`platform_info`** | Returns architecture overview: services, ports, health status, uptime |
+| **`get_config`** | Read any `platform_config` key or list all config with descriptions |
+| **`health_check`** | Service health, provider availability, model discovery, queue depth |
+| **`get_capabilities`** | Enabled features, installed MCP servers, available tools, active integrations |
+| **`get_own_logs`** | Read recent orchestrator/gateway/memory-service logs (filtered, not raw) |
+
+### C. Self-Modification Tools (write, guarded)
+
+| Tool | Description |
+|---|---|
+| **`update_config`** | Update platform_config values (routing strategy, model preferences, persona, timeouts) |
+| **`manage_providers`** | Enable/disable providers, test connections, pull Ollama models |
+| **`manage_mcp_servers`** | Add, remove, enable/disable MCP servers |
+| **`restart_service`** | Restart a specific service via recovery API (with confirmation) |
+
+### D. Proactive Behaviors
+
+| Feature | Description |
+|---|---|
+| **Health monitoring** | Nova periodically checks provider health, alerts user if a provider goes down |
+| **Config suggestions** | Nova notices suboptimal config (e.g. classifier timing out) and suggests improvements |
+| **Capability discovery** | When a user asks about a feature, Nova checks if it's enabled and offers to turn it on |
+| **Self-diagnosis** | When an error occurs, Nova can inspect its own logs and config to diagnose the issue |
+
+### Safety Mechanisms
+
+- **Read tools are unrestricted** — Nova can always inspect itself
+- **Write tools require confirmation** — config changes show a preview and ask "Apply this change?"
+- **Service restarts require explicit user approval** — never automatic
+- **Self-modification audit log** — every config change Nova makes is logged with timestamp and reason
+- **Rollback support** — config changes can be reverted to previous values
+- **No source code modification** — Nova can read its own code but cannot modify it (that's what the human developer is for)
+
+### Implementation Order
+
+1. **System prompt enrichment** — cheapest, highest impact. Add platform context to `_build_nova_context()`
+2. **Read-only introspection tools** — `platform_info`, `get_config`, `health_check`, `get_capabilities`
+3. **Write tools with confirmation** — `update_config`, `manage_providers`
+4. **Proactive behaviors** — health monitoring, config suggestions (requires background task loop)
 
 ---
 
@@ -2994,6 +3096,7 @@ Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGra
 
 | Feature | Inspiration | Description | Target Phase |
 |---|---|---|---|
+| **Platform self-introspection** | OpenHands/OpenClaw | Agent can inspect own architecture, config, health, logs; modify own config with guardrails. Foundation for self-directed autonomy | Phase 7a |
 | **Tool sandboxing** | IronClaw (WASM), NanoClaw (containers) | Docker-in-Docker or gVisor for `run_shell`; agents running unsupervised need containment | Before Phase 7 |
 | **Graph-based execution / DAG** | LangGraph | Implement `parallel_group` support in pipeline executor for parallel stages (field exists in schema, executor ignores it) | Phase 6 or 7 |
 | **Agent Swarms / dynamic teams** | NanoClaw | Allow dynamic agent composition instead of fixed pipeline order; agents can recruit specialists mid-task | Phase 7+ |

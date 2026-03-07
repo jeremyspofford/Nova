@@ -2,7 +2,7 @@
 -- Ships disabled by default (opt-in via Settings).
 
 INSERT INTO platform_config (key, value, description, is_secret) VALUES
-  ('llm.intelligent_routing', 'false',
+  ('llm.intelligent_routing', 'true',
    'Enable intelligent model routing — classifier picks optimal model per message', false),
   ('llm.classifier_model', '"auto"',
    'Classifier model: "auto" (local-first) or explicit model ID', false),

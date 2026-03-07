@@ -788,7 +788,7 @@ function IntelligentRoutingSection({
           } disabled:opacity-40`}
         >
           <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-            enabled ? 'translate-x-4.5' : 'translate-x-0.5'
+            enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
           }`} />
         </button>
       </div>
