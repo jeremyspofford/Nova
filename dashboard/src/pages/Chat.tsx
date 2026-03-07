@@ -77,15 +77,35 @@ export function Chat() {
   })
   const models = modelsData?.data ?? []
 
+  const containerRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  // Prevent iOS keyboard from shifting the viewport
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv || !containerRef.current) return
+
+    const onResize = () => {
+      if (containerRef.current) {
+        containerRef.current.style.height = `${vv.height}px`
+      }
+      // Scroll to keep input visible
+      requestAnimationFrame(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
+    }
+    vv.addEventListener('resize', onResize)
+    return () => vv.removeEventListener('resize', onResize)
+  }, [])
 
   const resizeTextarea = () => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 160)}px`
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
   }
 
   const handleSubmit = useCallback(async () => {
@@ -171,7 +191,7 @@ export function Chat() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-57px)]">
+    <div ref={containerRef} className="flex flex-col h-[calc(100dvh-57px)] overflow-hidden">
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 px-3 py-2.5 sm:px-6 sm:py-3 shrink-0">
@@ -193,7 +213,7 @@ export function Chat() {
             onChange={e => setModelId(e.target.value)}
             disabled={isStreaming}
             title="Override Nova's default model for this conversation"
-            className="w-24 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
+            className="w-24 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-[16px] sm:text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
           >
             <option value="">Default</option>
             {models.map(m => (

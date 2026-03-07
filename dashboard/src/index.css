@@ -35,6 +35,9 @@
 }
 
 @layer base {
+  html, body {
+    overscroll-behavior: none;
+  }
   body {
     background-color: rgb(var(--neutral-50));
     color: rgb(var(--neutral-900));
@@ -43,6 +46,19 @@
   html.dark body {
     background-color: rgb(var(--neutral-950));
     color: rgb(var(--neutral-200));
+  }
+}
+
+/* ── Prevent iOS Safari auto-zoom on input focus ──────────────────────────── */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+  /* Restore visual sizes on desktop */
+  @media (min-width: 640px) {
+    input, textarea, select {
+      font-size: inherit !important;
+    }
   }
 }
 
