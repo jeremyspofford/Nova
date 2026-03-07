@@ -7,7 +7,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowUp, ArrowDown, X, Plus } from 'lucide-react'
-import { getModels } from '../api'
+import { discoverModels } from '../api'
 
 interface ModelPickerProps {
   /** Currently selected primary model. null = inherit from pod/service default. */
@@ -28,12 +28,14 @@ export function ModelPicker({
 }: ModelPickerProps) {
   const [addingFallback, setAddingFallback] = useState(false)
 
-  const { data } = useQuery({
-    queryKey: ['models'],
-    queryFn: getModels,
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
     staleTime: 60_000,
   })
-  const allModelIds = (data?.data ?? []).map(m => m.id)
+  const allModelIds = (providers ?? [])
+    .filter(p => p.available)
+    .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
 
   // Models that can still be added as fallbacks
   const available = allModelIds.filter(

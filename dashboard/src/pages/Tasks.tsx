@@ -8,7 +8,7 @@ import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
-  reviewPipelineTask, getQueueStats, getPods, getModels,
+  reviewPipelineTask, getQueueStats, getPods, discoverModels,
   deletePipelineTask, bulkDeletePipelineTasks,
 } from '../api'
 import type { PipelineTask, TaskStatus } from '../types'
@@ -297,8 +297,8 @@ function SubmitForm() {
   const qc = useQueryClient()
 
   const { data: pods }        = useQuery({ queryKey: ['pods'],   queryFn: getPods,      staleTime: 30_000 })
-  const { data: modelsData }  = useQuery({ queryKey: ['models'], queryFn: getModels,    staleTime: 60_000 })
-  const models = modelsData?.data ?? []
+  const { data: providers }   = useQuery({ queryKey: ['model-catalog'], queryFn: () => discoverModels(), staleTime: 60_000 })
+  const models = (providers ?? []).filter(p => p.available).flatMap(p => p.models.filter(m => m.registered).map(m => ({ id: m.id })))
 
   const submit = useMutation({
     mutationFn: () => submitPipelineTask(

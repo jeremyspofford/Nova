@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Save, RotateCcw, Bot, Sliders, Palette, Moon, Sun, Monitor, FileCode, ExternalLink, Activity, Gauge, ShieldCheck, Radio, Wifi, WifiOff, Power, Loader2, Globe, Shield } from 'lucide-react'
-import { getPlatformConfig, updatePlatformConfig, getProviderStatus, testProvider, getAdminSecret, setAdminSecret, getOllamaStatus, getModels, type PlatformConfigEntry, type ProviderStatus } from '../api'
+import { getPlatformConfig, updatePlatformConfig, getProviderStatus, testProvider, getAdminSecret, setAdminSecret, getOllamaStatus, discoverModels, type PlatformConfigEntry, type ProviderStatus } from '../api'
 import { getRemoteAccessStatus } from '../api-recovery'
 import { useTheme } from '../stores/theme-store'
 import { accentPalettes, themePresets } from '../lib/color-palettes'
@@ -330,16 +330,15 @@ function CloudFallbackModelPicker({
   onSave: (key: string, value: string) => void
   saving: boolean
 }) {
-  const { data } = useQuery({
-    queryKey: ['models'],
-    queryFn: getModels,
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
     staleTime: 60_000,
   })
-  const allModels = (data?.data ?? []).map(m => m.id)
-  // Filter to cloud models only (exclude local ollama models that don't have a provider prefix)
-  const cloudModels = allModels.filter(id =>
-    id.includes('/') || id.startsWith('gpt-') || id.startsWith('claude-') || id.startsWith('gemini-')
-  )
+  // Filter to cloud models only from available providers
+  const cloudModels = (providers ?? [])
+    .filter(p => p.available && p.type !== 'local')
+    .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
 
   const [draft, setDraft] = useState(value)
   const [dirty, setDirty] = useState(false)

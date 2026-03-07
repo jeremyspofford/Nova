@@ -4,7 +4,7 @@ import { Send, Bot, User, RefreshCw, MessageSquare } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamChat, getModels, type ChatMessage } from '../api'
+import { streamChat, discoverModels, type ChatMessage } from '../api'
 import { useChatStore, type Message } from '../stores/chat-store'
 import Card from '../components/Card'
 
@@ -70,12 +70,14 @@ export function Chat() {
   const bottomRef   = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const { data: modelsData } = useQuery({
-    queryKey: ['models'],
-    queryFn: getModels,
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
     staleTime: 60_000,
   })
-  const models = modelsData?.data ?? []
+  const models = (providers ?? [])
+    .filter(p => p.available)
+    .flatMap(p => p.models.filter(m => m.registered).map(m => ({ id: m.id, provider: p.name })))
 
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -217,7 +219,7 @@ export function Chat() {
           >
             <option value="">Default</option>
             {models.map(m => (
-              <option key={m.id} value={m.id}>{m.id}</option>
+              <option key={m.id} value={m.id}>{m.id} ({m.provider})</option>
             ))}
           </select>
 
