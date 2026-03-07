@@ -1534,6 +1534,61 @@ NOVA_CUSTOM_DOMAIN=nova.mydomain.com    # set by Nova after deployment
 
 ---
 
+## 🔜 Phase 8c — Chat Platform Integrations
+
+Allow users to interact with Nova through their preferred messaging platform instead of (or alongside) the built-in web chat. Each integration is a lightweight bridge service that translates between the platform's API and Nova's chat-api WebSocket.
+
+**Architecture:**
+- Each platform adapter is a small Python service (or module in chat-api)
+- Adapters connect to Nova's existing chat-api WebSocket for streaming
+- Users enable/disable adapters in Settings → Chat Platforms
+- Platform tokens/bot IDs stored in platform_config (encrypted)
+
+**Phase 1 — Telegram (priority: highest)**
+- [ ] `telegram-bridge` service: Python + `python-telegram-bot` library
+- [ ] Create bot via @BotFather, store token in platform_config
+- [ ] Message handling: user message → chat-api → stream response → Telegram reply
+- [ ] Markdown rendering: convert Nova's markdown to Telegram's MarkdownV2
+- [ ] Conversation context: map Telegram chat_id to Nova session_id
+- [ ] Slash commands: `/new` (new conversation), `/model` (switch model), `/status` (system health)
+- [ ] Docker Compose profile: `--profile telegram`
+- [ ] One-click setup in Settings: paste bot token, enable, done
+
+**Phase 2 — Slack**
+- [ ] `slack-bridge` service: Python + `slack-bolt`
+- [ ] Slack App manifest for easy workspace install
+- [ ] Thread support: each Slack thread = one Nova conversation
+- [ ] Rich formatting: code blocks, links, reactions for status
+- [ ] Docker Compose profile: `--profile slack`
+
+**Phase 3 — Discord**
+- [ ] `discord-bridge` service: Python + `discord.py`
+- [ ] Bot invite link generator in Settings
+- [ ] Channel-based or DM-based conversations
+- [ ] Docker Compose profile: `--profile discord`
+
+**Future platforms (community-driven):**
+- Microsoft Teams (complex auth, enterprise use case)
+- WhatsApp (Business API approval required)
+- Matrix/Element (self-hosted, privacy-focused)
+- Signal (via signal-cli, privacy-focused)
+
+**Built-in chat improvements (ongoing):**
+- [ ] Fix iOS keyboard spacing (input bar too high above keyboard)
+- [ ] Conversation history sidebar (list past sessions)
+- [ ] Image/file upload support
+- [ ] Voice input (Web Speech API)
+- [ ] Push notifications on task completion (Web Push API)
+- [ ] Typing indicators with estimated completion time
+
+**Success criteria:**
+- [ ] Telegram bot responds to messages with <2s first-token latency
+- [ ] Conversation context persists across messages (memory works through Telegram)
+- [ ] Enabling Telegram requires only pasting a bot token — no code, no config files
+- [ ] All platform bridges are optional Docker profiles — zero overhead if unused
+
+---
+
 ## 🔜 Phase 9 — Infrastructure + Triggers + Computer Use
 
 **Infrastructure hardening:**
