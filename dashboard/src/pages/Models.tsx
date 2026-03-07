@@ -458,6 +458,15 @@ function OllamaStatusBadge({ status }: { status: OllamaStatus | undefined }) {
   )
 }
 
+const REQUIRED_MODELS = new Set(RECOMMENDED_OLLAMA_MODELS.filter(m => m.required).map(m => m.name))
+
+function isRequiredModel(name: string): boolean {
+  if (REQUIRED_MODELS.has(name)) return true
+  // Also match tagged variants like "nomic-embed-text:latest"
+  const base = name.split(':')[0]
+  return REQUIRED_MODELS.has(base)
+}
+
 function PulledModelRow({
   model,
   deleting,
@@ -467,18 +476,26 @@ function PulledModelRow({
   deleting: boolean
   onDelete: () => void
 }) {
+  const required = isRequiredModel(model.name)
   return (
     <tr className="border-b border-neutral-100 dark:border-neutral-800 last:border-0 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
-      <td className="px-4 py-2.5 font-mono text-neutral-900 dark:text-neutral-100">{model.name}</td>
+      <td className="px-4 py-2.5 font-mono text-neutral-900 dark:text-neutral-100">
+        {model.name}
+        {required && (
+          <span className="ml-2 rounded bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+            required
+          </span>
+        )}
+      </td>
       <td className="hidden sm:table-cell px-4 py-2.5 text-neutral-500 dark:text-neutral-400">{model.parameter_size || '—'}</td>
       <td className="hidden sm:table-cell px-4 py-2.5 text-neutral-500 dark:text-neutral-400">{model.quantization_level || '—'}</td>
       <td className="px-4 py-2.5 text-right text-neutral-500 dark:text-neutral-400">{formatBytes(model.size)}</td>
       <td className="px-2 py-2.5">
         <button
           onClick={onDelete}
-          disabled={deleting}
-          className="p-1 rounded text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
-          title="Delete model"
+          disabled={deleting || required}
+          className="p-1 rounded text-neutral-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title={required ? 'Required by Nova' : 'Delete model'}
         >
           {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
         </button>
