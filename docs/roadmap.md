@@ -1709,14 +1709,14 @@ Allow users to interact with Nova through their preferred messaging platform ins
 - Users enable/disable adapters in Settings → Chat Platforms
 - Platform tokens/bot IDs stored in platform_config (encrypted)
 
-**Phase 1 — Telegram (priority: highest)**
-- [ ] `telegram-bridge` service: Python + `python-telegram-bot` library
+**Phase 1 — Telegram (priority: highest)** ✅ Implemented
+- [x] `chat-bridge` service: Python + httpx, unified multi-platform bridge (FastAPI + redis)
 - [ ] Create bot via @BotFather, store token in platform_config
-- [ ] Message handling: user message → chat-api → stream response → Telegram reply
-- [ ] Markdown rendering: convert Nova's markdown to Telegram's MarkdownV2
-- [ ] Conversation context: map Telegram chat_id to Nova session_id
+- [x] Message handling: user message → orchestrator stream → Telegram reply
+- [x] Markdown rendering: convert Nova's markdown to Telegram's MarkdownV2
+- [x] Conversation context: map Telegram chat_id to Nova session_id
 - [ ] Slash commands: `/new` (new conversation), `/model` (switch model), `/status` (system health)
-- [ ] Docker Compose profile: `--profile telegram`
+- [x] Docker Compose profile: `--profile bridges`
 - [ ] One-click setup in Settings: paste bot token, enable, done
 
 **Phase 2 — Slack**

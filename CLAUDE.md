@@ -13,18 +13,19 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 - **llm-gateway** (8001) — Multi-provider model routing via LiteLLM: Anthropic, OpenAI, Ollama, Groq, Gemini, Cerebras, OpenRouter, GitHub, Claude/ChatGPT subscription providers (FastAPI)
 - **memory-service** (8002) — Embedding + hybrid semantic/keyword retrieval via pgvector (FastAPI + SQLAlchemy async)
 - **chat-api** (8080) — WebSocket streaming bridge for external clients (FastAPI)
+- **chat-bridge** (8090) — Multi-platform chat integration: Telegram, Slack (FastAPI + httpx + redis). Optional, start with `--profile bridges`.
 - **dashboard** (3000/5173) — React admin UI (Vite dev / nginx prod)
 - **postgres** (5432) — pgvector-enabled PostgreSQL 16
 - **recovery** (8888) — Backup/restore, factory reset, service management (FastAPI + asyncpg + Docker SDK). Only depends on postgres — stays alive when other services crash.
 - **redis** (6379) — State, task queue (BRPOP), rate limiting, session memory
 
-**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/memories/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), and recovery (`/recovery-api`). Chat-api forwards to orchestrator's streaming endpoint. Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
+**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/memories/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), and recovery (`/recovery-api`). Chat-api forwards to orchestrator's streaming endpoint. Chat-bridge calls orchestrator (`/api/v1/tasks/stream`) to relay messages from external platforms. Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
 
 **Shared contracts:** `nova-contracts/` is a Pydantic-only package defining the API contract between services (chat, llm, memory, orchestrator models). Any service satisfying these models is a drop-in replacement.
 
 **Quartet Pipeline:** 5-stage agent chain — Context → Task → Guardrail → Code Review → Decision. Runs via Redis BRPOP task queue with heartbeat (30s) and stale reaper (150s timeout). Pipeline code lives in `orchestrator/app/pipeline/`.
 
-**Redis DB allocation:** orchestrator=db2, llm-gateway=db1, chat-api=db3, memory-service=db0.
+**Redis DB allocation:** orchestrator=db2, llm-gateway=db1, chat-api=db3, memory-service=db0, chat-bridge=db4.
 
 ## Build & Run Commands
 
