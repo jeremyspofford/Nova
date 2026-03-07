@@ -81,6 +81,27 @@ export interface PipelineTask {
   metadata: Record<string, unknown>
 }
 
+export interface GuardrailFinding {
+  id: string
+  task_id: string
+  finding_type: string
+  severity: string
+  description: string
+  evidence: string | null
+  status: string
+  created_at: string
+}
+
+export interface CodeReviewVerdict {
+  id: string
+  task_id: string
+  iteration: number
+  verdict: string
+  issues: { severity: string; description: string; file?: string; line?: string }[]
+  summary: string
+  created_at: string
+}
+
 export interface PodAgent {
   id: string
   pod_id: string

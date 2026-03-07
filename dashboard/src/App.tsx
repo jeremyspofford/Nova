@@ -68,7 +68,8 @@ function AppShell() {
     <BrowserRouter>
       <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
         <NavBar />
-        <main className="flex-1 min-h-0 mx-auto max-w-6xl w-full overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <main className="mx-auto max-w-6xl w-full">
           <Routes>
             <Route path="/"        element={<Chat />} />
             <Route path="/chat"    element={<Chat />} />
@@ -85,6 +86,7 @@ function AppShell() {
             <Route path="/remote-access" element={<RemoteAccess />} />
           </Routes>
         </main>
+        </div>
       </div>
     </BrowserRouter>
     </ChatProvider>

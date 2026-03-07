@@ -92,7 +92,48 @@
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
-/* ── Thin scrollbar for textarea ────────────────────────────────────────── */
+/* ── Custom scrollbars (thin, auto-hide) ───────────────────────────────── */
+
+/* Firefox */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s;
+}
+.custom-scrollbar:hover {
+  scrollbar-color: rgb(var(--neutral-300)) transparent;
+}
+.dark .custom-scrollbar:hover {
+  scrollbar-color: rgb(var(--neutral-600)) transparent;
+}
+
+/* Webkit (Chrome, Safari, Edge) */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+  transition: background 0.3s;
+}
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgb(var(--neutral-300) / 0.6);
+}
+.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background: rgb(var(--neutral-600) / 0.6);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--neutral-400));
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--neutral-500));
+}
+
+/* Thin scrollbar for textarea (legacy) */
 textarea::-webkit-scrollbar { width: 4px; }
 textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-300)); border-radius: 2px; }
 .dark textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-600)); }

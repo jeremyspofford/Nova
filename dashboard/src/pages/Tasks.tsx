@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Send, RefreshCw, X, CheckCircle, AlertCircle, Clock,
   ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Loader2, Trash2,
+  ShieldAlert, FileSearch, AlertTriangle,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
@@ -10,8 +11,9 @@ import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
   reviewPipelineTask, getQueueStats, getPods, discoverModels,
   deletePipelineTask, bulkDeletePipelineTasks,
+  getTaskFindings, getTaskReviews,
 } from '../api'
-import type { PipelineTask, TaskStatus } from '../types'
+import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import Card from '../components/Card'
 import { Input } from '../components/ui'
@@ -104,11 +106,107 @@ function StageProgress({ task }: { task: PipelineTask }) {
   )
 }
 
+// ── Severity badge ────────────────────────────────────────────────────────────
+
+const SEVERITY_STYLES: Record<string, string> = {
+  critical: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',
+  high:     'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400',
+  medium:   'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',
+  low:      'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400',
+}
+
+function SeverityBadge({ severity }: { severity: string }) {
+  return (
+    <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase', SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.low)}>
+      {severity}
+    </span>
+  )
+}
+
+// ── Findings section ──────────────────────────────────────────────────────────
+
+function FindingsSection({ findings }: { findings: GuardrailFinding[] }) {
+  if (findings.length === 0) return null
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-400">
+        <ShieldAlert size={13} /> Guardrail Findings ({findings.length})
+      </div>
+      {findings.map(f => (
+        <div key={f.id} className="rounded-md border border-orange-200 dark:border-orange-800/50 bg-orange-50 dark:bg-orange-900/20 p-2.5 text-xs space-y-1">
+          <div className="flex items-center gap-2">
+            <SeverityBadge severity={f.severity} />
+            <span className="font-medium text-neutral-700 dark:text-neutral-300 capitalize">{f.finding_type.replace(/_/g, ' ')}</span>
+          </div>
+          <p className="text-neutral-600 dark:text-neutral-400">{f.description}</p>
+          {f.evidence && (
+            <pre className="mt-1 rounded bg-orange-100 dark:bg-orange-900/30 px-2 py-1 text-[11px] text-orange-800 dark:text-orange-300 whitespace-pre-wrap break-words">
+              {f.evidence}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Code review section ───────────────────────────────────────────────────────
+
+function CodeReviewSection({ reviews }: { reviews: CodeReviewVerdict[] }) {
+  if (reviews.length === 0) return null
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-blue-700 dark:text-blue-400">
+        <FileSearch size={13} /> Code Review ({reviews.length} {reviews.length === 1 ? 'iteration' : 'iterations'})
+      </div>
+      {reviews.map(r => (
+        <div key={r.id} className="rounded-md border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-900/20 p-2.5 text-xs space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className={clsx(
+              'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase',
+              r.verdict === 'pass' && 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
+              r.verdict === 'needs_refactor' && 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',
+              r.verdict === 'reject' && 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',
+            )}>
+              {r.verdict.replace(/_/g, ' ')}
+            </span>
+            <span className="text-neutral-500 dark:text-neutral-400">Iteration {r.iteration}</span>
+          </div>
+          {r.summary && <p className="text-neutral-600 dark:text-neutral-400">{r.summary}</p>}
+          {r.issues?.length > 0 && (
+            <ul className="space-y-1 pl-2 border-l-2 border-blue-200 dark:border-blue-800">
+              {r.issues.map((iss, j) => (
+                <li key={j} className="text-neutral-600 dark:text-neutral-400">
+                  <SeverityBadge severity={iss.severity} />{' '}
+                  {iss.description}
+                  {iss.file && <span className="text-neutral-400 dark:text-neutral-500"> ({iss.file}{iss.line ? `:${iss.line}` : ''})</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ── Review panel (for pending_human_review tasks) ──────────────────────────────
 
 function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void }) {
   const [comment, setComment] = useState('')
   const qc = useQueryClient()
+
+  const { data: findings = [], isLoading: findingsLoading } = useQuery({
+    queryKey: ['task-findings', task.id],
+    queryFn: () => getTaskFindings(task.id),
+    staleTime: 10_000,
+  })
+
+  const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
+    queryKey: ['task-reviews', task.id],
+    queryFn: () => getTaskReviews(task.id),
+    staleTime: 10_000,
+  })
 
   const review = useMutation({
     mutationFn: ({ decision }: { decision: 'approve' | 'reject' }) =>
@@ -119,33 +217,71 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
     },
   })
 
+  const escalationMsg = task.metadata?.escalation_message as string | undefined
+  const isLoading = findingsLoading || reviewsLoading
+
   return (
-    <div className="mt-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/30 p-3">
-      <p className="mb-2 text-xs font-medium text-purple-700 dark:text-purple-400">Human Review Required</p>
-      <textarea
-        rows={2}
-        placeholder="Optional comment…"
-        value={comment}
-        onChange={e => setComment(e.target.value)}
-        className="mb-2 w-full resize-none rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-purple-500"
-      />
-      <div className="flex gap-2">
-        <button
-          onClick={() => review.mutate({ decision: 'approve' })}
-          disabled={review.isPending}
-          className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          <ThumbsUp size={12} /> Approve
-        </button>
-        <button
-          onClick={() => review.mutate({ decision: 'reject' })}
-          disabled={review.isPending}
-          className="flex items-center gap-1.5 rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
-        >
-          <ThumbsDown size={12} /> Reject
-        </button>
-        {review.isPending && <Loader2 size={14} className="animate-spin self-center text-neutral-500 dark:text-neutral-400" />}
-        {review.isError && <span className="self-center text-xs text-red-600 dark:text-red-400">Failed — try again</span>}
+    <div className="mt-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-4">
+      {/* Escalation reason */}
+      <div>
+        <div className="flex items-center gap-1.5 mb-1.5 text-xs font-semibold text-purple-700 dark:text-purple-400">
+          <AlertTriangle size={13} /> Why This Needs Review
+        </div>
+        <p className="text-sm text-neutral-700 dark:text-neutral-300">
+          {escalationMsg || 'This task was escalated for human review.'}
+        </p>
+      </div>
+
+      {/* Task output (what the pipeline produced) */}
+      {task.output && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">Pipeline Output</p>
+          <pre className="max-h-48 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 p-3 text-xs text-neutral-700 dark:text-neutral-300">
+            {task.output}
+          </pre>
+        </div>
+      )}
+
+      {/* Guardrail findings & code reviews */}
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+          <Loader2 size={12} className="animate-spin" /> Loading review context…
+        </div>
+      ) : (
+        <>
+          <FindingsSection findings={findings} />
+          <CodeReviewSection reviews={reviews} />
+        </>
+      )}
+
+      {/* Decision area */}
+      <div className="border-t border-purple-200 dark:border-purple-700 pt-3 space-y-2">
+        <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Your Decision</p>
+        <textarea
+          rows={2}
+          placeholder="Optional comment…"
+          value={comment}
+          onChange={e => setComment(e.target.value)}
+          className="w-full resize-none rounded-md border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-purple-500"
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => review.mutate({ decision: 'approve' })}
+            disabled={review.isPending}
+            className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            <ThumbsUp size={12} /> Approve
+          </button>
+          <button
+            onClick={() => review.mutate({ decision: 'reject' })}
+            disabled={review.isPending}
+            className="flex items-center gap-1.5 rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+          >
+            <ThumbsDown size={12} /> Reject
+          </button>
+          {review.isPending && <Loader2 size={14} className="animate-spin self-center text-neutral-500 dark:text-neutral-400" />}
+          {review.isError && <span className="self-center text-xs text-red-600 dark:text-red-400">Failed — try again</span>}
+        </div>
       </div>
     </div>
   )
@@ -154,8 +290,9 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
 // ── Task card ──────────────────────────────────────────────────────────────────
 
 function TaskCard({ task }: { task: PipelineTask }) {
-  const [expanded, setExpanded] = useState(false)
-  const [reviewing, setReviewing] = useState(false)
+  const needsReview = task.status === 'pending_human_review'
+  const [expanded, setExpanded] = useState(needsReview)
+  const [reviewing, setReviewing] = useState(needsReview)
   const qc = useQueryClient()
 
   const cancelMutation = useMutation({
@@ -169,7 +306,6 @@ function TaskCard({ task }: { task: PipelineTask }) {
   })
 
   const isActive    = ACTIVE_TASK_STATUSES.has(task.status)
-  const needsReview = task.status === 'pending_human_review'
   const isTerminal  = ['complete','failed','cancelled'].includes(task.status)
 
   const relativeTime = task.queued_at
@@ -262,7 +398,7 @@ function TaskCard({ task }: { task: PipelineTask }) {
           {task.output && (
             <div>
               <p className="mb-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Output</p>
-              <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-neutral-50 dark:bg-neutral-800 p-3 text-xs text-neutral-700 dark:text-neutral-300">
+              <pre className="max-h-64 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md bg-neutral-50 dark:bg-neutral-800 p-3 text-xs text-neutral-700 dark:text-neutral-300">
                 {task.output}
               </pre>
             </div>

@@ -654,7 +654,7 @@ export function AiTroubleshooter({ suggestedPrompt }: { suggestedPrompt?: string
           {/* Message area */}
           <div
             ref={scrollRef}
-            className="h-64 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-3"
+            className="h-64 overflow-y-auto custom-scrollbar rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-3"
           >
             {messages.length === 0 && !loading && (
               <p className="text-xs text-neutral-400 dark:text-neutral-500 text-center py-8">

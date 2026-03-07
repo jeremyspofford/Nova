@@ -249,7 +249,7 @@ export function Chat() {
       {messages.length === 0 ? (
         /* Empty state: greeting bubble + input */
         <div className="flex-1 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
             <div className="max-w-3xl mx-auto px-4 py-6">
               {greeting && (
                 <MessageBubble message={{
@@ -270,7 +270,7 @@ export function Chat() {
       ) : (
         /* Active chat: scrollable messages + bottom-pinned input */
         <>
-          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
               {greeting && (
                 <MessageBubble message={{
