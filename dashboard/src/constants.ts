@@ -10,30 +10,39 @@ export interface RecommendedModel {
 
 export const RECOMMENDED_OLLAMA_MODELS: RecommendedModel[] = [
   // Embedding (required)
-  { name: 'nomic-embed-text',      category: 'embedding', sizeGB: 0.3, description: '768-dim embeddings for memory service', required: true },
+  { name: 'nomic-embed-text',        category: 'embedding', sizeGB: 0.3, description: '768-dim embeddings for memory service', required: true },
 
   // General — small to large
-  { name: 'qwen2.5:1.5b',          category: 'general',   sizeGB: 1.0, description: 'Starter — CPU-friendly' },
-  { name: 'llama3.2:3b',           category: 'general',   sizeGB: 1.9, description: 'Fast, good for simple tasks' },
-  { name: 'gemma3:4b',             category: 'general',   sizeGB: 3.0, description: 'Google, multimodal capable' },
-  { name: 'mistral:7b',            category: 'general',   sizeGB: 4.1, description: 'Mistral AI, well-rounded' },
-  { name: 'qwen2.5:7b',            category: 'general',   sizeGB: 4.4, description: 'Multilingual, strong' },
-  { name: 'llama3.1:8b',           category: 'general',   sizeGB: 4.7, description: 'Meta, high quality' },
-  { name: 'gemma3:12b',            category: 'general',   sizeGB: 8.0, description: 'Google, very capable' },
-  { name: 'phi4:14b',              category: 'general',   sizeGB: 9.0, description: 'Microsoft, strong reasoning' },
-  { name: 'gemma3:27b',            category: 'general',   sizeGB: 17.0, description: 'Google, needs GPU' },
+  { name: 'qwen2.5:1.5b',            category: 'general',   sizeGB: 1.0, description: 'Starter — CPU-friendly' },
+  { name: 'llama3.2:3b',             category: 'general',   sizeGB: 1.9, description: 'Fast, good for simple tasks' },
+  { name: 'gemma3:4b',               category: 'general',   sizeGB: 3.0, description: 'Google, multimodal capable' },
+  { name: 'mistral:7b',              category: 'general',   sizeGB: 4.1, description: 'Mistral AI, well-rounded' },
+  { name: 'qwen2.5:7b',              category: 'general',   sizeGB: 4.4, description: 'Multilingual, strong' },
+  { name: 'llama3.1:8b',             category: 'general',   sizeGB: 4.7, description: 'Meta, high quality' },
+  { name: 'gemma3:12b',              category: 'general',   sizeGB: 8.0, description: 'Google, very capable' },
+  { name: 'phi4:14b',                category: 'general',   sizeGB: 9.0, description: 'Microsoft, strong reasoning' },
+  { name: 'gemma3:27b',              category: 'general',   sizeGB: 17.0, description: 'Google, excellent quality' },
+  { name: 'qwen2.5:32b',             category: 'general',   sizeGB: 20.0, description: 'Multilingual, very strong' },
+  { name: 'qwen2.5:72b',             category: 'general',   sizeGB: 47.0, description: 'Frontier-class local model' },
+  { name: 'llama3.1:70b',            category: 'general',   sizeGB: 43.0, description: 'Meta, near cloud quality' },
+  { name: 'mistral-large-3:123b',    category: 'general',   sizeGB: 72.0, description: 'Mistral flagship, 128k context' },
 
   // Reasoning
-  { name: 'deepseek-r1:8b',        category: 'reasoning', sizeGB: 4.7, description: 'Chain-of-thought reasoning' },
-  { name: 'deepseek-r1:14b',       category: 'reasoning', sizeGB: 9.0, description: 'Stronger chain-of-thought' },
+  { name: 'deepseek-r1:8b',          category: 'reasoning', sizeGB: 4.7, description: 'Chain-of-thought reasoning' },
+  { name: 'deepseek-r1:14b',         category: 'reasoning', sizeGB: 9.0, description: 'Stronger chain-of-thought' },
+  { name: 'deepseek-r1:32b',         category: 'reasoning', sizeGB: 20.0, description: 'Deep reasoning, needs GPU' },
+  { name: 'deepseek-r1:70b',         category: 'reasoning', sizeGB: 43.0, description: 'Best local reasoning model' },
 
   // Code
-  { name: 'qwen2.5-coder:7b',      category: 'code',      sizeGB: 4.4, description: 'Code generation and editing' },
-  { name: 'devstral-small-2:24b',   category: 'code',      sizeGB: 14.0, description: 'Mistral code agent' },
+  { name: 'qwen2.5-coder:7b',        category: 'code',      sizeGB: 4.4, description: 'Code generation and editing' },
+  { name: 'qwen2.5-coder:14b',       category: 'code',      sizeGB: 9.0, description: 'Stronger code generation' },
+  { name: 'devstral-small-2:24b',     category: 'code',      sizeGB: 14.0, description: 'Mistral code agent' },
+  { name: 'qwen2.5-coder:32b',       category: 'code',      sizeGB: 20.0, description: 'Best local coding model' },
 
   // Vision
-  { name: 'llava:7b',              category: 'vision',    sizeGB: 4.5, description: 'Image understanding' },
-  { name: 'llava:13b',             category: 'vision',    sizeGB: 8.0, description: 'Better image understanding' },
+  { name: 'llava:7b',                category: 'vision',    sizeGB: 4.5, description: 'Image understanding' },
+  { name: 'llava:13b',               category: 'vision',    sizeGB: 8.0, description: 'Better image understanding' },
+  { name: 'llava:34b',               category: 'vision',    sizeGB: 20.0, description: 'Best local vision model' },
 ]
 
 /** Provider display order for the Models page. */

@@ -36,6 +36,7 @@ export function Models() {
   const [pullingModels, setPullingModels] = useState<Set<string>>(new Set())
   const [deletingModels, setDeletingModels] = useState<Set<string>>(new Set())
   const [categoryFilter, setCategoryFilter] = useState<string>('all')
+  const [sizeFilter, setSizeFilter] = useState<number>(0) // 0 = show all
   const [onboardingDismissed, setOnboardingDismissed] = useState(
     () => localStorage.getItem(ONBOARDING_DISMISSED_KEY) === 'true'
   )
@@ -245,37 +246,67 @@ export function Models() {
 
           {/* Recommended models grid */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <p className="text-xs text-neutral-500 dark:text-neutral-400">Recommended models</p>
+            <div className="space-y-2 mb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">Recommended models</p>
+                  <div className="flex gap-1 flex-wrap">
+                    {['all', 'general', 'reasoning', 'code', 'vision', 'embedding'].map(cat => (
+                      <button
+                        key={cat}
+                        onClick={() => setCategoryFilter(cat)}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
+                          categoryFilter === cat
+                            ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400'
+                            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                        }`}
+                      >
+                        {cat === 'all' ? 'All' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <a
+                  href="https://ollama.com/library"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1 text-[11px] text-teal-600 dark:text-teal-400 hover:underline flex-shrink-0"
+                >
+                  Browse all models <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+              <div className="flex items-center gap-2">
+                <HardDrive className="h-3 w-3 text-neutral-400" />
+                <span className="text-[10px] text-neutral-500 dark:text-neutral-400">Max size:</span>
                 <div className="flex gap-1">
-                  {['all', 'general', 'reasoning', 'code', 'vision', 'embedding'].map(cat => (
+                  {[
+                    { label: 'All', value: 0 },
+                    { label: '≤ 5 GB', value: 5 },
+                    { label: '≤ 10 GB', value: 10 },
+                    { label: '≤ 24 GB', value: 24 },
+                    { label: '≤ 48 GB', value: 48 },
+                    { label: '≤ 64 GB', value: 64 },
+                    { label: '≤ 96 GB', value: 96 },
+                  ].map(opt => (
                     <button
-                      key={cat}
-                      onClick={() => setCategoryFilter(cat)}
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors ${
-                        categoryFilter === cat
-                          ? 'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-400'
+                      key={opt.value}
+                      onClick={() => setSizeFilter(opt.value)}
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium font-mono transition-colors ${
+                        sizeFilter === opt.value
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400'
                           : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
                       }`}
                     >
-                      {cat === 'all' ? 'All' : cat.charAt(0).toUpperCase() + cat.slice(1)}
+                      {opt.label}
                     </button>
                   ))}
                 </div>
               </div>
-              <a
-                href="https://ollama.com/library"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 text-[11px] text-teal-600 dark:text-teal-400 hover:underline"
-              >
-                Browse all models <ExternalLink className="h-3 w-3" />
-              </a>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               {RECOMMENDED_OLLAMA_MODELS
                 .filter(rec => categoryFilter === 'all' || rec.category === categoryFilter)
+                .filter(rec => sizeFilter === 0 || rec.sizeGB <= sizeFilter)
                 .map(rec => {
                 const isPulled = pulledNames.has(rec.name)
                 const isPulling = pullingModels.has(rec.name)
