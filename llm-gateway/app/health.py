@@ -17,8 +17,10 @@ async def readiness():
 
     # Check Ollama connectivity (informational — not required for readiness)
     import httpx
+    from app.registry import get_ollama_base_url
+    ollama_url = await get_ollama_base_url()
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=3.0) as c:
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=3.0) as c:
             r = await c.get("/api/tags")
             checks["ollama"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
     except Exception as e:
@@ -82,18 +84,22 @@ async def ollama_status():
     ollama = get_ollama_provider()
     strategy = await get_routing_strategy()
 
+    from app.registry import get_ollama_base_url, get_wol_mac
+    ollama_url = await get_ollama_base_url()
+    wol_mac = await get_wol_mac()
+
     result = {
         "healthy": ollama.healthy,
-        "base_url": settings.ollama_base_url,
+        "base_url": ollama_url,
         "routing_strategy": strategy,
-        "wol_configured": bool(settings.wol_mac_address),
+        "wol_configured": bool(wol_mac),
         "gpu_available": False,
     }
 
     # Detect GPU availability from Ollama's /api/ps (running models show GPU layers)
     # or from /api/tags response details
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=3.0) as c:
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=3.0) as c:
             r = await c.get("/api/ps")
             if r.status_code == 200:
                 ps_data = r.json()
@@ -105,7 +111,7 @@ async def ollama_status():
     except Exception:
         pass
 
-    if settings.wol_mac_address:
+    if wol_mac:
         import time as _time
         wol_age = _time.monotonic() - ollama._wol_sent_at if ollama._wol_sent_at > 0 else None
         result["wol_last_sent_seconds_ago"] = int(wol_age) if wol_age is not None else None

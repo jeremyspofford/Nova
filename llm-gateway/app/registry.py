@@ -248,6 +248,54 @@ async def get_routing_strategy() -> str:
     return _cached_strategy
 
 
+# ── Dynamic config from Redis (synced from platform_config) ──────────────────
+
+_config_cache: dict[str, tuple[str, float]] = {}  # key -> (value, fetched_at)
+_CONFIG_CACHE_TTL = 5.0
+
+
+async def _get_redis_config(key: str, default: str) -> str:
+    """Read a nova:config:{key} value from Redis with 5s cache, falling back to default."""
+    now = time.monotonic()
+    cached = _config_cache.get(key)
+    if cached and (now - cached[1]) < _CONFIG_CACHE_TTL:
+        return cached[0]
+
+    try:
+        r = await _get_strategy_redis()
+        val = await r.get(f"nova:config:{key}")
+        if val is not None:
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, str) and parsed:
+                    _config_cache[key] = (parsed, now)
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                if val and val != "null":
+                    _config_cache[key] = (val, now)
+                    return val
+    except Exception as e:
+        log.debug("Failed to read %s from Redis: %s", key, e)
+
+    _config_cache[key] = (default, now)
+    return default
+
+
+async def get_ollama_base_url() -> str:
+    """Get the current Ollama base URL (runtime-configurable via dashboard)."""
+    return await _get_redis_config("llm.ollama_url", settings.ollama_base_url)
+
+
+async def get_wol_mac() -> str:
+    """Get the current WoL MAC address (runtime-configurable via dashboard)."""
+    return await _get_redis_config("llm.wol_mac", settings.wol_mac_address)
+
+
+async def get_wol_broadcast() -> str:
+    """Get the current WoL broadcast IP (runtime-configurable via dashboard)."""
+    return await _get_redis_config("llm.wol_broadcast", settings.wol_broadcast_ip)
+
+
 # ── Ollama model names (models that route to Ollama by default) ──────────────
 
 _OLLAMA_MODELS = {
@@ -265,9 +313,9 @@ async def sync_ollama_models() -> int:
     """Discover pulled Ollama models and register any that aren't in MODEL_REGISTRY.
     Called at startup and after each successful pull. Returns count of newly registered models."""
     import httpx
-
+    ollama_url = await get_ollama_base_url()
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=5.0) as client:
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=5.0) as client:
             resp = await client.get("/api/tags")
             resp.raise_for_status()
             data = resp.json()

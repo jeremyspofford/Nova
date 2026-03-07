@@ -544,7 +544,7 @@ function LLMRoutingSection({
             configKey="llm.ollama_url"
             value={ollamaUrl}
             placeholder="http://192.168.1.50:11434"
-            description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var. Requires container restart to take effect."
+            description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var. Takes effect within ~5 seconds."
             onSave={onSave}
             saving={saving}
           />

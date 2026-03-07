@@ -43,6 +43,17 @@ class OllamaProvider(ModelProvider):
         self._wol_sent_at: float = 0.0
         self._health_lock = asyncio.Lock()
 
+    async def _get_base_url(self) -> str:
+        """Get the current Ollama base URL (runtime-configurable via dashboard)."""
+        from app.registry import get_ollama_base_url
+        url = await get_ollama_base_url()
+        if url != self._base_url:
+            log.info("Ollama base URL changed: %s -> %s", self._base_url, url)
+            self._base_url = url
+            self._healthy = True  # reset health for new URL
+            self._last_health_check = 0.0
+        return url
+
     @property
     def name(self) -> str:
         return "ollama"
@@ -66,6 +77,7 @@ class OllamaProvider(ModelProvider):
         Caches result for ollama_health_check_interval seconds.
         On failure, fires WoL in the background and raises RuntimeError.
         """
+        base_url = await self._get_base_url()
         now = time.monotonic()
         if self._healthy and (now - self._last_health_check) < settings.ollama_health_check_interval:
             return  # recently checked and healthy — 0ms overhead
@@ -78,7 +90,7 @@ class OllamaProvider(ModelProvider):
 
             try:
                 async with httpx.AsyncClient(
-                    base_url=self._base_url,
+                    base_url=base_url,
                     timeout=settings.ollama_health_check_timeout,
                 ) as client:
                     r = await client.get("/api/tags")
@@ -89,22 +101,25 @@ class OllamaProvider(ModelProvider):
             except Exception as e:
                 self._healthy = False
                 self._last_health_check = now
-                log.warning("Ollama unreachable at %s: %s", self._base_url, e)
+                log.warning("Ollama unreachable at %s: %s", base_url, e)
 
                 # Fire WoL if configured and not recently sent
-                if settings.wol_mac_address and (now - self._wol_sent_at) > settings.wol_boot_wait_seconds:
+                from app.registry import get_wol_mac, get_wol_broadcast
+                wol_mac = await get_wol_mac()
+                if wol_mac and (now - self._wol_sent_at) > settings.wol_boot_wait_seconds:
                     self._wol_sent_at = now
+                    wol_broadcast = await get_wol_broadcast()
                     from app.wol import send_wol
-                    asyncio.create_task(send_wol(settings.wol_mac_address, settings.wol_broadcast_ip))
-                    log.info("WoL packet sent to %s (broadcast %s)", settings.wol_mac_address, settings.wol_broadcast_ip)
+                    asyncio.create_task(send_wol(wol_mac, wol_broadcast))
+                    log.info("WoL packet sent to %s (broadcast %s)", wol_mac, wol_broadcast)
 
-                raise RuntimeError(f"Ollama unreachable at {self._base_url}") from e
+                raise RuntimeError(f"Ollama unreachable at {base_url}") from e
 
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
         await self._ensure_healthy()
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:  # _base_url updated by _ensure_healthy
             resp = await client.post("/api/chat", json={
                 "model": request.model or self._default_model,
                 "messages": messages,

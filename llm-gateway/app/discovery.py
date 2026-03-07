@@ -101,8 +101,10 @@ class PullRequest(BaseModel):
 
 async def _discover_ollama() -> list[DiscoveredModel]:
     """List pulled Ollama models via /api/tags."""
+    from app.registry import get_ollama_base_url
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=_DISCOVERY_TIMEOUT) as client:
+        ollama_url = await get_ollama_base_url()
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=_DISCOVERY_TIMEOUT) as client:
             resp = await client.get("/api/tags")
             resp.raise_for_status()
             data = resp.json()
@@ -438,8 +440,10 @@ async def discover_models(refresh: bool = False) -> list[ProviderModelList]:
 @discovery_router.get("/ollama/pulled")
 async def get_ollama_pulled() -> list[OllamaPulledModel]:
     """List all models pulled into Ollama with size and quantization details."""
+    from app.registry import get_ollama_base_url
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=_DISCOVERY_TIMEOUT) as client:
+        ollama_url = await get_ollama_base_url()
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=_DISCOVERY_TIMEOUT) as client:
             resp = await client.get("/api/tags")
             resp.raise_for_status()
             data = resp.json()
@@ -464,8 +468,10 @@ async def get_ollama_pulled() -> list[OllamaPulledModel]:
 @discovery_router.post("/ollama/pull")
 async def pull_ollama_model(req: PullRequest):
     """Pull a model into Ollama. Blocking — may take several minutes."""
+    from app.registry import get_ollama_base_url
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=_PULL_TIMEOUT) as client:
+        ollama_url = await get_ollama_base_url()
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=_PULL_TIMEOUT) as client:
             resp = await client.post("/api/pull", json={"name": req.name, "stream": False})
             resp.raise_for_status()
     except httpx.TimeoutException:
@@ -490,8 +496,10 @@ async def pull_ollama_model(req: PullRequest):
 @discovery_router.delete("/ollama/{name:path}")
 async def delete_ollama_model(name: str):
     """Delete a pulled Ollama model."""
+    from app.registry import get_ollama_base_url
     try:
-        async with httpx.AsyncClient(base_url=settings.ollama_base_url, timeout=30.0) as client:
+        ollama_url = await get_ollama_base_url()
+        async with httpx.AsyncClient(base_url=ollama_url, timeout=30.0) as client:
             resp = await client.request("DELETE", "/api/delete", json={"name": name})
             if resp.status_code == 404:
                 raise HTTPException(status_code=404, detail=f"Model '{name}' not found")
