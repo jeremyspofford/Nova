@@ -114,6 +114,23 @@ The `LLM_ROUTING_STRATEGY` variable controls how Nova selects between local and 
 
 This setting is runtime-configurable from the dashboard Settings page.
 
+## Platform identity
+
+These settings are managed from the dashboard Settings page (Nova Identity section) and stored in the `platform_config` table. They control how the AI presents itself.
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `nova.name` | Display name used in the system prompt, toolbar, and chat UI | `Nova` |
+| `nova.persona` | Personality guidelines injected into the system prompt's `## Identity` block. Defines communication style, tone, and character. | *(empty)* |
+| `nova.greeting` | Opening message shown in the Chat page before the user types. Supports `{name}` placeholder which auto-resolves to the current name. | `Hello! I'm {name}. I have access to your workspace...` |
+
+Changes take effect immediately -- no restart required. The AI's system prompt is assembled dynamically:
+
+1. **Identity** -- name and persona from `nova.name` + `nova.persona`
+2. **Platform Context** -- model, tools, active agents
+3. **Response Style** -- formatting rules
+4. **Memories** -- relevant context from previous conversations
+
 ## Context budgets
 
 The orchestrator allocates context window space across different purposes to prevent any single source from consuming the entire context:

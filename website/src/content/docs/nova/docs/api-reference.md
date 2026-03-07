@@ -198,6 +198,23 @@ curl -X POST http://localhost:8000/api/v1/mcp-servers/{id}/reload \
   -H "X-Admin-Secret: your-secret"
 ```
 
+### Identity (public)
+
+```bash
+# Get the AI's display name and greeting (no auth required)
+curl http://localhost:8000/api/v1/identity
+```
+
+Returns:
+```json
+{
+  "name": "Nova",
+  "greeting": "Hello! I'm Nova. I have access to your workspace..."
+}
+```
+
+The greeting supports a `{name}` placeholder that is automatically resolved to the current name. Configure the name, greeting, and persona from Settings > Nova Identity.
+
 ### Health
 
 ```bash

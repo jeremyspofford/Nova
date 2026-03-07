@@ -98,6 +98,12 @@ The Orchestrator is Nova's central coordination service. It manages agent lifecy
 | GET | `/api/v1/keys` | Admin | List all keys |
 | DELETE | `/api/v1/keys/{id}` | Admin | Revoke a key |
 
+### Identity
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/identity` | Public | Get AI display name and greeting (used by dashboard UI) |
+
 ### Health
 
 | Method | Path | Description |
@@ -123,7 +129,7 @@ The Orchestrator is Nova's central coordination service. It manages agent lifecy
 
 1. Recover any Redis agents stuck in `running` state from a previous crash
 2. Initialize the PostgreSQL connection pool and apply versioned schema migrations
-3. Ensure one canonical "Nova" agent exists; prune duplicates
+3. Ensure one canonical primary agent exists; prune duplicates
 4. Load MCP server configurations from the database and connect to enabled servers
 5. Start background tasks: queue worker (BRPOP) and stale task reaper
 

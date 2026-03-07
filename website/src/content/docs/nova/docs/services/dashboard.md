@@ -21,8 +21,7 @@ The Dashboard is Nova's web-based admin interface. Built with React, it provides
 
 | Page | Path | Description |
 |------|------|-------------|
-| **Overview** | `/` | Live agent cards with auto-polling (5s), system status at a glance |
-| **Chat** | `/chat` | Streaming chat with the primary Nova agent, model switcher |
+| **Chat** | `/` | Streaming chat with the primary agent, model switcher (default landing page) |
 | **Tasks** | `/tasks` | Pipeline task board -- submit goals, track state machine progress, cancel in-flight |
 | **Pods** | `/pods` | Pod management -- create, configure, enable/disable pods; visual pipeline editor |
 | **Usage** | `/usage` | Monthly/weekly/daily usage charts by model with sort toggle |
@@ -39,16 +38,18 @@ The Dashboard is Nova's web-based admin interface. Built with React, it provides
 
 The Settings page is organized into these sections:
 
-1. **Nova Identity** -- platform name and persona
-2. **Platform Defaults** -- default chat model, workspace path
-3. **LLM Routing** -- routing strategy (local-only, local-first, cloud-only, cloud-first)
+1. **Nova Identity** -- AI name, greeting message, and persona/soul (configures how the AI presents itself)
+2. **Platform Defaults** -- task history retention
+3. **LLM Routing** -- routing strategy (local-only, local-first, cloud-only, cloud-first), Ollama URL, intelligent routing
 4. **Provider Status** -- API key presence, ping latency, test button per provider
 5. **Context Budgets** -- tune the system/tools/memory/history/working percentage split
 6. **Admin Secret** -- update the admin authentication secret
-7. **Backups** -- quick access to backup/restore
-8. **Appearance** -- theme preferences
-9. **Notifications** -- notification settings
-10. **Developer Resources** -- links to API docs, CLI, and reference material
+7. **Remote Access** -- Cloudflare Tunnel and Tailscale configuration
+8. **Recovery & Services** -- backup/restore, factory reset, service management
+9. **System Status** -- live status of Queue Worker, Reaper, and MCP Servers
+10. **Appearance** -- theme presets and accent color palette
+11. **Notifications** -- desktop notification preferences
+12. **Developer Resources** -- links to API docs and service ports
 
 ## Proxy configuration
 
