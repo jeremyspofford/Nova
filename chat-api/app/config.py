@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     # Default agent — created on first connection if no agent_id provided
     default_agent_name: str = "Nova"
-    default_model: str = "llama3.2"
+    default_model: str = "auto"
 
     require_auth: bool = True
     cors_allowed_origins: str = "http://localhost:3001,http://localhost:5173,http://localhost:8080"

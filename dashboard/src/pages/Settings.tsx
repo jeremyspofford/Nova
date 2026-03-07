@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Save, RotateCcw, Bot, Sliders, Palette, Moon, Sun, Monitor, FileCode, ExternalLink, Activity, Gauge, ShieldCheck, Radio, Wifi, WifiOff, Power, Loader2, Globe, Shield } from 'lucide-react'
-import { getPlatformConfig, updatePlatformConfig, getProviderStatus, testProvider, getAdminSecret, setAdminSecret, getOllamaStatus, discoverModels, type PlatformConfigEntry, type ProviderStatus } from '../api'
+import { getPlatformConfig, updatePlatformConfig, getProviderStatus, testProvider, getAdminSecret, setAdminSecret, getOllamaStatus, discoverModels, resolveModel, type PlatformConfigEntry, type ProviderStatus } from '../api'
 import { getRemoteAccessStatus } from '../api-recovery'
 import { useTheme } from '../stores/theme-store'
 import { accentPalettes, themePresets } from '../lib/color-palettes'
@@ -403,6 +403,94 @@ function CloudFallbackModelPicker({
   )
 }
 
+function DefaultModelPicker({
+  onSave,
+  saving,
+  entries,
+}: {
+  onSave: (key: string, value: string) => void
+  saving: boolean
+  entries: PlatformConfigEntry[]
+}) {
+  const configured = useConfigValue(entries, 'llm.default_chat_model', 'auto')
+  const [draft, setDraft] = useState(configured)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    setDraft(configured)
+    setDirty(false)
+  }, [configured])
+
+  const { data: resolved } = useQuery({
+    queryKey: ['resolved-model'],
+    queryFn: resolveModel,
+    staleTime: 30_000,
+  })
+
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
+    staleTime: 60_000,
+  })
+  const allModels = (providers ?? [])
+    .filter(p => p.available)
+    .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
+
+  const handleChange = (v: string) => {
+    setDraft(v)
+    setDirty(v !== configured)
+  }
+
+  const handleSave = () => onSave('llm.default_chat_model', JSON.stringify(draft))
+  const handleReset = () => { setDraft(configured); setDirty(false) }
+
+  return (
+    <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+      <div className="mb-1 flex items-center justify-between">
+        <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Default Chat Model</label>
+        {dirty && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleReset}
+              className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
+            >
+              <RotateCcw size={10} /> Reset
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
+            >
+              <Save size={10} /> {saving ? 'Saving…' : 'Save'}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <select
+        value={draft}
+        onChange={e => handleChange(e.target.value)}
+        className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+      >
+        <option value="auto">
+          Auto (best available){resolved?.source === 'auto' ? ` — ${resolved.model}` : ''}
+        </option>
+        {allModels.map(id => (
+          <option key={id} value={id}>{id}</option>
+        ))}
+        {/* If current explicit value isn't in the list, still show it */}
+        {draft !== 'auto' && !allModels.includes(draft) && (
+          <option value={draft}>{draft}</option>
+        )}
+      </select>
+
+      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+        Model used for chat and pipeline when no override is set. &quot;Auto&quot; picks the best model from your authenticated providers.
+      </p>
+    </div>
+  )
+}
+
 function LLMRoutingSection({
   entries,
   onSave,
@@ -583,6 +671,9 @@ function LLMRoutingSection({
           saving={saving}
         />
       )}
+
+      {/* Default chat model — auto or explicit */}
+      <DefaultModelPicker onSave={onSave} saving={saving} entries={entries} />
     </Section>
   )
 }
@@ -1156,7 +1247,6 @@ export function Settings() {
   const novaName    = useConfigValue(entries, 'nova.name', 'Nova')
   const novaPersona = useConfigValue(entries, 'nova.persona', '')
   const novaGreeting = useConfigValue(entries, 'nova.greeting', '')
-  const defaultModel = useConfigValue(entries, 'nova.default_model', '')
   const retentionDays = useConfigValue(entries, 'task_history_retention_days', '')
 
   if (isLoading) return <div className="px-4 py-6 sm:px-6 text-sm text-neutral-500 dark:text-neutral-400">Loading…</div>
@@ -1224,15 +1314,6 @@ export function Settings() {
         title="Platform Defaults"
         description="Fallback values used when a task or agent has no explicit configuration."
       >
-        <ConfigField
-          label="Default model override"
-          configKey="nova.default_model"
-          value={defaultModel}
-          placeholder="Leave blank to use the NOVA_DEFAULT_MODEL env var"
-          description="When set, overrides the NOVA_DEFAULT_MODEL environment variable without a restart. Use the exact model ID from the Models page (e.g. claude-sonnet-4-5)."
-          onSave={handleSave}
-          saving={saveMutation.isPending}
-        />
         <ConfigField
           label="Task history retention (days)"
           configKey="task_history_retention_days"

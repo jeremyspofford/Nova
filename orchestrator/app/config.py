@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     memory_service_url: str = "http://memory-service:8002"
     llm_gateway_url: str = "http://llm-gateway:8001"
 
-    default_model: str = "llama3.2"
+    default_model: str = "auto"
     default_system_prompt: str = (
         "You are Nova, a helpful AI assistant with persistent memory. "
         "You remember previous conversations and can use tools to help users."

@@ -234,7 +234,8 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
 
     # Use the primary agent (Nova) — first in the list by creation time
     agent = agents[0]
-    model = req.model or agent.config.model
+    from app.model_resolver import resolve_default_model
+    model = req.model or await resolve_default_model()
     task_id = uuid4()
     session_id = req.session_id or str(uuid4())
 

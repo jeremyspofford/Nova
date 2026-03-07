@@ -405,8 +405,9 @@ async def _run_agent(
     from .agents.decision    import DecisionAgent
     from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox
 
-    # Resolve model: per-task override → agent → pod default → service default
-    model = model_override or agent.model or pod.default_model or settings.default_model
+    # Resolve model: per-task override → agent → pod default → auto-resolved default
+    from ..model_resolver import resolve_default_model
+    model = model_override or agent.model or pod.default_model or await resolve_default_model()
 
     AGENT_CLASSES = {
         "context":     ContextAgent,

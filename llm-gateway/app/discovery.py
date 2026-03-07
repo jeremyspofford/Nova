@@ -6,6 +6,7 @@ with auth method metadata so the dashboard can guide unconfigured users.
 
 Endpoints:
     GET  /models/discover       — full provider catalog with discovered models
+    GET  /models/resolve        — resolve "auto" to best available model
     GET  /models/ollama/pulled  — Ollama pulled models with size/details
     POST /models/ollama/pull    — pull a model into Ollama
     DELETE /models/ollama/{name} — delete a pulled Ollama model
@@ -418,6 +419,118 @@ async def discover_all() -> list[ProviderModelList]:
         ))
 
     return catalog
+
+
+# ── Auto-resolve: pick best available model ───────────────────────────────────
+
+# Quality-ranked preference list for general-purpose chat.
+# Each entry: (model_id, provider_slug, requires_ollama_check)
+_AUTO_PREFERENCE: list[tuple[str, str, bool]] = [
+    ("claude-sonnet-4-6",              "anthropic",   False),
+    ("claude-max/claude-sonnet-4-6",   "claude-max",  False),
+    ("gpt-4o",                         "openai",      False),
+    ("chatgpt/gpt-4o",                 "chatgpt",     False),
+    ("gemini/gemini-2.5-flash",        "gemini",      False),
+    ("groq/llama-3.3-70b-versatile",   "groq",        False),
+    ("claude-haiku-4-5-20251001",      "anthropic",   False),
+    ("claude-max/claude-haiku-4-5",    "claude-max",  False),
+    ("chatgpt/gpt-4o-mini",           "chatgpt",     False),
+    ("github/gpt-4o-mini",            "github",      False),
+    ("cerebras/llama3.1-8b",           "cerebras",    False),
+]
+
+_FALLBACK_MODEL = "llama3.2"
+
+# Module-level cache for resolve result
+_resolve_cache: dict[str, tuple[str, str, float]] = {}  # "resolve" -> (model, source, timestamp)
+_RESOLVE_CACHE_TTL = 30.0  # seconds
+
+
+def _best_ollama_model() -> str | None:
+    """Return the best pulled Ollama model by parameter count (sync-safe, uses cached catalog)."""
+    import re
+
+    # Try to read from the cached discovery result
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+
+    # We can't do async here easily, so check the Redis cache synchronously
+    # Instead, use the in-memory catalog approach — check _OLLAMA_MODELS from registry
+    from app.registry import MODEL_REGISTRY, _OLLAMA_MODELS
+
+    if not _OLLAMA_MODELS:
+        return None
+
+    # Parse parameter sizes from known model names for ranking
+    def _param_score(name: str) -> float:
+        """Rough parameter count from model name for ranking."""
+        # Match patterns like "70b", "8b", "3b", "1.5b"
+        m = re.search(r'(\d+\.?\d*)b', name.lower())
+        if m:
+            return float(m.group(1))
+        # Known sizes for common models without size in name
+        known = {"deepseek-r1": 7, "mistral": 7, "phi4": 14, "gemma3": 12}
+        for prefix, size in known.items():
+            if name.startswith(prefix):
+                return size
+        return 3  # default assumption
+
+    # Filter out embedding models and pick the largest
+    candidates = [m for m in _OLLAMA_MODELS if "embed" not in m.lower()]
+    if not candidates:
+        return None
+
+    return max(candidates, key=_param_score)
+
+
+async def resolve_auto_model() -> str:
+    """Iterate the preference list and return the first model whose provider is available.
+    Falls back to best Ollama model, then llama3.2."""
+    for model_id, slug, _ in _AUTO_PREFERENCE:
+        if _is_provider_available(slug):
+            return model_id
+
+    # Try best pulled Ollama model
+    best_local = _best_ollama_model()
+    if best_local:
+        return best_local
+
+    return _FALLBACK_MODEL
+
+
+class ResolveResponse(BaseModel):
+    model: str
+    source: str  # "auto" or "explicit"
+
+
+@discovery_router.get("/resolve")
+async def resolve_model() -> ResolveResponse:
+    """Resolve the default chat model. If set to 'auto', picks the best available model."""
+    import time as _time
+
+    # Check cache
+    cached = _resolve_cache.get("resolve")
+    if cached:
+        model, source, ts = cached
+        if (_time.monotonic() - ts) < _RESOLVE_CACHE_TTL:
+            return ResolveResponse(model=model, source=source)
+
+    # Read configured default from Redis
+    from app.registry import _get_redis_config
+    configured = await _get_redis_config("llm.default_chat_model", "auto")
+
+    if configured == "auto":
+        model = await resolve_auto_model()
+        source = "auto"
+    else:
+        model = configured
+        source = "explicit"
+
+    _resolve_cache["resolve"] = (model, source, _time.monotonic())
+    return ResolveResponse(model=model, source=source)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

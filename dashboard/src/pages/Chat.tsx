@@ -4,7 +4,7 @@ import { Send, Bot, User, RefreshCw, MessageSquare } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamChat, discoverModels, type ChatMessage } from '../api'
+import { streamChat, discoverModels, resolveModel, type ChatMessage } from '../api'
 import { useChatStore, type Message } from '../stores/chat-store'
 import Card from '../components/Card'
 
@@ -78,6 +78,12 @@ export function Chat() {
   const models = (providers ?? [])
     .filter(p => p.available)
     .flatMap(p => p.models.filter(m => m.registered).map(m => ({ id: m.id, provider: p.name })))
+
+  const { data: resolved } = useQuery({
+    queryKey: ['resolved-model'],
+    queryFn: resolveModel,
+    staleTime: 30_000,
+  })
 
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -217,7 +223,7 @@ export function Chat() {
             title="Override Nova's default model for this conversation"
             className="w-24 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-[16px] sm:text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
           >
-            <option value="">Default</option>
+            <option value="">Auto{resolved ? ` (${resolved.model})` : ''}</option>
             {models.map(m => (
               <option key={m.id} value={m.id}>{m.id} ({m.provider})</option>
             ))}

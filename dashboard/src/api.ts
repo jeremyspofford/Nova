@@ -436,6 +436,14 @@ export interface OllamaPulledModel {
 export const discoverModels = (refresh = false) =>
   apiFetch<ProviderModelList[]>(`/v1/models/discover${refresh ? '?refresh=true' : ''}`)
 
+export interface ResolvedModel {
+  model: string
+  source: 'auto' | 'explicit'
+}
+
+export const resolveModel = () =>
+  apiFetch<ResolvedModel>('/v1/models/resolve')
+
 export const getOllamaPulled = () =>
   apiFetch<OllamaPulledModel[]>('/v1/models/ollama/pulled')
 

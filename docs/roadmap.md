@@ -229,12 +229,27 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 | **Streaming pipeline progress** | Show which stage is running in the dashboard (Context → Task → ...) |
 | **Adaptive stage count** | Simple questions skip the full Quartet — direct answer with optional guardrail |
 
-### C. Smart Model Auto-Detection (next)
+### C. Smart Model Auto-Detection
+
+#### Phase 1: Simple Auto (delivered)
+
+| Feature | Status |
+|---|---|
+| `llm.default_chat_model` config key, defaults to `"auto"` | ✅ |
+| Quality-ranked preference list: Sonnet → GPT-4o → Gemini Flash → Groq → Haiku → local → llama3.2 | ✅ |
+| `/v1/models/resolve` endpoint with 30s cached auto-resolution | ✅ |
+| Chat dropdown shows "Auto (model-name)" with resolved model | ✅ |
+| Settings LLM Routing section: auto-aware model picker | ✅ |
+| Pipeline executor uses auto-resolved model as fallback | ✅ |
+
+#### Phase 2: Capability-Aware Routing (next)
 
 | Feature | Description |
 |---|---|
-| **Best-available model selection** | Auto-select best model based on authenticated providers + pulled Ollama models |
-| **Priority chain** | User preference → Claude Sonnet → GPT-4o → Gemini Flash → best local → llama3.2 |
+| **Message content analysis** | Detect images, code blocks, long context to route to capable models |
+| **Model capability tags** | Tag models in registry with vision, code, long-context capabilities |
+| **Per-capability preferences** | Separate preference lists for vision, code, general tasks |
+| **Separate chat vs pipeline defaults** | Allow different auto-resolution for interactive chat vs pipeline agents |
 | **Chat onboarding** | First-run greeting that helps users configure providers through conversation |
 
 ---
