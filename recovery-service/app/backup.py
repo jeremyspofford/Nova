@@ -131,6 +131,72 @@ def delete_backup(filename: str) -> dict:
     return {"filename": filename, "deleted": True}
 
 
+def list_checkpoints() -> list[dict]:
+    """List automatic checkpoint backups sorted newest-first."""
+    d = _backup_dir()
+    checkpoints = []
+    for f in sorted(d.glob("nova-checkpoint-*.tar.gz"), reverse=True):
+        stat = f.stat()
+        checkpoints.append({
+            "filename": f.name,
+            "size_bytes": stat.st_size,
+            "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        })
+    return checkpoints
+
+
+async def create_checkpoint() -> dict:
+    """Create an automatic checkpoint backup (same as manual but different prefix)."""
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+    filename = f"nova-checkpoint-{timestamp}.tar.gz"
+    outpath = _backup_dir() / filename
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+
+        sql_path = tmp / "database.sql"
+        proc = await asyncio.create_subprocess_exec(
+            "pg_dump",
+            "-h", settings.pg_host,
+            "-p", str(settings.pg_port),
+            "-U", settings.pg_user,
+            "-d", settings.pg_database,
+            "--no-owner",
+            "--no-acl",
+            "-f", str(sql_path),
+            env={**os.environ, "PGPASSWORD": settings.pg_password},
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            raise RuntimeError(f"pg_dump failed: {stderr.decode()}")
+
+        with tarfile.open(outpath, "w:gz") as tar:
+            tar.add(sql_path, arcname="database.sql")
+
+        logger.info("Checkpoint created: %s (%.1f MB)", filename, outpath.stat().st_size / 1_048_576)
+
+    stat = outpath.stat()
+    return {
+        "filename": filename,
+        "size_bytes": stat.st_size,
+        "created_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+    }
+
+
+def prune_checkpoints(max_keep: int) -> int:
+    """Delete oldest checkpoints beyond the retention limit. Returns number pruned."""
+    d = _backup_dir()
+    checkpoints = sorted(d.glob("nova-checkpoint-*.tar.gz"), key=lambda f: f.stat().st_mtime, reverse=True)
+    pruned = 0
+    for f in checkpoints[max_keep:]:
+        f.unlink()
+        logger.info("Pruned checkpoint: %s", f.name)
+        pruned += 1
+    return pruned
+
+
 def _prune_old_backups():
     """Remove backups older than retention period."""
     if settings.backup_retain_days <= 0:

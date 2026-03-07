@@ -1,8 +1,9 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, RefreshCw, HardDrive, RotateCcw, Download,
   Trash2, Shield, CheckCircle2, XCircle, Loader2, Server,
+  MessageCircle, Send, ChevronDown, ChevronUp, Clock,
 } from 'lucide-react'
 import { format } from 'date-fns'
 import Card from '../components/Card'
@@ -11,7 +12,9 @@ import {
   getServiceStatus, restartService, restartAllServices,
   getBackups, createBackup, restoreBackup, deleteBackup,
   getResetCategories, factoryReset, getRecoveryOverview,
+  troubleshootChat,
   type ServiceStatus, type BackupInfo, type ResetCategory, type RecoveryOverview,
+  type TroubleshootMessage,
 } from '../api-recovery'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -562,6 +565,9 @@ export function OverviewBanner() {
               </p>
               <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
                 {format(new Date(backups.latest.created_at), 'h:mm a')}
+                {backups.latest.filename.startsWith('nova-checkpoint-') && (
+                  <span className="ml-1 text-teal-600 dark:text-teal-400">(auto)</span>
+                )}
               </p>
             </>
           ) : (
@@ -576,12 +582,153 @@ export function OverviewBanner() {
   )
 }
 
+// ── AI Troubleshooter ────────────────────────────────────────────────────────
+
+interface ChatEntry {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export function AiTroubleshooter({ suggestedPrompt }: { suggestedPrompt?: string }) {
+  const [expanded, setExpanded] = useState(false)
+  const [messages, setMessages] = useState<ChatEntry[]>([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [promptApplied, setPromptApplied] = useState(false)
+  const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Prepopulate input when there's a suggested prompt and the user hasn't interacted yet
+  useEffect(() => {
+    if (suggestedPrompt && !promptApplied && messages.length === 0 && !input) {
+      setInput(suggestedPrompt)
+      setExpanded(true)
+      setPromptApplied(true)
+    }
+  }, [suggestedPrompt, promptApplied, messages.length, input])
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages])
+
+  const handleSend = useCallback(async () => {
+    const text = input.trim()
+    if (!text || loading) return
+    setInput('')
+    const userMsg: ChatEntry = { role: 'user', content: text }
+    setMessages(prev => [...prev, userMsg])
+    setLoading(true)
+    try {
+      const history: TroubleshootMessage[] = messages.map(m => ({ role: m.role, content: m.content }))
+      const result = await troubleshootChat(text, history)
+      setMessages(prev => [...prev, { role: 'assistant', content: result.response }])
+    } catch (e) {
+      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${e}` }])
+    }
+    setLoading(false)
+  }, [input, loading, messages])
+
+  return (
+    <Card className="overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full border-b border-teal-200 dark:border-teal-900/50 bg-teal-50/50 dark:bg-teal-950/20 px-4 py-4 sm:px-5 text-left"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MessageCircle size={15} className="text-teal-600 dark:text-teal-400" />
+            <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">AI Troubleshooter</h2>
+          </div>
+          {expanded
+            ? <ChevronUp size={14} className="text-neutral-400" />
+            : <ChevronDown size={14} className="text-neutral-400" />}
+        </div>
+        <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+          Ask an AI to diagnose issues using live service logs and status.
+        </p>
+      </button>
+
+      {expanded && (
+        <div className="px-4 py-4 sm:px-5 space-y-3">
+          {/* Message area */}
+          <div
+            ref={scrollRef}
+            className="h-64 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-3"
+          >
+            {messages.length === 0 && !loading && (
+              <p className="text-xs text-neutral-400 dark:text-neutral-500 text-center py-8">
+                Ask a question like "Why is the orchestrator down?" or "What errors are in the logs?"
+              </p>
+            )}
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+                  msg.role === 'user'
+                    ? 'bg-teal-600 text-white'
+                    : 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 border border-neutral-200 dark:border-neutral-600'
+                }`}>
+                  {msg.content}
+                </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="rounded-lg bg-white dark:bg-neutral-700 border border-neutral-200 dark:border-neutral-600 px-3 py-2">
+                  <Loader2 size={14} className="text-teal-500 animate-spin" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
+              placeholder="Describe the issue..."
+              disabled={loading}
+              className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 outline-none focus:border-teal-500 disabled:opacity-50"
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || loading}
+              className="rounded-lg bg-teal-600 dark:bg-teal-700 px-3 py-2 text-white hover:bg-teal-500 dark:hover:bg-teal-600 disabled:opacity-40 transition-colors"
+            >
+              <Send size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+    </Card>
+  )
+}
+
 // ── Recovery Page ────────────────────────────────────────────────────────────
 
 export function Recovery() {
+  const { data: overview } = useQuery({
+    queryKey: ['recovery-overview'],
+    queryFn: getRecoveryOverview,
+    refetchInterval: 15_000,
+  })
+
+  // Build a suggested prompt when services are unhealthy
+  const suggestedPrompt = (() => {
+    if (!overview) return undefined
+    const down = overview.services.details
+      ?.filter((s: ServiceStatus) => s.status !== 'running' || (s.health !== 'healthy' && s.health !== 'none'))
+      .map((s: ServiceStatus) => s.service)
+    if (!down?.length) return undefined
+    return `These services are having issues: ${down.join(', ')}. What's wrong and how do I fix it?`
+  })()
+
   return (
     <div className="px-4 py-6 sm:px-6 space-y-6">
       <OverviewBanner />
+      <AiTroubleshooter suggestedPrompt={suggestedPrompt} />
       <ServiceStatusSection />
       <BackupSection />
       <FactoryResetSection />

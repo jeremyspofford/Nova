@@ -15,7 +15,7 @@ export function InputDrawer({ open, onAttach, onTranscript }: Props) {
       className="overflow-hidden transition-all duration-200 ease-out"
       style={{ maxHeight: open ? '300px' : '0px', opacity: open ? 1 : 0 }}
     >
-      <div className="flex flex-col sm:flex-row gap-3 pb-2 pt-1">
+      <div className="flex flex-col sm:flex-row gap-3 pb-2 pt-2 border-t border-neutral-100 dark:border-neutral-800 mb-2">
         {/* Left: action buttons */}
         <div className="flex sm:flex-col gap-1">
           <button

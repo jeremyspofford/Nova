@@ -112,6 +112,19 @@ def check_container_status(name: str) -> dict:
         return {"name": name, "container_name": None, "status": "error", "health": "unknown", "running": False}
 
 
+def get_container_logs(service_name: str, tail: int = 100) -> str:
+    """Get recent logs from a Nova service container."""
+    try:
+        client = _client()
+        containers = client.containers.list(all=True)
+        for c in containers:
+            if service_name in c.name and ("nova" in c.name or service_name == c.name):
+                return c.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
+        return f"Container for '{service_name}' not found"
+    except DockerException as e:
+        return f"Docker error: {e}"
+
+
 def restart_all_services() -> list[dict]:
     """Restart all Nova services (except postgres, redis, recovery)."""
     results = []

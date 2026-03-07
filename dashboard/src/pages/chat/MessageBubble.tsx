@@ -22,7 +22,7 @@ export function MessageBubble({ message }: { message: Message }) {
         <div className={`text-sm leading-relaxed ${
           isUser
             ? 'rounded-2xl rounded-tr-sm px-4 py-2.5 bg-accent-700 text-white whitespace-pre-wrap'
-            : 'text-neutral-900 dark:text-neutral-100 markdown-body overflow-x-auto'
+            : 'rounded-2xl rounded-tl-sm px-4 py-2.5 bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 markdown-body overflow-x-auto'
         }`}>
           {!isUser && message.activitySteps && message.activitySteps.length > 0 && (
             <ActivityFeed

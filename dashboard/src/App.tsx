@@ -53,16 +53,22 @@ function AppShell() {
     })
   }, [])
 
+  const handleOpenRecovery = useCallback(() => {
+    // Set the URL before BrowserRouter mounts so it renders the Recovery route
+    window.history.replaceState(null, '', '/recovery')
+    setReady(true)
+  }, [])
+
   if (!ready) {
-    return <StartupScreen onReady={handleReady} />
+    return <StartupScreen onReady={handleReady} onOpenRecovery={handleOpenRecovery} />
   }
 
   return (
     <ChatProvider>
     <BrowserRouter>
-      <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
+      <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
         <NavBar />
-        <main className="mx-auto max-w-6xl">
+        <main className="flex-1 min-h-0 mx-auto max-w-6xl w-full overflow-y-auto">
           <Routes>
             <Route path="/"        element={<Chat />} />
             <Route path="/chat"    element={<Chat />} />

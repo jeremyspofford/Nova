@@ -55,7 +55,7 @@ function ServiceRow({ svc }: { svc: ServiceStatus }) {
   )
 }
 
-export function StartupScreen({ onReady }: { onReady: () => void }) {
+export function StartupScreen({ onReady, onOpenRecovery }: { onReady: () => void; onOpenRecovery?: () => void }) {
   const { data: overview } = useQuery({
     queryKey: ['startup-status'],
     queryFn: getRecoveryOverview,
@@ -122,6 +122,16 @@ export function StartupScreen({ onReady }: { onReady: () => void }) {
               {overview?.services.up ?? 0} of {overview?.services.total ?? 0} services ready
             </p>
           </div>
+        )}
+
+        {/* Recovery access — always visible so users can reach recovery tools during startup */}
+        {onOpenRecovery && (
+          <button
+            onClick={onOpenRecovery}
+            className="mt-6 w-full rounded-lg border border-neutral-300 dark:border-neutral-700 px-4 py-2 text-xs font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 hover:border-neutral-400 dark:hover:border-neutral-600 transition-colors"
+          >
+            Open Recovery Tools
+          </button>
         )}
       </div>
     </div>

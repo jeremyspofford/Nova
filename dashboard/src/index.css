@@ -92,6 +92,11 @@
   padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
+/* ── Thin scrollbar for textarea ────────────────────────────────────────── */
+textarea::-webkit-scrollbar { width: 4px; }
+textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-300)); border-radius: 2px; }
+.dark textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-600)); }
+
 /* ── Markdown rendering in chat bubbles ──────────────────────────────────── */
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child  { margin-bottom: 0; }

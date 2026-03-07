@@ -245,7 +245,7 @@ export function Chat() {
   }
 
   return (
-    <div ref={containerRef} className="flex flex-col h-[calc(100dvh-57px)] overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+    <div ref={containerRef} className="flex flex-col h-full overflow-hidden bg-neutral-50 dark:bg-neutral-950">
       {messages.length === 0 ? (
         /* Empty state: greeting bubble + input */
         <div className="flex-1 flex flex-col">
@@ -272,6 +272,14 @@ export function Chat() {
         <>
           <div className="flex-1 min-h-0 overflow-y-auto">
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+              {greeting && (
+                <MessageBubble message={{
+                  id: 'greeting',
+                  role: 'assistant',
+                  content: greeting,
+                  timestamp: new Date(),
+                }} />
+              )}
               {messages.map(msg => (
                 <MessageBubble key={msg.id} message={msg} />
               ))}

@@ -134,6 +134,37 @@ export const patchEnv = (updates: Record<string, string>) =>
     { method: 'PATCH', body: JSON.stringify({ updates }) },
   )
 
+// ── Diagnostics ─────────────────────────────────────────────────────────────
+
+export interface DiagnosticsData {
+  services: ServiceStatus[]
+  service_logs: Record<string, string>
+  database: { connected: boolean; size?: string; error?: string }
+  checkpoints: { count: number; latest: BackupInfo | null }
+  error_patterns: string[]
+}
+
+export const getDiagnostics = () =>
+  recoveryFetch<DiagnosticsData>('/api/v1/recovery/diagnostics')
+
+// ── Troubleshoot ────────────────────────────────────────────────────────────
+
+export interface TroubleshootMessage {
+  role: string
+  content: string
+}
+
+export interface TroubleshootResponse {
+  response: string
+  provider: string | null
+}
+
+export const troubleshootChat = (message: string, history: TroubleshootMessage[]) =>
+  recoveryFetch<TroubleshootResponse>(
+    '/api/v1/recovery/troubleshoot/chat',
+    { method: 'POST', body: JSON.stringify({ message, history }) },
+  )
+
 // ── Compose Profiles ────────────────────────────────────────────────────────
 
 export const manageComposeProfile = (profile: string, action: 'start' | 'stop') =>

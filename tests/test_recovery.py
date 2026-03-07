@@ -49,3 +49,60 @@ class TestFactoryReset:
         resp = await recovery.get("/api/v1/recovery/factory-reset/categories")
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
+
+
+class TestTroubleshoot:
+    async def test_troubleshoot_requires_auth(self, recovery: httpx.AsyncClient):
+        resp = await recovery.post(
+            "/api/v1/recovery/troubleshoot/chat",
+            json={"message": "Why is my service down?", "history": []},
+        )
+        assert resp.status_code in (401, 403)
+
+    async def test_troubleshoot_returns_response(
+        self, recovery: httpx.AsyncClient, admin_headers: dict
+    ):
+        resp = await recovery.post(
+            "/api/v1/recovery/troubleshoot/chat",
+            json={"message": "What services are running?", "history": []},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert "response" in data
+        assert "provider" in data
+        # provider may be null if no LLM is configured
+        if data["provider"] is not None:
+            assert data["provider"] in ("anthropic", "openai", "groq", "ollama")
+
+    async def test_troubleshoot_with_history(
+        self, recovery: httpx.AsyncClient, admin_headers: dict
+    ):
+        history = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi, how can I help?"},
+        ]
+        resp = await recovery.post(
+            "/api/v1/recovery/troubleshoot/chat",
+            json={"message": "Check postgres", "history": history},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert "response" in data
+        assert "provider" in data
+
+    async def test_troubleshoot_empty_message(
+        self, recovery: httpx.AsyncClient, admin_headers: dict
+    ):
+        resp = await recovery.post(
+            "/api/v1/recovery/troubleshoot/chat",
+            json={"message": "", "history": []},
+            headers=admin_headers,
+        )
+        # Accept either a valid response or a validation error
+        assert resp.status_code in (200, 422), resp.text
+        if resp.status_code == 200:
+            data = resp.json()
+            assert "response" in data
+            assert "provider" in data

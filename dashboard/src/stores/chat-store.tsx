@@ -111,7 +111,16 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const [persisted] = useState(loadPersistedChat)
   const [messages, setMessages] = useState<Message[]>(persisted.messages)
   const [sessionId, setSessionId] = useState<string | undefined>(persisted.sessionId)
-  const [modelId, setModelId] = useState('')
+  const [modelId, _setModelId] = useState(
+    () => localStorage.getItem('nova_chat_model') ?? ''
+  )
+  const setModelId: React.Dispatch<React.SetStateAction<string>> = useCallback((val) => {
+    _setModelId(prev => {
+      const next = typeof val === 'function' ? val(prev) : val
+      localStorage.setItem('nova_chat_model', next)
+      return next
+    })
+  }, [])
   const [error, setError] = useState<string | null>(null)
 
   const [pendingFiles, setPendingFiles] = useState<AttachedFile[]>([])

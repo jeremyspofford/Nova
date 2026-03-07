@@ -5,10 +5,10 @@ import logging
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 
-from .backup import create_backup, delete_backup, list_backups, restore_backup
+from .backup import create_backup, delete_backup, list_backups, list_checkpoints, restore_backup
 from .compose_client import start_profiled_service, stop_profiled_service
 from .config import settings
-from .docker_client import check_container_status, list_service_status, restart_all_services, restart_service
+from .docker_client import check_container_status, get_container_logs, list_service_status, restart_all_services, restart_service
 from .env_manager import add_compose_profile, patch_env, read_env, remove_compose_profile
 from .factory_reset import factory_reset, get_categories
 
@@ -252,6 +252,69 @@ async def get_remote_access_status(x_admin_secret: str = Header(default="")):
             "container": ts_status,
         },
     }
+
+
+# ── Diagnostics ────────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/recovery/diagnostics")
+async def get_diagnostics(x_admin_secret: str = Header(default="")):
+    """Aggregated diagnostics for AI troubleshooting: service health, logs, DB status."""
+    _check_admin(x_admin_secret)
+    from .db import get_pool
+    import re
+
+    services = list_service_status()
+    checkpoints = list_checkpoints()
+
+    # Collect logs from unhealthy/down services
+    service_logs: dict[str, str] = {}
+    for svc in services:
+        if svc["status"] != "running" or svc["health"] not in ("healthy", "none"):
+            service_logs[svc["service"]] = get_container_logs(svc["service"], tail=50)
+
+    # DB connectivity
+    db_info: dict = {}
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            db_size = await conn.fetchval(
+                "SELECT pg_size_pretty(pg_database_size(current_database()))"
+            )
+            db_info = {"connected": True, "size": db_size}
+    except Exception as e:
+        db_info = {"connected": False, "error": str(e)}
+
+    # Extract error patterns from logs
+    error_patterns: list[str] = []
+    for svc_name, logs in service_logs.items():
+        for line in logs.splitlines()[-50:]:
+            if re.search(r"(?i)(error|exception|traceback|fatal|panic|crash)", line):
+                error_patterns.append(f"[{svc_name}] {line.strip()[-200:]}")
+
+    return {
+        "services": services,
+        "service_logs": service_logs,
+        "database": db_info,
+        "checkpoints": {
+            "count": len(checkpoints),
+            "latest": checkpoints[0] if checkpoints else None,
+        },
+        "error_patterns": error_patterns[:30],
+    }
+
+
+# ── Troubleshoot ──────────────────────────────────────────────────────────────
+
+from .troubleshoot import TroubleshootRequest, troubleshoot_chat
+
+@router.post("/api/v1/recovery/troubleshoot/chat")
+async def troubleshoot_endpoint(
+    req: TroubleshootRequest,
+    x_admin_secret: str = Header(default=""),
+):
+    """AI-powered troubleshooting chat — calls an external LLM directly."""
+    _check_admin(x_admin_secret)
+    return await troubleshoot_chat(req)
 
 
 # ── Factory Reset ──────────────────────────────────────────────────────────────

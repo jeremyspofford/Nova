@@ -19,11 +19,15 @@ logger = logging.getLogger("nova.recovery")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     from .db import init_pool, close_pool
+    from .scheduler import checkpoint_loop
 
     await init_pool()
+    checkpoint_task = asyncio.create_task(checkpoint_loop())
     logger.info("Recovery service ready — port %s, backups at %s", settings.port, settings.backup_dir)
     yield
+    checkpoint_task.cancel()
     await close_pool()
 
 
