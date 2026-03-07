@@ -206,6 +206,39 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 
 ---
 
+## 🔜 Phase 4b — Pipeline Performance & Chat Responsiveness
+
+> Pipeline tasks are slow because the Quartet runs 5 sequential LLM stages.
+> Chat is slower than it needs to be because of unnecessary pre-flight LLM calls.
+> This phase addresses both with targeted optimizations.
+
+### A. Chat Latency (delivered)
+
+| Optimization | Status |
+|---|---|
+| Skip tool pre-resolution for interactive chat — pass tools inline to streaming call | ✅ |
+| Eliminates one full LLM round-trip per chat message (~40-50% first-token improvement) | ✅ |
+
+### B. Pipeline Task Performance (next)
+
+| Optimization | Description |
+|---|---|
+| **Parallel stage execution** | Run Context + Guardrail in parallel where possible (no data dependency) |
+| **Stage skipping for simple tasks** | Skip Code Review for non-code tasks; skip Guardrail for low-risk queries |
+| **Context caching across stages** | Share retrieved context between Context Agent and Task Agent without re-fetching |
+| **Streaming pipeline progress** | Show which stage is running in the dashboard (Context → Task → ...) |
+| **Adaptive stage count** | Simple questions skip the full Quartet — direct answer with optional guardrail |
+
+### C. Smart Model Auto-Detection (next)
+
+| Feature | Description |
+|---|---|
+| **Best-available model selection** | Auto-select best model based on authenticated providers + pulled Ollama models |
+| **Priority chain** | User preference → Claude Sonnet → GPT-4o → Gemini Flash → best local → llama3.2 |
+| **Chat onboarding** | First-run greeting that helps users configure providers through conversation |
+
+---
+
 ## 🔜 Phase 5b — Dashboard Enhancement (Pod Management + Full Visibility)
 
 > The dashboard grows to expose everything Phase 4 produces.

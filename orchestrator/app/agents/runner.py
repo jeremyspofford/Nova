@@ -113,12 +113,18 @@ async def run_agent_turn_streaming(
     model: str,
     system_prompt: str,
     api_key_id: UUID | None = None,
+    skip_tool_preresolution: bool = False,
 ):
     """Streaming variant — yields text deltas as they arrive from the LLM.
 
-    Tool-use strategy: resolve tool-call rounds non-streaming (fast, tool calls
-    rarely produce large output), then stream the final answer turn. This keeps
-    the UI responsive without complex mid-stream interruption handling.
+    Tool-use strategy: by default, resolve tool-call rounds non-streaming
+    (fast, tool calls rarely produce large output), then stream the final
+    answer turn.
+
+    When skip_tool_preresolution=True (used by interactive chat), tools are
+    passed directly to the streaming call — the model can use them inline
+    without an extra non-streaming round-trip. This cuts first-token latency
+    roughly in half for conversational messages.
     """
     from app.usage import log_usage
 
@@ -132,11 +138,16 @@ async def run_agent_turn_streaming(
     )
     prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
 
-    streaming_messages, used_tools = await _resolve_tool_rounds(
-        messages=prompt_messages,
-        model=model,
-        metadata={"agent_id": agent_id, "session_id": session_id},
-    )
+    if skip_tool_preresolution:
+        # Pass tools directly to streaming — no pre-flight LLM call
+        streaming_messages = prompt_messages
+        used_tools = True  # Always include tools so model can use them
+    else:
+        streaming_messages, used_tools = await _resolve_tool_rounds(
+            messages=prompt_messages,
+            model=model,
+            metadata={"agent_id": agent_id, "session_id": session_id},
+        )
 
     # Pass tools when history contains tool interactions — Anthropic requires
     # tools= to be present whenever any message references tool_use content.
