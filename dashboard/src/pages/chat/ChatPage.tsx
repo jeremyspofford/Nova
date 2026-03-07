@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Bot } from 'lucide-react'
 import { streamChat, uploadFile, discoverModels, resolveModel, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
@@ -248,19 +247,24 @@ export function Chat() {
   return (
     <div ref={containerRef} className="flex flex-col h-[calc(100dvh-57px)] overflow-hidden bg-neutral-50 dark:bg-neutral-950">
       {messages.length === 0 ? (
-        /* Empty state: centered greeting + input */
-        <div className="flex-1 flex flex-col items-center justify-center px-4">
-          <div className="mb-8 text-center">
-            <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-accent-700 text-white">
-              <Bot size={24} />
+        /* Empty state: greeting bubble + input */
+        <div className="flex-1 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="max-w-3xl mx-auto px-4 py-6">
+              {greeting && (
+                <MessageBubble message={{
+                  id: 'greeting',
+                  role: 'assistant',
+                  content: greeting,
+                  timestamp: new Date(),
+                }} />
+              )}
             </div>
-            <h1 className="text-lg font-medium text-neutral-900 dark:text-neutral-100">
-              {greeting || `How can I help you?`}
-            </h1>
-            <p className="mt-1 text-sm text-neutral-500">{aiName} has persistent memory and tools.</p>
           </div>
-          <div className="w-full max-w-3xl">
-            <ChatInput {...chatInputProps} />
+          <div className="shrink-0 w-full pb-4 pt-2 px-4">
+            <div className="max-w-3xl mx-auto">
+              <ChatInput {...chatInputProps} />
+            </div>
           </div>
         </div>
       ) : (
