@@ -207,6 +207,20 @@ async def get_task(task_id: str, _key: ApiKeyDep):
 
 # ── Direct chat (admin dashboard) ────────────────────────────────────────────
 
+BASE_FORMAT_PROMPT = (
+    "IMPORTANT — Response formatting rules:\n"
+    "- Always use markdown. Start sections with ## headings.\n"
+    "- Use bullet points for lists, bold for key terms.\n"
+    "- Keep paragraphs to 2-3 sentences max, separated by blank lines.\n"
+    "- Never write walls of text. Break every response into clear sections.\n"
+    "- Example structure:\n"
+    "  ## Overview\n"
+    "  Brief summary here.\n\n"
+    "  ## Details\n"
+    "  - Point one\n"
+    "  - Point two"
+)
+
 STYLE_PROMPTS = {
     "concise": "Be concise and brief. Give short, direct answers without unnecessary elaboration.",
     "detailed": "Give thorough, detailed answers with examples and explanations.",
@@ -255,7 +269,7 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
 
     # Build style/research modifiers for system prompt
     system_prompt = agent.config.system_prompt
-    modifiers: list[str] = []
+    modifiers: list[str] = [BASE_FORMAT_PROMPT]
     if req.output_style and req.output_style in STYLE_PROMPTS:
         modifiers.append(STYLE_PROMPTS[req.output_style])
     if req.custom_instructions:

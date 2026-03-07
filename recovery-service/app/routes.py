@@ -199,6 +199,7 @@ async def patch_env_vars(
 PROFILE_MAP = {
     "cloudflare-tunnel": "cloudflared",
     "tailscale": "tailscale",
+    "bridges": "chat-bridge",
 }
 
 
@@ -251,6 +252,28 @@ async def get_remote_access_status(x_admin_secret: str = Header(default="")):
             "configured": bool(env.get("TAILSCALE_AUTHKEY")),
             "container": ts_status,
         },
+    }
+
+
+# ── Chat Integrations Status ─────────────────────────────────────────────────
+
+@router.get("/api/v1/recovery/chat-integrations/status")
+async def get_chat_integrations_status(x_admin_secret: str = Header(default="")):
+    """Container + config status for chat bridge adapters (Telegram, Slack)."""
+    _check_admin(x_admin_secret)
+    env = read_env()
+    bridge_status = check_container_status("chat-bridge")
+
+    return {
+        "telegram": {
+            "configured": bool(env.get("TELEGRAM_BOT_TOKEN")),
+            "container": bridge_status,
+        },
+        "slack": {
+            "configured": bool(env.get("SLACK_BOT_TOKEN")),
+            "container": bridge_status,
+        },
+        "container": bridge_status,
     }
 
 

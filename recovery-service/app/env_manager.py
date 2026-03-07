@@ -11,12 +11,15 @@ logger = logging.getLogger("nova.recovery.env")
 ENV_WHITELIST = {
     "CLOUDFLARE_TUNNEL_TOKEN",
     "TAILSCALE_AUTHKEY",
+    "TELEGRAM_BOT_TOKEN",
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
     "COMPOSE_PROFILES",
     "CORS_ALLOWED_ORIGINS",
 }
 
 # Keys whose values should be masked in GET responses
-SECRET_KEYS = {"CLOUDFLARE_TUNNEL_TOKEN", "TAILSCALE_AUTHKEY"}
+SECRET_KEYS = {"CLOUDFLARE_TUNNEL_TOKEN", "TAILSCALE_AUTHKEY", "TELEGRAM_BOT_TOKEN", "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"}
 
 ENV_FILE = os.getenv("NOVA_ENV_FILE", "/project/.env")
 

@@ -393,13 +393,12 @@ function TaskCard({ task }: { task: PipelineTask }) {
   const [reviewing, setReviewing] = useState(needsReview)
   const qc = useQueryClient()
   const navigate = useNavigate()
-  const { resetConversation, setPrefillInput } = useChatStore()
+  const { setPrefillInput } = useChatStore()
 
   const handleDiscuss = useCallback(() => {
-    resetConversation()
     setPrefillInput(buildTaskContext(task))
     navigate('/chat')
-  }, [task, resetConversation, setPrefillInput, navigate])
+  }, [task, setPrefillInput, navigate])
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelPipelineTask(task.id),

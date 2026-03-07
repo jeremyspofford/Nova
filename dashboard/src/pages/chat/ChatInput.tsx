@@ -49,11 +49,11 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
   const handleSubmit = useCallback(() => {
     const text = input.trim()
-    if (!text || isStreaming) return
+    if (!text) return
     setInput('')
     if (textareaRef.current) textareaRef.current.style.height = 'auto'
     onSubmit(text)
-  }, [input, isStreaming, onSubmit])
+  }, [input, onSubmit])
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -195,7 +195,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
         <button
           onClick={handleSubmit}
-          disabled={!input.trim() || isStreaming}
+          disabled={!input.trim()}
           className="flex items-center justify-center rounded-full bg-accent-700 p-2.5 text-white hover:bg-accent-500 disabled:opacity-40 transition-colors shrink-0"
           style={{ height: '42px', width: '42px' }}
         >

@@ -32,6 +32,7 @@ export function Chat() {
 
   const { name: aiName, greeting } = useNovaIdentity()
   const [isStreaming, setIsStreaming] = useState(false)
+  const [messageQueue, setMessageQueue] = useState<string[]>([])
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -72,22 +73,25 @@ export function Chat() {
     return () => vv.removeEventListener('resize', onResize)
   }, [])
 
-  const handleSubmit = useCallback(async (text: string) => {
-    if (isStreaming) return
+  const handleSubmit = useCallback(async (text: string, fromQueue = false) => {
+    if (isStreaming && !fromQueue) {
+      // Show user message immediately, queue for sequential processing
+      const queuedMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: text,
+        timestamp: new Date(),
+      }
+      setMessages(prev => [...prev, queuedMsg])
+      setMessageQueue(q => [...q, text])
+      return
+    }
 
     setError(null)
 
-    // Capture pending files before clearing
-    const attachments = pendingFiles.length > 0 ? [...pendingFiles] : undefined
+    // Capture pending files before clearing (skip for queued messages)
+    const attachments = (!fromQueue && pendingFiles.length > 0) ? [...pendingFiles] : undefined
     if (attachments) setPendingFiles([])
-
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-      timestamp: new Date(),
-      attachments,
-    }
 
     const assistantMsgId = crypto.randomUUID()
     const assistantMsg: Message = {
@@ -98,7 +102,19 @@ export function Chat() {
       isStreaming: true,
     }
 
-    setMessages(prev => [...prev, userMsg, assistantMsg])
+    if (fromQueue) {
+      // User message already shown when queued
+      setMessages(prev => [...prev, assistantMsg])
+    } else {
+      const userMsg: Message = {
+        id: crypto.randomUUID(),
+        role: 'user',
+        content: text,
+        timestamp: new Date(),
+        attachments,
+      }
+      setMessages(prev => [...prev, userMsg, assistantMsg])
+    }
     setIsStreaming(true)
 
     const currentSessionId = sessionId ?? (() => {
@@ -129,7 +145,10 @@ export function Chat() {
       }
       userContent = blocks
     }
-    history.push({ role: 'user', content: userContent })
+    // For queued messages, user message is already in the messages array
+    if (!fromQueue) {
+      history.push({ role: 'user', content: userContent })
+    }
 
     // Upload files to memory service (fire-and-forget for storage)
     if (attachments) {
@@ -216,7 +235,17 @@ export function Chat() {
     }
   }, [messages, sessionId, modelId, isStreaming, setMessages, setSessionId, setError, pendingFiles, setPendingFiles, outputStyle, customInstructions, webSearchEnabled, deepResearchEnabled])
 
+  // Process queued messages sequentially when streaming completes
+  useEffect(() => {
+    if (!isStreaming && messageQueue.length > 0) {
+      const next = messageQueue[0]
+      setMessageQueue(q => q.slice(1))
+      handleSubmit(next, true)
+    }
+  }, [isStreaming, messageQueue, handleSubmit])
+
   const startNewConversation = () => {
+    setMessageQueue([])
     resetConversation()
   }
 
@@ -298,8 +327,12 @@ export function Chat() {
             </div>
           </div>
 
-          {streamingStatus && (
-            <p className="text-xs text-neutral-400 text-center py-1">{aiName} is {streamingStatus}</p>
+          {(streamingStatus || messageQueue.length > 0) && (
+            <p className="text-xs text-neutral-400 text-center py-1">
+              {streamingStatus && <>{aiName} is {streamingStatus}</>}
+              {streamingStatus && messageQueue.length > 0 && ' · '}
+              {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
+            </p>
           )}
 
           <div className="shrink-0 w-full pb-4 pt-2 px-4">

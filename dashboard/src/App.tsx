@@ -69,7 +69,7 @@ function AppShell() {
       <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
         <NavBar />
         <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <main className="mx-auto max-w-6xl w-full">
+        <main className="mx-auto max-w-6xl w-full h-full">
           <Routes>
             <Route path="/"        element={<Chat />} />
             <Route path="/chat"    element={<Chat />} />

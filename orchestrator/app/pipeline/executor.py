@@ -294,13 +294,27 @@ async def _run_pipeline(task_id: str) -> None:
         # Check if human review needed after this stage
         if _should_pause_for_review(state, pod, result, agent.role):
             escalation_msg = result.get("escalation_message", "Task requires human review.")
-            await _pause_for_human_review(task_id, escalation_msg)
+            await _pause_for_human_review(task_id, escalation_msg, state)
             return
 
         i += 1
 
     # ── Pipeline complete ──────────────────────────────────────────────────
-    final_output = state.completed.get("task", {}).get("output", "Task completed.")
+    task_result = state.completed.get("task", {})
+    final_output = task_result.get("output", "Task completed.")
+
+    # Append the detailed explanation so users see what was actually done
+    explanation = task_result.get("explanation", "")
+    if explanation:
+        final_output = f"{final_output}\n\n---\n\n{explanation}"
+
+    # Include files changed and commands run if present
+    files_changed = task_result.get("files_changed", [])
+    commands_run = task_result.get("commands_run", [])
+    if files_changed:
+        final_output += f"\n\n**Files changed:** {', '.join(files_changed)}"
+    if commands_run:
+        final_output += f"\n\n**Commands run:**\n" + "\n".join(f"- {c}" for c in commands_run)
 
     # Best-effort memory extraction — fire-and-forget, never blocks completion
     asyncio.create_task(
@@ -462,7 +476,7 @@ async def _run_agent(
             logger.info(f"Agent '{agent.role}' failed with on_failure=skip — continuing")
             return {}, session_id
         if agent.on_failure == "escalate":
-            await _pause_for_human_review(task_id, f"Agent '{agent.role}' failed: {exc}")
+            await _pause_for_human_review(task_id, f"Agent '{agent.role}' failed: {exc}", state)
             return None, session_id
         # on_failure == "abort" (default)
         return None, session_id
@@ -675,18 +689,42 @@ async def _complete_task(task_id: str, output: str, state: PipelineState) -> Non
     logger.info(f"Task {task_id} complete")
 
 
-async def _pause_for_human_review(task_id: str, escalation_message: str) -> None:
+async def _pause_for_human_review(
+    task_id: str, escalation_message: str, state: PipelineState | None = None
+) -> None:
     pool = get_pool()
+
+    # Build a preview of what the task agent produced so reviewers see actual results
+    preview_output: str | None = None
+    if state:
+        task_result = state.completed.get("task", {})
+        parts = []
+        summary = task_result.get("output", "")
+        if summary:
+            parts.append(summary)
+        explanation = task_result.get("explanation", "")
+        if explanation:
+            parts.append(explanation)
+        files_changed = task_result.get("files_changed", [])
+        if files_changed:
+            parts.append(f"**Files changed:** {', '.join(files_changed)}")
+        commands_run = task_result.get("commands_run", [])
+        if commands_run:
+            parts.append("**Commands run:**\n" + "\n".join(f"- {c}" for c in commands_run))
+        if parts:
+            preview_output = "\n\n".join(parts)
+
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE tasks
             SET status = 'pending_human_review',
+                output = COALESCE($3, output),
                 metadata = metadata || jsonb_build_object('escalation_message', $2::text),
                 current_stage = NULL
             WHERE id = $1
             """,
-            task_id, escalation_message,
+            task_id, escalation_message, preview_output,
         )
     await _audit(task_id, "task_escalated", "warning", {"message": escalation_message})
     logger.warning(f"Task {task_id} paused for human review: {escalation_message}")
