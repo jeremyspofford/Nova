@@ -144,18 +144,26 @@ export interface ChatMessage {
   content: string
 }
 
+/** Metadata emitted by intelligent routing before content deltas. */
+export interface StreamMeta {
+  model?: string
+  category?: string
+}
+
+export type StreamEvent = string | { meta: StreamMeta }
+
 /**
  * Stream a chat turn directly with the primary Nova agent.
  * Uses the admin secret — no API key required.
  *
- * Yields text deltas as they arrive. Pass the sessionId back on the next call
- * to continue the same conversation thread (with memory).
+ * Yields text deltas (strings) and optional routing metadata events.
+ * Pass the sessionId back on the next call to continue the same conversation thread.
  */
 export async function* streamChat(
   messages: ChatMessage[],
   model?: string,
   sessionId?: string,
-): AsyncGenerator<string, void, unknown> {
+): AsyncGenerator<StreamEvent, void, unknown> {
   const resp = await fetch('/api/v1/chat/stream', {
     method: 'POST',
     headers: {
@@ -189,6 +197,10 @@ export async function* streamChat(
         try {
           const parsed = JSON.parse(data) as Record<string, unknown>
           if (parsed.error) throw new Error(String(parsed.error))
+          if (parsed.meta) {
+            yield { meta: parsed.meta as StreamMeta }
+            continue
+          }
         } catch {
           if (data) yield data
         }

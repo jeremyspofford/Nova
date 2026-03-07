@@ -4,7 +4,7 @@ import { Send, Bot, User, RefreshCw, MessageSquare } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { streamChat, discoverModels, resolveModel, type ChatMessage } from '../api'
+import { streamChat, discoverModels, resolveModel, type ChatMessage, type StreamEvent } from '../api'
 import { useChatStore, type Message } from '../stores/chat-store'
 import Card from '../components/Card'
 
@@ -47,6 +47,12 @@ function MessageBubble({ message }: { message: Message }) {
         </div>
         <p className={`mt-1 text-xs text-neutral-500 dark:text-neutral-500 px-1 ${isUser ? 'text-right' : ''}`}>
           {formatDistanceToNow(message.timestamp, { addSuffix: true })}
+          {!isUser && message.modelUsed && (
+            <span className="ml-1.5">
+              &middot; {message.modelUsed}
+              {message.category && <span className="text-neutral-400 dark:text-neutral-600"> ({message.category})</span>}
+            </span>
+          )}
         </p>
       </div>
     </div>
@@ -156,8 +162,19 @@ export function Chat() {
 
     try {
       let accumulated = ''
-      for await (const delta of streamChat(history, modelId || undefined, currentSessionId)) {
-        accumulated += delta
+      for await (const event of streamChat(history, modelId || undefined, currentSessionId)) {
+        if (typeof event === 'object' && 'meta' in event) {
+          // Routing metadata — store on assistant message
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === assistantMsgId
+                ? { ...m, modelUsed: event.meta.model, category: event.meta.category }
+                : m
+            )
+          )
+          continue
+        }
+        accumulated += event
         setMessages(prev =>
           prev.map(m =>
             m.id === assistantMsgId ? { ...m, content: accumulated } : m

@@ -242,14 +242,27 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 | Settings LLM Routing section: auto-aware model picker | ✅ |
 | Pipeline executor uses auto-resolved model as fallback | ✅ |
 
-#### Phase 2: Capability-Aware Routing (next)
+#### Phase 2: Intelligent Routing (delivered)
+
+| Feature | Status |
+|---|---|
+| **Classifier tier** | Cheap/fast model classifies messages into categories (general, code, reasoning, creative, quick) | ✅ |
+| **Zero-latency classification** | Classifier runs in `asyncio.gather` alongside memory retrieval — no added latency | ✅ |
+| **Cascading classifier models** | Auto mode tries local Ollama → Groq → Cerebras; configurable explicit model | ✅ |
+| **Category-to-model routing map** | Per-category model preference lists, first available wins, configurable in Settings | ✅ |
+| **SSE metadata events** | Stream emits routing metadata (model, category) before content deltas | ✅ |
+| **Chat bubble routing info** | Message footer shows `model (category)` when intelligent routing is active | ✅ |
+| **Settings UI** | Toggle, classifier model picker, timeout slider, category mapping editor | ✅ |
+| **Ships disabled by default** | `llm.intelligent_routing = false` — opt-in via Settings | ✅ |
+| **Graceful fallback** | Any classifier failure silently falls back to Phase 1 auto-resolve | ✅ |
+
+#### Phase 3: Advanced Routing (next)
 
 | Feature | Description |
 |---|---|
-| **Message content analysis** | Detect images, code blocks, long context to route to capable models |
-| **Model capability tags** | Tag models in registry with vision, code, long-context capabilities |
-| **Per-capability preferences** | Separate preference lists for vision, code, general tasks |
-| **Separate chat vs pipeline defaults** | Allow different auto-resolution for interactive chat vs pipeline agents |
+| **Vision/multimodal routing** | Detect images in messages, route to vision-capable models |
+| **Long-context detection** | Route large context windows to models with higher token limits |
+| **Separate chat vs pipeline defaults** | Different auto-resolution for interactive chat vs pipeline agents |
 | **Chat onboarding** | First-run greeting that helps users configure providers through conversation |
 
 ---

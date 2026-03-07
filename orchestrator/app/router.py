@@ -236,6 +236,7 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
     agent = agents[0]
     from app.model_resolver import resolve_default_model
     model = req.model or await resolve_default_model()
+    explicit_model = bool(req.model)
     task_id = uuid4()
     session_id = req.session_id or str(uuid4())
 
@@ -258,6 +259,7 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
                 system_prompt=agent.config.system_prompt,
                 api_key_id=None,
                 skip_tool_preresolution=True,
+                explicit_model=explicit_model,
             ),
             error_label="Chat stream",
             sandbox_token=sandbox_token,

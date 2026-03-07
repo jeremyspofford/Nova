@@ -38,6 +38,7 @@ async def run_agent_turn(
     model: str,
     system_prompt: str,
     api_key_id: UUID | None = None,
+    explicit_model: bool = False,
 ) -> TaskResult:
     """Execute one agent turn: memory retrieval → LLM call → memory storage → usage log."""
     from app.usage import log_usage
@@ -48,11 +49,22 @@ async def run_agent_turn(
         user_messages = [m for m in messages if m.get("role") == "user"]
         query = user_messages[-1]["content"] if user_messages else ""
 
-        # 1. Fetch context concurrently
-        nova_ctx, memory_ctx = await asyncio.gather(
+        # 1. Fetch context concurrently (+ intelligent routing when auto-model)
+        from app.model_classifier import classify_and_resolve
+
+        async def _noop_classify():
+            return (None, None)
+
+        classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
+
+        nova_ctx, memory_ctx, (category, classified_model) = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id),
             _get_memory_context(agent_id, query),
+            classify_coro,
         )
+
+        if classified_model:
+            model = classified_model
 
         # 2. Build prompt
         prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
@@ -114,6 +126,7 @@ async def run_agent_turn_streaming(
     system_prompt: str,
     api_key_id: UUID | None = None,
     skip_tool_preresolution: bool = False,
+    explicit_model: bool = False,
 ):
     """Streaming variant — yields text deltas as they arrive from the LLM.
 
@@ -132,10 +145,22 @@ async def run_agent_turn_streaming(
     user_messages = [m for m in messages if m.get("role") == "user"]
     query = user_messages[-1]["content"] if user_messages else ""
 
-    nova_ctx, memory_ctx = await asyncio.gather(
+    # Intelligent routing: classify in parallel with context retrieval
+    from app.model_classifier import classify_and_resolve
+
+    async def _noop_classify():
+        return (None, None)
+
+    classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
+
+    nova_ctx, memory_ctx, (category, classified_model) = await asyncio.gather(
         _build_nova_context(model, agent_id, session_id),
         _get_memory_context(agent_id, query),
+        classify_coro,
     )
+
+    if classified_model:
+        model = classified_model
     prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
 
     if skip_tool_preresolution:
@@ -159,6 +184,10 @@ async def run_agent_turn_streaming(
         stream=True,
         metadata={"agent_id": agent_id, "session_id": session_id},
     )
+
+    # Emit routing metadata as the first event (before content deltas)
+    if category or classified_model:
+        yield json.dumps({"meta": {"model": model, "category": category}})
 
     full_response: list[str] = []
     stream_input_tokens = 0

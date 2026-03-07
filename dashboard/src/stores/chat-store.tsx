@@ -6,6 +6,8 @@ export interface Message {
   content: string
   timestamp: Date
   isStreaming?: boolean
+  modelUsed?: string
+  category?: string
 }
 
 interface ChatStore {

@@ -674,7 +674,247 @@ function LLMRoutingSection({
 
       {/* Default chat model — auto or explicit */}
       <DefaultModelPicker onSave={onSave} saving={saving} entries={entries} />
+
+      {/* Intelligent routing */}
+      <IntelligentRoutingSection entries={entries} onSave={onSave} saving={saving} />
     </Section>
+  )
+}
+
+// ── Intelligent Routing sub-section ──────────────────────────────────────────
+
+const CATEGORY_LABELS: Record<string, string> = {
+  general: 'General — conversation, greetings, opinions',
+  code: 'Code — writing, debugging, reviewing',
+  reasoning: 'Reasoning — math, logic, multi-step analysis',
+  creative: 'Creative — stories, copy, brainstorming',
+  quick: 'Quick — lookups, yes/no, one-word answers',
+}
+
+function IntelligentRoutingSection({
+  entries,
+  onSave,
+  saving,
+}: {
+  entries: PlatformConfigEntry[]
+  onSave: (key: string, value: string) => void
+  saving: boolean
+}) {
+  const enabled = useConfigValue(entries, 'llm.intelligent_routing', 'false') === 'true'
+  const classifierModel = useConfigValue(entries, 'llm.classifier_model', 'auto')
+  const timeoutMs = useConfigValue(entries, 'llm.classifier_timeout_ms', '500')
+  const routingMapRaw = useConfigValue(entries, 'llm.model_routing_map', '{}')
+
+  const [expanded, setExpanded] = useState(false)
+
+  // Parse routing map
+  let routingMap: Record<string, string[] | null> = {}
+  try {
+    const parsed = typeof routingMapRaw === 'string' ? JSON.parse(routingMapRaw) : routingMapRaw
+    if (typeof parsed === 'object' && parsed !== null) routingMap = parsed
+  } catch { /* use empty */ }
+
+  // Classifier model draft
+  const [classifierDraft, setClassifierDraft] = useState(classifierModel)
+  const [classifierDirty, setClassifierDirty] = useState(false)
+  useEffect(() => { setClassifierDraft(classifierModel); setClassifierDirty(false) }, [classifierModel])
+
+  // Timeout draft
+  const [timeoutDraft, setTimeoutDraft] = useState(timeoutMs)
+  const [timeoutDirty, setTimeoutDirty] = useState(false)
+  useEffect(() => { setTimeoutDraft(timeoutMs); setTimeoutDirty(false) }, [timeoutMs])
+
+  // Routing map draft (per-category comma-separated strings)
+  const [mapDraft, setMapDraft] = useState<Record<string, string>>({})
+  const [mapDirty, setMapDirty] = useState(false)
+  useEffect(() => {
+    const draft: Record<string, string> = {}
+    for (const [cat, models] of Object.entries(routingMap)) {
+      draft[cat] = models ? models.join(', ') : ''
+    }
+    setMapDraft(draft)
+    setMapDirty(false)
+  }, [routingMapRaw])
+
+  const handleToggle = () => {
+    onSave('llm.intelligent_routing', JSON.stringify(!enabled))
+  }
+
+  const handleSaveClassifier = () => {
+    onSave('llm.classifier_model', JSON.stringify(classifierDraft))
+    setClassifierDirty(false)
+  }
+
+  const handleSaveTimeout = () => {
+    onSave('llm.classifier_timeout_ms', JSON.stringify(timeoutDraft))
+    setTimeoutDirty(false)
+  }
+
+  const handleSaveMap = () => {
+    const result: Record<string, string[] | null> = {}
+    for (const [cat, val] of Object.entries(mapDraft)) {
+      const trimmed = val.trim()
+      result[cat] = trimmed ? trimmed.split(',').map(s => s.trim()).filter(Boolean) : null
+    }
+    onSave('llm.model_routing_map', JSON.stringify(result))
+    setMapDirty(false)
+  }
+
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
+    staleTime: 60_000,
+    enabled: expanded && enabled,
+  })
+  const allModels = (providers ?? [])
+    .filter(p => p.available)
+    .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
+
+  return (
+    <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+      {/* Toggle */}
+      <div className="flex items-center justify-between">
+        <div>
+          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Intelligent Model Routing</label>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+            Classifier picks the optimal model per message based on task type.
+          </p>
+        </div>
+        <button
+          onClick={handleToggle}
+          disabled={saving}
+          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+            enabled ? 'bg-accent-700' : 'bg-neutral-300 dark:bg-neutral-600'
+          } disabled:opacity-40`}
+        >
+          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+            enabled ? 'translate-x-4.5' : 'translate-x-0.5'
+          }`} />
+        </button>
+      </div>
+
+      {/* Expanded settings when enabled */}
+      {enabled && (
+        <div className="mt-3 space-y-3 pl-0">
+          {/* Classifier model */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Classifier Model</label>
+              {classifierDirty && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { setClassifierDraft(classifierModel); setClassifierDirty(false) }}
+                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
+                    <RotateCcw size={10} /> Reset
+                  </button>
+                  <button onClick={handleSaveClassifier} disabled={saving}
+                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
+                    <Save size={10} /> Save
+                  </button>
+                </div>
+              )}
+            </div>
+            <select
+              value={classifierDraft}
+              onChange={e => { setClassifierDraft(e.target.value); setClassifierDirty(e.target.value !== classifierModel) }}
+              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+            >
+              <option value="auto">Auto (local-first cascade)</option>
+              {allModels.map(id => <option key={id} value={id}>{id}</option>)}
+            </select>
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              Small fast model used to classify messages. &quot;Auto&quot; tries local Ollama first, then Groq, then Cerebras.
+            </p>
+          </div>
+
+          {/* Timeout */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+                Classifier Timeout: {timeoutDraft}ms
+              </label>
+              {timeoutDirty && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => { setTimeoutDraft(timeoutMs); setTimeoutDirty(false) }}
+                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
+                    <RotateCcw size={10} /> Reset
+                  </button>
+                  <button onClick={handleSaveTimeout} disabled={saving}
+                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
+                    <Save size={10} /> Save
+                  </button>
+                </div>
+              )}
+            </div>
+            <input
+              type="range"
+              min={100}
+              max={1000}
+              step={50}
+              value={timeoutDraft}
+              onChange={e => { setTimeoutDraft(e.target.value); setTimeoutDirty(e.target.value !== timeoutMs) }}
+              className="w-full accent-accent-700"
+            />
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+              Max time to wait for classification. Falls back to default model if exceeded.
+            </p>
+          </div>
+
+          {/* Category routing map */}
+          <div>
+            <div className="mb-1 flex items-center justify-between">
+              <button
+                onClick={() => setExpanded(!expanded)}
+                className="text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-accent-700 dark:hover:text-accent-400 flex items-center gap-1"
+              >
+                Category Model Mapping
+                <span className="text-[10px]">{expanded ? '▼' : '▶'}</span>
+              </button>
+              {mapDirty && (
+                <div className="flex items-center gap-2">
+                  <button onClick={() => {
+                    const draft: Record<string, string> = {}
+                    for (const [cat, models] of Object.entries(routingMap)) {
+                      draft[cat] = models ? models.join(', ') : ''
+                    }
+                    setMapDraft(draft); setMapDirty(false)
+                  }}
+                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
+                    <RotateCcw size={10} /> Reset
+                  </button>
+                  <button onClick={handleSaveMap} disabled={saving}
+                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
+                    <Save size={10} /> Save
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {expanded && (
+              <div className="space-y-2 mt-2">
+                {Object.keys(CATEGORY_LABELS).map(cat => (
+                  <div key={cat}>
+                    <label className="text-xs text-neutral-500 dark:text-neutral-400">{CATEGORY_LABELS[cat]}</label>
+                    <input
+                      type="text"
+                      value={mapDraft[cat] ?? ''}
+                      onChange={e => {
+                        setMapDraft(prev => ({ ...prev, [cat]: e.target.value }))
+                        setMapDirty(true)
+                      }}
+                      placeholder={cat === 'general' ? '(uses default model)' : 'model-1, model-2, ...'}
+                      className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 transition-colors font-mono"
+                    />
+                  </div>
+                ))}
+                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                  Comma-separated model preference list per category. First available model wins. Leave empty to use default.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
