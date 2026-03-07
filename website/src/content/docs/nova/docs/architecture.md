@@ -1,9 +1,9 @@
 ---
 title: "Architecture"
-description: "Nova's 8-service Docker Compose architecture, inter-service communication, and tech stack."
+description: "Nova's multi-service Docker Compose architecture, inter-service communication, and tech stack."
 ---
 
-Nova runs as an 8-service Docker Compose stack. Each service has a single responsibility and communicates over HTTP.
+Nova runs as a multi-service Docker Compose stack. Each service has a single responsibility and communicates over HTTP.
 
 ## Services
 
@@ -17,6 +17,7 @@ Nova runs as an 8-service Docker Compose stack. Each service has a single respon
 | **postgres** | 5432 | pgvector-enabled PostgreSQL 16 |
 | **redis** | 6379 | State, task queue (BRPOP), rate limiting, session memory |
 | **recovery** | 8888 | Backup/restore, factory reset, service management. Only depends on postgres -- stays alive when other services crash. |
+| **chat-bridge** | 8090 | Multi-platform chat integration (Telegram, Slack). Opt-in via `bridges` profile. |
 
 ## Inter-service communication
 
@@ -28,6 +29,9 @@ dashboard ──proxy──▶ orchestrator  (/api)
           ──proxy──▶ recovery      (/recovery-api)
 
 chat-api ──────────▶ orchestrator  (streaming endpoint)
+
+chat-bridge ───────▶ orchestrator  (streaming endpoint, agent API)
+            ───────▶ redis         (session mapping, db 4)
 
 orchestrator ──────▶ llm-gateway   (/complete, /stream, /embed)
              ──────▶ memory-service (/api/v1/memories/*)
@@ -77,6 +81,7 @@ Each service uses a dedicated Redis database to avoid key collisions:
 | 1 | llm-gateway |
 | 2 | orchestrator |
 | 3 | chat-api |
+| 4 | chat-bridge |
 
 ## API design
 
