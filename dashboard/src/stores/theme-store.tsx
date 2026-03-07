@@ -79,7 +79,7 @@ function loadState(): ThemeState {
       // Current shape
       return {
         modePreference: ['light', 'dark', 'system'].includes(parsed.modePreference)
-          ? parsed.modePreference : 'system',
+          ? parsed.modePreference : 'dark',
         lightPreset: parsed.lightPreset || 'default',
         darkPreset: parsed.darkPreset || 'default',
         customLightAccent: parsed.customLightAccent || 'teal',
@@ -89,7 +89,7 @@ function loadState(): ThemeState {
   }
 
   return {
-    modePreference: 'system',
+    modePreference: 'dark',
     lightPreset: 'default',
     darkPreset: 'default',
     customLightAccent: 'teal',

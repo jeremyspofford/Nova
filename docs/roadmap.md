@@ -285,6 +285,7 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 | **Session Replay** — step through any agent session message-by-message | |
 | **Model Switcher** — dropdown in chat UI, persists to localStorage | |
 | UI overhaul — visual polish across all pages | |
+| **Theme system improvements** — more distinctive presets (current Ocean/Forest/Sunset are too similar), gradient effects on more components, potential theme editor with live preview | |
 
 ### Settings page expansion
 

@@ -4,11 +4,12 @@ const BASE = 'rounded-xl border border-neutral-200 dark:border-neutral-800 bg-ca
 
 export default function Card({
   className,
+  glow = true,
   children,
   ...rest
-}: React.HTMLAttributes<HTMLDivElement>) {
+}: React.HTMLAttributes<HTMLDivElement> & { glow?: boolean }) {
   return (
-    <div className={clsx(BASE, className)} {...rest}>
+    <div className={clsx(BASE, glow && 'card-glow', className)} {...rest}>
       {children}
     </div>
   )

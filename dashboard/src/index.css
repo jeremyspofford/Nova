@@ -49,6 +49,31 @@
   }
 }
 
+/* ── Card glow effect (matches docs site aesthetic) ────────────────────────── */
+.card-glow {
+  position: relative;
+  transition: border-color 0.3s, transform 0.2s;
+}
+.card-glow::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(var(--accent-600) / 0.5), transparent);
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.card-glow:hover {
+  border-color: rgb(var(--accent-600) / 0.3);
+  transform: translateY(-1px);
+}
+.card-glow:hover::before {
+  opacity: 1;
+}
+
 /* ── Prevent iOS Safari auto-zoom on input focus ──────────────────────────── */
 @supports (-webkit-touch-callout: none) {
   input, textarea, select {
