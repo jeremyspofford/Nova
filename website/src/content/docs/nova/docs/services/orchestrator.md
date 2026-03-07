@@ -5,7 +5,7 @@ description: "Agent lifecycle management, pipeline execution, task queue, MCP to
 
 The Orchestrator is Nova's central coordination service. It manages agent lifecycles, dispatches tasks through the Quartet Pipeline, maintains the Redis task queue, connects MCP tool servers, and runs database migrations at startup.
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|

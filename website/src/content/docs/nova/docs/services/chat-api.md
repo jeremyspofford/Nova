@@ -5,7 +5,7 @@ description: "WebSocket streaming bridge for external clients. Port 8080."
 
 The Chat API is a lightweight WebSocket bridge that connects external clients to Nova's Orchestrator. It provides a real-time streaming chat interface with automatic session management and reconnection handling.
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|

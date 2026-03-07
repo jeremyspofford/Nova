@@ -5,7 +5,7 @@ description: "Multi-platform chat integration service. Port 8090."
 
 The Chat Bridge connects Nova to external messaging platforms like Telegram and Slack. It runs as a single service with pluggable platform adapters that auto-enable based on which bot tokens are configured.
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|

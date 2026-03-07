@@ -5,7 +5,7 @@ description: "Multi-provider model routing via LiteLLM with an OpenAI-compatible
 
 The LLM Gateway is Nova's model routing layer. It exposes a unified API that translates requests to any configured provider -- Anthropic, OpenAI, Ollama, Groq, Gemini, Cerebras, OpenRouter, GitHub Models, and subscription-based providers (Claude Max, ChatGPT Plus).
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|

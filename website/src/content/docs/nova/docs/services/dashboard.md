@@ -5,7 +5,7 @@ description: "React admin UI for managing Nova. Vite dev server on port 5173, ng
 
 The Dashboard is Nova's web-based admin interface. Built with React, it provides a comprehensive UI for managing agents, monitoring tasks, configuring models, and controlling every aspect of the platform.
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|

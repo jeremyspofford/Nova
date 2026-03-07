@@ -5,7 +5,7 @@ description: "Embedding generation and hybrid semantic/keyword retrieval via pgv
 
 The Memory Service provides Nova's long-term memory system. It stores, retrieves, and manages memories across three tiers using PostgreSQL with pgvector for embedding-based similarity search combined with full-text keyword matching.
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|

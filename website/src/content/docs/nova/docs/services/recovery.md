@@ -5,7 +5,7 @@ description: "Backup/restore, factory reset, service management, and environment
 
 The Recovery Service is Nova's resilience layer. It is designed to stay alive when all other Nova services are down, providing backup/restore, factory reset, service management, and environment configuration capabilities.
 
-## Overview
+## At a glance
 
 | Property | Value |
 |----------|-------|
