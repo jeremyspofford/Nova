@@ -22,6 +22,9 @@ dist/
 # Claude Code local settings
 .claude/
 
+# Backups
+backups/
+
 # OS
 .DS_Store
 *.log
