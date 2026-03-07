@@ -249,17 +249,16 @@ export function Models() {
               {RECOMMENDED_OLLAMA_MODELS.map(rec => {
                 const isPulled = pulledNames.has(rec.name)
                 const isPulling = pullingModels.has(rec.name)
+                const isDeleting = deletingModels.has(rec.name)
                 return (
-                  <button
+                  <div
                     key={rec.name}
-                    disabled={isPulled || isPulling}
-                    onClick={() => handlePull(rec.name)}
-                    className={`relative text-left rounded-lg border px-3 py-2.5 text-xs transition-colors ${
+                    className={`relative rounded-lg border px-3 py-2.5 text-xs transition-colors ${
                       isPulled
-                        ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 cursor-default'
+                        ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20'
                         : isPulling
-                        ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 cursor-wait'
-                        : 'border-neutral-200 dark:border-neutral-700 hover:border-teal-400 dark:hover:border-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/10 cursor-pointer'
+                        ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20'
+                        : 'border-neutral-200 dark:border-neutral-700'
                     }`}
                   >
                     <div className="flex items-center gap-1.5">
@@ -275,10 +274,32 @@ export function Models() {
                       {isPulling && <Loader2 className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 ml-auto animate-spin" />}
                     </div>
                     <p className="mt-1 text-neutral-500 dark:text-neutral-400 leading-tight">{rec.description}</p>
-                    <span className="mt-1 inline-block rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
-                      {rec.category}
-                    </span>
-                  </button>
+                    <div className="mt-2 flex items-center justify-between">
+                      <span className="inline-block rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+                        {rec.category}
+                      </span>
+                      {isPulled ? (
+                        <button
+                          onClick={() => handleDelete(rec.name)}
+                          disabled={isDeleting || rec.required}
+                          title={rec.required ? 'Required by Nova' : 'Delete model'}
+                          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                          Delete
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handlePull(rec.name)}
+                          disabled={isPulling}
+                          className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors disabled:opacity-50"
+                        >
+                          {isPulling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                          Pull
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 )
               })}
             </div>
