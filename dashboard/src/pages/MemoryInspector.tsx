@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Search, Trash2, ChevronDown, ChevronRight, Plus, X } from 'lucide-react'
+import { Search, Trash2, ChevronDown, ChevronRight, Plus, X, HelpCircle } from 'lucide-react'
 import {
   browseMemoriesV2,
   searchMemories,
@@ -34,8 +34,9 @@ function TierBadge({ tier }: { tier: MemoryTier }) {
 function ConfidenceBar({ value }: { value: number }) {
   const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100)
   const color = pct >= 70 ? 'bg-emerald-500' : pct >= 40 ? 'bg-amber-400' : 'bg-red-400'
+  const label = pct >= 70 ? 'High confidence' : pct >= 40 ? 'Moderate confidence' : 'Low confidence'
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5" title={`${label} — ${pct}% reliable. Decays over time if not accessed.`}>
       <div className="w-16 h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700">
         <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
       </div>
@@ -246,6 +247,7 @@ export function MemoryInspector() {
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [showAddFact, setShowAddFact] = useState(false)
+  const [showHelp, setShowHelp] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
 
@@ -323,13 +325,57 @@ export function MemoryInspector() {
     <div className="px-4 py-6 sm:px-6 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Memory Inspector</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Memory Inspector</h1>
+          <button
+            onClick={() => setShowHelp(v => !v)}
+            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 transition-colors"
+            title="What is this?"
+          >
+            <HelpCircle size={16} />
+          </button>
+        </div>
         <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400 max-w-2xl">
-          Browse and search Nova's long-term memory. Semantic and procedural memories are written
-          after each pipeline run and read by the Planning Agent in Phase 7.
-          Facts support structured upsert — the same key always overwrites the previous value.
+          Browse and search Nova's long-term memory.
         </p>
       </div>
+
+      {showHelp && (
+        <Card className="p-4 border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-900/10">
+          <div className="space-y-3 text-xs text-neutral-600 dark:text-neutral-400">
+            <p className="font-medium text-sm text-neutral-800 dark:text-neutral-200">How Memory Works</p>
+            <p>Nova stores memories across four tiers, each serving a different purpose:</p>
+            <div className="grid sm:grid-cols-2 gap-2">
+              <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 p-2.5">
+                <span className="font-medium text-blue-700 dark:text-blue-400">Semantic</span>
+                <p className="mt-0.5">Long-term facts and knowledge. Written after pipeline runs. Includes structured facts (project/category/key) that can be upserted — saving the same key overwrites the previous value.</p>
+              </div>
+              <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 p-2.5">
+                <span className="font-medium text-purple-700 dark:text-purple-400">Procedural</span>
+                <p className="mt-0.5">How-to knowledge and learned processes. Stores patterns like "when X happens, do Y" that Nova reuses across tasks.</p>
+              </div>
+              <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 p-2.5">
+                <span className="font-medium text-amber-700 dark:text-amber-400">Episodic</span>
+                <p className="mt-0.5">Conversation history and task outcomes. Time-partitioned and auto-cleaned. Helps Nova recall what happened in previous sessions.</p>
+              </div>
+              <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 p-2.5">
+                <span className="font-medium text-neutral-600 dark:text-neutral-400">Working</span>
+                <p className="mt-0.5">Short-term scratch space. Used during active pipeline runs and cleared afterward.</p>
+              </div>
+            </div>
+            <div className="border-t border-neutral-200 dark:border-neutral-700 pt-2">
+              <p className="font-medium text-neutral-800 dark:text-neutral-200 mb-1">Confidence Score</p>
+              <p>The percentage bar shows how reliable a memory is. Starts at the base confidence (default 1.0) and decays over time if not accessed. Memories accessed frequently maintain high confidence.</p>
+              <div className="mt-1.5 flex items-center gap-4">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500" /> ≥70% — High</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> 40-69% — Moderate</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400" /> &lt;40% — Low</span>
+              </div>
+              <p className="mt-1.5">Memories without a confidence bar were created before the confidence system or are a type that doesn't track it.</p>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {/* Controls */}
       <div className="flex flex-col sm:flex-row gap-3">
