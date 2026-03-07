@@ -9,7 +9,7 @@ ENV_FILE="${PROJECT_ROOT}/.env"
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 
 # ── Collected config ──────────────────────────────────────────────────────────
-CFG_MODE=""              # 1=all-in-one, 2=cloud-only, 3=remote-gpu
+CFG_MODE=""              # 1=all-in-one, 2=cloud-only, 3=remote-gpu, 4=host-native
 CFG_PROVIDER=""          # groq, cerebras, gemini, claude-max, chatgpt, skip
 CFG_API_KEY=""
 CFG_REMOTE_IP=""
@@ -215,6 +215,7 @@ step_mode() {
   echo "  1) All-in-one    — Everything on this machine (simplest)"
   echo "  2) Cloud only    — No local AI models, use cloud APIs only"
   echo "  3) Remote GPU    — This machine runs Nova, a separate PC runs AI models"
+  echo "  4) Host native   — Ollama runs on this machine outside Docker (or Windows host in WSL2)"
   echo ""
 
   # Detect current mode as default
@@ -228,6 +229,8 @@ step_mode() {
 
   if [ "${existing_strategy}" = "cloud-only" ]; then
     default="2"
+  elif [ "${existing_ollama_url}" = "host" ]; then
+    default="4"
   elif [ -n "${existing_ollama_url}" ] && [ "${existing_ollama_url}" != "http://ollama:11434" ]; then
     default="3"
   elif echo "${existing_profiles}" | grep -q "local-ollama" 2>/dev/null; then
@@ -246,7 +249,7 @@ step_provider() {
   local required=false
   local label="Pick a cloud AI provider"
   case "${CFG_MODE}" in
-    1) label="Add a cloud backup provider? (press Enter to skip)" ;;
+    1|4) label="Add a cloud backup provider? (press Enter to skip)" ;;
     2) label="Pick a cloud AI provider (required)"; required=true ;;
     3) label="Add a cloud fallback? (recommended in case GPU box is off)" ;;
   esac
@@ -264,7 +267,7 @@ step_provider() {
   echo ""
 
   local default="1"
-  if [ "${required}" = "false" ] && [ "${CFG_MODE}" = "1" ]; then
+  if [ "${required}" = "false" ] && ([ "${CFG_MODE}" = "1" ] || [ "${CFG_MODE}" = "4" ]); then
     default="6"
   fi
 
@@ -335,6 +338,9 @@ step_remote() {
   if [ "${CFG_MODE}" != "3" ]; then
     return
   fi
+
+  # Mode 4 (host native) doesn't need remote IP — URL is just "host"
+  # This block only runs for mode 3 (remote GPU)
 
   echo ""
   printf "${BOLD}Remote Ollama Setup${RESET}\n"
@@ -505,6 +511,12 @@ write_env() {
     3) # Remote GPU
       compose_profiles=""
       ollama_url="http://${CFG_REMOTE_IP}:11434"
+      routing_strategy="local-first"
+      default_model="llama3.2"
+      ;;
+    4) # Host native
+      compose_profiles=""
+      ollama_url="host"
       routing_strategy="local-first"
       default_model="llama3.2"
       ;;
@@ -707,6 +719,7 @@ step_summary() {
     1) printf "  Mode:          All-in-one (local Ollama)\n" ;;
     2) printf "  Mode:          Cloud only\n" ;;
     3) printf "  Mode:          Remote GPU (${CFG_REMOTE_IP})\n" ;;
+    4) printf "  Mode:          Host native (Ollama on this machine)\n" ;;
   esac
 
   case "${CFG_PROVIDER}" in

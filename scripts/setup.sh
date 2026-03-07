@@ -30,6 +30,13 @@ set -a
 . "${PROJECT_ROOT}/.env"
 set +a
 
+# ── Resolve magic Ollama URL values ──────────────────────────────────────────
+if [ "${OLLAMA_BASE_URL:-}" = "auto" ] || [ "${OLLAMA_BASE_URL:-}" = "host" ]; then
+  RESOLVED_URL="$(bash "${SCRIPT_DIR}/resolve-ollama-url.sh")"
+  echo "  Ollama URL: ${OLLAMA_BASE_URL} -> ${RESOLVED_URL}"
+  export OLLAMA_BASE_URL="${RESOLVED_URL}"
+fi
+
 # ── Determine if local Ollama is needed ──────────────────────────────────────
 USE_LOCAL_OLLAMA=false
 case "${COMPOSE_PROFILES:-}" in

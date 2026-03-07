@@ -1,12 +1,18 @@
+import { useMemo } from 'react'
 import { Bot, User, FileText } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ActivityFeed } from '../../components/ActivityFeed'
+import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import type { Message } from '../../stores/chat-store'
 
 export function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user'
+  const cleanedContent = useMemo(
+    () => !isUser && message.content ? cleanToolArtifacts(message.content) : message.content,
+    [isUser, message.content],
+  )
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -56,10 +62,10 @@ export function MessageBubble({ message }: { message: Message }) {
             </div>
           )}
 
-          {message.content ? (
-            isUser ? message.content : (
+          {cleanedContent ? (
+            isUser ? cleanedContent : (
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {message.content}
+                {cleanedContent}
               </ReactMarkdown>
             )
           ) : (

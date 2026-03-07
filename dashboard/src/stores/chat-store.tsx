@@ -41,6 +41,10 @@ interface ChatStore {
   setError: React.Dispatch<React.SetStateAction<string | null>>
   resetConversation: () => void
 
+  // Pre-fill input from external pages (e.g. "Discuss" on Tasks page)
+  prefillInput: string | null
+  setPrefillInput: React.Dispatch<React.SetStateAction<string | null>>
+
   // Drawer & input controls
   pendingFiles: AttachedFile[]
   setPendingFiles: React.Dispatch<React.SetStateAction<AttachedFile[]>>
@@ -123,6 +127,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [])
   const [error, setError] = useState<string | null>(null)
 
+  const [prefillInput, setPrefillInput] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<AttachedFile[]>([])
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [outputStyle, setOutputStyle] = useState(
@@ -163,6 +168,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       modelId, setModelId,
       error, setError,
       resetConversation,
+      prefillInput, setPrefillInput,
       pendingFiles, setPendingFiles,
       drawerOpen, setDrawerOpen,
       outputStyle, setOutputStyle,

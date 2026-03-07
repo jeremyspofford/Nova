@@ -23,14 +23,28 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const { drawerOpen, setDrawerOpen } = useChatStore()
+  const { drawerOpen, setDrawerOpen, prefillInput, setPrefillInput } = useChatStore()
   const { pendingFiles, addFiles, removeFile, openFilePicker } = useFileAttach()
+
+  // Consume prefilled input (e.g. from "Discuss" on Tasks page)
+  useEffect(() => {
+    if (prefillInput) {
+      setInput(prefillInput)
+      setPrefillInput(null)
+      setTimeout(() => {
+        resizeTextarea()
+        textareaRef.current?.focus()
+      }, 0)
+    }
+  }, [prefillInput, setPrefillInput])
 
   const resizeTextarea = () => {
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+    // Allow taller expansion when there's a lot of content (e.g. prefilled task context)
+    const maxH = el.value.split('\n').length > 5 ? 400 : 200
+    el.style.height = `${Math.min(el.scrollHeight, maxH)}px`
   }
 
   const handleSubmit = useCallback(() => {
@@ -176,7 +190,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           placeholder={`Message ${aiName}...`}
           rows={1}
           className="flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-4 py-2.5 text-base text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors"
-          style={{ minHeight: '42px', maxHeight: '200px', fontSize: '16px' }}
+          style={{ minHeight: '42px', maxHeight: '400px', fontSize: '16px' }}
         />
 
         <button

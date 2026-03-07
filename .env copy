@@ -2,7 +2,7 @@
 # Run ./setup to configure interactively, or edit this file manually.
 
 # ── Core ───────────────────────────────────────────────────────────────────
-POSTGRES_PASSWORD=
+POSTGRES_PASSWORD=nova_dev_password
 NOVA_ADMIN_SECRET=nova-admin-secret-change-me
 
 # ── Deployment Mode ────────────────────────────────────────────────────────
@@ -20,14 +20,14 @@ NOVA_ADMIN_SECRET=nova-admin-secret-change-me
 #
 # Routing: local-only | local-first | cloud-only | cloud-first
 LLM_ROUTING_STRATEGY=local-first
-DEFAULT_CHAT_MODEL=llama3.2
+DEFAULT_CHAT_MODEL=claude-max/claude-sonnet-4-6
 
 # ── Per-provider default models (optional overrides) ──────────────────────
-# DEFAULT_OLLAMA_MODEL=llama3.2
-# DEFAULT_GROQ_MODEL=groq/llama-3.3-70b-versatile
-# DEFAULT_GEMINI_MODEL=gemini/gemini-2.5-flash
-# DEFAULT_CEREBRAS_MODEL=cerebras/llama-3.3-70b
-# DEFAULT_CLAUDE_MAX_MODEL=claude-max/claude-sonnet-4-6
+DEFAULT_OLLAMA_MODEL=llama3.2
+DEFAULT_GROQ_MODEL=groq/llama-3.3-70b-versatile
+DEFAULT_GEMINI_MODEL=gemini/gemini-2.5-flash
+DEFAULT_CEREBRAS_MODEL=cerebras/llama-3.3-70b
+DEFAULT_CLAUDE_MAX_MODEL=claude-max/claude-sonnet-4-6
 # DEFAULT_CHATGPT_MODEL=chatgpt/gpt-4o
 # DEFAULT_OPENROUTER_MODEL=openrouter/meta-llama/llama-3.1-8b-instruct:free
 # DEFAULT_GITHUB_MODEL=github/gpt-4o-mini

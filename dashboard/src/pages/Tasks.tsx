@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Send, RefreshCw, X, CheckCircle, AlertCircle, Clock,
   ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Loader2, Trash2,
-  ShieldAlert, FileSearch, AlertTriangle,
+  ShieldAlert, FileSearch, AlertTriangle, Copy, Check, MessageSquare,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
@@ -15,8 +16,105 @@ import {
 } from '../api'
 import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
+import { useChatStore } from '../stores/chat-store'
 import Card from '../components/Card'
 import { Input } from '../components/ui'
+
+// ── Copyable task ID ──────────────────────────────────────────────────────────
+
+function CopyableId({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    navigator.clipboard.writeText(id)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }, [id])
+
+  return (
+    <button
+      onClick={handleCopy}
+      title={copied ? 'Copied!' : `Copy task ID: ${id}`}
+      className={clsx(
+        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-mono transition-all',
+        copied
+          ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+          : 'border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:border-accent-400 dark:hover:border-accent-600 hover:text-accent-600 dark:hover:text-accent-400',
+      )}
+    >
+      <span className="text-[10px] font-sans font-medium uppercase tracking-wider opacity-60">ID</span>
+      {id.slice(0, 8)}
+      {copied
+        ? <Check size={10} className="text-emerald-500 dark:text-emerald-400" />
+        : <Copy size={10} className="opacity-40 group-hover:opacity-70" />
+      }
+    </button>
+  )
+}
+
+// ── Task context builder for chat ─────────────────────────────────────────────
+
+function inferReviewPrompt(task: PipelineTask): string {
+  const escalation = (task.metadata?.escalation_message as string | undefined) ?? ''
+
+  // Agent failure (on_failure=escalate pattern: "Agent 'role' failed: ...")
+  if (escalation.match(/^Agent '.+' failed:/)) {
+    return (
+      'This task was escalated because an agent failed during execution. ' +
+      'What went wrong, and is it safe to retry? Should I adjust the task input, ' +
+      'change the agent configuration, or reject this task entirely?'
+    )
+  }
+
+  // Guardrail block (findings with severity >= threshold)
+  if (escalation.toLowerCase().includes('guardrail') || escalation.toLowerCase().includes('finding')) {
+    return (
+      'The guardrail agent flagged this task with security or safety findings. ' +
+      'Analyze the findings — are they genuine risks or false positives? ' +
+      'What would you recommend: approve with modifications, or reject?'
+    )
+  }
+
+  // Decision agent escalation (most common path)
+  if (escalation.toLowerCase().includes('escalat') || escalation.toLowerCase().includes('review')) {
+    return (
+      'The pipeline escalated this task for human review after the decision agent evaluated it. ' +
+      'Summarize what was attempted, explain the concerns that triggered escalation, ' +
+      'and recommend whether I should approve or reject — and why.'
+    )
+  }
+
+  // Completed or failed tasks opened via "Discuss" (not in review)
+  if (task.status === 'complete') {
+    return 'This task completed successfully. Review the output and let me know if it achieved the intended goal.'
+  }
+  if (task.status === 'failed') {
+    return 'This task failed. Analyze the error and suggest how to fix or retry it.'
+  }
+
+  // Generic fallback
+  return (
+    'Explain the current state of this task — what has been completed, ' +
+    'what issues were found, and what you would recommend as next steps.'
+  )
+}
+
+function buildTaskContext(task: PipelineTask): string {
+  const parts = [
+    `I want to discuss pipeline task ${task.id.slice(0, 8)} (full ID: ${task.id}).`,
+    '',
+    `**Status:** ${task.status}`,
+    `**Input:** ${task.user_input}`,
+  ]
+  if (task.output) parts.push(`**Output:** ${task.output.slice(0, 500)}${task.output.length > 500 ? '…' : ''}`)
+  if (task.error) parts.push(`**Error:** ${task.error}`)
+  const escalation = task.metadata?.escalation_message as string | undefined
+  if (escalation) parts.push(`**Escalation reason:** ${escalation}`)
+  if (task.current_stage) parts.push(`**Last stage:** ${task.current_stage}`)
+  parts.push('', inferReviewPrompt(task))
+  return parts.join('\n')
+}
 
 // ── Stage pipeline definition ──────────────────────────────────────────────────
 
@@ -294,6 +392,14 @@ function TaskCard({ task }: { task: PipelineTask }) {
   const [expanded, setExpanded] = useState(needsReview)
   const [reviewing, setReviewing] = useState(needsReview)
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { resetConversation, setPrefillInput } = useChatStore()
+
+  const handleDiscuss = useCallback(() => {
+    resetConversation()
+    setPrefillInput(buildTaskContext(task))
+    navigate('/chat')
+  }, [task, resetConversation, setPrefillInput, navigate])
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelPipelineTask(task.id),
@@ -322,6 +428,7 @@ function TaskCard({ task }: { task: PipelineTask }) {
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex flex-wrap items-center gap-2">
             <TaskStatusBadge status={task.status} />
+            <CopyableId id={task.id} />
             {task.pod_name && (
               <span className="rounded-full bg-accent-50 dark:bg-accent-900/30 px-2 py-0.5 text-xs text-accent-700 dark:text-accent-400">
                 {task.pod_name}
@@ -354,6 +461,14 @@ function TaskCard({ task }: { task: PipelineTask }) {
             </button>
           )}
           <button
+            onClick={handleDiscuss}
+            title="Discuss this task with Nova"
+            className="flex items-center gap-1 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50 dark:bg-accent-900/30 px-2 py-1 text-xs font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-100 dark:hover:bg-accent-900/50 hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
+          >
+            <MessageSquare size={12} />
+            <span className="hidden sm:inline">Discuss</span>
+          </button>
+          <button
             onClick={() => setExpanded(e => !e)}
             className="rounded-md p-1 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
           >
@@ -380,9 +495,8 @@ function TaskCard({ task }: { task: PipelineTask }) {
       {/* Expanded detail */}
       {expanded && (
         <div className="mt-3 space-y-2 border-t border-neutral-200 dark:border-neutral-800 pt-3">
-          {/* Task ID + retry info */}
+          {/* Retry + timing info */}
           <div className="flex flex-wrap gap-x-4 text-xs text-neutral-500 dark:text-neutral-400">
-            <span>ID: <code className="text-neutral-500 dark:text-neutral-400">{task.id.slice(0, 8)}…</code></span>
             <span>Retries: {task.retry_count}/{task.max_retries}</span>
             {task.started_at && <span>Started: {formatDistanceToNow(new Date(task.started_at), { addSuffix: true })}</span>}
             {task.completed_at && <span>Completed: {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}</span>}

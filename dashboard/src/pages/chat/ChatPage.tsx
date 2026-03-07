@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { streamChat, uploadFile, discoverModels, resolveModel, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
+import { cleanToolArtifacts, getStableContent } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
@@ -186,15 +187,18 @@ export function Chat() {
           )
         }
         accumulated += event
+        const displayContent = getStableContent(accumulated)
         setMessages(prev =>
           prev.map(m =>
-            m.id === assistantMsgId ? { ...m, content: accumulated } : m
+            m.id === assistantMsgId ? { ...m, content: displayContent } : m
           )
         )
       }
       setMessages(prev =>
         prev.map(m =>
-          m.id === assistantMsgId ? { ...m, isStreaming: false } : m
+          m.id === assistantMsgId
+            ? { ...m, content: cleanToolArtifacts(accumulated), isStreaming: false }
+            : m
         )
       )
     } catch (err) {

@@ -89,6 +89,8 @@ services:
 # ─────────────────────────────────────────────────────────────────────────────
   llm-gateway:
     <<: *nova-common
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     build:
       context: .
       dockerfile: llm-gateway/Dockerfile
