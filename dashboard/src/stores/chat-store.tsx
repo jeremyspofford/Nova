@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
+import { summarizeSession } from '../api'
 
 export interface ActivityStep {
   step: string
@@ -127,6 +128,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [])
   const [error, setError] = useState<string | null>(null)
 
+  // Refs for current values — needed by resetConversation's stable callback
+  const messagesRef = useRef(messages)
+  const sessionIdRef = useRef(sessionId)
+  useEffect(() => { messagesRef.current = messages }, [messages])
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
+
   const [prefillInput, setPrefillInput] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<AttachedFile[]>([])
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -154,6 +161,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [messages, sessionId])
 
   const resetConversation = useCallback(() => {
+    // Summarize the completed conversation before clearing (fire-and-forget)
+    if (sessionIdRef.current && messagesRef.current.length >= 2) {
+      summarizeSession(
+        sessionIdRef.current,
+        messagesRef.current.map(m => ({ role: m.role, content: m.content })),
+      )
+    }
     setMessages([])
     setSessionId(undefined)
     setError(null)

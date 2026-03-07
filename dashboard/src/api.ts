@@ -275,6 +275,20 @@ export async function uploadFile(file: File, sessionId?: string): Promise<FileUp
   return resp.json()
 }
 
+/** Fire-and-forget: summarize a completed chat session for memory. */
+export function summarizeSession(sessionId: string, messages: Array<{ role: string; content: string }>): void {
+  fetch('/api/v1/chat/sessions/' + encodeURIComponent(sessionId) + '/summarize', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Secret': getAdminSecret(),
+    },
+    body: JSON.stringify({ messages }),
+  }).catch(() => {
+    // Silently ignore — summarization is best-effort
+  })
+}
+
 // ── MCP Servers ────────────────────────────────────────────────────────────────
 
 export interface MCPServer {
