@@ -65,9 +65,19 @@ export function Usage() {
     refetchInterval: 30_000,
   })
 
+  const now = new Date()
+  const dayAgo   = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+  const weekAgo  = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+  const yearAgo  = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000)
+
+  const costInPeriod = (since: Date) =>
+    events.filter(e => new Date(e.created_at) >= since).reduce((s, e) => s + (e.cost_usd ?? 0), 0)
+
   const totalCost   = events.reduce((s, e) => s + (e.cost_usd ?? 0), 0)
   const totalTokens = events.reduce((s, e) => s + e.input_tokens + e.output_tokens, 0)
   const totalCalls  = events.length
+  const shownCount  = Math.min(totalCalls, 50)
 
   const chartData   = getChartData(view, events, sortBy)
   const activeView  = VIEWS.find(v => v.id === view)!
@@ -76,12 +86,27 @@ export function Usage() {
     <div className="px-4 py-6 sm:px-6 space-y-6">
       <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Usage & Cost</h1>
 
-      {/* ── Summary cards (always visible, all-time totals) ─────────────── */}
+      {/* ── Cost breakdown cards ──────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        {[
+          { label: 'Today',      value: costInPeriod(dayAgo)   },
+          { label: 'This week',  value: costInPeriod(weekAgo)  },
+          { label: 'This month', value: costInPeriod(monthAgo) },
+          { label: 'This year',  value: costInPeriod(yearAgo)  },
+        ].map(({ label, value }) => (
+          <Card key={label} className="p-4">
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p>
+            <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">${value.toFixed(4)}</p>
+          </Card>
+        ))}
+      </div>
+
+      {/* ── All-time summary ───────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
         {[
-          { label: 'Total cost (all time)',   value: `$${totalCost.toFixed(4)}`          },
-          { label: 'Total tokens (all time)', value: totalTokens.toLocaleString()         },
-          { label: 'Total calls (all time)',  value: totalCalls.toLocaleString()          },
+          { label: 'Total cost (all time)',   value: `$${totalCost.toFixed(4)}`   },
+          { label: 'Total tokens (all time)', value: totalTokens.toLocaleString() },
+          { label: 'Total calls (all time)',  value: totalCalls.toLocaleString()  },
         ].map(({ label, value }) => (
           <Card key={label} className="p-4">
             <p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p>
@@ -235,7 +260,7 @@ export function Usage() {
       <Card className="overflow-hidden">
         <div className="border-b border-neutral-200 dark:border-neutral-800 px-4 py-3 flex items-center justify-between">
           <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Recent Events</p>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">showing last 50 of {totalCalls}</p>
+          <p className="text-xs text-neutral-500 dark:text-neutral-400">showing last {shownCount} of {totalCalls}</p>
         </div>
         {isLoading && <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
         {error     && <p className="p-4 text-sm text-red-600 dark:text-red-400">Failed to load usage: {String(error)}</p>}
