@@ -503,3 +503,13 @@ export const updatePlatformConfig = (key: string, value: string) =>
     body: JSON.stringify({ value }),
   })
 
+// ── Identity ─────────────────────────────────────────────────────────────────
+
+export interface NovaIdentity {
+  name: string
+  greeting: string
+}
+
+export const getNovaIdentity = () =>
+  apiFetch<NovaIdentity>('/api/v1/identity')
+

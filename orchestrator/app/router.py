@@ -333,6 +333,41 @@ async def validate_key(key: ApiKeyDep):
     return {"valid": True, "name": key.name}
 
 
+def _unwrap_jsonb_str(val: str | None) -> str:
+    """Strip one layer of JSON string quoting if present.
+
+    platform_config stores JSONB.  The dashboard sends values pre-encoded
+    (e.g. '"Nova"') which becomes a JSONB *string*.  Extracting with
+    ``#>> '{}'`` gives the text content, but values that were double-encoded
+    arrive here with literal surrounding quotes — strip them.
+    """
+    if val and len(val) >= 2 and val[0] == '"' and val[-1] == '"':
+        try:
+            return json.loads(val)
+        except Exception:
+            pass
+    return val or ""
+
+
+# ── Identity (public) ─────────────────────────────────────────────────────────
+
+@router.get("/api/v1/identity")
+async def get_identity() -> dict:
+    """Public endpoint returning the AI's display name and greeting.
+    No auth required - used by the dashboard UI."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT key, value #>> '{}' AS val FROM platform_config "
+            "WHERE key IN ('nova.name', 'nova.greeting')"
+        )
+    config = {r["key"]: _unwrap_jsonb_str(r["val"]) for r in rows}
+    name = config.get("nova.name") or "Nova"
+    greeting_template = config.get("nova.greeting") or ""
+    greeting = greeting_template.replace("{name}", name) if greeting_template else ""
+    return {"name": name, "greeting": greeting}
+
+
 # ── Platform configuration (admin-only) ──────────────────────────────────────
 
 class ConfigUpdateRequest(BaseModel):

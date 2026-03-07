@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     default_model: str = "auto"
     default_system_prompt: str = (
-        "You are Nova, a helpful AI assistant with persistent memory. "
+        "You are a helpful AI assistant with persistent memory. "
         "You remember previous conversations and can use tools to help users."
     )
     # The canonical agent that is auto-created (or adopted) on every startup.

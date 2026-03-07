@@ -49,7 +49,7 @@ async def get_or_create_session(session_id: str | None) -> tuple[str, str]:
             "config": {
                 "name": settings.default_agent_name,
                 "system_prompt": (
-                    "You are Nova, a helpful AI assistant with persistent memory across conversations. "
+                    "You are a helpful AI assistant with persistent memory across conversations. "
                     "You are thoughtful, accurate, and concise. You remember what users tell you and "
                     "reference past context when relevant."
                 ),

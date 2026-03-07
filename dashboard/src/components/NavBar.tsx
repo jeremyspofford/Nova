@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Activity, Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, Lock, Unlock } from 'lucide-react'
+import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, Lock, Unlock } from 'lucide-react'
 import clsx from 'clsx'
+import { useNovaIdentity } from '../hooks/useNovaIdentity'
 
 const mainLinks = [
-  { to: '/',         label: 'Overview', icon: Activity         },
-  { to: '/chat',     label: 'Chat',     icon: MessageSquare    },
+  { to: '/',         label: 'Chat',     icon: MessageSquare    },
   { to: '/tasks',    label: 'Tasks',    icon: ListTodo         },
   { to: '/pods',     label: 'Pods',     icon: Layers           },
   { to: '/usage',    label: 'Usage',    icon: BarChart2        },
@@ -23,12 +23,13 @@ const systemLinks = [
 export function NavBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const navigate = useNavigate()
+  const { name } = useNovaIdentity()
 
   return (
     <>
-      <nav className="flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-3 sm:px-6">
+      <nav className="sticky top-0 z-50 flex items-center justify-between border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-3 sm:px-6">
         <div className="flex items-center gap-4 sm:gap-6">
-          <span className="text-sm font-semibold tracking-widest text-accent-700 dark:text-accent-400 uppercase">Nova</span>
+          <span className="text-sm font-semibold tracking-widest text-accent-700 dark:text-accent-400 uppercase">{name}</span>
 
           {/* Desktop nav */}
           <div className="hidden md:flex gap-1">
@@ -74,7 +75,7 @@ export function NavBar() {
 
       {/* Mobile menu dropdown */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-2">
+        <div className="md:hidden sticky top-[57px] z-50 border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-2">
           <div className="grid grid-cols-3 gap-1">
             {[...mainLinks, ...systemLinks].map(({ to, label, icon: Icon }) => (
               <NavLink

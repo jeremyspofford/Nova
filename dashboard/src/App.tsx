@@ -5,7 +5,6 @@ import { NavBar } from './components/NavBar'
 import { StartupScreen } from './components/StartupScreen'
 import { ChatProvider } from './stores/chat-store'
 import { ThemeProvider } from './stores/theme-store'
-import { Overview } from './pages/Overview'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
 import { Keys } from './pages/Keys'
@@ -65,7 +64,7 @@ function AppShell() {
         <NavBar />
         <main className="mx-auto max-w-6xl">
           <Routes>
-            <Route path="/"        element={<Overview />} />
+            <Route path="/"        element={<Chat />} />
             <Route path="/chat"    element={<Chat />} />
             <Route path="/tasks"   element={<Tasks />} />
             <Route path="/pods"    element={<Pods />} />

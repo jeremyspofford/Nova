@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -57,7 +58,7 @@ async def run_agent_turn(
 
         classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
 
-        nova_ctx, memory_ctx, (category, classified_model) = await asyncio.gather(
+        nova_ctx, (memory_ctx, _mem_count), (category, classified_model) = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id),
             _get_memory_context(agent_id, query),
             classify_coro,
@@ -148,19 +149,38 @@ async def run_agent_turn_streaming(
     # Intelligent routing: classify in parallel with context retrieval
     from app.model_classifier import classify_and_resolve
 
+    will_classify = not explicit_model and query
+
     async def _noop_classify():
         return (None, None)
 
-    classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
+    classify_coro = classify_and_resolve(query) if will_classify else _noop_classify()
 
-    nova_ctx, memory_ctx, (category, classified_model) = await asyncio.gather(
+    # Emit "running" status for parallel steps before the gather
+    if will_classify:
+        yield json.dumps({"status": {"step": "classifying", "state": "running"}})
+    yield json.dumps({"status": {"step": "memory", "state": "running"}})
+
+    t0 = time.monotonic()
+    nova_ctx, (memory_ctx, memory_count), (category, classified_model) = await asyncio.gather(
         _build_nova_context(model, agent_id, session_id),
         _get_memory_context(agent_id, query),
         classify_coro,
     )
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+
+    # Emit "done" status for completed steps
+    if will_classify:
+        yield json.dumps({"status": {"step": "classifying", "state": "done", "detail": category or "general", "elapsed_ms": elapsed_ms}})
+    mem_detail = f"{memory_count} memor{'y' if memory_count == 1 else 'ies'}" if memory_count else "no memories"
+    yield json.dumps({"status": {"step": "memory", "state": "done", "detail": mem_detail, "elapsed_ms": elapsed_ms}})
 
     if classified_model:
         model = classified_model
+
+    # Emit model selection status
+    yield json.dumps({"status": {"step": "model", "state": "done", "detail": model}})
+
     prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
 
     if skip_tool_preresolution:
@@ -185,9 +205,8 @@ async def run_agent_turn_streaming(
         metadata={"agent_id": agent_id, "session_id": session_id},
     )
 
-    # Emit routing metadata as the first event (before content deltas)
-    if category or classified_model:
-        yield json.dumps({"meta": {"model": model, "category": category}})
+    # Emit generating status (replaces old meta event — info is carried by status steps)
+    yield json.dumps({"status": {"step": "generating", "state": "running", "model": model, "category": category}})
 
     full_response: list[str] = []
     stream_input_tokens = 0
@@ -234,10 +253,13 @@ async def run_agent_turn_streaming(
     )
 
 
-async def _get_memory_context(agent_id: str, query: str) -> str:
-    """Fetch relevant memories and format them as a context string."""
+async def _get_memory_context(agent_id: str, query: str) -> tuple[str, int]:
+    """Fetch relevant memories and format them as a context string.
+
+    Returns (context_string, memory_count).
+    """
     if not query:
-        return ""
+        return "", 0
 
     memory_client = get_memory_client()
     try:
@@ -246,84 +268,100 @@ async def _get_memory_context(agent_id: str, query: str) -> str:
             json={"agent_id": agent_id, "query": query, "max_tokens": 4096},
         )
         if resp.status_code != 200:
-            return ""
+            return "", 0
         ctx = resp.json()
         memories = ctx.get("memories", [])
         if not memories:
-            return ""
+            return "", 0
 
         lines = ["## Relevant memories from previous conversations:"]
         for m in memories:
             lines.append(f"- {m['content']}")
-        return "\n".join(lines)
+        return "\n".join(lines), len(memories)
     except Exception as e:
         log.warning("Memory retrieval failed: %s", e)
-        return ""
+        return "", 0
 
 
-async def _get_platform_persona() -> str:
+async def _get_platform_identity() -> tuple[str, str]:
     """
-    Load the Nova persona from platform_config (nova.persona key).
-    Returns empty string on any failure — missing table, bad value, etc.
-    This is intentionally fault-tolerant: persona is a nice-to-have overlay,
-    not load-bearing infrastructure.
+    Load the AI name and persona from platform_config.
+    Returns (name, persona). Defaults to ("Nova", "") on any failure.
     """
     from app.db import get_pool
     try:
         pool = get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT value FROM platform_config WHERE key = 'nova.persona'"
+            rows = await conn.fetch(
+                "SELECT key, value #>> '{}' AS val "
+                "FROM platform_config WHERE key IN ('nova.name', 'nova.persona')"
             )
-        if row and row["value"]:
-            persona = json.loads(row["value"])
-            return str(persona).strip() if persona else ""
-        return ""
+        result = {r["key"]: r["val"] for r in rows}
+        raw_name = result.get("nova.name") or "Nova"
+        raw_persona = result.get("nova.persona") or ""
+        # Strip one layer of JSON quoting if double-encoded
+        name = json.loads(raw_name) if raw_name.startswith('"') else raw_name
+        persona = json.loads(raw_persona) if raw_persona.startswith('"') else raw_persona
+        return str(name).strip(), str(persona).strip()
     except Exception as exc:
-        log.debug("Could not load nova.persona: %s", exc)
-        return ""
+        log.debug("Could not load platform identity: %s", exc)
+        return "Nova", ""
 
 
-async def _build_nova_context(model: str, agent_id: str, session_id: str) -> str:
-    """
-    Build the 'Nova Platform Context' block injected into every system prompt.
-    Queries live agent state from Redis so the LLM knows what's actually running.
-
-    Placement: after static system_prompt, before dynamic memories.
-    This maximises Anthropic prompt cache hits (stable prefix = cheaper turns).
-
-    Persona: loaded from platform_config and appended at the end so operators
-    can customise Nova's communication style without touching operational instructions.
-    """
+async def _safe_list_agents(agent_id: str) -> str:
+    """Format the active agents list, returning a safe fallback on error."""
     from app.store import list_agents
-
     try:
         all_agents = await list_agents()
         active = [a for a in all_agents if a.status.value != "stopped"]
         if active:
-            agent_lines = []
+            lines = []
             for a in sorted(active, key=lambda x: x.created_at):
-                marker = " ← YOU" if str(a.id) == agent_id else ""
-                agent_lines.append(
-                    f"  • {a.config.name}  id={a.id}"
+                marker = " <- YOU" if str(a.id) == agent_id else ""
+                lines.append(
+                    f"  - {a.config.name}  id={a.id}"
                     f"  model={a.config.model}  status={a.status.value}{marker}"
                 )
-            agents_block = "\n".join(agent_lines)
-        else:
-            agents_block = "  (none registered yet)"
+            return "\n".join(lines)
+        return "  (none registered yet)"
     except Exception as e:
         log.warning("Could not fetch agent list for nova_context: %s", e)
-        agents_block = "  (unavailable)"
+        return "  (unavailable)"
 
-    persona = await _get_platform_persona()
-    persona_block = f"\n\n## Persona\n{persona}" if persona else ""
 
-    return (
-        f"## Nova Platform Context\n"
+async def _build_nova_context(model: str, agent_id: str, session_id: str) -> str:
+    """
+    Build the context blocks injected into every system prompt.
+
+    Order (static -> dynamic for prompt cache hit rate):
+      1. ## Identity        - name + persona from platform_config
+      2. ## Platform Context - tools, active agents, session info
+      3. ## Response Style   - formatting rules
+    """
+    # Load identity and agent list concurrently
+    (name, persona), agents_block = await asyncio.gather(
+        _get_platform_identity(),
+        _safe_list_agents(agent_id),
+    )
+
+    # 1. Identity block
+    identity_lines = [
+        "## Identity",
+        f"Your name is {name}. You are a helpful AI assistant with persistent memory.",
+        "You remember previous conversations and can use tools to help users.",
+    ]
+    if persona:
+        identity_lines.append("")
+        identity_lines.append(persona)
+    identity_block = "\n".join(identity_lines)
+
+    # 2. Platform context
+    platform_block = (
+        f"## Platform Context\n"
         f"- Your model:    {model}\n"
         f"- Your agent ID: {agent_id}\n"
         f"- Session ID:    {session_id}\n"
-        f"\n### Active agents in this Nova instance:\n"
+        f"\n### Active agents in this instance:\n"
         f"{agents_block}\n"
         f"\n### Tools available to you:\n"
         f"  Platform:   list_agents, get_agent_info, create_agent, list_available_models, send_message_to_agent\n"
@@ -332,17 +370,22 @@ async def _build_nova_context(model: str, agent_id: str, session_id: str) -> str
         f"  Search:     search_codebase (ripgrep across workspace files)\n"
         f"  Git:        git_status, git_diff, git_log, git_commit\n"
         f"\nWorkspace root: {settings.workspace_root}  (all file/shell paths are relative to this)\n"
-        f"Answer model-identity questions using 'Your model' above (never guess).\n"
-        f"\n## Response Style\n"
-        f"This is a professional developer tool. Follow these rules in every response:\n"
-        f"- No emoji except as explicit status indicators (e.g. 🟢 active, 🟡 idle, 🔴 error)\n"
-        f"- No markdown bold/italic for single characters or trivial emphasis\n"
-        f"- Do not bold the word 'I' or wrap single letters in ** markers\n"
-        f"- Use plain prose for explanations; tables for structured data; code blocks for code\n"
-        f"- Be concise and precise — prefer one clear sentence over three vague ones\n"
-        f"- Never add filler phrases like 'Great question!', 'Certainly!', or 'Of course!'"
-        f"{persona_block}"
+        f"Answer model-identity questions using 'Your model' above (never guess)."
     )
+
+    # 3. Response style
+    style_block = (
+        "## Response Style\n"
+        "This is a professional developer tool. Follow these rules in every response:\n"
+        "- No emoji except as explicit status indicators\n"
+        "- No markdown bold/italic for single characters or trivial emphasis\n"
+        "- Do not bold the word 'I' or wrap single letters in ** markers\n"
+        "- Use plain prose for explanations; tables for structured data; code blocks for code\n"
+        "- Be concise and precise - prefer one clear sentence over three vague ones\n"
+        "- Never add filler phrases like 'Great question!', 'Certainly!', or 'Of course!'"
+    )
+
+    return f"{identity_block}\n\n{platform_block}\n\n{style_block}"
 
 
 async def _resolve_tool_rounds(

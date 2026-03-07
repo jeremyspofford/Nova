@@ -7,6 +7,7 @@ import remarkGfm from 'remark-gfm'
 import { streamChat, discoverModels, resolveModel, type ChatMessage, type StreamEvent } from '../api'
 import { useChatStore, type Message } from '../stores/chat-store'
 import Card from '../components/Card'
+import { useNovaIdentity } from '../hooks/useNovaIdentity'
 
 // ── Message bubble ────────────────────────────────────────────────────────────
 
@@ -70,6 +71,7 @@ export function Chat() {
     resetConversation,
   } = useChatStore()
 
+  const { name: aiName, greeting } = useNovaIdentity()
   const [input, setInput]             = useState('')
   const [isStreaming, setIsStreaming]  = useState(false)
 
@@ -225,7 +227,7 @@ export function Chat() {
             <Bot size={15} />
           </div>
           <div className="min-w-0">
-            <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">Nova</h1>
+            <h1 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 leading-tight">{aiName}</h1>
             <p className="text-[11px] text-neutral-500 dark:text-neutral-400 leading-tight truncate">
               {isStreaming ? 'typing…' : 'online'}
             </p>
@@ -237,7 +239,7 @@ export function Chat() {
             value={modelId}
             onChange={e => setModelId(e.target.value)}
             disabled={isStreaming}
-            title="Override Nova's default model for this conversation"
+            title={`Override ${aiName}'s default model for this conversation`}
             className="w-24 sm:w-auto rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-[16px] sm:text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
           >
             <option value="">Auto{resolved ? ` (${resolved.model})` : ''}</option>
@@ -263,9 +265,9 @@ export function Chat() {
           <div className="flex flex-col items-center gap-4 text-neutral-400 dark:text-neutral-600 select-none">
             <MessageSquare size={44} strokeWidth={1} />
             <div className="text-center space-y-1">
-              <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">Start a conversation with Nova</p>
+              <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">{`Start a conversation with ${aiName}`}</p>
               <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-sm">
-                Nova has persistent memory, can use tools, and remembers previous sessions.
+                {`${aiName} has persistent memory, can use tools, and remembers previous sessions.`}
               </p>
             </div>
           </div>
@@ -292,7 +294,7 @@ export function Chat() {
             value={input}
             onChange={e => { setInput(e.target.value); resizeTextarea() }}
             onKeyDown={handleKeyDown}
-            placeholder="Message Nova…"
+            placeholder={`Message ${aiName}...`}
             rows={1}
             className="flex-1 resize-none overflow-hidden rounded-2xl border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-4 py-2.5 text-base text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors"
             style={{ minHeight: '42px', maxHeight: '120px', fontSize: '16px' }}
