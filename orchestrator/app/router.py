@@ -475,13 +475,8 @@ async def update_platform_config(
     # Publish llm.* config changes to Redis db1 (llm-gateway's db) for runtime pickup
     if key.startswith("llm."):
         try:
-            import redis.asyncio as aioredis
-            gateway_redis = aioredis.from_url(
-                settings.redis_url.rsplit("/", 1)[0] + "/1",
-                decode_responses=True,
-            )
-            await gateway_redis.set(f"nova:config:{key}", req.value)
-            await gateway_redis.aclose()
+            from app.config_sync import push_config_to_redis
+            await push_config_to_redis(key, req.value)
         except Exception as e:
             log.warning("Failed to publish config %s to Redis: %s", key, e)
 

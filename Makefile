@@ -14,6 +14,13 @@ else ifeq ($(NOVA_GPU),auto)
   GPU_OVERLAY = $(shell command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1 && echo "-f docker-compose.gpu.yml")
 endif
 
+# ── Ollama URL auto-detection ────────────────────────────────────────────
+OLLAMA_BASE_URL ?=
+ifneq ($(filter auto host,$(OLLAMA_BASE_URL)),)
+  RESOLVED_OLLAMA_URL := $(shell ./scripts/resolve-ollama-url.sh)
+  export OLLAMA_BASE_URL := $(RESOLVED_OLLAMA_URL)
+endif
+
 COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,7 +43,7 @@ down: ## Stop and remove all containers
 
 # ── Develop ──────────────────────────────────────────────────────────────────
 dev: ## Start backend detached + Vite dashboard with hot-reload  [1-line dev]
-	$(COMPOSE) up -d
+	$(COMPOSE) --profile website up -d
 	cd $(DASHBOARD) && npm run dev
 
 watch: ## Sync Python source into running containers for backend hot-reload

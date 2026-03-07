@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
     # Initialize Postgres pool and apply versioned schema migrations
     await init_db()
 
+    # Sync DB config to Redis so LLM gateway has correct values immediately
+    from app.config_sync import sync_llm_config_to_redis
+    await sync_llm_config_to_redis()
+
     # Guarantee one canonical Nova agent exists; prune any duplicates
     primary = await ensure_primary_agent()
     log.info("Primary agent ready: %s model=%s", primary.id, primary.config.model)
