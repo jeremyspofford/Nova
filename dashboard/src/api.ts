@@ -19,13 +19,16 @@ function getAccessToken(): string | null {
   }
 }
 
-/** Build auth headers: prefer JWT if available, fallback to admin secret. */
+/** Build auth headers: always include admin secret, add JWT when available. */
 function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {
+    'X-Admin-Secret': getAdminSecret(),
+  }
   const token = getAccessToken()
   if (token) {
-    return { 'Authorization': `Bearer ${token}` }
+    headers['Authorization'] = `Bearer ${token}`
   }
-  return { 'X-Admin-Secret': getAdminSecret() }
+  return headers
 }
 
 /** Try to refresh the access token using the stored refresh token. */

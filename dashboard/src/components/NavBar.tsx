@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
-import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, Lock, Unlock, LogOut } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { NavLink, useNavigate, useLocation } from 'react-router-dom'
+import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser } from 'lucide-react'
 import clsx from 'clsx'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
@@ -23,9 +23,26 @@ const systemLinks = [
 
 export function NavBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate()
+  const location = useLocation()
   const { name } = useNovaIdentity()
   const { isAuthenticated, user, logout } = useAuth()
+
+  // Close user menu on click outside
+  useEffect(() => {
+    if (!userMenuOpen) return
+    const handleClick = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node))
+        setUserMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [userMenuOpen])
+
+  // Close user menu on route change
+  useEffect(() => { setUserMenuOpen(false) }, [location.pathname])
 
   return (
     <>
@@ -55,24 +72,65 @@ export function NavBar() {
         </div>
 
         <div className="flex items-center gap-2">
-          {typeof window !== 'undefined' && (
-            window.location.protocol === 'https:' ? (
-              <span title="Secure connection (HTTPS)" className="text-emerald-500"><Lock size={14} /></span>
-            ) : window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' ? (
-              <span title="Insecure connection — not using HTTPS" className="text-amber-500"><Unlock size={14} /></span>
-            ) : null
-          )}
-          {isAuthenticated && user && (
-            <span className="hidden sm:inline text-xs text-neutral-500 dark:text-neutral-400 mr-1">{user.display_name || user.email}</span>
-          )}
-          <button onClick={() => navigate('/settings')} title="Settings" className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
-            <Settings size={16} />
-          </button>
-          {isAuthenticated && (
-            <button onClick={logout} title="Sign out" className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
-              <LogOut size={16} />
+
+          {/* User dropdown */}
+          <div ref={userMenuRef} className="relative">
+            <button
+              onClick={() => setUserMenuOpen(v => !v)}
+              className={clsx(
+                'flex items-center gap-1.5 rounded-md px-2 py-1.5 text-sm transition-colors',
+                userMenuOpen
+                  ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
+                  : 'text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
+              )}
+              title="User menu"
+            >
+              <CircleUser size={18} />
+              {isAuthenticated && user && (
+                <span className="hidden sm:inline text-xs max-w-[120px] truncate">
+                  {user.display_name || user.email}
+                </span>
+              )}
+              <ChevronDown size={12} className={clsx('transition-transform', userMenuOpen && 'rotate-180')} />
             </button>
-          )}
+
+            {userMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-lg py-1 z-50">
+                {isAuthenticated && user && (
+                  <div className="px-3 py-2 border-b border-neutral-200 dark:border-neutral-700">
+                    <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100 truncate">
+                      {user.display_name || 'User'}
+                    </p>
+                    {user.email && (
+                      <p className="text-xs text-neutral-500 dark:text-neutral-400 truncate">{user.email}</p>
+                    )}
+                  </div>
+                )}
+                <NavLink
+                  to="/settings"
+                  onClick={() => setUserMenuOpen(false)}
+                  className={clsx(
+                    'flex items-center gap-2 px-3 py-2 text-sm transition-colors',
+                    location.pathname.startsWith('/settings')
+                      ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100'
+                  )}
+                >
+                  <Settings size={14} />
+                  Settings
+                </NavLink>
+                {isAuthenticated && (
+                  <button
+                    onClick={() => { setUserMenuOpen(false); logout() }}
+                    className="flex items-center gap-2 w-full px-3 py-2 text-sm text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
+                  >
+                    <LogOut size={14} />
+                    Sign out
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileMenuOpen(v => !v)}
