@@ -65,5 +65,11 @@ class Settings(BaseSettings):
     # Default pod name used when no routing match is found
     default_pod_name: str = "Quartet"
 
+    # User auth
+    jwt_secret: str = ""  # Auto-generated if empty (stored in platform_config)
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    registration_mode: str = "open"  # 'open' | 'invite' | 'admin'
+
 
 settings = Settings()

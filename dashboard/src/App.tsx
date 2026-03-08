@@ -5,6 +5,8 @@ import { NavBar } from './components/NavBar'
 import { StartupScreen } from './components/StartupScreen'
 import { ChatProvider } from './stores/chat-store'
 import { ThemeProvider } from './stores/theme-store'
+import { AuthProvider, useAuth } from './stores/auth-store'
+import { Login } from './pages/Login'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
 import { Keys } from './pages/Keys'
@@ -17,6 +19,10 @@ import { AgentEndpoints } from './pages/AgentEndpoints'
 import { MemoryInspector } from './pages/MemoryInspector'
 import { Recovery } from './pages/Recovery'
 import { RemoteAccess } from './pages/RemoteAccess'
+
+function PageShell({ children }: { children: React.ReactNode }) {
+  return <main className="mx-auto max-w-6xl w-full h-full overflow-y-auto custom-scrollbar">{children}</main>
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +44,26 @@ async function checkBackendReady(): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+function AuthGate({ children }: { children: React.ReactNode }) {
+  const { isAuthenticated, loading, authConfig } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
+        <div className="text-neutral-400 text-sm">Loading...</div>
+      </div>
+    )
+  }
+
+  // If auth config says REQUIRE_AUTH=false (no providers endpoint), skip auth gate
+  // Also skip if user is already authenticated
+  if (isAuthenticated || !authConfig) {
+    return <>{children}</>
+  }
+
+  return <Login />
 }
 
 function AppShell() {
@@ -64,32 +90,34 @@ function AppShell() {
   }
 
   return (
+    <AuthGate>
     <ChatProvider>
     <BrowserRouter>
       <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
         <NavBar />
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-        <main className="mx-auto max-w-6xl w-full h-full">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <Routes>
+            {/* Chat gets full width for sidebar layout */}
             <Route path="/"        element={<Chat />} />
             <Route path="/chat"    element={<Chat />} />
-            <Route path="/tasks"   element={<Tasks />} />
-            <Route path="/pods"    element={<Pods />} />
-            <Route path="/usage"   element={<Usage />} />
-            <Route path="/keys"    element={<Keys />} />
-            <Route path="/mcp"     element={<MCP />} />
-            <Route path="/agents"  element={<AgentEndpoints />} />
-            <Route path="/memory"  element={<MemoryInspector />} />
-            <Route path="/models"   element={<Models />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/recovery" element={<Recovery />} />
-            <Route path="/remote-access" element={<RemoteAccess />} />
+            {/* Other pages get constrained width with scroll */}
+            <Route path="/tasks"   element={<PageShell><Tasks /></PageShell>} />
+            <Route path="/pods"    element={<PageShell><Pods /></PageShell>} />
+            <Route path="/usage"   element={<PageShell><Usage /></PageShell>} />
+            <Route path="/keys"    element={<PageShell><Keys /></PageShell>} />
+            <Route path="/mcp"     element={<PageShell><MCP /></PageShell>} />
+            <Route path="/agents"  element={<PageShell><AgentEndpoints /></PageShell>} />
+            <Route path="/memory"  element={<PageShell><MemoryInspector /></PageShell>} />
+            <Route path="/models"   element={<PageShell><Models /></PageShell>} />
+            <Route path="/settings" element={<PageShell><Settings /></PageShell>} />
+            <Route path="/recovery" element={<PageShell><Recovery /></PageShell>} />
+            <Route path="/remote-access" element={<PageShell><RemoteAccess /></PageShell>} />
           </Routes>
-        </main>
         </div>
       </div>
     </BrowserRouter>
     </ChatProvider>
+    </AuthGate>
   )
 }
 
@@ -97,7 +125,9 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <AppShell />
+        <AuthProvider>
+          <AppShell />
+        </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>
   )

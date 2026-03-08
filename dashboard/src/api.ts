@@ -8,15 +8,74 @@ export const getAdminSecret = () =>
 export const setAdminSecret = (s: string) =>
   localStorage.setItem('nova_admin_secret', s)
 
-async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
-  const resp = await fetch(url, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Admin-Secret': getAdminSecret(),
-      ...(options.headers ?? {}),
-    },
-  })
+/** Get the current JWT access token if available. */
+function getAccessToken(): string | null {
+  try {
+    const raw = localStorage.getItem('nova_auth_tokens')
+    if (!raw) return null
+    return JSON.parse(raw).accessToken ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Build auth headers: prefer JWT if available, fallback to admin secret. */
+function getAuthHeaders(): Record<string, string> {
+  const token = getAccessToken()
+  if (token) {
+    return { 'Authorization': `Bearer ${token}` }
+  }
+  return { 'X-Admin-Secret': getAdminSecret() }
+}
+
+/** Try to refresh the access token using the stored refresh token. */
+async function tryRefreshToken(): Promise<boolean> {
+  try {
+    const raw = localStorage.getItem('nova_auth_tokens')
+    if (!raw) return false
+    const { refreshToken } = JSON.parse(raw)
+    if (!refreshToken) return false
+
+    const resp = await fetch('/api/v1/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    if (!resp.ok) return false
+    const data = await resp.json()
+    localStorage.setItem('nova_auth_tokens', JSON.stringify({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+    }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+export async function apiFetch<T>(url: string, options: RequestInit = {}): Promise<T> {
+  const doFetch = async () => {
+    const resp = await fetch(url, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+        ...(options.headers ?? {}),
+      },
+    })
+    return resp
+  }
+
+  let resp = await doFetch()
+
+  // On 401 with JWT, try to refresh and retry once
+  if (resp.status === 401 && getAccessToken()) {
+    const refreshed = await tryRefreshToken()
+    if (refreshed) {
+      resp = await doFetch()
+    }
+  }
+
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText)
     throw new Error(`${resp.status}: ${text}`)
@@ -161,6 +220,7 @@ export interface StreamChatOptions {
   custom_instructions?: string
   web_search?: boolean
   deep_research?: boolean
+  conversation_id?: string
 }
 
 /** Metadata emitted by intelligent routing before content deltas. */
@@ -198,7 +258,7 @@ export async function* streamChat(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Admin-Secret': getAdminSecret(),
+      ...getAuthHeaders(),
     },
     body: JSON.stringify({
       messages,
@@ -265,7 +325,7 @@ export async function uploadFile(file: File, sessionId?: string): Promise<FileUp
 
   const resp = await fetch('/mem/api/v1/memories/files', {
     method: 'POST',
-    headers: { 'X-Admin-Secret': getAdminSecret() },
+    headers: getAuthHeaders(),
     body: form,
   })
   if (!resp.ok) {
@@ -281,7 +341,7 @@ export function summarizeSession(sessionId: string, messages: Array<{ role: stri
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-Admin-Secret': getAdminSecret(),
+      ...getAuthHeaders(),
     },
     body: JSON.stringify({ messages }),
   }).catch(() => {

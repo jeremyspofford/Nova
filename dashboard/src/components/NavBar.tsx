@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, Lock, Unlock } from 'lucide-react'
+import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, Lock, Unlock, LogOut } from 'lucide-react'
 import clsx from 'clsx'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
+import { useAuth } from '../stores/auth-store'
 
 const mainLinks = [
   { to: '/',         label: 'Chat',     icon: MessageSquare    },
@@ -24,6 +25,7 @@ export function NavBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const navigate = useNavigate()
   const { name } = useNovaIdentity()
+  const { isAuthenticated, user, logout } = useAuth()
 
   return (
     <>
@@ -60,9 +62,17 @@ export function NavBar() {
               <span title="Insecure connection — not using HTTPS" className="text-amber-500"><Unlock size={14} /></span>
             ) : null
           )}
+          {isAuthenticated && user && (
+            <span className="hidden sm:inline text-xs text-neutral-500 dark:text-neutral-400 mr-1">{user.display_name || user.email}</span>
+          )}
           <button onClick={() => navigate('/settings')} title="Settings" className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
             <Settings size={16} />
           </button>
+          {isAuthenticated && (
+            <button onClick={logout} title="Sign out" className="text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors">
+              <LogOut size={16} />
+            </button>
+          )}
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileMenuOpen(v => !v)}

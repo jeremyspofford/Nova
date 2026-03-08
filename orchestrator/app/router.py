@@ -3,6 +3,7 @@ Orchestrator FastAPI router — agent lifecycle, task routing, key management, u
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
@@ -21,7 +22,7 @@ from nova_contracts import (
 )
 
 from app.agents.runner import run_agent_turn, run_agent_turn_streaming
-from app.auth import AdminDep, ApiKeyDep
+from app.auth import AdminDep, ApiKeyDep, UserDep
 from app.tools.sandbox import SandboxTier, set_sandbox, reset_sandbox
 from app.db import (
     create_api_key_record,
@@ -45,10 +46,23 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["orchestrator"])
 
 
-async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sandbox_token=None):
+async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sandbox_token=None,
+                      conversation_id: str | None = None, user_message: str | None = None):
     """SSE-formatted wrapper: yields deltas from run_agent_turn_streaming, handles errors, resets agent status."""
+    accumulated = ""
+    model_used = None
     try:
         async for delta in stream_gen:
+            # Track accumulated text and model for conversation persistence
+            if isinstance(delta, str) and not delta.startswith("{"):
+                accumulated += delta
+            elif isinstance(delta, str) and delta.startswith("{"):
+                try:
+                    parsed = json.loads(delta)
+                    if isinstance(parsed, dict) and "meta" in parsed:
+                        model_used = parsed["meta"].get("model")
+                except (json.JSONDecodeError, KeyError):
+                    accumulated += delta
             yield f"data: {delta}\n\n".encode()
         yield b"data: [DONE]\n\n"
     except Exception as e:
@@ -59,6 +73,25 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
         await update_agent_status(agent_id, AgentStatus.idle)
         if sandbox_token is not None:
             reset_sandbox(sandbox_token)
+        # Persist messages to conversation if conversation_id provided
+        if conversation_id and accumulated:
+            try:
+                from app.conversations import add_message, generate_title
+                if user_message:
+                    await add_message(conversation_id, "user", user_message)
+                await add_message(conversation_id, "assistant", accumulated, model_used=model_used)
+                # Auto-title: check if conversation still has no title
+                from app.db import get_pool
+                pool = get_pool()
+                async with pool.acquire() as conn:
+                    title = await conn.fetchval(
+                        "SELECT title FROM conversations WHERE id = $1",
+                        UUID(conversation_id),
+                    )
+                if not title and user_message:
+                    asyncio.create_task(generate_title(conversation_id, user_message))
+            except Exception as e:
+                log.warning("Failed to persist conversation messages: %s", e)
 
 
 # ── Agent lifecycle ───────────────────────────────────────────────────────────
@@ -234,6 +267,7 @@ class ChatRequest(BaseModel):
     messages: list[dict]
     model: str | None = None
     session_id: str | None = None
+    conversation_id: str | None = None
     output_style: str | None = None
     custom_instructions: str | None = None
     web_search: bool = False
@@ -241,7 +275,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/api/v1/chat/stream")
-async def chat_stream(req: ChatRequest, _admin: AdminDep):
+async def chat_stream(req: ChatRequest, user: UserDep):
     """
     Streaming chat directly with the primary Nova agent. Admin-only.
 
@@ -265,7 +299,24 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
     model = req.model or await resolve_default_model()
     explicit_model = bool(req.model)
     task_id = uuid4()
-    session_id = req.session_id or str(uuid4())
+    # Use conversation_id as session_id when available (for memory-service compatibility)
+    session_id = req.conversation_id or req.session_id or str(uuid4())
+
+    # If conversation_id provided, verify ownership
+    conversation_id = req.conversation_id
+    if conversation_id:
+        from app.conversations import get_conversation
+        conv = await get_conversation(conversation_id, user.id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Extract last user message for persistence
+    user_message = None
+    if conversation_id and req.messages:
+        last_user = [m for m in req.messages if m.get("role") == "user"]
+        if last_user:
+            content = last_user[-1].get("content", "")
+            user_message = content if isinstance(content, str) else str(content)
 
     # Build style/research modifiers for system prompt
     system_prompt = agent.config.system_prompt
@@ -304,6 +355,8 @@ async def chat_stream(req: ChatRequest, _admin: AdminDep):
             ),
             error_label="Chat stream",
             sandbox_token=sandbox_token,
+            conversation_id=conversation_id,
+            user_message=user_message,
         ),
         media_type="text/event-stream",
         headers={
@@ -321,7 +374,7 @@ class SummarizeRequest(BaseModel):
 
 
 @router.post("/api/v1/chat/sessions/{session_id}/summarize")
-async def summarize_chat_session(session_id: str, req: SummarizeRequest, _admin: AdminDep):
+async def summarize_chat_session(session_id: str, req: SummarizeRequest, _user: UserDep):
     """Summarize a completed chat session and store as semantic memory."""
     from app.session_summary import summarize_session
 

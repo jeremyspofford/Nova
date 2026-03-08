@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
-import { summarizeSession } from '../api'
+import { summarizeSession, apiFetch } from '../api'
 
 export interface ActivityStep {
   step: string
@@ -36,11 +36,15 @@ interface ChatStore {
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   sessionId: string | undefined
   setSessionId: React.Dispatch<React.SetStateAction<string | undefined>>
+  conversationId: string | null
+  setConversationId: React.Dispatch<React.SetStateAction<string | null>>
   modelId: string
   setModelId: React.Dispatch<React.SetStateAction<string>>
   error: string | null
   setError: React.Dispatch<React.SetStateAction<string | null>>
   resetConversation: () => void
+  loadConversation: (id: string) => Promise<void>
+  newConversation: () => Promise<void>
 
   // Pre-fill input from external pages (e.g. "Discuss" on Tasks page)
   prefillInput: string | null
@@ -59,63 +63,46 @@ interface ChatStore {
   setWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>
   deepResearchEnabled: boolean
   setDeepResearchEnabled: React.Dispatch<React.SetStateAction<boolean>>
+
+  // Sidebar state
+  sidebarCollapsed: boolean
+  setSidebarCollapsed: React.Dispatch<React.SetStateAction<boolean>>
 }
 
 const STORAGE_KEY = 'nova_chat_history'
 
-/** Serializable subset of Message for localStorage. */
-interface PersistedChat {
-  sessionId: string | undefined
-  messages: Array<{
-    id: string
-    role: 'user' | 'assistant'
-    content: string
-    timestamp: string
-    modelUsed?: string
-    category?: string
-  }>
-}
-
-function loadPersistedChat(): { messages: Message[]; sessionId: string | undefined } {
+/** Check if there's a legacy localStorage chat to potentially migrate. */
+export function hasLegacyChat(): boolean {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { messages: [], sessionId: undefined }
-    const data: PersistedChat = JSON.parse(raw)
-    const messages = data.messages.map(m => ({
-      ...m,
-      timestamp: new Date(m.timestamp),
-    }))
-    return { messages, sessionId: data.sessionId }
+    if (!raw) return false
+    const data = JSON.parse(raw)
+    return Array.isArray(data?.messages) && data.messages.length > 0
   } catch {
-    return { messages: [], sessionId: undefined }
+    return false
   }
 }
 
-function saveChat(messages: Message[], sessionId: string | undefined) {
+export function getLegacyChat(): { sessionId: string | undefined; messages: Array<{ role: string; content: string; timestamp: string; modelUsed?: string }> } | null {
   try {
-    const data: PersistedChat = {
-      sessionId,
-      messages: messages.map(m => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        timestamp: m.timestamp.toISOString(),
-        ...(m.modelUsed ? { modelUsed: m.modelUsed } : {}),
-        ...(m.category ? { category: m.category } : {}),
-      })),
-    }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    return JSON.parse(raw)
   } catch {
-    // localStorage full or unavailable — silently ignore
+    return null
   }
+}
+
+export function clearLegacyChat() {
+  localStorage.removeItem(STORAGE_KEY)
 }
 
 const ChatContext = createContext<ChatStore | null>(null)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
-  const [persisted] = useState(loadPersistedChat)
-  const [messages, setMessages] = useState<Message[]>(persisted.messages)
-  const [sessionId, setSessionId] = useState<string | undefined>(persisted.sessionId)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [sessionId, setSessionId] = useState<string | undefined>(undefined)
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const [modelId, _setModelId] = useState(
     () => localStorage.getItem('nova_chat_model') ?? ''
   )
@@ -145,20 +132,63 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   )
   const [webSearchEnabled, setWebSearchEnabled] = useState(false)
   const [deepResearchEnabled, setDeepResearchEnabled] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('nova_sidebar_collapsed') === 'true'
+  )
 
-  // Persist messages + sessionId to localStorage on change (skip streaming updates)
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  // Persist sidebar state
   useEffect(() => {
-    // Debounce saves — don't write on every streaming token
-    clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      const hasStreaming = messages.some(m => m.isStreaming)
-      if (!hasStreaming) {
-        saveChat(messages, sessionId)
-      }
-    }, 300)
-    return () => clearTimeout(saveTimer.current)
-  }, [messages, sessionId])
+    localStorage.setItem('nova_sidebar_collapsed', String(sidebarCollapsed))
+  }, [sidebarCollapsed])
+
+  const loadConversation = useCallback(async (id: string) => {
+    try {
+      const msgs = await apiFetch<Array<{
+        id: string; role: string; content: string; model_used?: string; metadata?: Record<string, unknown>; created_at: string
+      }>>(`/api/v1/conversations/${id}/messages?limit=200`)
+      setMessages(msgs.map(m => ({
+        id: m.id,
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        timestamp: new Date(m.created_at),
+        modelUsed: m.model_used ?? undefined,
+      })))
+      setConversationId(id)
+      setSessionId(id)  // conversation ID = session ID for memory compatibility
+      setError(null)
+      setPendingFiles([])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load conversation')
+    }
+  }, [])
+
+  const newConversation = useCallback(async () => {
+    // Summarize the previous conversation before switching (fire-and-forget)
+    if (sessionIdRef.current && messagesRef.current.length >= 2) {
+      summarizeSession(
+        sessionIdRef.current,
+        messagesRef.current.map(m => ({ role: m.role, content: m.content })),
+      )
+    }
+    try {
+      const conv = await apiFetch<{ id: string }>('/api/v1/conversations', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      })
+      setMessages([])
+      setConversationId(conv.id)
+      setSessionId(conv.id)
+      setError(null)
+      setPendingFiles([])
+    } catch {
+      // Fallback: local-only conversation (e.g. REQUIRE_AUTH=false)
+      setMessages([])
+      setConversationId(null)
+      setSessionId(undefined)
+      setError(null)
+      setPendingFiles([])
+    }
+  }, [])
 
   const resetConversation = useCallback(() => {
     // Summarize the completed conversation before clearing (fire-and-forget)
@@ -169,19 +199,22 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       )
     }
     setMessages([])
+    setConversationId(null)
     setSessionId(undefined)
     setError(null)
     setPendingFiles([])
-    localStorage.removeItem(STORAGE_KEY)
   }, [])
 
   return (
     <ChatContext.Provider value={{
       messages, setMessages,
       sessionId, setSessionId,
+      conversationId, setConversationId,
       modelId, setModelId,
       error, setError,
       resetConversation,
+      loadConversation,
+      newConversation,
       prefillInput, setPrefillInput,
       pendingFiles, setPendingFiles,
       drawerOpen, setDrawerOpen,
@@ -189,6 +222,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       customInstructions, setCustomInstructions,
       webSearchEnabled, setWebSearchEnabled,
       deepResearchEnabled, setDeepResearchEnabled,
+      sidebarCollapsed, setSidebarCollapsed,
     }}>
       {children}
     </ChatContext.Provider>

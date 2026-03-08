@@ -12,6 +12,7 @@ from nova_contracts.logging import configure_logging
 from app.clients import close_clients
 from app.config import settings
 from app.db import close_db, init_db
+from app.auth_router import router as auth_router
 from app.health import health_router
 from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
@@ -35,6 +36,10 @@ async def lifespan(app: FastAPI):
 
     # Initialize Postgres pool and apply versioned schema migrations
     await init_db()
+
+    # Auto-generate JWT secret if not configured
+    from app.jwt_auth import ensure_jwt_secret
+    await ensure_jwt_secret()
 
     # Sync DB config to Redis so LLM gateway has correct values immediately
     from app.config_sync import sync_llm_config_to_redis
@@ -88,4 +93,5 @@ app.add_middleware(
 
 app.include_router(health_router)
 app.include_router(router)
+app.include_router(auth_router)
 app.include_router(pipeline_router)

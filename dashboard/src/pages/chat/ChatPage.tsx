@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { streamChat, uploadFile, discoverModels, resolveModel, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { streamChat, uploadFile, discoverModels, resolveModel, apiFetch, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
+import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts, getStableContent } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
+import { ConversationSidebar } from '../../components/ConversationSidebar'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
 
@@ -20,15 +22,21 @@ export function Chat() {
   const {
     messages, setMessages,
     sessionId, setSessionId,
+    conversationId, setConversationId,
     modelId, setModelId,
     error, setError,
     resetConversation,
+    loadConversation,
+    newConversation,
     pendingFiles, setPendingFiles,
     outputStyle,
     customInstructions,
     webSearchEnabled,
     deepResearchEnabled,
+    sidebarCollapsed, setSidebarCollapsed,
   } = useChatStore()
+  const { isAuthenticated } = useAuth()
+  const queryClient = useQueryClient()
 
   const { name: aiName, greeting } = useNovaIdentity()
   const [isStreaming, setIsStreaming] = useState(false)
@@ -117,7 +125,23 @@ export function Chat() {
     }
     setIsStreaming(true)
 
-    const currentSessionId = sessionId ?? (() => {
+    // Auto-create conversation for authenticated users without one
+    let activeConversationId = conversationId
+    if (isAuthenticated && !activeConversationId) {
+      try {
+        const conv = await apiFetch<{ id: string }>('/api/v1/conversations', {
+          method: 'POST',
+          body: JSON.stringify({}),
+        })
+        activeConversationId = conv.id
+        setConversationId(conv.id)
+        setSessionId(conv.id)
+      } catch {
+        // Fallback: no conversation persistence
+      }
+    }
+
+    const currentSessionId = activeConversationId ?? sessionId ?? (() => {
       const newId = crypto.randomUUID()
       setSessionId(newId)
       return newId
@@ -163,6 +187,7 @@ export function Chat() {
       ...(customInstructions.trim() ? { custom_instructions: customInstructions.trim() } : {}),
       ...(webSearchEnabled ? { web_search: true } : {}),
       ...(deepResearchEnabled ? { deep_research: true } : {}),
+      ...(activeConversationId ? { conversation_id: activeConversationId } : {}),
     }
 
     try {
@@ -232,8 +257,11 @@ export function Chat() {
       )
     } finally {
       setIsStreaming(false)
+      if (conversationId) {
+        queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      }
     }
-  }, [messages, sessionId, modelId, isStreaming, setMessages, setSessionId, setError, pendingFiles, setPendingFiles, outputStyle, customInstructions, webSearchEnabled, deepResearchEnabled])
+  }, [messages, sessionId, conversationId, modelId, isStreaming, setMessages, setSessionId, setError, pendingFiles, setPendingFiles, outputStyle, customInstructions, webSearchEnabled, deepResearchEnabled, queryClient])
 
   // Process queued messages sequentially when streaming completes
   useEffect(() => {
@@ -244,9 +272,14 @@ export function Chat() {
     }
   }, [isStreaming, messageQueue, handleSubmit])
 
-  const startNewConversation = () => {
+  const startNewConversation = async () => {
     setMessageQueue([])
-    resetConversation()
+    if (isAuthenticated) {
+      await newConversation()
+      queryClient.invalidateQueries({ queryKey: ['conversations'] })
+    } else {
+      resetConversation()
+    }
   }
 
   // Compute streaming status text
@@ -277,8 +310,27 @@ export function Chat() {
     hasMessages: messages.length > 0,
   }
 
+  const handleSelectConversation = useCallback(async (id: string) => {
+    setMessageQueue([])
+    await loadConversation(id)
+  }, [loadConversation])
+
+  const handleNewConversation = useCallback(async () => {
+    await startNewConversation()
+  }, [startNewConversation]) // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <div ref={containerRef} className="flex flex-col h-full overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+    <div className="flex h-full overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+      {isAuthenticated && (
+        <ConversationSidebar
+          currentId={conversationId}
+          onSelect={handleSelectConversation}
+          onNew={handleNewConversation}
+          collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed(c => !c)}
+        />
+      )}
+    <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
       {messages.length === 0 ? (
         /* Empty state: greeting bubble + input */
         <div className="flex-1 flex flex-col">
@@ -342,6 +394,7 @@ export function Chat() {
           </div>
         </>
       )}
+    </div>
     </div>
   )
 }

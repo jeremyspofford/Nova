@@ -1,20 +1,23 @@
 """
 FastAPI dependencies for API key authentication and Redis rate limiting.
 
-Two separate auth paths:
+Three separate auth paths:
   ApiKeyDep  — validates X-API-Key header; applied to all task + agent endpoints
   AdminDep   — validates X-Admin-Secret header; applied to key management endpoints
+  UserDep    — validates JWT Bearer token; applied to user-facing endpoints (dashboard)
 
 When REQUIRE_AUTH=false (local dev), ApiKeyDep returns a synthetic bypass key
 so all handlers work identically without distributing real keys.
+UserDep also accepts X-Admin-Secret as a fallback for backward compatibility.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Annotated, Any
-from uuid import UUID  # still needed for type hints in AuthenticatedKey and touch_api_key
+from uuid import UUID
 
 from fastapi import Depends, Header, HTTPException
 
@@ -23,6 +26,16 @@ from app.db import lookup_api_key, touch_api_key
 from app.store import get_redis
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class AuthenticatedUser:
+    """Validated user context injected into handlers via UserDep."""
+    id: str
+    email: str
+    display_name: str
+    is_admin: bool
+
 
 class AuthenticatedKey:
     """Validated API key context injected into handlers via ApiKeyDep."""
@@ -98,6 +111,50 @@ async def require_admin(
         raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
+_SYNTHETIC_ADMIN = AuthenticatedUser(
+    id="00000000-0000-0000-0000-000000000000",
+    email="admin@local",
+    display_name="Admin",
+    is_admin=True,
+)
+
+
+async def require_user(
+    authorization: Annotated[str | None, Header()] = None,
+    x_admin_secret: Annotated[str | None, Header(alias="X-Admin-Secret")] = None,
+) -> AuthenticatedUser:
+    """Authenticate dashboard requests. Accepts:
+    1. Bearer JWT token (user auth)
+    2. X-Admin-Secret header (legacy backward compat — maps to synthetic admin user)
+    3. If REQUIRE_AUTH=false, returns synthetic admin user (backward compat)
+    """
+    # Dev bypass
+    if not settings.require_auth:
+        return _SYNTHETIC_ADMIN
+
+    # Try JWT first
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        try:
+            from app.jwt_auth import verify_access_token
+            payload = verify_access_token(token)
+            return AuthenticatedUser(
+                id=payload["sub"],
+                email=payload["email"],
+                display_name=payload.get("display_name", ""),
+                is_admin=payload.get("is_admin", False),
+            )
+        except Exception:
+            pass  # Fall through to admin secret check
+
+    # Fallback: admin secret (backward compat for existing dashboard sessions)
+    if x_admin_secret and x_admin_secret == settings.nova_admin_secret:
+        return _SYNTHETIC_ADMIN
+
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 # Clean type aliases used in handler signatures
 ApiKeyDep = Annotated[AuthenticatedKey, Depends(require_api_key)]
 AdminDep = Annotated[None, Depends(require_admin)]
+UserDep = Annotated[AuthenticatedUser, Depends(require_user)]
