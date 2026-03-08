@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -248,3 +249,35 @@ class TestTaskDeletion:
             headers=admin_headers,
         )
         assert resp.status_code == 400
+
+
+class TestSessionSummarization:
+    @pytest.mark.requires_llm
+    async def test_session_summarize(self, orchestrator: httpx.AsyncClient, admin_headers: dict):
+        """POST /api/v1/chat/sessions/{id}/summarize stores a session summary."""
+        session_id = f"nova-test-summary-{uuid4().hex[:8]}"
+        messages = [
+            {"role": "user", "content": "What is the capital of France?"},
+            {"role": "assistant", "content": "The capital of France is Paris."},
+            {"role": "user", "content": "What about Germany?"},
+            {"role": "assistant", "content": "The capital of Germany is Berlin."},
+        ]
+        resp = await orchestrator.post(
+            f"/api/v1/chat/sessions/{session_id}/summarize",
+            json={"messages": messages},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert len(data["summary"]) > 10
+
+    async def test_session_summarize_skips_short(self, orchestrator: httpx.AsyncClient, admin_headers: dict):
+        """Sessions with fewer than 2 messages are skipped."""
+        resp = await orchestrator.post(
+            f"/api/v1/chat/sessions/nova-test-short/summarize",
+            json={"messages": [{"role": "user", "content": "hi"}]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "skipped"
