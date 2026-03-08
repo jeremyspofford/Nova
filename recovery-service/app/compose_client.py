@@ -25,13 +25,37 @@ async def _run_compose(*args: str) -> tuple[int, str, str]:
 
 
 async def start_profiled_service(profile: str, service: str) -> dict:
-    """Start a profiled service via docker compose up -d."""
+    """Start a profiled service via docker compose up -d.
+
+    Uses --no-build because the recovery container lacks the full build
+    context.  If the image hasn't been built yet, we detect it and return
+    an actionable error message.
+    """
     code, stdout, stderr = await _run_compose(
-        "--profile", profile, "up", "-d", service,
+        "--profile", profile, "up", "-d", "--no-build", service,
     )
     if code != 0:
-        logger.error("compose up failed: %s", stderr)
-        return {"ok": False, "error": stderr.strip()}
+        err = stderr.strip()
+        logger.error("compose up failed: %s", err)
+        err_lower = err.lower()
+        if "no such image" in err_lower or ("image" in err_lower and "not found" in err_lower):
+            return {
+                "ok": False,
+                "error": (
+                    f"Image for '{service}' not found. "
+                    f"Build it on the host first: "
+                    f"docker compose --profile {profile} build {service}"
+                ),
+            }
+        if "is not healthy" in err_lower or "dependency" in err_lower:
+            return {
+                "ok": False,
+                "error": (
+                    f"Cannot start '{service}': a dependency is not healthy. "
+                    f"Check that orchestrator and redis are running."
+                ),
+            }
+        return {"ok": False, "error": err}
     return {"ok": True, "output": stdout.strip() or stderr.strip()}
 
 

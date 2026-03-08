@@ -19,8 +19,14 @@ async function recoveryFetch<T>(path: string, options: RequestInit = {}): Promis
     },
   })
   if (!resp.ok) {
-    const text = await resp.text().catch(() => resp.statusText)
-    throw new Error(`${resp.status}: ${text}`)
+    let msg = resp.statusText
+    try {
+      const body = await resp.json()
+      msg = body.detail ?? body.error ?? JSON.stringify(body)
+    } catch {
+      msg = await resp.text().catch(() => resp.statusText)
+    }
+    throw new Error(`${resp.status}: ${msg}`)
   }
   if (resp.status === 204) return undefined as T
   return resp.json() as Promise<T>
@@ -67,6 +73,24 @@ export interface ServiceStatus {
 
 export const getServiceStatus = () =>
   recoveryFetch<ServiceStatus[]>('/api/v1/recovery/services')
+
+export interface FullServiceStatus {
+  service: string
+  container_name: string | null
+  status: string
+  health: string
+  ports: number[]
+  optional: boolean
+  profile?: string
+}
+
+export interface AllServicesResponse {
+  core: FullServiceStatus[]
+  optional: FullServiceStatus[]
+}
+
+export const getAllServiceStatus = () =>
+  recoveryFetch<AllServicesResponse>('/api/v1/recovery/services/all')
 
 export const restartService = (serviceName: string) =>
   recoveryFetch<{ service: string; action: string; ok: boolean }>(
