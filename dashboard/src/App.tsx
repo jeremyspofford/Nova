@@ -21,7 +21,7 @@ import { Recovery } from './pages/Recovery'
 import { RemoteAccess } from './pages/RemoteAccess'
 
 function PageShell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto max-w-6xl w-full h-full overflow-y-auto custom-scrollbar">{children}</main>
+  return <main className="mx-auto max-w-6xl w-full">{children}</main>
 }
 
 const queryClient = new QueryClient({
@@ -96,7 +96,7 @@ function AppShell() {
     <BrowserRouter>
       <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
         <NavBar />
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
           <Routes>
             {/* Chat gets full width for sidebar layout */}
             <Route path="/"        element={<Chat />} />

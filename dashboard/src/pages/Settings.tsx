@@ -125,6 +125,7 @@ export function Settings() {
       <div className="space-y-6">
         {activeCategory === 'general' && (
           <>
+            {isAuthenticated && <AccountSection />}
             <Section icon={Bot} title="Nova Identity" description="How Nova presents itself. Changes appear in the next Chat session.">
               <ConfigField label="Name" configKey="nova.name" value={novaName} placeholder="Nova" description="Shown in the dashboard header and chat UI." onSave={handleSave} saving={saveMutation.isPending} />
               <ConfigField label="Greeting message" configKey="nova.greeting" value={novaGreeting} placeholder="Hello! I'm Nova…" description="The first message shown in the Chat page before the user types anything." onSave={handleSave} saving={saveMutation.isPending} />
