@@ -8,11 +8,12 @@ logger = logging.getLogger("nova.recovery.compose")
 
 COMPOSE_PROJECT_DIR = os.getenv("COMPOSE_PROJECT_DIR", "/project")
 COMPOSE_FILE = os.path.join(COMPOSE_PROJECT_DIR, "docker-compose.yml")
+COMPOSE_PROJECT_NAME = os.getenv("COMPOSE_PROJECT_NAME", "nova")
 
 
 async def _run_compose(*args: str) -> tuple[int, str, str]:
     """Run a docker compose command and return (returncode, stdout, stderr)."""
-    cmd = ["docker", "compose", "-f", COMPOSE_FILE, *args]
+    cmd = ["docker", "compose", "-f", COMPOSE_FILE, "-p", COMPOSE_PROJECT_NAME, *args]
     logger.info("Running: %s", " ".join(cmd))
     proc = await asyncio.create_subprocess_exec(
         *cmd,
