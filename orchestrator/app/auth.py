@@ -99,16 +99,31 @@ async def require_api_key(
 
 
 async def require_admin(
+    authorization: Annotated[str | None, Header()] = None,
     x_admin_secret: Annotated[str | None, Header(alias="X-Admin-Secret")] = None,
 ) -> None:
-    """Validate X-Admin-Secret for key management endpoints.
+    """Validate admin access for key management and config endpoints.
 
-    Intentionally separate from API key auth: a revoked API key cannot
-    list or create other keys, and the admin secret is never distributed
-    to API clients.
+    Accepts either:
+    1. X-Admin-Secret header (original method)
+    2. JWT Bearer token from an admin user (dashboard after login)
     """
-    if not x_admin_secret or x_admin_secret != settings.nova_admin_secret:
-        raise HTTPException(status_code=403, detail="Invalid admin secret")
+    # Check admin secret first
+    if x_admin_secret and x_admin_secret == settings.nova_admin_secret:
+        return
+
+    # Check JWT from admin user
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        try:
+            from app.jwt_auth import verify_access_token
+            payload = verify_access_token(token)
+            if payload.get("is_admin"):
+                return
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 
 _SYNTHETIC_ADMIN = AuthenticatedUser(
