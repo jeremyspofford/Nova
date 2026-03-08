@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from .backup import create_backup, delete_backup, list_backups, list_checkpoints, restore_backup
 from .compose_client import start_profiled_service, stop_profiled_service
 from .config import settings
-from .docker_client import check_container_status, get_container_logs, list_service_status, restart_all_services, restart_service
+from .docker_client import check_container_status, get_container_logs, list_all_service_status, list_service_status, restart_all_services, restart_service
 from .env_manager import add_compose_profile, patch_env, read_env, remove_compose_profile
 from .factory_reset import factory_reset, get_categories
 
@@ -94,6 +94,12 @@ async def get_overview():
 async def get_services():
     """List all Nova service containers and their status."""
     return list_service_status()
+
+
+@router.get("/api/v1/recovery/services/all")
+async def get_all_services():
+    """All core + optional services with ports and profile info."""
+    return list_all_service_status()
 
 
 @router.post("/api/v1/recovery/services/{service_name}/restart")

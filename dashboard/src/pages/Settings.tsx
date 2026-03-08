@@ -9,10 +9,12 @@ import { ContextBudgetSection } from './settings/ContextBudgetSection'
 import { AdminSecretSection } from './settings/AdminSecretSection'
 import { RemoteAccessSection } from './settings/RemoteAccessSection'
 import { ChatIntegrationsSection } from './settings/ChatIntegrationsSection'
-import { RecoverySection, SystemStatusSection } from './settings/RecoverySection'
+import { RecoverySection } from './settings/RecoverySection'
 import { AppearanceSection } from './settings/AppearanceSection'
 import { NotificationsSection } from './settings/NotificationsSection'
 import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
+import { AccountSection } from './settings/AccountSection'
+import { useAuth } from '../stores/auth-store'
 
 // ── Category tabs ────────────────────────────────────────────────────────────
 
@@ -75,6 +77,7 @@ function CategoryTabs({ active, onChange }: { active: CategoryKey; onChange: (k:
 export function Settings() {
   const qc = useQueryClient()
   const [activeCategory, setCategory] = useActiveCategory()
+  const { isAuthenticated } = useAuth()
 
   const { data: entries = [], isLoading, error } = useQuery({
     queryKey: ['platform-config'],
@@ -168,10 +171,9 @@ export function Settings() {
 
         {activeCategory === 'system' && (
           <>
-            <RecoverySection />
-            <SystemStatusSection />
-            <NotificationsSection />
             <DeveloperResourcesSection />
+            <NotificationsSection />
+            <RecoverySection />
           </>
         )}
 

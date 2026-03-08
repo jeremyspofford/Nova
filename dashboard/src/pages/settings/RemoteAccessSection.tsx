@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Globe } from 'lucide-react'
+import { Globe, ExternalLink } from 'lucide-react'
 import { getRemoteAccessStatus } from '../../api-recovery'
 import { CloudflareWizard, TailscaleWizard, StatusBadge as RemoteStatusBadge } from '../RemoteAccess'
 import { Section } from './shared'
@@ -26,7 +26,7 @@ export function RemoteAccessSection() {
     <Section
       icon={Globe}
       title="Remote Access"
-      description="Expose Nova securely to the internet via Cloudflare Tunnel, or access from your devices via Tailscale."
+      description={<>Expose Nova securely to the internet via Cloudflare Tunnel, or access from your devices via Tailscale. <a href="https://arialabs.ai/nova/docs/remote-access/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400 hover:underline">Setup guide <ExternalLink size={12} /></a></>}
     >
       <div className="flex gap-4 text-sm mb-3">
         <span className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">

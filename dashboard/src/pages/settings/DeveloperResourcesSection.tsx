@@ -1,119 +1,241 @@
-import { FileCode, ExternalLink } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useCallback, Fragment } from 'react'
+import { FileCode, ExternalLink, RefreshCw } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { getQueueStats, getMCPServers } from '../../api'
+import { getAllServiceStatus, restartService, type FullServiceStatus } from '../../api-recovery'
 import { Section } from './shared'
 
-const SERVICES = [
-  { name: 'Orchestrator',   port: 8000, healthPath: '/api/health/live', desc: 'Agent lifecycle, pipeline execution, task queue' },
-  { name: 'LLM Gateway',    port: 8001, healthPath: '/v1/health/live',  desc: 'Multi-provider model routing, completions, embeddings' },
-  { name: 'Memory Service', port: 8002, healthPath: '/mem/health/live', desc: 'Semantic memory storage and hybrid retrieval' },
-  { name: 'Recovery',       port: 8888, healthPath: '/recovery-api/health/live', desc: 'Backup, restore, factory reset, service management' },
-] as const
+const SERVICE_META: Record<string, { desc: string; hasDocs?: boolean }> = {
+  'postgres':       { desc: 'pgvector-enabled database' },
+  'redis':          { desc: 'State, task queue, rate limiting' },
+  'orchestrator':   { desc: 'Agent lifecycle, pipeline, task queue', hasDocs: true },
+  'llm-gateway':    { desc: 'Multi-provider model routing', hasDocs: true },
+  'memory-service': { desc: 'Semantic memory & retrieval', hasDocs: true },
+  'chat-api':       { desc: 'WebSocket streaming bridge' },
+  'recovery':       { desc: 'Backup, restore, factory reset', hasDocs: true },
+  'dashboard':      { desc: 'React admin UI' },
+  'chat-bridge':    { desc: 'Telegram & Slack integration' },
+  'website':        { desc: 'Documentation & landing page' },
+  'ollama':         { desc: 'Local model serving' },
+  'cloudflared':    { desc: 'Cloudflare Tunnel' },
+  'tailscale':      { desc: 'Tailscale VPN' },
+}
 
-/** Build a direct URL to a service's Swagger docs (bypasses nginx prefix issues). */
+const NO_RESTART = new Set(['postgres', 'redis', 'recovery'])
+
 function docsUrl(port: number): string {
   return `${window.location.protocol}//${window.location.hostname}:${port}/docs`
 }
 
-const ENDPOINTS = [
-  { name: 'Orchestrator',   port: 8000, desc: 'Agent lifecycle, pipeline, tasks' },
-  { name: 'LLM Gateway',    port: 8001, desc: 'Model routing, completions, embeddings' },
-  { name: 'Memory Service', port: 8002, desc: 'Semantic memory, retrieval' },
-  { name: 'Chat API',       port: 8080, desc: 'WebSocket streaming bridge' },
-  { name: 'Recovery',       port: 8888, desc: 'Backup, restore, factory reset, service management' },
-  { name: 'Dashboard',      port: '5173 / 3000', desc: 'Dev (Vite) / Prod (nginx)' },
-  { name: 'PostgreSQL',     port: 5432, desc: 'pgvector-enabled database' },
-  { name: 'Redis',          port: 6379, desc: 'State, task queue, rate limiting' },
-] as const
+function StatusDot({ status, health }: { status: string; health: string }) {
+  const isUp = status === 'running' && (health === 'healthy' || health === 'none')
+  const isStarting = status === 'running' && health === 'starting'
+  const notStarted = status === 'not_found'
+  const color = isUp
+    ? 'bg-emerald-500'
+    : isStarting
+      ? 'bg-amber-400'
+      : notStarted
+        ? 'bg-neutral-300 dark:bg-neutral-600'
+        : 'bg-red-500'
+  const label = isUp ? 'Healthy' : isStarting ? 'Starting' : notStarted ? 'Not started' : status
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className={`inline-block size-2 rounded-full ${color}`} />
+      <span className="text-xs text-neutral-500 dark:text-neutral-400 capitalize">{label}</span>
+    </div>
+  )
+}
 
-function useServiceHealth() {
-  return useQuery({
-    queryKey: ['service-health'],
-    queryFn: async () => {
-      const results = await Promise.allSettled(
-        SERVICES.map(s =>
-          fetch(s.healthPath, { signal: AbortSignal.timeout(3000) })
-            .then(r => r.ok)
-        ),
-      )
-      return Object.fromEntries(
-        SERVICES.map((s, i) => [s.name, results[i].status === 'fulfilled' && (results[i] as PromiseFulfilledResult<boolean>).value])
-      ) as Record<string, boolean>
-    },
-    staleTime: 15_000,
-  })
+function ServiceRow({
+  svc,
+  restartingService,
+  onRestart,
+}: {
+  svc: FullServiceStatus
+  restartingService: string | null
+  onRestart: (name: string) => void
+}) {
+  const meta = SERVICE_META[svc.service]
+  const port = svc.ports[0]
+  const dimmed = svc.optional && svc.status !== 'running'
+  const canRestart = !NO_RESTART.has(svc.service) && svc.status === 'running'
+
+  return (
+    <tr className={dimmed ? 'opacity-50' : ''}>
+      <td className="px-3 py-2 font-medium text-neutral-900 dark:text-neutral-100 text-sm">
+        {svc.service}
+      </td>
+      <td className="px-3 py-2 font-mono text-xs text-neutral-500 dark:text-neutral-400">
+        {port ?? '—'}
+      </td>
+      <td className="hidden md:table-cell px-3 py-2 text-xs text-neutral-500 dark:text-neutral-400">
+        {meta?.desc ?? ''}
+      </td>
+      <td className="px-3 py-2">
+        <StatusDot status={svc.status} health={svc.health} />
+      </td>
+      <td className="px-3 py-2 text-right">
+        <div className="flex items-center justify-end gap-2">
+          {canRestart && (
+            <button
+              onClick={() => onRestart(svc.service)}
+              disabled={restartingService === svc.service}
+              className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 disabled:opacity-40 transition-colors"
+            >
+              <RefreshCw size={11} className={restartingService === svc.service ? 'animate-spin' : ''} />
+              Restart
+            </button>
+          )}
+          {meta?.hasDocs && port && svc.status === 'running' && (
+            <a
+              href={docsUrl(port)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline"
+            >
+              Docs <ExternalLink size={11} />
+            </a>
+          )}
+        </div>
+      </td>
+    </tr>
+  )
+}
+
+function SubsystemRow({ label, ok, detail }: { label: string; ok: boolean; detail?: string }) {
+  return (
+    <tr>
+      <td className="pl-6 pr-3 py-1 text-xs text-neutral-500 dark:text-neutral-400 border-l-2 border-neutral-200 dark:border-neutral-700 ml-3">
+        <span className="text-neutral-400 dark:text-neutral-500 mr-1">└</span>
+        {label}
+      </td>
+      <td className="px-3 py-1" />
+      <td className="hidden md:table-cell px-3 py-1 text-xs text-neutral-500 dark:text-neutral-400">
+        {detail}
+      </td>
+      <td className="px-3 py-1">
+        <div className="flex items-center gap-1.5">
+          <span className={`inline-block size-1.5 rounded-full ${ok ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-600'}`} />
+        </div>
+      </td>
+      <td className="px-3 py-1" />
+    </tr>
+  )
 }
 
 export function DeveloperResourcesSection() {
-  const { data: health } = useServiceHealth()
+  const qc = useQueryClient()
+  const [restartingService, setRestartingService] = useState<string | null>(null)
+
+  const { data: allServices, isLoading } = useQuery({
+    queryKey: ['all-service-status'],
+    queryFn: getAllServiceStatus,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+  })
+
+  const { data: queueStats, isError: queueError } = useQuery({
+    queryKey: ['queue-stats'],
+    queryFn: getQueueStats,
+    refetchInterval: 10_000,
+    staleTime: 5_000,
+    retry: 1,
+  })
+
+  const { data: mcpServers = [] } = useQuery({
+    queryKey: ['mcp-servers'],
+    queryFn: getMCPServers,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+
+  const enabledServers = mcpServers.filter((s: any) => s.enabled)
+  const connectedServers = mcpServers.filter((s: any) => s.connected)
+  const totalTools = connectedServers.reduce((sum: number, s: any) => sum + (s.tool_count ?? 0), 0)
+  const orchestratorOk = !queueError && queueStats !== undefined
+
+  const handleRestart = useCallback(async (svc: string) => {
+    setRestartingService(svc)
+    try {
+      await restartService(svc)
+      qc.invalidateQueries({ queryKey: ['all-service-status'] })
+      qc.invalidateQueries({ queryKey: ['recovery-services'] })
+    } catch { /* silently handled */ }
+    setRestartingService(null)
+  }, [qc])
+
+  const subsystems = [
+    { label: 'Queue Worker', ok: orchestratorOk, detail: queueStats ? `depth ${(queueStats as any).queue_depth}` : undefined },
+    { label: 'Reaper', ok: orchestratorOk, detail: 'stale-agent recovery' },
+    {
+      label: 'MCP Servers',
+      ok: enabledServers.length > 0 && connectedServers.length === enabledServers.length,
+      detail: enabledServers.length === 0
+        ? 'none configured'
+        : `${connectedServers.length}/${enabledServers.length} connected · ${totalTools} tools`,
+    },
+  ]
 
   return (
     <Section
       icon={FileCode}
       title="Developer Resources"
-      description="API documentation, service health, and endpoint reference."
+      description="Unified service status, ports, and API documentation. Auto-refreshes every 10 seconds."
     >
-      {/* Service cards */}
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {SERVICES.map(s => {
-          const alive = health?.[s.name]
-          return (
-            <div
-              key={s.name}
-              className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={
-                      'inline-block size-2 rounded-full ' +
-                      (health === undefined
-                        ? 'bg-neutral-400 dark:bg-neutral-500'
-                        : alive ? 'bg-emerald-500' : 'bg-red-500')
-                    }
-                    title={health === undefined ? 'Checking…' : alive ? 'Healthy' : 'Unreachable'}
-                  />
-                  <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{s.name}</span>
-                </div>
-                <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">:{s.port}</span>
-              </div>
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">{s.desc}</p>
-              <a
-                href={docsUrl(s.port)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline"
-              >
-                API Docs <ExternalLink size={11} />
-              </a>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Endpoint quick-reference */}
-      <div>
-        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Endpoint Reference</label>
-        <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden text-xs">
+      {isLoading ? (
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">Checking services...</p>
+      ) : (
+        <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 overflow-hidden text-sm">
           <table className="w-full">
             <thead>
-              <tr className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
-                <th className="px-3 py-1.5 text-left font-medium">Service</th>
-                <th className="px-3 py-1.5 text-left font-medium font-mono">Port</th>
-                <th className="px-3 py-1.5 text-left font-medium">Description</th>
+              <tr className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 text-xs">
+                <th className="px-3 py-2 text-left font-medium">Service</th>
+                <th className="px-3 py-2 text-left font-medium font-mono">Port</th>
+                <th className="hidden md:table-cell px-3 py-2 text-left font-medium">Description</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
-              {ENDPOINTS.map(e => (
-                <tr key={e.name} className="text-neutral-700 dark:text-neutral-300">
-                  <td className="px-3 py-1.5 font-medium">{e.name}</td>
-                  <td className="px-3 py-1.5 font-mono text-neutral-500 dark:text-neutral-400">{e.port}</td>
-                  <td className="px-3 py-1.5 text-neutral-500 dark:text-neutral-400">{e.desc}</td>
+              {(allServices?.core ?? []).map(svc => (
+                <Fragment key={svc.service}>
+                  <ServiceRow
+                    svc={svc}
+                    restartingService={restartingService}
+                    onRestart={handleRestart}
+                  />
+                  {svc.service === 'orchestrator' &&
+                    subsystems.map(sub => (
+                      <SubsystemRow key={sub.label} {...sub} />
+                    ))}
+                </Fragment>
+              ))}
+
+              {/* Optional services divider */}
+              {(allServices?.optional ?? []).length > 0 && (
+                <tr>
+                  <td
+                    colSpan={5}
+                    className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500 bg-neutral-50 dark:bg-neutral-800/50"
+                  >
+                    Optional Services
+                  </td>
                 </tr>
+              )}
+
+              {(allServices?.optional ?? []).map(svc => (
+                <ServiceRow
+                  key={svc.service}
+                  svc={svc}
+                  restartingService={restartingService}
+                  onRestart={handleRestart}
+                />
               ))}
             </tbody>
           </table>
         </div>
-      </div>
+      )}
     </Section>
   )
 }

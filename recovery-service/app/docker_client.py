@@ -18,9 +18,65 @@ NOVA_SERVICES = [
     "dashboard",
 ]
 
+# Optional services gated behind compose profiles
+OPTIONAL_SERVICES = {
+    "chat-bridge": "bridges",
+    "website": "website",
+    "ollama": "local-ollama",
+    "cloudflared": "cloudflare-tunnel",
+    "tailscale": "tailscale",
+}
+
 
 def _client() -> docker.DockerClient:
     return docker.DockerClient.from_env()
+
+
+def _get_ports(container) -> list[int]:
+    """Extract host ports from container port mappings."""
+    try:
+        ports_cfg = container.attrs.get("NetworkSettings", {}).get("Ports") or {}
+        host_ports: list[int] = []
+        for _container_port, bindings in ports_cfg.items():
+            if bindings:
+                for b in bindings:
+                    port = b.get("HostPort")
+                    if port:
+                        host_ports.append(int(port))
+        return sorted(set(host_ports))
+    except Exception:
+        return []
+
+
+def _find_container(by_name: dict, svc: str):
+    """Find a container matching a service name."""
+    for name, c in by_name.items():
+        if svc in name and ("nova" in name or svc == name):
+            return c
+    return None
+
+
+def _container_to_status(svc: str, container, *, optional: bool = False, profile: str | None = None) -> dict:
+    """Build a status dict from a container (or None)."""
+    if container:
+        return {
+            "service": svc,
+            "container_name": container.name,
+            "status": container.status,
+            "health": _get_health(container),
+            "ports": _get_ports(container),
+            "optional": optional,
+            **({"profile": profile} if profile else {}),
+        }
+    return {
+        "service": svc,
+        "container_name": None,
+        "status": "not_found",
+        "health": "unknown",
+        "ports": [],
+        "optional": optional,
+        **({"profile": profile} if profile else {}),
+    }
 
 
 def list_service_status() -> list[dict]:
@@ -29,33 +85,13 @@ def list_service_status() -> list[dict]:
     try:
         client = _client()
         containers = client.containers.list(all=True)
-        # Build lookup by container name
         by_name: dict[str, docker.models.containers.Container] = {}
         for c in containers:
             by_name[c.name] = c
 
         for svc in NOVA_SERVICES:
-            # Match containers with common naming patterns
-            container = None
-            for name, c in by_name.items():
-                if svc in name and ("nova" in name or svc == name):
-                    container = c
-                    break
-
-            if container:
-                results.append({
-                    "service": svc,
-                    "container_name": container.name,
-                    "status": container.status,  # running, exited, restarting, etc.
-                    "health": _get_health(container),
-                })
-            else:
-                results.append({
-                    "service": svc,
-                    "container_name": None,
-                    "status": "not_found",
-                    "health": "unknown",
-                })
+            container = _find_container(by_name, svc)
+            results.append(_container_to_status(svc, container))
     except DockerException as e:
         logger.warning("Docker API unavailable: %s", e)
         for svc in NOVA_SERVICES:
@@ -64,8 +100,46 @@ def list_service_status() -> list[dict]:
                 "container_name": None,
                 "status": "unknown",
                 "health": "unknown",
+                "ports": [],
+                "optional": False,
             })
     return results
+
+
+def list_all_service_status() -> dict:
+    """Return status for core services (+ recovery) and optional profile-gated services."""
+    core = []
+    optional = []
+    try:
+        client = _client()
+        containers = client.containers.list(all=True)
+        by_name: dict[str, docker.models.containers.Container] = {}
+        for c in containers:
+            by_name[c.name] = c
+
+        # Core services
+        for svc in NOVA_SERVICES:
+            container = _find_container(by_name, svc)
+            core.append(_container_to_status(svc, container))
+
+        # Recovery itself
+        recovery_container = _find_container(by_name, "recovery")
+        core.append(_container_to_status("recovery", recovery_container))
+
+        # Optional profile-gated services
+        for svc, profile in OPTIONAL_SERVICES.items():
+            container = _find_container(by_name, svc)
+            optional.append(_container_to_status(svc, container, optional=True, profile=profile))
+
+    except DockerException as e:
+        logger.warning("Docker API unavailable: %s", e)
+        for svc in NOVA_SERVICES:
+            core.append({"service": svc, "container_name": None, "status": "unknown", "health": "unknown", "ports": [], "optional": False})
+        core.append({"service": "recovery", "container_name": None, "status": "unknown", "health": "unknown", "ports": [], "optional": False})
+        for svc, profile in OPTIONAL_SERVICES.items():
+            optional.append({"service": svc, "container_name": None, "status": "unknown", "health": "unknown", "ports": [], "optional": True, "profile": profile})
+
+    return {"core": core, "optional": optional}
 
 
 def _get_health(container) -> str:

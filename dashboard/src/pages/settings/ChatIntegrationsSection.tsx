@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageSquare } from 'lucide-react'
+import { MessageSquare, ExternalLink } from 'lucide-react'
 import { getChatIntegrationsStatus } from '../../api-recovery'
 import { TelegramSetup, SlackSetup } from '../ChatIntegrations'
 import { StatusBadge as RemoteStatusBadge } from '../RemoteAccess'
@@ -28,7 +28,7 @@ export function ChatIntegrationsSection() {
     <Section
       icon={MessageSquare}
       title="Chat Integrations"
-      description="Connect Nova to external chat platforms. Messages are relayed through the chat-bridge service."
+      description={<>Connect Nova to external chat platforms. Messages are relayed through the chat-bridge service. <a href="https://arialabs.ai/nova/docs/services/chat-bridge/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400 hover:underline">Setup guide <ExternalLink size={12} /></a></>}
     >
       <div className="flex gap-4 text-sm mb-3">
         <span className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">

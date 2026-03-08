@@ -180,14 +180,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let cancelled = false
 
     async function init() {
-      // Fetch auth config
+      // Fetch auth config — always set a value so AuthGate can rely on it
       try {
         const resp = await fetch('/api/v1/auth/providers')
         if (resp.ok && !cancelled) {
           setAuthConfig(await resp.json())
+        } else if (!cancelled) {
+          // Non-ok response — assume auth required (fail-closed)
+          setAuthConfig({ google: false, registration_mode: 'open', has_users: true })
         }
       } catch {
-        // Auth endpoints not available — likely REQUIRE_AUTH=false
+        // Backend unreachable — set fallback so AuthGate shows login instead of blank page
+        if (!cancelled) {
+          setAuthConfig({ google: false, registration_mode: 'open', has_users: true })
+        }
       }
 
       // If we have tokens, validate them

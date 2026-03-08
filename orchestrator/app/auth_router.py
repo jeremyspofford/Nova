@@ -39,6 +39,10 @@ class UpdateProfileRequest(BaseModel):
     display_name: str | None = None
     avatar_url: str | None = None
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 class AuthResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -225,6 +229,31 @@ async def update_me(req: UpdateProfileRequest, user: UserDep):
     if not updated:
         raise HTTPException(status_code=404, detail="User not found")
     return _safe_user(updated)
+
+
+@router.patch("/api/v1/auth/password", status_code=204)
+async def change_password(req: ChangePasswordRequest, user: UserDep):
+    """Change the authenticated user's password."""
+    from app.users import get_user_by_id
+    from app.db import get_pool
+
+    full_user = await get_user_by_id(user.id)
+    if not full_user or not full_user.get("password_hash"):
+        raise HTTPException(status_code=400, detail="Cannot change password for OAuth-only accounts")
+
+    if not _verify_password(req.current_password, full_user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+
+    new_hash = _hash_password(req.new_password)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+            new_hash, UUID(user.id),
+        )
 
 
 # ── Google OAuth ─────────────────────────────────────────────────────────────

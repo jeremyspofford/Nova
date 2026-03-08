@@ -57,12 +57,13 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     )
   }
 
-  // If auth config says REQUIRE_AUTH=false (no providers endpoint), skip auth gate
-  // Also skip if user is already authenticated
-  if (isAuthenticated || !authConfig) {
+  // Authenticated users always get through
+  if (isAuthenticated) {
     return <>{children}</>
   }
 
+  // No auth config yet (fetch failed/slow) or config says auth required → show login
+  // This is fail-closed: we show Login unless we know auth isn't required
   return <Login />
 }
 
