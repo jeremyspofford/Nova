@@ -91,6 +91,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.trusted_network import TrustedNetworkMiddleware, parse_cidrs
+app.add_middleware(
+    TrustedNetworkMiddleware,
+    trusted_cidrs=parse_cidrs(settings.trusted_networks),
+    proxy_header=settings.trusted_proxy_header,
+)
+
 app.include_router(health_router)
 app.include_router(router)
 app.include_router(auth_router)

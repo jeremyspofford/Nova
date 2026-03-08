@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     # Default pod name used when no routing match is found
     default_pod_name: str = "Quartet"
 
+    # Trusted networks — comma-separated CIDRs that bypass auth (treated as admin)
+    # Default includes RFC1918 private ranges, Tailscale CGNAT, and localhost
+    trusted_networks: str = "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,::1/128"
+    # Header containing the real client IP when behind a trusted reverse proxy
+    # e.g. CF-Connecting-IP (Cloudflare), X-Real-IP (nginx), X-Forwarded-For
+    trusted_proxy_header: str = ""
+
     # User auth
     jwt_secret: str = ""  # Auto-generated if empty (stored in platform_config)
     google_client_id: str = ""

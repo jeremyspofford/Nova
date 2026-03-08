@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
 
 from app.config import settings
 from app.db import lookup_api_key, touch_api_key
@@ -68,6 +68,7 @@ async def _apply_rate_limit(api_key_id: UUID, rate_limit_rpm: int) -> None:
 
 
 async def require_api_key(
+    request: Request,
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
 ) -> AuthenticatedKey:
     """Validate X-API-Key and enforce per-key rate limit.
@@ -76,6 +77,14 @@ async def require_api_key(
     works without distributing keys. Usage events still write with the
     zero UUID so test traffic can be filtered from real traffic in reports.
     """
+    # Trusted network bypass (LAN, Tailscale, localhost)
+    if getattr(request.state, "is_trusted_network", False):
+        return AuthenticatedKey({
+            "id": None,
+            "name": "trusted-network",
+            "rate_limit_rpm": 9999,
+        })
+
     if not settings.require_auth:
         return AuthenticatedKey({
             "id": None,   # None avoids FK violation in usage_events when no real key exists
@@ -99,15 +108,21 @@ async def require_api_key(
 
 
 async def require_admin(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     x_admin_secret: Annotated[str | None, Header(alias="X-Admin-Secret")] = None,
 ) -> None:
     """Validate admin access for key management and config endpoints.
 
     Accepts either:
-    1. X-Admin-Secret header (original method)
-    2. JWT Bearer token from an admin user (dashboard after login)
+    1. Trusted network (LAN, Tailscale, localhost)
+    2. X-Admin-Secret header (original method)
+    3. JWT Bearer token from an admin user (dashboard after login)
     """
+    # Trusted network bypass
+    if getattr(request.state, "is_trusted_network", False):
+        return
+
     # Check admin secret first
     if x_admin_secret and x_admin_secret == settings.nova_admin_secret:
         return
@@ -135,14 +150,20 @@ _SYNTHETIC_ADMIN = AuthenticatedUser(
 
 
 async def require_user(
+    request: Request,
     authorization: Annotated[str | None, Header()] = None,
     x_admin_secret: Annotated[str | None, Header(alias="X-Admin-Secret")] = None,
 ) -> AuthenticatedUser:
     """Authenticate dashboard requests. Accepts:
-    1. Bearer JWT token (user auth)
-    2. X-Admin-Secret header (legacy backward compat — maps to synthetic admin user)
-    3. If REQUIRE_AUTH=false, returns synthetic admin user (backward compat)
+    1. Trusted network (LAN, Tailscale, localhost) — returns synthetic admin
+    2. Bearer JWT token (user auth)
+    3. X-Admin-Secret header (legacy backward compat — maps to synthetic admin user)
+    4. If REQUIRE_AUTH=false, returns synthetic admin user (backward compat)
     """
+    # Trusted network bypass
+    if getattr(request.state, "is_trusted_network", False):
+        return _SYNTHETIC_ADMIN
+
     # Dev bypass
     if not settings.require_auth:
         return _SYNTHETIC_ADMIN

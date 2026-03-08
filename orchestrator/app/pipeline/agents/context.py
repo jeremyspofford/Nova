@@ -72,14 +72,19 @@ Return ONLY valid JSON matching this exact schema — no markdown, no preamble:
             "parts of the codebase. Then return your structured JSON context package."
         )
 
-        raw_output = await run_agent_turn_raw(
+        raw_output, in_tokens, out_tokens, cost_usd = await run_agent_turn_raw(
             system_prompt=self.system_prompt,
             user_message=prompt,
             model=self.model,
             tools=tools,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            return_usage=True,
         )
+        # Accumulate tool-loop usage into agent usage
+        self._usage["input_tokens"] += in_tokens
+        self._usage["output_tokens"] += out_tokens
+        self._usage["cost_usd"] += cost_usd or 0.0
 
         # The runner returns the final assistant message. Parse it as JSON.
         messages = [

@@ -111,16 +111,19 @@ class BaseAgent:
         self.temperature    = temperature
         self.max_tokens     = max_tokens
         self.fallback_models = fallback_models or []
+        # Usage accumulator — populated by _call_llm_full()
+        self._usage = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "llm_calls": 0}
+        # Training data log — populated by _call_llm_full() when training logging is enabled
+        self._training_log: list[dict] = []
 
     # ── LLM call ──────────────────────────────────────────────────────────────
 
-    async def _call_llm(self, messages: list[dict]) -> str:
+    async def _call_llm_full(self, messages: list[dict]) -> tuple[str, str]:
         """
-        Call the LLM gateway and return the raw text response.
+        Call the LLM gateway and return (content, model_used).
 
         Tries self.model first, then each entry in self.fallback_models in order.
-        Falls back on any exception (HTTP error, timeout, parse failure), so a
-        rate-limited or unavailable model never permanently stalls the pipeline.
+        Accumulates token usage into self._usage and appends to self._training_log.
         """
         from ...clients import get_llm_client
 
@@ -139,12 +142,37 @@ class BaseAgent:
                 response = await client.post("/complete", json=payload)
                 response.raise_for_status()
                 data = response.json()
-                if model != self.model:
+                was_fallback = model != self.model
+                if was_fallback:
                     logger.warning(
                         "[%s] Primary model '%s' failed — used fallback '%s'",
                         self.ROLE, self.model, model,
                     )
-                return data["content"]
+
+                # Accumulate usage
+                in_tokens = data.get("input_tokens", 0) or 0
+                out_tokens = data.get("output_tokens", 0) or 0
+                cost = data.get("cost_usd", 0.0) or 0.0
+                self._usage["input_tokens"] += in_tokens
+                self._usage["output_tokens"] += out_tokens
+                self._usage["cost_usd"] += cost
+                self._usage["llm_calls"] += 1
+
+                content = data["content"]
+
+                # Training log entry
+                self._training_log.append({
+                    "messages": messages,
+                    "response": content,
+                    "model": model,
+                    "input_tokens": in_tokens,
+                    "output_tokens": out_tokens,
+                    "cost_usd": cost,
+                    "was_fallback": was_fallback,
+                    "temperature": self.temperature,
+                })
+
+                return content, model
             except Exception as exc:
                 last_exc = exc
                 logger.warning("[%s] Model '%s' failed: %s", self.ROLE, model, exc)
@@ -154,6 +182,11 @@ class BaseAgent:
             f"Primary='{self.model}' fallbacks={self.fallback_models}. "
             f"Last error: {last_exc}"
         ) from last_exc
+
+    async def _call_llm(self, messages: list[dict]) -> str:
+        """Call the LLM gateway and return the raw text response."""
+        content, _ = await self._call_llm_full(messages)
+        return content
 
     # ── think_json ────────────────────────────────────────────────────────────
 

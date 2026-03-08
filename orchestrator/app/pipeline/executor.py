@@ -126,6 +126,7 @@ async def mark_task_failed(task_id: str, error: str) -> None:
             """,
             task_id, error,
         )
+    await _backfill_training_success(task_id, success=False)
     await _audit(task_id, "task_failed", "error", {"error": error})
 
 
@@ -150,6 +151,12 @@ async def _run_pipeline(task_id: str) -> None:
 
     # Per-task model override (set via metadata.model_override in the API request)
     model_override: str | None = task.metadata.get("model_override") or None
+
+    # Classify task complexity for model routing (Phase 3)
+    from .complexity_classifier import classify_complexity
+    complexity = await classify_complexity(task.user_input)
+    if complexity:
+        logger.info(f"Task {task_id}: complexity classified as '{complexity}'")
 
     # Mark task as started
     await _set_task_status(task_id, "queued")
@@ -197,7 +204,7 @@ async def _run_pipeline(task_id: str) -> None:
                 )
                 abort = await _run_parallel_group(
                     group_agents, task_id, state, pod, checkpoint,
-                    code_review_iterations, model_override,
+                    code_review_iterations, model_override, complexity=complexity,
                 )
                 if abort:
                     await mark_task_failed(task_id, f"Parallel group '{group_name}' had a fatal agent failure")
@@ -230,7 +237,7 @@ async def _run_pipeline(task_id: str) -> None:
             continue
 
         # ── Run this agent ─────────────────────────────────────────────
-        result, session_id = await _run_agent(agent, task_id, state, pod, code_review_iterations, model_override=model_override)
+        result, session_id = await _run_agent(agent, task_id, state, pod, code_review_iterations, model_override=model_override, complexity=complexity)
 
         if result is None:
             # Agent failed with on_failure=abort → task fails
@@ -299,6 +306,9 @@ async def _run_pipeline(task_id: str) -> None:
 
         i += 1
 
+    # ── Backfill training log success status ──────────────────────────────
+    await _backfill_training_success(task_id, success=True)
+
     # ── Pipeline complete ──────────────────────────────────────────────────
     task_result = state.completed.get("task", {})
     final_output = task_result.get("output", "Task completed.")
@@ -335,6 +345,7 @@ async def _run_parallel_group(
     checkpoint: dict,
     code_review_iterations: int,
     model_override: str | None,
+    complexity: str | None = None,
 ) -> bool:
     """
     Run a group of agents concurrently via asyncio.gather.
@@ -362,7 +373,7 @@ async def _run_parallel_group(
     async def _run_one(agent: AgentRow) -> tuple[AgentRow, dict | None, str | None]:
         result, session_id = await _run_agent(
             agent, task_id, state, pod, code_review_iterations,
-            model_override=model_override,
+            model_override=model_override, complexity=complexity,
         )
         return agent, result, session_id
 
@@ -406,6 +417,7 @@ async def _run_agent(
     pod: PodRow,
     code_review_iteration: int = 0,
     model_override: str | None = None,
+    complexity: str | None = None,
 ) -> tuple[dict | None, str | None]:
     """
     Instantiate and run a single agent. Returns (output_dict, session_id).
@@ -419,9 +431,16 @@ async def _run_agent(
     from .agents.decision    import DecisionAgent
     from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox
 
-    # Resolve model: per-task override → agent → pod default → auto-resolved default
+    # Resolve model: per-task override → agent → complexity → stage default → pod → auto
     from ..model_resolver import resolve_default_model
-    model = model_override or agent.model or pod.default_model or await resolve_default_model()
+    from .stage_model_resolver import resolve_stage_model
+    from .complexity_model_map import resolve_complexity_model
+    model = (model_override
+             or agent.model
+             or await resolve_complexity_model(complexity, agent.role)
+             or await resolve_stage_model(agent.role)
+             or pod.default_model
+             or await resolve_default_model())
 
     AGENT_CLASSES = {
         "context":     ContextAgent,
@@ -445,8 +464,8 @@ async def _run_agent(
         fallback_models=agent.fallback_models,
     )
 
-    # Create agent_session row
-    session_id = await _create_session(task_id, agent)
+    # Create agent_session row — store the actually-resolved model, not agent.model
+    session_id = await _create_session(task_id, agent, resolved_model=model)
     await _set_task_status(task_id, f"{agent.role}_running", current_stage=agent.role)
 
     # Set sandbox tier from pod config for this agent execution
@@ -464,7 +483,15 @@ async def _run_agent(
             result = await instance.run(state)
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        await _complete_session(session_id, result, elapsed_ms)
+        await _complete_session(session_id, result, elapsed_ms, usage=instance._usage)
+
+        # Phase 4: Write training log entries (best-effort)
+        await _write_training_logs(
+            task_id, session_id, agent.role, instance._training_log,
+            complexity=complexity,
+            stage_verdict=result.get("verdict") if agent.role == "code_review" else None,
+        )
+
         return result, session_id
 
     except Exception as exc:
@@ -730,7 +757,7 @@ async def _pause_for_human_review(
     logger.warning(f"Task {task_id} paused for human review: {escalation_message}")
 
 
-async def _create_session(task_id: str, agent: AgentRow) -> str:
+async def _create_session(task_id: str, agent: AgentRow, resolved_model: str | None = None) -> str:
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -740,23 +767,43 @@ async def _create_session(task_id: str, agent: AgentRow) -> str:
             VALUES ($1, $2::uuid, $3, $4, 'running', $5, now())
             RETURNING id
             """,
-            task_id, agent.id, agent.role, agent.position, agent.model,
+            task_id, agent.id, agent.role, agent.position, resolved_model or agent.model,
         )
     return str(row["id"])
 
 
-async def _complete_session(session_id: str, output: dict, elapsed_ms: int) -> None:
+async def _complete_session(
+    session_id: str,
+    output: dict,
+    elapsed_ms: int,
+    usage: dict | None = None,
+) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE agent_sessions
-            SET status = 'complete', output = $2::jsonb,
-                completed_at = now(), duration_ms = $3
-            WHERE id = $1
-            """,
-            session_id, output, elapsed_ms,
-        )
+        if usage and (usage.get("input_tokens") or usage.get("output_tokens")):
+            await conn.execute(
+                """
+                UPDATE agent_sessions
+                SET status = 'complete', output = $2::jsonb,
+                    completed_at = now(), duration_ms = $3,
+                    input_tokens = $4, output_tokens = $5, cost_usd = $6
+                WHERE id = $1
+                """,
+                session_id, output, elapsed_ms,
+                usage.get("input_tokens", 0),
+                usage.get("output_tokens", 0),
+                usage.get("cost_usd", 0.0),
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE agent_sessions
+                SET status = 'complete', output = $2::jsonb,
+                    completed_at = now(), duration_ms = $3
+                WHERE id = $1
+                """,
+                session_id, output, elapsed_ms,
+            )
 
 
 async def _fail_session(session_id: str, error: str, elapsed_ms: int) -> None:
@@ -992,6 +1039,71 @@ async def _maybe_compact_state(state: PipelineState, task_id: str) -> None:
             logger.warning("Task %s: compaction LLM call failed HTTP %s", task_id, resp.status_code)
     except Exception as exc:
         logger.warning("Task %s: compaction failed (non-fatal): %s", task_id, exc)
+
+
+async def _write_training_logs(
+    task_id: str,
+    session_id: str,
+    role: str,
+    training_log: list[dict],
+    complexity: str | None = None,
+    stage_verdict: str | None = None,
+) -> None:
+    """Best-effort: write training data entries to pipeline_training_logs."""
+    if not training_log:
+        return
+    try:
+        from ..db import get_pool as _gp
+        pool = _gp()
+        async with pool.acquire() as conn:
+            # Check if training logging is enabled
+            row = await conn.fetchrow(
+                "SELECT value FROM platform_config WHERE key = 'pipeline.training_log_enabled'"
+            )
+            if not row:
+                return
+            import json as _json
+            val = _json.loads(row["value"]) if isinstance(row["value"], str) else row["value"]
+            if val != "true" and val is not True:
+                return
+
+            for entry in training_log:
+                await conn.execute(
+                    """
+                    INSERT INTO pipeline_training_logs
+                        (task_id, agent_session_id, role, prompt, response, model,
+                         input_tokens, output_tokens, cost_usd, complexity,
+                         stage_verdict, was_fallback, temperature)
+                    VALUES ($1, $2::uuid, $3, $4::jsonb, $5, $6,
+                            $7, $8, $9, $10, $11, $12, $13)
+                    """,
+                    task_id, session_id, role,
+                    _json.dumps(entry.get("messages", [])),
+                    entry.get("response", ""),
+                    entry.get("model", ""),
+                    entry.get("input_tokens", 0),
+                    entry.get("output_tokens", 0),
+                    entry.get("cost_usd"),
+                    complexity,
+                    stage_verdict,
+                    entry.get("was_fallback", False),
+                    entry.get("temperature"),
+                )
+    except Exception as exc:
+        logger.warning("Failed to write training logs for %s/%s: %s", task_id, role, exc)
+
+
+async def _backfill_training_success(task_id: str, success: bool) -> None:
+    """Backfill pipeline_success on all training log entries for a task."""
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE pipeline_training_logs SET pipeline_success = $2 WHERE task_id = $1",
+                task_id, success,
+            )
+    except Exception as exc:
+        logger.debug("Training log backfill failed for %s: %s", task_id, exc)
 
 
 async def _audit(

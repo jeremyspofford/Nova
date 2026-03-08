@@ -27,7 +27,7 @@ function getAccessToken(): string | null {
  * alongside JWT because it grants full admin access regardless of user role.
  * Fallback to admin secret only when no JWT exists (pre-auth local dev).
  */
-function getAuthHeaders(): Record<string, string> {
+export function getAuthHeaders(): Record<string, string> {
   const token = getAccessToken()
   if (token) {
     return { 'Authorization': `Bearer ${token}` }

@@ -1,8 +1,10 @@
 """Recovery service API routes."""
 
 import logging
+import time
 
-from fastapi import APIRouter, Header, HTTPException
+import jwt as pyjwt
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from .backup import create_backup, delete_backup, list_backups, list_checkpoints, restore_backup
@@ -19,9 +21,59 @@ router = APIRouter()
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
-def _check_admin(x_admin_secret: str = Header(default="")):
-    if x_admin_secret != settings.admin_secret:
-        raise HTTPException(401, "Invalid admin secret")
+_jwt_secret: str | None = None
+_jwt_secret_fetched_at: float = 0
+_JWT_SECRET_TTL = 300  # re-fetch from DB every 5 minutes
+
+
+async def _get_jwt_secret() -> str | None:
+    """Fetch JWT secret from platform_config, cached with 5-minute TTL."""
+    global _jwt_secret, _jwt_secret_fetched_at
+    if _jwt_secret is not None and (time.monotonic() - _jwt_secret_fetched_at) < _JWT_SECRET_TTL:
+        return _jwt_secret
+    try:
+        from .db import get_pool
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            value = await conn.fetchval(
+                "SELECT value #>> '{}' FROM platform_config WHERE key = 'auth.jwt_secret'"
+            )
+            if value and value.strip('"'):
+                _jwt_secret = value.strip('"')
+                _jwt_secret_fetched_at = time.monotonic()
+                return _jwt_secret
+    except Exception:
+        logger.debug("Could not fetch JWT secret from platform_config")
+    return None
+
+
+def _verify_admin_jwt(token: str, secret: str) -> bool:
+    """Decode JWT and check it belongs to an admin user."""
+    try:
+        payload = pyjwt.decode(token, secret, algorithms=["HS256"])
+        if payload.get("type") != "access":
+            return False
+        return bool(payload.get("is_admin"))
+    except pyjwt.PyJWTError:
+        return False
+
+
+async def _check_admin(
+    authorization: str = Header(default=""),
+    x_admin_secret: str = Header(default=""),
+):
+    """Validate admin access. Accepts JWT Bearer or X-Admin-Secret."""
+    # Check admin secret (backward compat)
+    if x_admin_secret and x_admin_secret == settings.admin_secret:
+        return
+
+    # Check JWT Bearer token
+    if authorization and authorization.startswith("Bearer "):
+        secret = await _get_jwt_secret()
+        if secret and _verify_admin_jwt(authorization[7:], secret):
+            return
+
+    raise HTTPException(401, "Admin authentication required")
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -105,9 +157,8 @@ async def get_all_services():
 @router.post("/api/v1/recovery/services/{service_name}/restart")
 async def restart_service_endpoint(
     service_name: str,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
-    _check_admin(x_admin_secret)
     result = restart_service(service_name)
     if not result["ok"]:
         raise HTTPException(400, result.get("error", "Restart failed"))
@@ -115,8 +166,7 @@ async def restart_service_endpoint(
 
 
 @router.post("/api/v1/recovery/services/restart-all")
-async def restart_all_endpoint(x_admin_secret: str = Header(default="")):
-    _check_admin(x_admin_secret)
+async def restart_all_endpoint(_: None = Depends(_check_admin)):
     return restart_all_services()
 
 
@@ -129,9 +179,8 @@ async def get_backups():
 
 
 @router.post("/api/v1/recovery/backups")
-async def create_backup_endpoint(x_admin_secret: str = Header(default="")):
+async def create_backup_endpoint(_: None = Depends(_check_admin)):
     """Create a new backup."""
-    _check_admin(x_admin_secret)
     try:
         return await create_backup()
     except RuntimeError as e:
@@ -141,10 +190,9 @@ async def create_backup_endpoint(x_admin_secret: str = Header(default="")):
 @router.post("/api/v1/recovery/backups/{filename}/restore")
 async def restore_backup_endpoint(
     filename: str,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
     """Restore from a specific backup."""
-    _check_admin(x_admin_secret)
     try:
         return await restore_backup(filename)
     except FileNotFoundError as e:
@@ -156,10 +204,9 @@ async def restore_backup_endpoint(
 @router.delete("/api/v1/recovery/backups/{filename}")
 async def delete_backup_endpoint(
     filename: str,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
     """Delete a specific backup."""
-    _check_admin(x_admin_secret)
     try:
         return delete_backup(filename)
     except (FileNotFoundError, ValueError) as e:
@@ -177,9 +224,8 @@ async def get_reset_categories():
 # ── Env Management ────────────────────────────────────────────────────────────
 
 @router.get("/api/v1/recovery/env")
-async def get_env_vars(x_admin_secret: str = Header(default="")):
+async def get_env_vars(_: None = Depends(_check_admin)):
     """Read whitelisted env vars (secrets masked)."""
-    _check_admin(x_admin_secret)
     return read_env()
 
 
@@ -190,10 +236,9 @@ class EnvPatchRequest(BaseModel):
 @router.patch("/api/v1/recovery/env")
 async def patch_env_vars(
     req: EnvPatchRequest,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
     """Update .env keys (whitelist enforced)."""
-    _check_admin(x_admin_secret)
     try:
         return patch_env(req.updates)
     except ValueError as e:
@@ -217,10 +262,9 @@ class ComposeProfileRequest(BaseModel):
 @router.post("/api/v1/recovery/compose-profiles")
 async def manage_compose_profile(
     req: ComposeProfileRequest,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
     """Add/remove a compose profile and start/stop its service."""
-    _check_admin(x_admin_secret)
     if req.profile not in PROFILE_MAP:
         raise HTTPException(400, f"Unknown profile: {req.profile}. Valid: {list(PROFILE_MAP.keys())}")
 
@@ -242,9 +286,8 @@ async def manage_compose_profile(
 # ── Remote Access Status ─────────────────────────────────────────────────────
 
 @router.get("/api/v1/recovery/remote-access/status")
-async def get_remote_access_status(x_admin_secret: str = Header(default="")):
+async def get_remote_access_status(_: None = Depends(_check_admin)):
     """Container + config status for Cloudflare Tunnel and Tailscale."""
-    _check_admin(x_admin_secret)
     env = read_env()
     cf_status = check_container_status("cloudflared")
     ts_status = check_container_status("tailscale")
@@ -264,9 +307,8 @@ async def get_remote_access_status(x_admin_secret: str = Header(default="")):
 # ── Chat Integrations Status ─────────────────────────────────────────────────
 
 @router.get("/api/v1/recovery/chat-integrations/status")
-async def get_chat_integrations_status(x_admin_secret: str = Header(default="")):
+async def get_chat_integrations_status(_: None = Depends(_check_admin)):
     """Container + config status for chat bridge adapters (Telegram, Slack)."""
-    _check_admin(x_admin_secret)
     env = read_env()
     bridge_status = check_container_status("chat-bridge")
 
@@ -286,9 +328,8 @@ async def get_chat_integrations_status(x_admin_secret: str = Header(default=""))
 # ── Diagnostics ────────────────────────────────────────────────────────────────
 
 @router.get("/api/v1/recovery/diagnostics")
-async def get_diagnostics(x_admin_secret: str = Header(default="")):
+async def get_diagnostics(_: None = Depends(_check_admin)):
     """Aggregated diagnostics for AI troubleshooting: service health, logs, DB status."""
-    _check_admin(x_admin_secret)
     from .db import get_pool
     import re
 
@@ -339,10 +380,9 @@ from .troubleshoot import TroubleshootRequest, troubleshoot_chat
 @router.post("/api/v1/recovery/troubleshoot/chat")
 async def troubleshoot_endpoint(
     req: TroubleshootRequest,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
     """AI-powered troubleshooting chat — calls an external LLM directly."""
-    _check_admin(x_admin_secret)
     return await troubleshoot_chat(req)
 
 
@@ -356,10 +396,9 @@ class FactoryResetRequest(BaseModel):
 @router.post("/api/v1/recovery/factory-reset")
 async def factory_reset_endpoint(
     req: FactoryResetRequest,
-    x_admin_secret: str = Header(default=""),
+    _: None = Depends(_check_admin),
 ):
     """Factory reset — wipe data categories not in the 'keep' list."""
-    _check_admin(x_admin_secret)
     if req.confirm != "RESET":
         raise HTTPException(400, "Confirmation required: set confirm to 'RESET'")
     result = await factory_reset(keep=set(req.keep))

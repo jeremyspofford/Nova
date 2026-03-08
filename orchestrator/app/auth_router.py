@@ -81,7 +81,7 @@ def _safe_user(user: dict) -> dict:
 # ── Auth config (public) ────────────────────────────────────────────────────
 
 @router.get("/api/v1/auth/providers")
-async def get_auth_providers():
+async def get_auth_providers(request: Request):
     """Public: what auth options are available."""
     from app.oauth import google_enabled
     from app.users import count_users
@@ -90,6 +90,16 @@ async def get_auth_providers():
         "google": google_enabled(),
         "registration_mode": settings.registration_mode,
         "has_users": user_count > 0,
+        "trusted_network": getattr(request.state, "is_trusted_network", False),
+    }
+
+
+@router.get("/api/v1/auth/network-status")
+async def get_network_status(request: Request):
+    """Public: show the client's IP and whether it's on a trusted network."""
+    return {
+        "client_ip": getattr(request.state, "client_ip", request.client.host if request.client else "unknown"),
+        "trusted": getattr(request.state, "is_trusted_network", False),
     }
 
 

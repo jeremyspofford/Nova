@@ -592,6 +592,81 @@ async def list_available_tools(_admin: AdminDep):
 
 # ── Usage reporting (admin-only) ──────────────────────────────────────────────
 
+@router.get("/api/v1/training-data/export")
+async def export_training_data(
+    _admin: AdminDep,
+    role: str | None = Query(default=None, description="Filter by pipeline role"),
+    success_only: bool = Query(default=False, description="Only include successful pipelines"),
+    format: str = Query(default="jsonl", description="Export format (jsonl)"),
+):
+    """Export pipeline training data as JSONL for fine-tuning. Admin-only."""
+    import json as _json
+    pool = get_pool()
+    conditions = []
+    params = []
+    idx = 1
+
+    if role:
+        conditions.append(f"role = ${idx}")
+        params.append(role)
+        idx += 1
+    if success_only:
+        conditions.append(f"pipeline_success = ${idx}")
+        params.append(True)
+        idx += 1
+
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    async def _stream():
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT prompt, response, model, role, input_tokens, output_tokens, "
+                f"cost_usd, complexity, pipeline_success, stage_verdict, was_fallback, "
+                f"temperature, created_at "
+                f"FROM pipeline_training_logs {where} "
+                f"ORDER BY created_at ASC",
+                *params,
+            )
+            for row in rows:
+                entry = {
+                    "messages": row["prompt"],
+                    "response": row["response"],
+                    "model": row["model"],
+                    "role": row["role"],
+                    "input_tokens": row["input_tokens"],
+                    "output_tokens": row["output_tokens"],
+                    "cost_usd": float(row["cost_usd"]) if row["cost_usd"] else None,
+                    "complexity": row["complexity"],
+                    "pipeline_success": row["pipeline_success"],
+                    "stage_verdict": row["stage_verdict"],
+                    "was_fallback": row["was_fallback"],
+                }
+                yield _json.dumps(entry, default=str) + "\n"
+
+    return StreamingResponse(
+        _stream(),
+        media_type="application/x-ndjson",
+        headers={"Content-Disposition": "attachment; filename=training-data.jsonl"},
+    )
+
+
+@router.get("/api/v1/training-data/count")
+async def training_data_count(
+    _admin: AdminDep,
+    role: str | None = Query(default=None),
+):
+    """Count training data entries. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        if role:
+            row = await conn.fetchrow(
+                "SELECT count(*) AS cnt FROM pipeline_training_logs WHERE role = $1", role
+            )
+        else:
+            row = await conn.fetchrow("SELECT count(*) AS cnt FROM pipeline_training_logs")
+    return {"count": row["cnt"]}
+
+
 @router.get("/api/v1/usage")
 async def get_usage(
     _admin: AdminDep,

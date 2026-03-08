@@ -119,10 +119,14 @@ async def send_message(session_id: str, agent_id: str, text: str) -> str:
                         break
                     if line.startswith("data: "):
                         delta = line[6:]
+                        # Skip JSON objects (status updates, metadata)
+                        # — only keep plain text deltas
                         try:
                             parsed = json.loads(delta)
-                            if "error" in parsed:
-                                return f"Error: {parsed['error']}"
+                            if isinstance(parsed, dict):
+                                if "error" in parsed:
+                                    return f"Error: {parsed['error']}"
+                                continue  # status/meta — not user-facing
                         except (json.JSONDecodeError, TypeError):
                             pass
                         if delta:

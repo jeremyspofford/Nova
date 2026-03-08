@@ -16,6 +16,8 @@ ENV_WHITELIST = {
     "SLACK_APP_TOKEN",
     "COMPOSE_PROFILES",
     "CORS_ALLOWED_ORIGINS",
+    "REQUIRE_AUTH",
+    "TRUSTED_PROXY_HEADER",
 }
 
 # Keys whose values should be masked in GET responses

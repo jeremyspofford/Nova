@@ -11,7 +11,9 @@ import { RemoteAccessSection } from './settings/RemoteAccessSection'
 import { ChatIntegrationsSection } from './settings/ChatIntegrationsSection'
 import { RecoverySection } from './settings/RecoverySection'
 import { AppearanceSection } from './settings/AppearanceSection'
+import { PipelineModelsSection } from './settings/PipelineModelsSection'
 import { NotificationsSection } from './settings/NotificationsSection'
+import { TrustedNetworksSection } from './settings/TrustedNetworksSection'
 import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
 import { AccountSection } from './settings/AccountSection'
 import { useAuth } from '../stores/auth-store'
@@ -158,6 +160,7 @@ export function Settings() {
         {activeCategory === 'ai' && (
           <>
             <LLMRoutingSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+            <PipelineModelsSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
             <ProviderStatusSection />
             <ContextBudgetSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </>
@@ -172,6 +175,7 @@ export function Settings() {
 
         {activeCategory === 'system' && (
           <>
+            <TrustedNetworksSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
             <DeveloperResourcesSection />
             <NotificationsSection />
             <RecoverySection />

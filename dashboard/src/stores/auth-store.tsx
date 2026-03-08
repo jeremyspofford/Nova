@@ -13,6 +13,7 @@ interface AuthConfig {
   google: boolean
   registration_mode: 'open' | 'invite' | 'admin'
   has_users: boolean
+  trusted_network: boolean
 }
 
 interface AuthStore {
@@ -187,12 +188,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAuthConfig(await resp.json())
         } else if (!cancelled) {
           // Non-ok response — assume auth required (fail-closed)
-          setAuthConfig({ google: false, registration_mode: 'open', has_users: true })
+          setAuthConfig({ google: false, registration_mode: 'open', has_users: true, trusted_network: false })
         }
       } catch {
         // Backend unreachable — set fallback so AuthGate shows login instead of blank page
         if (!cancelled) {
-          setAuthConfig({ google: false, registration_mode: 'open', has_users: true })
+          setAuthConfig({ google: false, registration_mode: 'open', has_users: true, trusted_network: false })
         }
       }
 

@@ -109,8 +109,14 @@ export function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatu
       await cf.createDnsRecord(s.token, s.selectedZone, tunnel.id, s.subdomain, s.selectedZoneName)
 
       // 4. Get tunnel token and save to .env
+      // Also enable auth + trusted proxy header so public traffic requires login
+      // while LAN/Tailscale traffic bypasses it automatically
       const tunnelToken = await cf.getTunnelToken(s.token, s.selectedAccount, tunnel.id)
-      await patchEnv({ CLOUDFLARE_TUNNEL_TOKEN: tunnelToken })
+      await patchEnv({
+        CLOUDFLARE_TUNNEL_TOKEN: tunnelToken,
+        REQUIRE_AUTH: 'true',
+        TRUSTED_PROXY_HEADER: 'CF-Connecting-IP',
+      })
 
       // 5. Start cloudflared container
       await manageComposeProfile('cloudflare-tunnel', 'start')
@@ -126,7 +132,7 @@ export function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatu
     set({ loading: true, error: '' })
     try {
       await manageComposeProfile('cloudflare-tunnel', 'stop')
-      await patchEnv({ CLOUDFLARE_TUNNEL_TOKEN: '' })
+      await patchEnv({ CLOUDFLARE_TUNNEL_TOKEN: '', TRUSTED_PROXY_HEADER: '' })
       setS(initialCfState)
       onDone()
     } catch (e: any) {

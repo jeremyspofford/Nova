@@ -62,6 +62,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     return <>{children}</>
   }
 
+  // Trusted network (LAN, Tailscale, localhost) — skip login
+  if (authConfig?.trusted_network) {
+    return <>{children}</>
+  }
+
   // No auth config yet (fetch failed/slow) or config says auth required → show login
   // This is fail-closed: we show Login unless we know auth isn't required
   return <Login />

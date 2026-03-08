@@ -424,7 +424,8 @@ async def run_agent_turn_raw(
     temperature: float = 0.3,
     max_tokens: int = 4096,
     max_rounds: int = 10,
-) -> str:
+    return_usage: bool = False,
+) -> str | tuple[str, int, int, float | None]:
     """
     Lightweight agent turn for pipeline stages (ContextAgent, TaskAgent).
 
@@ -443,15 +444,16 @@ async def run_agent_turn_raw(
         temperature:    Sampling temperature from pod_agents config
         max_tokens:     Max output tokens from pod_agents config
         max_rounds:     Max tool-use rounds before forcing a final answer
+        return_usage:   If True, returns (content, in_tokens, out_tokens, cost_usd)
 
     Returns:
-        The final assistant text response.
+        The final assistant text response, or a tuple with usage if return_usage=True.
     """
     messages: list[Message] = [
         Message(role="system", content=system_prompt),
         Message(role="user",   content=user_message),
     ]
-    content, _, _, _ = await _run_tool_loop(
+    content, in_tokens, out_tokens, cost_usd = await _run_tool_loop(
         messages=messages,
         model=model,
         metadata={},
@@ -460,6 +462,8 @@ async def run_agent_turn_raw(
         max_tokens=max_tokens,
         max_rounds=max_rounds,
     )
+    if return_usage:
+        return content, in_tokens, out_tokens, cost_usd
     return content
 
 

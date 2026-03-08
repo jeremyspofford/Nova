@@ -152,6 +152,12 @@ class GuardrailAgent(BaseAgent):
             tier2_result = await tier2_agent.think_json(
                 tier2_messages, purpose="guardrail_tier2"
             )
+            # Merge Tier 2 usage into self so executor can capture it
+            for key in ("input_tokens", "output_tokens", "llm_calls"):
+                self._usage[key] += tier2_agent._usage.get(key, 0)
+            self._usage["cost_usd"] += tier2_agent._usage.get("cost_usd", 0.0)
+            self._training_log.extend(tier2_agent._training_log)
+
             tier2_result.setdefault("blocked", tier1_result["blocked"])
             tier2_result.setdefault("findings", tier1_result["findings"])
             tier2_result.setdefault("tier", 2)

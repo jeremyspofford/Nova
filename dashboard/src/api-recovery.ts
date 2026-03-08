@@ -5,7 +5,7 @@
  * even when other Nova services are down.
  */
 
-import { getAdminSecret } from './api'
+import { getAuthHeaders } from './api'
 
 const BASE = '/recovery-api'
 
@@ -14,7 +14,7 @@ async function recoveryFetch<T>(path: string, options: RequestInit = {}): Promis
     ...options,
     headers: {
       'Content-Type': 'application/json',
-      'X-Admin-Secret': getAdminSecret(),
+      ...getAuthHeaders(),
       ...(options.headers ?? {}),
     },
   })
