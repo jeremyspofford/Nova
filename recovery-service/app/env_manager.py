@@ -89,19 +89,10 @@ def patch_env(updates: dict[str, str]) -> dict[str, str]:
         if key not in updated_keys:
             new_lines.append(f"{key}={value}\n")
 
-    # Atomic write
-    env_dir = os.path.dirname(ENV_FILE)
-    fd, tmp_path = tempfile.mkstemp(dir=env_dir, prefix=".env.tmp.")
-    try:
-        with os.fdopen(fd, "w") as f:
-            f.writelines(new_lines)
-        os.rename(tmp_path, ENV_FILE)
-    except Exception:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+    # Write in-place — atomic rename doesn't work on Docker bind-mounts
+    # (.env is small, so partial-write risk is negligible)
+    with open(ENV_FILE, "w") as f:
+        f.writelines(new_lines)
 
     logger.info("Patched .env keys: %s", sorted(updates.keys()))
     return {k: _mask_value(k, v) for k, v in updates.items()}

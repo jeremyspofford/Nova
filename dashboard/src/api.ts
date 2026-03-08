@@ -19,16 +19,20 @@ function getAccessToken(): string | null {
   }
 }
 
-/** Build auth headers: always include admin secret, add JWT when available. */
+/**
+ * Build auth headers.
+ *
+ * When JWT auth is active (user logged in), only send the Bearer token.
+ * The admin secret is a bootstrap/local-dev mechanism — it must NOT be sent
+ * alongside JWT because it grants full admin access regardless of user role.
+ * Fallback to admin secret only when no JWT exists (pre-auth local dev).
+ */
 function getAuthHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
-    'X-Admin-Secret': getAdminSecret(),
-  }
   const token = getAccessToken()
   if (token) {
-    headers['Authorization'] = `Bearer ${token}`
+    return { 'Authorization': `Bearer ${token}` }
   }
-  return headers
+  return { 'X-Admin-Secret': getAdminSecret() }
 }
 
 /** Try to refresh the access token using the stored refresh token. */
@@ -71,8 +75,9 @@ export async function apiFetch<T>(url: string, options: RequestInit = {}): Promi
 
   let resp = await doFetch()
 
-  // On 401 with JWT, try to refresh and retry once
-  if (resp.status === 401 && getAccessToken()) {
+  // On 401/403 with JWT, try to refresh and retry once
+  // 401 = UserDep auth failure, 403 = AdminDep auth failure (expired JWT)
+  if ((resp.status === 401 || resp.status === 403) && getAccessToken()) {
     const refreshed = await tryRefreshToken()
     if (refreshed) {
       resp = await doFetch()
