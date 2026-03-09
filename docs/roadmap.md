@@ -2857,80 +2857,67 @@ llama-cpp:
 
 ---
 
-## 🔜 Phase 13 — Multi-Tenancy
+## 🔜 Phase 13 — RBAC, Invitations & Multi-Tenancy
 
-**Motivation:** Nova is currently single-user. To support multiple people (starting with a 2-person household — Jeremy and wife), Nova needs user isolation: separate chat histories, memory spaces, API keys, preferences, and usage tracking. Wife's use case: personal chatbot + UX Designer workflow assistant.
+**Motivation:** Nova needs role-based access control so the instance owner can invite users with specific permissions. Starting single-tenant with `tenant_id` scaffolding for future multi-tenancy. Design doc: `docs/plans/2026-03-08-rbac-invitations-design.md`.
 
-**This phase has two sub-phases: planning (13a) and implementation (13b).**
+**This phase has three sub-phases: RBAC & invitations (13a), data isolation (13b), and full multi-tenancy (13c).**
 
-> **Early scaffolding strategy:** Add `tenant_id` columns and Redis key prefixes *before* this phase,
-> defaulting to a single value. This makes the data layer tenant-aware without building the full
-> multi-tenancy UI/auth. When Phase 13 arrives, the schema is already partitioned — only the auth
-> layer, UI scoping, and migration logic need building. Key areas to scaffold early:
-> - `tenant_id` column on: conversations, tasks, memories, api_keys, usage_events, pods
-> - Redis key namespace: prefix all keys with `tenant:{id}:`
-> - nova-contracts: tenant context flows through shared Pydantic models
-> - Memory service: pgvector similarity search filters by tenant (critical for isolation)
+### Phase 13a — RBAC & User Invitations ✨ NEW
 
-### Phase 13a — Multi-Tenancy Design
+Five fixed roles: Owner > Admin > Member > Viewer > Guest. Link-based invitations with role assignment. Guest accounts auto-expire with sandboxed LLM access (admin-configured model allowlist, no tools, no system context).
 
-Before writing code, produce a design document (`docs/plans/multi-tenancy-design.md`) covering:
+- [ ] `role`, `tenant_id`, `expires_at`, `status` columns on `users` table
+- [ ] `role`, `account_expires_in_hours`, `tenant_id` columns on `invite_codes` table
+- [ ] `tenants` table (single row for now) + `audit_log` table
+- [ ] `tenant_id` scaffolding on: conversations, tasks, memories, api_keys, usage_events
+- [ ] `RoleDep(min_role=...)` FastAPI dependency replacing `AdminDep`
+- [ ] JWT claims: add `role`, `tenant_id` (keep `is_admin` for backwards compat)
+- [ ] Guest isolation: no `nova_context`, no tools, no memory, guardrail system prompt
+- [ ] Guest model filtering: `guest_allowed_models` in `platform_config`, enforced in orchestrator
+- [ ] Expiry check on every authenticated request + Redis deny-list for immediate revocation
+- [ ] `GET/PATCH/DELETE /api/v1/admin/users` endpoints
+- [ ] Invite creation with role assignment (`POST /api/v1/auth/invites` extended)
+- [ ] Migration: `is_admin=true` → owner/admin, `is_admin=false` → member
+- [ ] Dashboard: Users page (user table, invitation management, role changes)
+- [ ] Role-based nav visibility (Guest sees Chat only, Viewer is read-only)
+- [ ] `/invite/{code}` route with registration flow
+- [ ] Audit logging for role changes, invites, deactivations
 
-**Identity & Auth:**
-- How do users authenticate? Options: local username/password, OAuth (Google), passkey, or invite-link with shared admin secret
-- Session management: JWT tokens? Cookie-based sessions? How do they interact with existing `X-Admin-Secret` admin auth?
-- User roles: admin (full access, can manage other users) vs. user (own data only)
+### Phase 13b — Data Isolation & User Scoping
 
-**Data Isolation:**
-- Chat history: per-user conversations (currently global in orchestrator DB)
-- Memory: per-user memory spaces in memory-service (currently shared pgvector collection)
-- API keys: keys already have no user association — add `user_id` FK
-- Usage tracking: per-user usage reports and cost attribution
-- Tasks/pipelines: per-user task queues, or shared queue with user context?
-- Pods: shared pod definitions (admin-managed) vs. per-user custom pods
-- Settings: which settings are global (admin) vs. per-user (appearance, default model, notification prefs)?
+Per-user data isolation leveraging the `tenant_id` + `user_id` columns from 13a.
 
-**UX Design:**
-- Login screen / user switcher
-- Dashboard scoped to current user's data
-- Admin panel for user management
-- Wife's UX Designer persona: should this be a pre-configured pod with UX-specific system prompts, tools, and memory?
-
-**Infrastructure Impact:**
-- Database schema changes (add `users` table, add `user_id` FK to conversations, memories, tasks, api_keys, usage_events)
-- Memory service: tenant-scoped embedding collections
-- Redis: namespace keys by user ID
-- LLM Gateway: per-user rate limits? Per-user provider preferences?
-- Recovery service: per-user backup scope or global only?
-
-**Migration Strategy:**
-- How to migrate existing single-user data to the first user account
-- Backwards compatibility: single-user mode should still work (no login required when only 1 user)
-
-### Phase 13b — Multi-Tenancy Implementation
-
-Implement the design from 13a. Likely deliverables:
-
-- [ ] `users` table with hashed passwords, roles, preferences
-- [ ] Login/registration UI in dashboard
-- [ ] JWT or session-based auth middleware across all services
-- [ ] `user_id` column added to: conversations, tasks, memories, api_keys, usage_events
-- [ ] Dashboard scoped to authenticated user's data
-- [ ] Admin panel: user CRUD, usage-per-user, global settings
+- [ ] All data queries scoped by `tenant_id` + `user_id` (Member/Guest) or `tenant_id` only (Admin/Owner)
+- [ ] Memory service: tenant-scoped embedding retrieval (pgvector filter by tenant)
+- [ ] Redis key namespacing: `tenant:{id}:` prefix on all keys
+- [ ] nova-contracts: tenant context flows through shared Pydantic models
 - [ ] Per-user settings (appearance, default model, notifications)
-- [ ] Memory service tenant isolation (user-scoped collections)
-- [ ] Redis key namespacing by user ID
-- [ ] Migration: existing data assigned to initial admin user
-- [ ] Pre-built "UX Designer" pod with relevant system prompts and tools
-- [ ] Single-user mode preserved: if only 1 user exists, skip login
+- [ ] Dashboard scoped to authenticated user's data
+- [ ] Migration: existing data assigned to initial owner user
+
+### Phase 13c — Full Multi-Tenancy
+
+Enable multiple tenants within one Nova instance. Users can belong to multiple tenants.
+
+- [ ] Tenant creation / management UI
+- [ ] Tenant switcher in dashboard
+- [ ] Per-tenant billing and usage tracking
+- [ ] Per-tenant rate limits and provider preferences
+- [ ] Recovery service: per-tenant backup scope
+- [ ] Pre-built persona pods (e.g. "UX Designer") per tenant
 
 ### Success Criteria
 
+- [ ] Owner can invite users with specific roles via shareable links
+- [ ] Guest users can only chat with allowed models, no tool/memory/config access
+- [ ] Guest accounts auto-expire after configured duration
+- [ ] Role changes take effect within 15 minutes (JWT lifetime) or immediately (via Redis deny-list)
 - [ ] Two users can chat simultaneously with isolated histories
 - [ ] User A cannot see User B's conversations, memories, or tasks
 - [ ] Admin can view all users' usage and manage accounts
-- [ ] Existing single-user installations upgrade seamlessly (data migrated to first user)
-- [ ] Wife can use a UX Designer-optimized pod with relevant context and tools
+- [ ] Existing single-user installations upgrade seamlessly
+- [ ] Audit log captures all security-sensitive actions
 
 ---
 
