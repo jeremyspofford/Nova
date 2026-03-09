@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import secrets
 from uuid import UUID
@@ -63,6 +64,8 @@ class MessageImport(BaseModel):
 class InviteCreate(BaseModel):
     email: str | None = None
     expires_in_hours: int | None = 72
+    role: str = "member"
+    account_expires_in_hours: int | None = None
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,6 +117,7 @@ async def register(req: RegisterRequest):
     if settings.registration_mode == "admin":
         raise HTTPException(status_code=403, detail="Registration is disabled. Ask an admin to create your account.")
 
+    invite = None
     if settings.registration_mode == "invite":
         if not req.invite_code:
             raise HTTPException(status_code=400, detail="Invite code required")
@@ -122,7 +126,7 @@ async def register(req: RegisterRequest):
         pool = get_pool()
         async with pool.acquire() as conn:
             invite = await conn.fetchrow(
-                "SELECT id, email, used_by FROM invite_codes "
+                "SELECT id, email, used_by, role, account_expires_in_hours, tenant_id FROM invite_codes "
                 "WHERE code = $1 AND used_by IS NULL AND (expires_at IS NULL OR expires_at > NOW())",
                 req.invite_code,
             )
@@ -139,9 +143,24 @@ async def register(req: RegisterRequest):
     if not req.password or len(req.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
-    # First user becomes admin
+    # Determine role and expiry from invite
     user_count = await count_users()
-    is_admin = user_count == 0
+    invite_role = "member"
+    invite_tenant_id = "00000000-0000-0000-0000-000000000001"
+    account_expires_at = None
+    if settings.registration_mode == "invite" and invite:
+        invite_role = invite.get("role", "member")
+        invite_tenant_id = str(invite.get("tenant_id", "00000000-0000-0000-0000-000000000001"))
+        if invite.get("account_expires_in_hours"):
+            from datetime import datetime, timedelta, timezone
+            account_expires_at = datetime.now(timezone.utc) + timedelta(hours=invite["account_expires_in_hours"])
+
+    # First user is always owner
+    if user_count == 0:
+        invite_role = "owner"
+        is_admin = True
+    else:
+        is_admin = invite_role in ("owner", "admin")
 
     password_hash = _hash_password(req.password)
     user = await create_user(
@@ -149,6 +168,9 @@ async def register(req: RegisterRequest):
         password_hash=password_hash,
         display_name=req.display_name or req.email.split("@")[0],
         is_admin=is_admin,
+        role=invite_role,
+        tenant_id=invite_tenant_id,
+        expires_at=account_expires_at,
     )
 
     # Mark invite as used
@@ -161,7 +183,11 @@ async def register(req: RegisterRequest):
                 UUID(user["id"]), req.invite_code,
             )
 
-    access = create_access_token(user["id"], user["email"], user["is_admin"])
+    access = create_access_token(
+        user["id"], user["email"], user["is_admin"],
+        role=user.get("role", "member"),
+        tenant_id=user.get("tenant_id", "00000000-0000-0000-0000-000000000001"),
+    )
     refresh = await create_refresh_token(user["id"])
 
     return AuthResponse(
@@ -185,7 +211,11 @@ async def login(req: LoginRequest):
     if not _verify_password(req.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    access = create_access_token(user["id"], user["email"], user["is_admin"])
+    access = create_access_token(
+        user["id"], user["email"], user["is_admin"],
+        role=user.get("role", "member"),
+        tenant_id=str(user.get("tenant_id", "00000000-0000-0000-0000-000000000001")),
+    )
     refresh = await create_refresh_token(user["id"])
 
     return AuthResponse(
@@ -321,7 +351,11 @@ async def google_callback(request: Request):
             is_admin=is_admin,
         )
 
-    access = create_access_token(user["id"], user["email"], user["is_admin"])
+    access = create_access_token(
+        user["id"], user["email"], user["is_admin"],
+        role=user.get("role", "member"),
+        tenant_id=str(user.get("tenant_id", "00000000-0000-0000-0000-000000000001")),
+    )
     refresh = await create_refresh_token(user["id"])
 
     return AuthResponse(
@@ -335,8 +369,13 @@ async def google_callback(request: Request):
 
 @router.post("/api/v1/auth/invites")
 async def create_invite(req: InviteCreate, user: UserDep):
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin required")
+    from app.roles import VALID_ROLES, can_assign_role, has_min_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(VALID_ROLES))}")
+    if not can_assign_role(user.role, req.role):
+        raise HTTPException(status_code=403, detail=f"Cannot assign role higher than your own ({user.role})")
 
     from app.db import get_pool
     code = secrets.token_urlsafe(8)
@@ -347,26 +386,32 @@ async def create_invite(req: InviteCreate, user: UserDep):
         if req.expires_in_hours:
             expires = datetime.now(timezone.utc) + timedelta(hours=req.expires_in_hours)
         row = await conn.fetchrow(
-            """
-            INSERT INTO invite_codes (code, created_by, email, expires_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, code, email, expires_at, created_at
-            """,
-            code, UUID(user.id), req.email, expires,
+            """INSERT INTO invite_codes (code, created_by, email, expires_at, role, account_expires_in_hours, tenant_id)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id, code, email, expires_at, role, account_expires_in_hours, created_at""",
+            code, UUID(user.id), req.email, expires, req.role, req.account_expires_in_hours, UUID(user.tenant_id),
+        )
+        await conn.execute(
+            """INSERT INTO audit_log (actor_id, action, target_id, details, tenant_id)
+               VALUES ($1, 'invite_created', $2, $3, $4)""",
+            UUID(user.id), row["id"],
+            json.dumps({"role": req.role, "email": req.email}),
+            UUID(user.tenant_id),
         )
     return dict(row)
 
 
 @router.get("/api/v1/auth/invites")
 async def list_invites(user: UserDep):
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin required")
+    from app.roles import has_min_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
 
     from app.db import get_pool
     pool = get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, code, email, used_by, used_at, expires_at, created_at "
+            "SELECT id, code, email, used_by, used_at, expires_at, role, account_expires_in_hours, created_at "
             "FROM invite_codes WHERE used_by IS NULL AND (expires_at IS NULL OR expires_at > NOW()) "
             "ORDER BY created_at DESC"
         )
@@ -375,8 +420,9 @@ async def list_invites(user: UserDep):
 
 @router.delete("/api/v1/auth/invites/{invite_id}", status_code=204)
 async def revoke_invite(invite_id: UUID, user: UserDep):
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin required")
+    from app.roles import has_min_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
 
     from app.db import get_pool
     pool = get_pool()
@@ -395,11 +441,17 @@ class AdminCreateUser(BaseModel):
     email: str
     display_name: str | None = None
     is_admin: bool = False
+    role: str = "member"
 
 @router.post("/api/v1/admin/users")
 async def admin_create_user(req: AdminCreateUser, user: UserDep):
-    if not user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin required")
+    from app.roles import has_min_role, VALID_ROLES, can_assign_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
+    if req.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(sorted(VALID_ROLES))}")
+    if not can_assign_role(user.role, req.role):
+        raise HTTPException(status_code=403, detail=f"Cannot assign role higher than your own ({user.role})")
 
     from app.users import create_user, get_user_by_email
 
@@ -414,7 +466,9 @@ async def admin_create_user(req: AdminCreateUser, user: UserDep):
         email=req.email.lower(),
         password_hash=password_hash,
         display_name=req.display_name or req.email.split("@")[0],
-        is_admin=req.is_admin,
+        is_admin=req.is_admin or req.role in ("owner", "admin"),
+        role=req.role,
+        tenant_id=str(user.tenant_id),
     )
 
     return {**_safe_user(new_user), "temporary_password": temp_password}
