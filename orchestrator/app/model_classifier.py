@@ -75,19 +75,28 @@ async def _refresh_available_models() -> set[str]:
         return _available_models
 
 
-# ── Config loading ───────────────────────────────────────────────────────────
+# ── Config loading (cached to avoid per-request DB round-trips) ──────────────
+
+_config_cache: dict[str, tuple[float, object]] = {}
+_CONFIG_TTL = 10.0  # seconds
+
 
 async def _get_config(key: str, default: str) -> str:
-    """Read a platform_config value. Returns default on any failure."""
+    """Read a platform_config value, cached for 10s. Returns default on any failure."""
+    now = time.monotonic()
+    cached = _config_cache.get(key)
+    if cached and (now - cached[0]) < _CONFIG_TTL:
+        return cached[1]
+
     try:
         pool = get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT value FROM platform_config WHERE key = $1", key
             )
-        if row and row["value"]:
-            return json.loads(row["value"])
-        return default
+        val = json.loads(row["value"]) if row and row["value"] else default
+        _config_cache[key] = (now, val)
+        return val
     except Exception:
         return default
 
@@ -125,8 +134,10 @@ async def _get_routing_map() -> dict[str, list[str] | None]:
 
 async def classify_message(user_message: str) -> str | None:
     """Classify a user message into a category. Returns None on any failure."""
-    classifier_model = await _get_classifier_model()
-    timeout_ms = await _get_timeout_ms()
+    import asyncio
+    classifier_model, timeout_ms = await asyncio.gather(
+        _get_classifier_model(), _get_timeout_ms()
+    )
     timeout_s = timeout_ms / 1000.0
 
     if classifier_model != "auto":

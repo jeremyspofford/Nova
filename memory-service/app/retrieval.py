@@ -104,8 +104,20 @@ async def hybrid_search(
     """
     all_raw: list[RawResult] = []
 
-    # Fire all vector + keyword searches in parallel across all tiers
+    # Fire all vector + keyword searches in parallel across all tiers.
+    # Each coroutine gets its own session since AsyncSession isn't safe
+    # for concurrent queries on the same connection.
     import asyncio
+    from app.db.database import AsyncSessionLocal
+
+    async def _par_vector(table, fl, tier):
+        async with AsyncSessionLocal() as s:
+            return await _vector_search(s, table, agent_id, query_embedding, fl, tier, metadata_filter)
+
+    async def _par_keyword(table, fl, tier):
+        async with AsyncSessionLocal() as s:
+            return await _keyword_search(s, table, agent_id, query_text, fl, tier, metadata_filter)
+
     coros = []
     for tier in tiers:
         table = TIER_TABLES.get(tier)
@@ -113,8 +125,8 @@ async def hybrid_search(
             log.warning("Unknown memory tier: %s", tier)
             continue
         fetch_limit = min(limit * 3, 100)
-        coros.append(_vector_search(session, table, agent_id, query_embedding, fetch_limit, tier, metadata_filter))
-        coros.append(_keyword_search(session, table, agent_id, query_text, fetch_limit, tier, metadata_filter))
+        coros.append(_par_vector(table, fetch_limit, tier))
+        coros.append(_par_keyword(table, fetch_limit, tier))
 
     if coros:
         results = await asyncio.gather(*coros)

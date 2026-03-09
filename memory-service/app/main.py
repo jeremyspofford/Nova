@@ -16,6 +16,7 @@ from app.config import settings
 from app.db.database import run_schema_migrations
 from app.health import health_router
 from app.partitions import partition_loop
+from app.reembed import reembed_loop
 from app.router import context_router, router
 
 configure_logging("memory-service", settings.log_level)
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
     _cleanup_task = asyncio.create_task(cleanup_loop(), name="cleanup")
     _compaction_task = asyncio.create_task(compaction_loop(), name="compaction")
     _partition_task = asyncio.create_task(partition_loop(), name="partitions")
+    _reembed_task = asyncio.create_task(reembed_loop(), name="reembed")
     log.info("Memory Service ready")
 
     yield
@@ -38,7 +40,8 @@ async def lifespan(app: FastAPI):
     _cleanup_task.cancel()
     _compaction_task.cancel()
     _partition_task.cancel()
-    await asyncio.gather(_cleanup_task, _compaction_task, _partition_task, return_exceptions=True)
+    _reembed_task.cancel()
+    await asyncio.gather(_cleanup_task, _compaction_task, _partition_task, _reembed_task, return_exceptions=True)
 
 
 app = FastAPI(

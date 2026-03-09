@@ -125,3 +125,12 @@ DO $$ BEGIN
 END $$;
 CREATE INDEX IF NOT EXISTS semantic_mem_last_accessed_idx ON semantic_memories (last_accessed_at);
 CREATE INDEX IF NOT EXISTS semantic_mem_project_idx ON semantic_memories (project_id) WHERE project_id IS NOT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Embedding model tracking: records which model produced each row's embedding.
+-- NULL = legacy row (pre-tracking), triggers background re-embed on model change.
+-- ─────────────────────────────────────────────────────────────────────────────
+ALTER TABLE working_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+ALTER TABLE episodic_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+ALTER TABLE procedural_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;

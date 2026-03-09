@@ -33,6 +33,7 @@ from nova_contracts import (
     UpdateMemoryRequest,
 )
 
+from app.config import settings
 from app.db.database import get_db
 from app.embedding import get_embedding, get_embeddings_batch
 from app.retrieval import TIER_TABLES, _actr_confidence, hybrid_search, tier_table, to_pg_vector
@@ -147,17 +148,18 @@ async def store_memory(req: StoreMemoryRequest):
             "agent_id": req.agent_id,
             "content": req.content,
             "embedding": embedding_str,
+            "embedding_model": settings.embedding_model,
             "metadata": json.dumps(req.metadata) if isinstance(req.metadata, dict) else req.metadata,
         }
 
         # working_memories is the only tier with expires_at — add it to INSERT when TTL set
         if req.ttl_seconds and req.tier == MemoryTier.working:
-            cols = "agent_id, content, embedding, metadata, expires_at"
-            vals = ":agent_id, :content, CAST(:embedding AS halfvec), CAST(:metadata AS jsonb), now() + make_interval(secs => :ttl)"
+            cols = "agent_id, content, embedding, embedding_model, metadata, expires_at"
+            vals = ":agent_id, :content, CAST(:embedding AS halfvec), :embedding_model, CAST(:metadata AS jsonb), now() + make_interval(secs => :ttl)"
             params["ttl"] = req.ttl_seconds
         else:
-            cols = "agent_id, content, embedding, metadata"
-            vals = ":agent_id, :content, CAST(:embedding AS halfvec), CAST(:metadata AS jsonb)"
+            cols = "agent_id, content, embedding, embedding_model, metadata"
+            vals = ":agent_id, :content, CAST(:embedding AS halfvec), :embedding_model, CAST(:metadata AS jsonb)"
 
         result = await session.execute(
             text(f"""
@@ -293,14 +295,15 @@ async def bulk_store(req: BulkStoreRequest):
                 table = tier_table(mem_req.tier)
                 result = await session.execute(
                     text(f"""
-                        INSERT INTO {table} (agent_id, content, embedding, metadata)
-                        VALUES (:agent_id, :content, CAST(:embedding AS halfvec), CAST(:metadata AS jsonb))
+                        INSERT INTO {table} (agent_id, content, embedding, embedding_model, metadata)
+                        VALUES (:agent_id, :content, CAST(:embedding AS halfvec), :embedding_model, CAST(:metadata AS jsonb))
                         RETURNING id
                     """),
                     {
                         "agent_id": mem_req.agent_id,
                         "content": mem_req.content,
                         "embedding": to_pg_vector(embedding),
+                        "embedding_model": settings.embedding_model,
                         "metadata": json.dumps(mem_req.metadata) if isinstance(mem_req.metadata, dict) else mem_req.metadata,
                     },
                 )
@@ -407,8 +410,8 @@ async def upload_file(
 
     await db.execute(
         text("""
-            INSERT INTO working_memory (id, agent_id, content, metadata, embedding, created_at)
-            VALUES (:id, :agent_id, :content, :metadata, :embedding, :now)
+            INSERT INTO working_memory (id, agent_id, content, metadata, embedding, embedding_model, created_at)
+            VALUES (:id, :agent_id, :content, :metadata, :embedding, :embedding_model, :now)
         """),
         {
             "id": memory_id,
@@ -416,6 +419,7 @@ async def upload_file(
             "content": content,
             "metadata": json.dumps(metadata),
             "embedding": vec_literal,
+            "embedding_model": settings.embedding_model,
             "now": datetime.now(timezone.utc),
         },
     )

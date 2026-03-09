@@ -142,6 +142,11 @@ async def get_embeddings_batch(
     return [results[i] for i in range(len(texts))]
 
 
+# Track primary model failures to skip straight to fallback
+_primary_failed_until: float = 0.0
+_PRIMARY_FAIL_COOLDOWN = 60.0  # seconds before retrying primary model
+
+
 async def _call_with_retry_fallback(
     payload: dict,
     model: str,
@@ -149,26 +154,38 @@ async def _call_with_retry_fallback(
 ) -> list[float] | list[list[float]]:
     """Call LLM gateway /embed with retry + fallback model."""
     import asyncio as _aio
+    import time as _time
+    global _primary_failed_until
+
     models_to_try = [model]
     if model != settings.embedding_fallback_model:
         models_to_try.append(settings.embedding_fallback_model)
 
+    # Skip primary model if it recently failed (avoids retry delays)
+    if _primary_failed_until > _time.monotonic():
+        models_to_try = [m for m in models_to_try if m != model] or models_to_try
+
     for model_to_try in models_to_try:
         is_fallback = model_to_try != model
         if is_fallback:
-            log.warning("Falling back to embedding model: %s", model_to_try)
+            log.info("Using fallback embedding model: %s", model_to_try)
         for attempt in range(settings.embedding_max_retries):
             try:
-                async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
+                async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=10.0) as client:
                     resp = await client.post("/embed", json={"model": model_to_try, **payload})
                     resp.raise_for_status()
                     data = resp.json()
+                    # Primary model recovered — clear the cooldown
+                    if not is_fallback:
+                        _primary_failed_until = 0.0
                     return data["embeddings"][0] if extract == "single" else data["embeddings"]
             except Exception:
                 if attempt < settings.embedding_max_retries - 1:
                     await _aio.sleep(settings.embedding_retry_delay)
                 elif not is_fallback:
-                    log.warning("Primary embedding model %s failed after %d retries", model_to_try, settings.embedding_max_retries)
+                    log.warning("Primary embedding model %s failed after %d retries, cooling down for %ds",
+                                model_to_try, settings.embedding_max_retries, int(_PRIMARY_FAIL_COOLDOWN))
+                    _primary_failed_until = _time.monotonic() + _PRIMARY_FAIL_COOLDOWN
 
     raise RuntimeError(f"All embedding attempts failed for model {model} and fallback {settings.embedding_fallback_model}")
 
