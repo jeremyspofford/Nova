@@ -130,6 +130,7 @@ async def run_agent_turn_streaming(
     api_key_id: UUID | None = None,
     skip_tool_preresolution: bool = False,
     explicit_model: bool = False,
+    guest_mode: bool = False,
 ):
     """Streaming variant — yields text deltas as they arrive from the LLM.
 
@@ -141,6 +142,10 @@ async def run_agent_turn_streaming(
     passed directly to the streaming call — the model can use them inline
     without an extra non-streaming round-trip. This cuts first-token latency
     roughly in half for conversational messages.
+
+    When guest_mode=True, context retrieval (nova_context, memory) and tools
+    are skipped entirely — the model receives only the system prompt and user
+    messages with no platform state or tool access.
     """
     from app.usage import log_usage
 
@@ -150,44 +155,61 @@ async def run_agent_turn_streaming(
     user_messages = [m for m in messages if m.get("role") == "user"]
     query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
 
-    # Intelligent routing: classify in parallel with context retrieval
-    from app.model_classifier import classify_and_resolve
+    category = None
 
-    will_classify = not explicit_model and query
+    if guest_mode:
+        # Guest isolation: no context, no memory, no tools, no classification
+        nova_ctx = ""
+        memory_ctx = ""
+        memory_count = 0
+        yield json.dumps({"status": {"step": "model", "state": "done", "detail": model}})
+    else:
+        # Intelligent routing: classify in parallel with context retrieval
+        from app.model_classifier import classify_and_resolve
 
-    async def _noop_classify():
-        return (None, None)
+        will_classify = not explicit_model and query
 
-    classify_coro = classify_and_resolve(query) if will_classify else _noop_classify()
+        async def _noop_classify():
+            return (None, None)
 
-    # Emit "running" status for parallel steps before the gather
-    if will_classify:
-        yield json.dumps({"status": {"step": "classifying", "state": "running"}})
-    yield json.dumps({"status": {"step": "memory", "state": "running"}})
+        classify_coro = classify_and_resolve(query) if will_classify else _noop_classify()
 
-    t0 = time.monotonic()
-    nova_ctx, (memory_ctx, memory_count), (category, classified_model) = await asyncio.gather(
-        _build_nova_context(model, agent_id, session_id),
-        _get_memory_context(agent_id, query),
-        classify_coro,
-    )
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
+        # Emit "running" status for parallel steps before the gather
+        if will_classify:
+            yield json.dumps({"status": {"step": "classifying", "state": "running"}})
+        yield json.dumps({"status": {"step": "memory", "state": "running"}})
 
-    # Emit "done" status for completed steps
-    if will_classify:
-        yield json.dumps({"status": {"step": "classifying", "state": "done", "detail": category or "general", "elapsed_ms": elapsed_ms}})
-    mem_detail = f"{memory_count} memor{'y' if memory_count == 1 else 'ies'}" if memory_count else "no memories"
-    yield json.dumps({"status": {"step": "memory", "state": "done", "detail": mem_detail, "elapsed_ms": elapsed_ms}})
+        # Wrap coroutines to track individual timings
+        async def _timed(coro):
+            t = time.monotonic()
+            result = await coro
+            return result, int((time.monotonic() - t) * 1000)
 
-    if classified_model:
-        model = classified_model
+        (nova_ctx, _ctx_ms), ((memory_ctx, memory_count), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
+            _timed(_build_nova_context(model, agent_id, session_id)),
+            _timed(_get_memory_context(agent_id, query)),
+            _timed(classify_coro),
+        )
 
-    # Emit model selection status
-    yield json.dumps({"status": {"step": "model", "state": "done", "detail": model}})
+        # Emit "done" status with per-step timings
+        if will_classify:
+            yield json.dumps({"status": {"step": "classifying", "state": "done", "detail": category or "general", "elapsed_ms": cls_ms}})
+        mem_detail = f"{memory_count} memor{'y' if memory_count == 1 else 'ies'}" if memory_count else "no memories"
+        yield json.dumps({"status": {"step": "memory", "state": "done", "detail": mem_detail, "elapsed_ms": mem_ms}})
+
+        if classified_model:
+            model = classified_model
+
+        # Emit model selection status
+        yield json.dumps({"status": {"step": "model", "state": "done", "detail": model}})
 
     prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
 
-    if skip_tool_preresolution:
+    if guest_mode:
+        # Guest mode: no tools at all
+        streaming_messages = prompt_messages
+        used_tools = False
+    elif skip_tool_preresolution:
         # Pass tools directly to streaming — no pre-flight LLM call
         streaming_messages = prompt_messages
         used_tools = True  # Always include tools so model can use them

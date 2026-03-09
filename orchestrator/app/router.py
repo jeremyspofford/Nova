@@ -297,9 +297,20 @@ async def chat_stream(req: ChatRequest, user: UserDep):
 
     # Use the primary agent (Nova) — first in the list by creation time
     agent = agents[0]
-    from app.model_resolver import resolve_default_model
-    model = req.model or await resolve_default_model()
-    explicit_model = bool(req.model)
+    is_guest = user.role == "guest"
+
+    # Guest isolation: validate model against allowlist
+    if is_guest:
+        from app.guest import validate_guest_model
+        try:
+            model = await validate_guest_model(req.model)
+        except ValueError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+        explicit_model = True  # prevent intelligent routing from overriding
+    else:
+        from app.model_resolver import resolve_default_model
+        model = req.model or await resolve_default_model()
+        explicit_model = bool(req.model)
     task_id = uuid4()
     # Use conversation_id as session_id when available (for memory-service compatibility)
     session_id = req.conversation_id or req.session_id or str(uuid4())
@@ -320,19 +331,24 @@ async def chat_stream(req: ChatRequest, user: UserDep):
             content = last_user[-1].get("content", "")
             user_message = content if isinstance(content, str) else str(content)
 
-    # Build style/research modifiers for system prompt
-    system_prompt = agent.config.system_prompt
-    modifiers: list[str] = [BASE_FORMAT_PROMPT]
-    if req.output_style and req.output_style in STYLE_PROMPTS:
-        modifiers.append(STYLE_PROMPTS[req.output_style])
-    if req.custom_instructions:
-        modifiers.append(req.custom_instructions.strip())
-    if req.web_search:
-        modifiers.append("You have web search available. Use it when the question benefits from current information.")
-    if req.deep_research:
-        modifiers.append("Perform thorough multi-step research. Search multiple queries, cross-reference sources, synthesize findings, and cite sources.")
-    if modifiers:
-        system_prompt = (system_prompt or "") + "\n\n" + "\n\n".join(modifiers)
+    # Guest isolation: use stripped-down system prompt with no context injection
+    if is_guest:
+        from app.guest import GUEST_SYSTEM_PROMPT
+        system_prompt = GUEST_SYSTEM_PROMPT
+    else:
+        # Build style/research modifiers for system prompt
+        system_prompt = agent.config.system_prompt
+        modifiers: list[str] = [BASE_FORMAT_PROMPT]
+        if req.output_style and req.output_style in STYLE_PROMPTS:
+            modifiers.append(STYLE_PROMPTS[req.output_style])
+        if req.custom_instructions:
+            modifiers.append(req.custom_instructions.strip())
+        if req.web_search:
+            modifiers.append("You have web search available. Use it when the question benefits from current information.")
+        if req.deep_research:
+            modifiers.append("Perform thorough multi-step research. Search multiple queries, cross-reference sources, synthesize findings, and cite sources.")
+        if modifiers:
+            system_prompt = (system_prompt or "") + "\n\n" + "\n\n".join(modifiers)
 
     await update_agent_status(str(agent.id), AgentStatus.running)
 
@@ -354,6 +370,7 @@ async def chat_stream(req: ChatRequest, user: UserDep):
                 api_key_id=None,
                 skip_tool_preresolution=True,
                 explicit_model=explicit_model,
+                guest_mode=is_guest,
             ),
             error_label="Chat stream",
             sandbox_token=sandbox_token,
