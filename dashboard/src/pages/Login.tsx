@@ -4,13 +4,15 @@ import { LogIn, UserPlus, Mail, Lock, User, Loader2 } from 'lucide-react'
 
 export function Login() {
   const { login, register, loginWithGoogle, authConfig } = useAuth()
+  const searchParams = new URLSearchParams(window.location.search)
+  const urlInviteCode = searchParams.get('invite')
   const [mode, setMode] = useState<'login' | 'register'>(
-    authConfig && !authConfig.has_users ? 'register' : 'login'
+    urlInviteCode ? 'register' : authConfig && !authConfig.has_users ? 'register' : 'login'
   )
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
+  const [inviteCode, setInviteCode] = useState(urlInviteCode ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -69,6 +71,8 @@ export function Login() {
           <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">
             {isFirstUser
               ? 'Create your admin account to get started'
+              : urlInviteCode && mode === 'register'
+              ? "You've been invited! Create an account to get started."
               : mode === 'login' ? 'Sign in to your account' : 'Create a new account'}
           </p>
         </div>

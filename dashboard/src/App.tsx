@@ -21,6 +21,8 @@ import { Recovery } from './pages/Recovery'
 import { RemoteAccess } from './pages/RemoteAccess'
 import { About } from './pages/About'
 import { Users } from './pages/Users'
+import { Invite } from './pages/Invite'
+import { Expired } from './pages/Expired'
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto max-w-6xl w-full">{children}</main>
@@ -67,6 +69,14 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   // Trusted network (LAN, Tailscale, localhost) — skip login
   if (authConfig?.trusted_network) {
     return <>{children}</>
+  }
+
+  // If user hit an invite link while unauthenticated, redirect to login with the code
+  const inviteMatch = window.location.pathname.match(/^\/invite\/(.+)$/)
+  if (inviteMatch) {
+    const code = inviteMatch[1]
+    window.history.replaceState(null, '', `/login?invite=${code}`)
+    return <Login />
   }
 
   // No auth config yet (fetch failed/slow) or config says auth required → show login
@@ -122,6 +132,8 @@ function AppShell() {
             <Route path="/recovery" element={<PageShell><Recovery /></PageShell>} />
             <Route path="/remote-access" element={<PageShell><RemoteAccess /></PageShell>} />
             <Route path="/about" element={<PageShell><About /></PageShell>} />
+            <Route path="/invite/:code" element={<Invite />} />
+            <Route path="/expired" element={<Expired />} />
           </Routes>
         </div>
       </div>
