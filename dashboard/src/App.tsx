@@ -20,6 +20,7 @@ import { MemoryInspector } from './pages/MemoryInspector'
 import { Recovery } from './pages/Recovery'
 import { RemoteAccess } from './pages/RemoteAccess'
 import { About } from './pages/About'
+import { Users } from './pages/Users'
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto max-w-6xl w-full">{children}</main>
@@ -116,6 +117,7 @@ function AppShell() {
             <Route path="/agents"  element={<PageShell><AgentEndpoints /></PageShell>} />
             <Route path="/memory"  element={<PageShell><MemoryInspector /></PageShell>} />
             <Route path="/models"   element={<PageShell><Models /></PageShell>} />
+            <Route path="/users"    element={<PageShell><Users /></PageShell>} />
             <Route path="/settings" element={<PageShell><Settings /></PageShell>} />
             <Route path="/recovery" element={<PageShell><Recovery /></PageShell>} />
             <Route path="/remote-access" element={<PageShell><RemoteAccess /></PageShell>} />

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser, Info } from 'lucide-react'
+import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser, Info, Users2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
+import { hasMinRole, type Role } from '../lib/roles'
 
 const mainLinks = [
   { to: '/',         label: 'Chat',     icon: MessageSquare    },
@@ -18,6 +19,7 @@ const mainLinks = [
 ]
 
 const systemLinks = [
+  { to: '/users',         label: 'Users',    icon: Users2      },
   { to: '/settings',      label: 'Settings', icon: Settings    },
   { to: '/about',         label: 'About',    icon: Info        },
 ]
@@ -30,6 +32,14 @@ export function NavBar() {
   const location = useLocation()
   const { name } = useNovaIdentity()
   const { isAuthenticated, user, logout } = useAuth()
+
+  // Filter system links based on role
+  const filteredSystemLinks = systemLinks.filter(link => {
+    if (link.to === '/users') {
+      return user?.role && hasMinRole(user.role as Role, 'admin')
+    }
+    return true
+  })
 
   // Close user menu on click outside
   useEffect(() => {
@@ -107,6 +117,21 @@ export function NavBar() {
                     )}
                   </div>
                 )}
+                {user?.role && hasMinRole(user.role as Role, 'admin') && (
+                  <NavLink
+                    to="/users"
+                    onClick={() => setUserMenuOpen(false)}
+                    className={clsx(
+                      'flex items-center gap-2 px-3 py-2 text-sm transition-colors',
+                      location.pathname === '/users'
+                        ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
+                        : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100'
+                    )}
+                  >
+                    <Users2 size={14} />
+                    Users
+                  </NavLink>
+                )}
                 <NavLink
                   to="/settings"
                   onClick={() => setUserMenuOpen(false)}
@@ -159,7 +184,7 @@ export function NavBar() {
       {mobileMenuOpen && (
         <div className="md:hidden sticky top-[57px] z-50 border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-2">
           <div className="grid grid-cols-3 gap-1">
-            {[...mainLinks, ...systemLinks].map(({ to, label, icon: Icon }) => (
+            {[...mainLinks, ...filteredSystemLinks].map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
