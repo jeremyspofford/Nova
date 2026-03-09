@@ -80,6 +80,8 @@ class AuthenticatedUser:
     email: str
     display_name: str
     is_admin: bool
+    role: str = "member"
+    tenant_id: str = "00000000-0000-0000-0000-000000000001"
 
 
 class AuthenticatedKey:
@@ -191,6 +193,8 @@ _SYNTHETIC_ADMIN = AuthenticatedUser(
     email="admin@local",
     display_name="Admin",
     is_admin=True,
+    role="owner",
+    tenant_id="00000000-0000-0000-0000-000000000001",
 )
 
 
@@ -219,11 +223,15 @@ async def require_user(
         try:
             from app.jwt_auth import verify_access_token
             payload = verify_access_token(token)
+            role = payload.get("role", "admin" if payload.get("is_admin") else "member")
+            tenant_id = payload.get("tenant_id", "00000000-0000-0000-0000-000000000001")
             return AuthenticatedUser(
                 id=payload["sub"],
                 email=payload["email"],
                 display_name=payload.get("display_name", ""),
                 is_admin=payload.get("is_admin", False),
+                role=role,
+                tenant_id=tenant_id,
             )
         except Exception:
             pass  # Fall through to admin secret check
@@ -239,3 +247,36 @@ async def require_user(
 ApiKeyDep = Annotated[AuthenticatedKey, Depends(require_api_key)]
 AdminDep = Annotated[None, Depends(require_admin)]
 UserDep = Annotated[AuthenticatedUser, Depends(require_user)]
+
+
+# ── Role-based access control deps ──────────────────────────────────────────
+
+def require_role(min_role: str):
+    """Factory for role-checking dependencies."""
+    async def _check(user: UserDep) -> AuthenticatedUser:
+        from app.roles import has_min_role
+        if not has_min_role(user.role, min_role):
+            raise HTTPException(status_code=403, detail=f"Requires {min_role} role or higher")
+        return user
+    return _check
+
+
+async def check_account_active(user: UserDep) -> AuthenticatedUser:
+    from app.db import get_pool
+    from datetime import datetime, timezone
+    pool = get_pool()
+    row = await pool.fetchrow(
+        "SELECT status, expires_at FROM users WHERE id = $1", user.id
+    )
+    if row:
+        if row["status"] != "active":
+            raise HTTPException(status_code=403, detail="Account deactivated")
+        if row["expires_at"] and row["expires_at"] < datetime.now(timezone.utc):
+            raise HTTPException(status_code=403, detail="Account expired")
+    return user
+
+
+ActiveUserDep = Annotated[AuthenticatedUser, Depends(check_account_active)]
+OwnerDep = Annotated[AuthenticatedUser, Depends(require_role("owner"))]
+AdminRoleDep = Annotated[AuthenticatedUser, Depends(require_role("admin"))]
+MemberDep = Annotated[AuthenticatedUser, Depends(require_role("member"))]
