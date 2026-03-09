@@ -12,6 +12,7 @@ export default defineConfig({
       ],
       customCss: ['./src/styles/global.css'],
       sidebar: [
+        { label: 'Overview', slug: 'nova/docs' },
         { label: 'Quick Start', slug: 'nova/docs/quickstart' },
         {
           label: 'Core Concepts',

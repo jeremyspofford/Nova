@@ -397,7 +397,7 @@ async def create_invite(req: InviteCreate, user: UserDep):
             code, UUID(user.id), req.email, expires, req.role, req.account_expires_in_hours, UUID(user.tenant_id),
         )
         await conn.execute(
-            """INSERT INTO audit_log (actor_id, action, target_id, details, tenant_id)
+            """INSERT INTO rbac_audit_log (actor_id, action, target_id, details, tenant_id)
                VALUES ($1, 'invite_created', $2, $3, $4)""",
             UUID(user.id), row["id"],
             json.dumps({"role": req.role, "email": req.email}),

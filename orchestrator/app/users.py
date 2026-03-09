@@ -120,7 +120,7 @@ async def update_user_role(user_id: str, role: str, actor_id: str | None = None)
     )
     if row and actor_id:
         await pool.execute(
-            "INSERT INTO audit_log (actor_id, action, target_id, details, tenant_id) VALUES ($1, 'role_change', $2, $3, $4)",
+            "INSERT INTO rbac_audit_log (actor_id, action, target_id, details, tenant_id) VALUES ($1, 'role_change', $2, $3, $4)",
             UUID(actor_id), UUID(user_id), json.dumps({"new_role": role}), row["tenant_id"],
         )
     return _user_dict(row) if row else None
@@ -133,7 +133,7 @@ async def deactivate_user(user_id: str, actor_id: str) -> bool:
     )
     await pool.execute("DELETE FROM refresh_tokens WHERE user_id = $1", UUID(user_id))
     await pool.execute(
-        "INSERT INTO audit_log (actor_id, action, target_id, tenant_id) VALUES ($1, 'user_deactivated', $2, (SELECT tenant_id FROM users WHERE id = $2))",
+        "INSERT INTO rbac_audit_log (actor_id, action, target_id, tenant_id) VALUES ($1, 'user_deactivated', $2, (SELECT tenant_id FROM users WHERE id = $2))",
         UUID(actor_id), UUID(user_id),
     )
     return "UPDATE 1" in result

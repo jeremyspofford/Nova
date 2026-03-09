@@ -68,8 +68,8 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- 6. Audit log
-CREATE TABLE IF NOT EXISTS audit_log (
+-- 6. RBAC audit log (separate from the operational audit_log table)
+CREATE TABLE IF NOT EXISTS rbac_audit_log (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     actor_id    UUID REFERENCES users(id),
     action      TEXT NOT NULL,
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rbac_audit_log_tenant ON rbac_audit_log(tenant_id, created_at DESC);
 
 -- 7. Guest allowed models config
 INSERT INTO platform_config (key, value, description, is_secret) VALUES

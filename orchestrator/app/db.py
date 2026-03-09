@@ -87,6 +87,38 @@ def get_pool() -> asyncpg.Pool:
     return _pool
 
 
+def _split_sql(sql: str) -> list[str]:
+    """Split SQL text into individual statements, respecting $$ dollar-quoting.
+
+    Naive str.split(";") breaks PL/pgSQL DO blocks that contain semicolons
+    inside $$ ... $$ quoted bodies.  This splitter tracks dollar-quote regions
+    and only treats `;` as a statement separator when outside them.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    in_dollar_quote = False
+    i = 0
+    while i < len(sql):
+        if sql[i : i + 2] == "$$":
+            in_dollar_quote = not in_dollar_quote
+            current.append("$$")
+            i += 2
+        elif sql[i] == ";" and not in_dollar_quote:
+            stmt = "".join(current).strip()
+            if stmt:
+                statements.append(stmt)
+            current = []
+            i += 1
+        else:
+            current.append(sql[i])
+            i += 1
+    # Handle trailing statement without semicolon
+    stmt = "".join(current).strip()
+    if stmt:
+        statements.append(stmt)
+    return statements
+
+
 async def _run_schema_migrations() -> None:
     """
     Versioned migration runner.
@@ -127,10 +159,8 @@ async def _run_schema_migrations() -> None:
             sql_stripped = re.sub(r"--[^\n]*", "", sql)
 
             async with conn.transaction():
-                for statement in sql_stripped.split(";"):
-                    stmt = statement.strip()
-                    if stmt:
-                        await conn.execute(stmt)
+                for stmt in _split_sql(sql_stripped):
+                    await conn.execute(stmt)
                 await conn.execute(
                     "INSERT INTO schema_migrations (version) VALUES ($1)", version
                 )
