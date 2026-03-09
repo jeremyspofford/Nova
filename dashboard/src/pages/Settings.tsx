@@ -15,6 +15,7 @@ import { NotificationsSection } from './settings/NotificationsSection'
 import { TrustedNetworksSection } from './settings/TrustedNetworksSection'
 import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
 import { AccountSection } from './settings/AccountSection'
+import { GuestAccessSection } from './settings/GuestAccessSection'
 import { useAuth } from '../stores/auth-store'
 
 // ── Category tabs ────────────────────────────────────────────────────────────
@@ -161,6 +162,7 @@ export function Settings() {
             <PipelineModelsSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
             <ProviderStatusSection />
             <ContextBudgetSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+            <GuestAccessSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </>
         )}
 
