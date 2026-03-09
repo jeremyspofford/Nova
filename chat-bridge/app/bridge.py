@@ -118,19 +118,24 @@ async def send_message(session_id: str, agent_id: str, text: str) -> str:
                     if line == "data: [DONE]":
                         break
                     if line.startswith("data: "):
-                        delta = line[6:]
-                        # Skip JSON objects (status updates, metadata)
-                        # — only keep plain text deltas
+                        raw = line[6:]
+                        if not raw:
+                            continue
+                        # Parse JSON events — extract text deltas, skip status/meta
                         try:
-                            parsed = json.loads(delta)
+                            parsed = json.loads(raw)
                             if isinstance(parsed, dict):
                                 if "error" in parsed:
                                     return f"Error: {parsed['error']}"
-                                continue  # status/meta — not user-facing
+                                if "t" in parsed:
+                                    parts.append(parsed["t"])
+                                # status/meta — not user-facing, skip
+                                continue
                         except (json.JSONDecodeError, TypeError):
                             pass
-                        if delta:
-                            parts.append(delta)
+                        # Fallback: raw text delta (shouldn't happen with new protocol)
+                        if raw:
+                            parts.append(raw)
                 return "".join(parts)
 
     except httpx.HTTPStatusError as e:

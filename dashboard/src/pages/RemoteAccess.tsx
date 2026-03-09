@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Globe, Cloud, Shield, CheckCircle2, XCircle, Loader2, ArrowRight, ArrowLeft, Trash2, ExternalLink } from 'lucide-react'
 import { getRemoteAccessStatus, patchEnv, manageComposeProfile } from '../api-recovery'
+import { updatePlatformConfig } from '../api'
 import type { RemoteAccessStatus } from '../api-recovery'
 import * as cf from '../lib/cloudflare-api'
 import * as ts from '../lib/tailscale-api'
@@ -118,6 +119,12 @@ export function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatu
         TRUSTED_PROXY_HEADER: 'CF-Connecting-IP',
       })
 
+      // 4b. Also update platform_config so dynamic middleware picks up changes
+      await Promise.all([
+        updatePlatformConfig('trusted_proxy_header', JSON.stringify('CF-Connecting-IP')),
+        updatePlatformConfig('auth.require_auth', JSON.stringify(true)),
+      ])
+
       // 5. Start cloudflared container
       await manageComposeProfile('cloudflare-tunnel', 'start')
 
@@ -133,6 +140,8 @@ export function CloudflareWizard({ status, onDone }: { status: RemoteAccessStatu
     try {
       await manageComposeProfile('cloudflare-tunnel', 'stop')
       await patchEnv({ CLOUDFLARE_TUNNEL_TOKEN: '', TRUSTED_PROXY_HEADER: '' })
+      // Clear proxy header in platform_config so middleware stops using it
+      await updatePlatformConfig('trusted_proxy_header', JSON.stringify(''))
       setS(initialCfState)
       onDone()
     } catch (e: any) {

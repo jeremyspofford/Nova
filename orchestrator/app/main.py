@@ -25,6 +25,58 @@ configure_logging("orchestrator", settings.log_level)
 log = logging.getLogger(__name__)
 
 
+async def _seed_config_from_env() -> None:
+    """Seed platform_config from .env values for existing deployments.
+
+    Only writes if the DB value is still the default and the .env value differs.
+    Never overwrites DB with .env — DB is the source of truth once set.
+    """
+    import json
+    from app.db import get_pool
+
+    SEEDS = {
+        # (config_key, env_value, default_db_value)
+        "trusted_networks": (
+            settings.trusted_networks,
+            "127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,::1/128",
+        ),
+        "trusted_proxy_header": (settings.trusted_proxy_header, ""),
+        "auth.require_auth": (str(settings.require_auth).lower(), "true"),
+        "auth.registration_mode": (settings.registration_mode, "invite"),
+    }
+
+    pool = get_pool()
+    seeded = []
+    try:
+        async with pool.acquire() as conn:
+            for key, (env_val, default_val) in SEEDS.items():
+                if not env_val or env_val == default_val:
+                    continue
+                row = await conn.fetchrow(
+                    "SELECT value #>> '{}' AS val FROM platform_config WHERE key = $1", key
+                )
+                if not row:
+                    continue
+                db_val = row["val"] or ""
+                # Strip JSON string quotes for comparison
+                if db_val.startswith('"') and db_val.endswith('"'):
+                    try:
+                        db_val = json.loads(db_val)
+                    except Exception:
+                        pass
+                if db_val == default_val or db_val == "":
+                    json_val = json.dumps(env_val)
+                    await conn.execute(
+                        "UPDATE platform_config SET value = $2::jsonb, updated_at = NOW() WHERE key = $1",
+                        key, json_val,
+                    )
+                    seeded.append(key)
+        if seeded:
+            log.info("Seeded platform_config from .env: %s", seeded)
+    except Exception:
+        log.warning("Failed to seed platform_config from .env (DB not ready?)", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Orchestrator starting")
@@ -40,6 +92,9 @@ async def lifespan(app: FastAPI):
     # Auto-generate JWT secret if not configured
     from app.jwt_auth import ensure_jwt_secret
     await ensure_jwt_secret()
+
+    # Seed platform_config from .env for existing deployments
+    await _seed_config_from_env()
 
     # Sync DB config to Redis so LLM gateway has correct values immediately
     from app.config_sync import sync_llm_config_to_redis

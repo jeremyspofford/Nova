@@ -177,7 +177,22 @@ async def _stream_response(
                         })
                         break
                     if line.startswith("data: "):
-                        delta = line[6:]
+                        raw = line[6:]
+                        if not raw:
+                            continue
+                        # Unwrap JSON-encoded text deltas {"t": "..."}
+                        # and skip status/meta events (not relevant for WS clients)
+                        delta = raw
+                        if raw.startswith("{"):
+                            try:
+                                parsed = json.loads(raw)
+                                if isinstance(parsed, dict):
+                                    if "t" in parsed:
+                                        delta = parsed["t"]
+                                    elif "status" in parsed or "meta" in parsed:
+                                        continue
+                            except (json.JSONDecodeError, KeyError):
+                                pass
                         if delta:
                             full_response_parts.append(delta)
                             await websocket.send_json({

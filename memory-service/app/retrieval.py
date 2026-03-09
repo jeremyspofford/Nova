@@ -104,16 +104,22 @@ async def hybrid_search(
     """
     all_raw: list[RawResult] = []
 
+    # Fire all vector + keyword searches in parallel across all tiers
+    import asyncio
+    coros = []
     for tier in tiers:
         table = TIER_TABLES.get(tier)
         if not table:
             log.warning("Unknown memory tier: %s", tier)
             continue
         fetch_limit = min(limit * 3, 100)
-        vector_results = await _vector_search(session, table, agent_id, query_embedding, fetch_limit, tier, metadata_filter)
-        keyword_results = await _keyword_search(session, table, agent_id, query_text, fetch_limit, tier, metadata_filter)
-        all_raw.extend(vector_results)
-        all_raw.extend(keyword_results)
+        coros.append(_vector_search(session, table, agent_id, query_embedding, fetch_limit, tier, metadata_filter))
+        coros.append(_keyword_search(session, table, agent_id, query_text, fetch_limit, tier, metadata_filter))
+
+    if coros:
+        results = await asyncio.gather(*coros)
+        for result_list in results:
+            all_raw.extend(result_list)
 
     fused = _reciprocal_rank_fusion(all_raw, limit, vector_weight, keyword_weight)
 

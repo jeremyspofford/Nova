@@ -6,7 +6,6 @@ import { Section, ConfigField, useConfigValue } from './settings/shared'
 import { LLMRoutingSection } from './settings/LLMRoutingSection'
 import { ProviderStatusSection } from './settings/ProviderStatusSection'
 import { ContextBudgetSection } from './settings/ContextBudgetSection'
-import { AdminSecretSection } from './settings/AdminSecretSection'
 import { RemoteAccessSection } from './settings/RemoteAccessSection'
 import { ChatIntegrationsSection } from './settings/ChatIntegrationsSection'
 import { RecoverySection } from './settings/RecoverySection'
@@ -153,7 +152,6 @@ export function Settings() {
               <ConfigField label="Task history retention (days)" configKey="task_history_retention_days" value={retentionDays} placeholder="0 (keep forever)" description="Automatically delete completed/failed/cancelled tasks older than this many days. Set to 0 or leave blank to keep forever. Common values: 7, 30, 60, 90." onSave={handleSave} saving={saveMutation.isPending} />
             </Section>
 
-            <AdminSecretSection />
           </>
         )}
 

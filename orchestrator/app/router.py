@@ -53,17 +53,19 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
     model_used = None
     try:
         async for delta in stream_gen:
-            # Track accumulated text and model for conversation persistence
-            if isinstance(delta, str) and not delta.startswith("{"):
-                accumulated += delta
-            elif isinstance(delta, str) and delta.startswith("{"):
+            # JSON events (status/meta) from the runner — pass through as-is
+            if isinstance(delta, str) and delta.startswith("{"):
                 try:
                     parsed = json.loads(delta)
                     if isinstance(parsed, dict) and "meta" in parsed:
                         model_used = parsed["meta"].get("model")
+                    yield f"data: {delta}\n\n".encode()
+                    continue
                 except (json.JSONDecodeError, KeyError):
-                    accumulated += delta
-            yield f"data: {delta}\n\n".encode()
+                    pass  # Not valid JSON — treat as text delta below
+            # Text deltas: wrap in JSON so newlines can't break SSE framing
+            accumulated += delta
+            yield f"data: {json.dumps({'t': delta})}\n\n".encode()
         yield b"data: [DONE]\n\n"
     except Exception as e:
         log.error("%s error (agent=%s): %s", error_label, agent_id, e)

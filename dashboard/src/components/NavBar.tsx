@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser } from 'lucide-react'
+import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser, Info } from 'lucide-react'
 import clsx from 'clsx'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
@@ -19,6 +19,7 @@ const mainLinks = [
 
 const systemLinks = [
   { to: '/settings',      label: 'Settings', icon: Settings    },
+  { to: '/about',         label: 'About',    icon: Info        },
 ]
 
 export function NavBar() {
@@ -118,6 +119,19 @@ export function NavBar() {
                 >
                   <Settings size={14} />
                   Settings
+                </NavLink>
+                <NavLink
+                  to="/about"
+                  onClick={() => setUserMenuOpen(false)}
+                  className={clsx(
+                    'flex items-center gap-2 px-3 py-2 text-sm transition-colors',
+                    location.pathname === '/about'
+                      ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
+                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100'
+                  )}
+                >
+                  <Info size={14} />
+                  About
                 </NavLink>
                 {isAuthenticated && (
                   <button

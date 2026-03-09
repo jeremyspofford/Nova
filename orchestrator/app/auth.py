@@ -13,8 +13,9 @@ UserDep also accepts X-Admin-Secret as a fallback for backward compatibility.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import time
+import time as _time
 from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
@@ -26,6 +27,50 @@ from app.db import lookup_api_key, touch_api_key
 from app.store import get_redis
 
 log = logging.getLogger(__name__)
+
+# ── Dynamic require_auth from DB (30s cache) ─────────────────────────────────
+
+_AUTH_CACHE_TTL = 30  # seconds
+_auth_cache: dict[str, Any] = {"require_auth": None, "ts": 0.0}
+
+
+async def _get_require_auth() -> bool:
+    """Read auth.require_auth from platform_config with 30s cache.
+
+    Falls back to settings.require_auth if the DB key is missing or on error.
+    """
+    now = _time.monotonic()
+    if now - _auth_cache["ts"] < _AUTH_CACHE_TTL and _auth_cache["require_auth"] is not None:
+        return _auth_cache["require_auth"]
+
+    try:
+        from app.db import get_pool
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT value #>> '{}' AS val FROM platform_config WHERE key = 'auth.require_auth'"
+            )
+        if row and row["val"] is not None:
+            raw = row["val"]
+            # Handle JSONB values: could be "true"/"false" or JSON-encoded
+            if raw in ("true", "True", "1"):
+                val = True
+            elif raw in ("false", "False", "0"):
+                val = False
+            else:
+                try:
+                    val = bool(json.loads(raw))
+                except Exception:
+                    val = settings.require_auth
+            _auth_cache["require_auth"] = val
+            _auth_cache["ts"] = now
+            return val
+    except Exception:
+        log.debug("Failed to read auth.require_auth from DB, using .env fallback")
+
+    _auth_cache["require_auth"] = settings.require_auth
+    _auth_cache["ts"] = now
+    return settings.require_auth
 
 
 @dataclass
@@ -85,7 +130,7 @@ async def require_api_key(
             "rate_limit_rpm": 9999,
         })
 
-    if not settings.require_auth:
+    if not await _get_require_auth():
         return AuthenticatedKey({
             "id": None,   # None avoids FK violation in usage_events when no real key exists
             "name": "dev-bypass",
@@ -165,7 +210,7 @@ async def require_user(
         return _SYNTHETIC_ADMIN
 
     # Dev bypass
-    if not settings.require_auth:
+    if not await _get_require_auth():
         return _SYNTHETIC_ADMIN
 
     # Try JWT first

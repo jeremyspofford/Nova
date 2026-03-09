@@ -300,6 +300,10 @@ export async function* streamChat(
         try {
           const parsed = JSON.parse(data) as Record<string, unknown>
           if (parsed.error) throw new Error(String(parsed.error))
+          if (parsed.t !== undefined) {
+            yield parsed.t as string
+            continue
+          }
           if (parsed.status) {
             yield { status: parsed.status as ActivityStep }
             continue
