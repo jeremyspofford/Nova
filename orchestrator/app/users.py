@@ -1,6 +1,7 @@
 """User CRUD operations — raw asyncpg queries."""
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 from uuid import UUID
@@ -23,16 +24,21 @@ async def create_user(
     provider: str = "local",
     provider_id: str | None = None,
     is_admin: bool = False,
+    role: str | None = None,
+    tenant_id: str = "00000000-0000-0000-0000-000000000001",
+    expires_at=None,
 ) -> dict[str, Any]:
+    if role is None:
+        role = "admin" if is_admin else "member"
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO users (email, password_hash, display_name, provider, provider_id, is_admin)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, email, display_name, avatar_url, provider, provider_id, is_admin, created_at, updated_at
+            INSERT INTO users (email, password_hash, display_name, provider, provider_id, is_admin, role, tenant_id, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id, email, display_name, avatar_url, provider, provider_id, is_admin, role, tenant_id, expires_at, created_at, updated_at
             """,
-            email, password_hash, display_name, provider, provider_id, is_admin,
+            email, password_hash, display_name, provider, provider_id, is_admin, role, UUID(tenant_id), expires_at,
         )
     return _user_dict(row)
 
@@ -95,3 +101,39 @@ async def count_users() -> int:
     pool = get_pool()
     async with pool.acquire() as conn:
         return await conn.fetchval("SELECT COUNT(*) FROM users")
+
+
+async def list_users(tenant_id: str = "00000000-0000-0000-0000-000000000001") -> list[dict[str, Any]]:
+    pool = get_pool()
+    rows = await pool.fetch(
+        "SELECT * FROM users WHERE tenant_id = $1 ORDER BY created_at", UUID(tenant_id)
+    )
+    return [_user_dict(r) for r in rows]
+
+
+async def update_user_role(user_id: str, role: str, actor_id: str | None = None) -> dict[str, Any] | None:
+    pool = get_pool()
+    is_admin = role in ("owner", "admin")
+    row = await pool.fetchrow(
+        "UPDATE users SET role = $2, is_admin = $3, updated_at = NOW() WHERE id = $1 RETURNING *",
+        UUID(user_id), role, is_admin,
+    )
+    if row and actor_id:
+        await pool.execute(
+            "INSERT INTO audit_log (actor_id, action, target_id, details, tenant_id) VALUES ($1, 'role_change', $2, $3, $4)",
+            UUID(actor_id), UUID(user_id), json.dumps({"new_role": role}), row["tenant_id"],
+        )
+    return _user_dict(row) if row else None
+
+
+async def deactivate_user(user_id: str, actor_id: str) -> bool:
+    pool = get_pool()
+    result = await pool.execute(
+        "UPDATE users SET status = 'deactivated', updated_at = NOW() WHERE id = $1", UUID(user_id)
+    )
+    await pool.execute("DELETE FROM refresh_tokens WHERE user_id = $1", UUID(user_id))
+    await pool.execute(
+        "INSERT INTO audit_log (actor_id, action, target_id, tenant_id) VALUES ($1, 'user_deactivated', $2, (SELECT tenant_id FROM users WHERE id = $2))",
+        UUID(actor_id), UUID(user_id),
+    )
+    return "UPDATE 1" in result

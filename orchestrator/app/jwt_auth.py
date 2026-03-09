@@ -55,12 +55,14 @@ async def ensure_jwt_secret() -> None:
         log.info("Generated and stored JWT_SECRET in platform_config")
 
 
-def create_access_token(user_id: str, email: str, is_admin: bool) -> str:
+def create_access_token(user_id: str, email: str, is_admin: bool, role: str = "member", tenant_id: str = "00000000-0000-0000-0000-000000000001") -> str:
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "email": email,
         "is_admin": is_admin,
+        "role": role,
+        "tenant_id": tenant_id,
         "iat": now,
         "exp": now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         "type": "access",
@@ -117,7 +119,7 @@ async def rotate_refresh_token(old_token: str) -> tuple[str, str, dict] | None:
 
         user_id = row["user_id"]
         user = await conn.fetchrow(
-            "SELECT id, email, display_name, avatar_url, is_admin, provider "
+            "SELECT id, email, display_name, avatar_url, is_admin, provider, role, tenant_id "
             "FROM users WHERE id = $1",
             user_id,
         )
@@ -127,7 +129,11 @@ async def rotate_refresh_token(old_token: str) -> tuple[str, str, dict] | None:
     from app.users import _user_dict
     user_dict = _user_dict(user)
 
-    access = create_access_token(str(user_id), user["email"], user["is_admin"])
+    access = create_access_token(
+        str(user_id), user["email"], user["is_admin"],
+        role=user.get("role", "member"),
+        tenant_id=str(user["tenant_id"]) if user.get("tenant_id") else "00000000-0000-0000-0000-000000000001",
+    )
     refresh = await create_refresh_token(str(user_id))
     return access, refresh, user_dict
 
