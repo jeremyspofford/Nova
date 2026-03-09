@@ -6,7 +6,11 @@ export interface User {
   display_name: string | null
   avatar_url: string | null
   is_admin: boolean
+  role: 'owner' | 'admin' | 'member' | 'viewer' | 'guest'
   provider: string
+  tenant_id: string
+  expires_at: string | null
+  status: string
 }
 
 interface AuthConfig {
