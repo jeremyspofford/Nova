@@ -67,6 +67,11 @@ class InviteCreate(BaseModel):
     role: str = "member"
     account_expires_in_hours: int | None = None
 
+class AdminUpdateUser(BaseModel):
+    role: str | None = None
+    status: str | None = None  # 'active' | 'deactivated'
+    expires_at: str | None = None  # ISO datetime or null
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -472,6 +477,94 @@ async def admin_create_user(req: AdminCreateUser, user: UserDep):
     )
 
     return {**_safe_user(new_user), "temporary_password": temp_password}
+
+
+@router.get("/api/v1/admin/users")
+async def list_all_users(user: UserDep):
+    """List all users. Requires admin role."""
+    from app.roles import has_min_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
+    from app.users import list_users
+    users = await list_users(user.tenant_id)
+    return [_safe_user(u) for u in users]
+
+
+@router.patch("/api/v1/admin/users/{user_id}")
+async def update_user_admin(user_id: str, body: AdminUpdateUser, user: UserDep):
+    """Update user role, status, or expiry. Requires admin role."""
+    from app.roles import has_min_role, can_assign_role, parse_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
+
+    from app.users import get_user_by_id, update_user_role
+    target = await get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Can't modify users with equal or higher role (unless self)
+    if parse_role(target["role"]) >= parse_role(user.role) and user.id != user_id:
+        raise HTTPException(status_code=403, detail="Cannot modify user with equal or higher role")
+
+    from app.db import get_pool
+    pool = get_pool()
+
+    if body.role is not None:
+        from app.roles import VALID_ROLES
+        if body.role not in VALID_ROLES:
+            raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}")
+        if not can_assign_role(user.role, body.role):
+            raise HTTPException(status_code=403, detail=f"Cannot assign role higher than your own ({user.role})")
+        await update_user_role(user_id, body.role, actor_id=user.id)
+        # Revoke tokens to force re-auth with new role
+        async with pool.acquire() as conn:
+            await conn.execute("DELETE FROM refresh_tokens WHERE user_id = $1", UUID(user_id))
+
+    if body.status is not None:
+        if body.status not in ("active", "deactivated"):
+            raise HTTPException(status_code=400, detail="Status must be 'active' or 'deactivated'")
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2",
+                body.status, UUID(user_id),
+            )
+            if body.status == "deactivated":
+                await conn.execute("DELETE FROM refresh_tokens WHERE user_id = $1", UUID(user_id))
+
+    if body.expires_at is not None:
+        from datetime import datetime
+        try:
+            expires = datetime.fromisoformat(body.expires_at) if body.expires_at else None
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid datetime format for expires_at")
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE users SET expires_at = $1, updated_at = NOW() WHERE id = $2",
+                expires, UUID(user_id),
+            )
+
+    updated = await get_user_by_id(user_id)
+    return _safe_user(updated)
+
+
+@router.delete("/api/v1/admin/users/{user_id}")
+async def deactivate_user_endpoint(user_id: str, user: UserDep):
+    """Deactivate a user (soft delete). Requires admin role."""
+    from app.roles import has_min_role, parse_role
+    if not has_min_role(user.role, "admin"):
+        raise HTTPException(status_code=403, detail="Requires admin role")
+
+    from app.users import get_user_by_id, deactivate_user
+    target = await get_user_by_id(user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target["role"] == "owner":
+        raise HTTPException(status_code=403, detail="Cannot deactivate the owner")
+    if parse_role(target["role"]) >= parse_role(user.role):
+        raise HTTPException(status_code=403, detail="Cannot deactivate user with equal or higher role")
+
+    await deactivate_user(user_id, user.id)
+    return {"status": "deactivated"}
 
 
 # ── Conversations ────────────────────────────────────────────────────────────
