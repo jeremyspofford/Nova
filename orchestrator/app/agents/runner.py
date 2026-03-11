@@ -60,7 +60,7 @@ async def run_agent_turn(
 
         classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
 
-        nova_ctx, (memory_ctx, _mem_count), (category, classified_model) = await asyncio.gather(
+        nova_ctx, (memory_ctx, _mem_count, _engram_ids), (category, classified_model) = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id),
             _get_memory_context(agent_id, query, session_id),
             classify_coro,
@@ -87,6 +87,9 @@ async def run_agent_turn(
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
 
         # 5. Log usage — fire-and-forget, no await
+        _usage_meta = {"task_type": "chat"}
+        if _engram_ids:
+            _usage_meta["engram_ids"] = _engram_ids
         log_usage(
             api_key_id=api_key_id,
             agent_id=UUID(agent_id),
@@ -96,6 +99,7 @@ async def run_agent_turn(
             output_tokens=output_tokens,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
+            metadata=_usage_meta,
         )
 
         return TaskResult(
@@ -156,6 +160,7 @@ async def run_agent_turn_streaming(
     query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
 
     category = None
+    _engram_ids: list[str] = []
 
     if guest_mode:
         # Guest isolation: no context, no memory, no tools, no classification
@@ -185,7 +190,7 @@ async def run_agent_turn_streaming(
             result = await coro
             return result, int((time.monotonic() - t) * 1000)
 
-        (nova_ctx, _ctx_ms), ((memory_ctx, memory_count), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
+        (nova_ctx, _ctx_ms), ((memory_ctx, memory_count, _engram_ids), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
             _timed(_build_nova_context(model, agent_id, session_id)),
             _timed(_get_memory_context(agent_id, query, session_id)),
             _timed(classify_coro),
@@ -267,6 +272,9 @@ async def run_agent_turn_streaming(
 
     completed_at = datetime.now(timezone.utc)
     duration_ms = int((completed_at - started_at).total_seconds() * 1000)
+    _usage_meta = {"task_type": "chat"}
+    if _engram_ids:
+        _usage_meta["engram_ids"] = _engram_ids
     log_usage(
         api_key_id=api_key_id,
         agent_id=UUID(agent_id),
@@ -276,18 +284,19 @@ async def run_agent_turn_streaming(
         output_tokens=stream_output_tokens,
         cost_usd=stream_cost_usd,
         duration_ms=duration_ms,
+        metadata=_usage_meta,
     )
 
 
-async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int]:
+async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str]]:
     """Fetch engram-powered memory context for prompt assembly.
 
     Calls the engram /context endpoint which returns a formatted prompt string
     with sections (self-model, active goal, reconstructed memories, key decisions,
-    open threads). Returns (context_string, section_count).
+    open threads). Returns (context_string, section_count, engram_ids).
     """
     if not query:
-        return "", 0
+        return "", 0, []
 
     memory_client = get_memory_client()
     try:
@@ -296,17 +305,18 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
             params={"query": query, "session_id": session_id},
         )
         if resp.status_code != 200:
-            return "", 0
+            return "", 0, []
         data = resp.json()
         context = data.get("context", "")
         if not context:
-            return "", 0
+            return "", 0, []
         sections = data.get("sections", {})
         section_count = sum(1 for v in sections.values() if v)
-        return context, section_count
+        engram_ids = data.get("engram_ids", [])
+        return context, section_count, engram_ids
     except Exception as e:
         log.warning("Engram memory retrieval failed: %s", e)
-        return "", 0
+        return "", 0, []
 
 
 async def _get_platform_identity() -> tuple[str, str]:
