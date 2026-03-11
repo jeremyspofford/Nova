@@ -455,6 +455,16 @@ async def _run_agent(
         logger.warning(f"Unknown agent role '{agent.role}' — skipping")
         return {}
 
+    # Map pipeline stage → routing tier + task_type for adaptive model routing
+    _STAGE_TIER_MAP: dict[str, tuple[str, str]] = {
+        "context": ("cheap", "context_retrieval"),
+        "task": ("best", "task_execution"),
+        "guardrail": ("mid", "guardrail"),
+        "code_review": ("mid", "code_review"),
+        "decision": ("cheap", "decision"),
+    }
+    _tier, _task_type = _STAGE_TIER_MAP.get(agent.role, ("mid", "task_execution"))
+
     instance = agent_cls(
         model=model,
         system_prompt=agent.system_prompt,
@@ -462,6 +472,8 @@ async def _run_agent(
         temperature=agent.temperature,
         max_tokens=agent.max_tokens,
         fallback_models=agent.fallback_models,
+        tier=_tier,
+        task_type=_task_type,
     )
 
     # Create agent_session row — store the actually-resolved model, not agent.model

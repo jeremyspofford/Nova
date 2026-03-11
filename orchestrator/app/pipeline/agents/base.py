@@ -104,6 +104,8 @@ class BaseAgent:
         temperature: float = 0.3,
         max_tokens: int = 4096,
         fallback_models: list[str] | None = None,
+        tier: str | None = None,
+        task_type: str | None = None,
     ) -> None:
         self.model          = model
         self.system_prompt  = system_prompt or self.DEFAULT_SYSTEM
@@ -111,6 +113,8 @@ class BaseAgent:
         self.temperature    = temperature
         self.max_tokens     = max_tokens
         self.fallback_models = fallback_models or []
+        self.tier           = tier       # Routing tier hint for llm-gateway
+        self.task_type      = task_type  # Task type for outcome tracking
         # Usage accumulator — populated by _call_llm_full()
         self._usage = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "llm_calls": 0}
         # Training data log — populated by _call_llm_full() when training logging is enabled
@@ -139,6 +143,10 @@ class BaseAgent:
                     "temperature": self.temperature,
                     "max_tokens":  self.max_tokens,
                 }
+                if self.tier:
+                    payload["tier"] = self.tier
+                if self.task_type:
+                    payload["task_type"] = self.task_type
                 response = await client.post("/complete", json=payload)
                 response.raise_for_status()
                 data = response.json()
