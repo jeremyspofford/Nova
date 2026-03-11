@@ -254,36 +254,36 @@ def _score_stage_outcome(role: str, result: dict, flags: set[str]) -> tuple[floa
 
 - [ ] **Step 2: Wire scoring into _run_agent()**
 
-In `_run_agent()`, after the call to `_persist_stage_records()` (around line 505), add outcome scoring. The function already has access to `result`, `agent.role`, `state`, and `task_id`. Add the usage event insert:
+In `_run_agent()`, after `_write_training_logs()` (line 505) and before `return result, session_id` (line 507), add outcome scoring. All needed variables are in scope at this point: `result`, `agent.role`, `state`, `model`, `session_id`, `instance`, `elapsed_ms`, `_task_type`, and `task_id`.
 
 ```python
-    # Score stage outcome for adaptive routing
-    try:
-        _oscore, _oconf = _score_stage_outcome(agent.role, result, state.flags)
-        _meta = {
-            "task_type": _task_type,
-            "stage": agent.role,
-            "task_id": task_id,
-        }
-        from app.usage import log_usage
-        log_usage(
-            api_key_id=None,
-            agent_id=None,
-            session_id=session_id,
-            model=model,
-            input_tokens=instance._usage.get("input_tokens", 0),
-            output_tokens=instance._usage.get("output_tokens", 0),
-            cost_usd=instance._usage.get("cost_usd"),
-            duration_ms=instance._usage.get("llm_calls", 0),
-            metadata=_meta,
-            outcome_score=_oscore,
-            outcome_confidence=_oconf,
-        )
-    except Exception as exc:
-        logger.debug("Stage outcome scoring failed: %s", exc)
+        # Score stage outcome for adaptive routing
+        try:
+            _oscore, _oconf = _score_stage_outcome(agent.role, result, state.flags)
+            _meta = {
+                "task_type": _task_type,
+                "stage": agent.role,
+                "task_id": task_id,
+            }
+            from app.usage import log_usage
+            log_usage(
+                api_key_id=None,
+                agent_id=None,
+                session_id=session_id,
+                model=model,
+                input_tokens=instance._usage.get("input_tokens", 0),
+                output_tokens=instance._usage.get("output_tokens", 0),
+                cost_usd=instance._usage.get("cost_usd"),
+                duration_ms=elapsed_ms,
+                metadata=_meta,
+                outcome_score=_oscore,
+                outcome_confidence=_oconf,
+            )
+        except Exception as exc:
+            logger.debug("Stage outcome scoring failed: %s", exc)
 ```
 
-Insert this right after the existing `_persist_stage_records()` call but before the return statement. The `instance` variable (the agent instance) is in scope here since it was created earlier in the function. `model` is the resolved model string, `session_id` is returned from the agent session creation, and `_task_type` comes from the `_STAGE_TIER_MAP` added in the previous adaptive routing work.
+Insert this inside the `try` block of `_run_agent()`, between `_write_training_logs()` (line 505) and `return result, session_id` (line 507). The `elapsed_ms` variable is computed at line 497. The `_task_type` comes from the `_STAGE_TIER_MAP` added in the adaptive routing work (line 466).
 
 - [ ] **Step 3: Commit**
 
@@ -497,7 +497,7 @@ from datetime import datetime, timezone, timedelta
 
 from .db import get_pool
 from .store import get_redis
-from .clients import get_memory_client
+from .clients import get_llm_client
 
 log = logging.getLogger(__name__)
 
@@ -522,8 +522,8 @@ def _score_by_keywords(user_msg: str) -> tuple[float, float] | None:
     """Try keyword-based scoring. Returns (score, confidence) or None if no match."""
     text = user_msg.strip()
 
-    # Short acknowledgment
-    if len(text) < 50 and _ACKNOWLEDGMENT_PATTERNS.match(text):
+    # Short acknowledgment (spec threshold: 30 chars)
+    if len(text) < 30 and _ACKNOWLEDGMENT_PATTERNS.match(text):
         return 0.9, 0.85
 
     # Correction
@@ -534,12 +534,14 @@ def _score_by_keywords(user_msg: str) -> tuple[float, float] | None:
 
 
 async def _get_embedding(text: str) -> list[float] | None:
-    """Get embedding via memory-service /embed endpoint."""
+    """Get embedding via llm-gateway /embed endpoint."""
     try:
-        client = get_memory_client()
-        resp = await client.post("/api/v1/embed", json={"text": text})
+        client = get_llm_client()
+        resp = await client.post("/embed", json={"input": text})
         if resp.status_code == 200:
-            return resp.json().get("embedding")
+            data = resp.json()
+            # llm-gateway returns {"data": [{"embedding": [...]}]}
+            return data["data"][0]["embedding"]
     except Exception:
         pass
     return None
@@ -676,34 +678,26 @@ async def _process_new_messages() -> int:
             score, confidence = await _score_turn(user_msg, prev_user_msg, assistant_msg)
 
             # Find matching usage_event (session_id = conversation_id, within 120s)
-            updated = await conn.execute(
+            # PostgreSQL doesn't allow ORDER BY/LIMIT in UPDATE — use subquery
+            ref_time = assistant_row.get("created_at", msg_time)
+            await conn.execute(
                 """
                 UPDATE usage_events
                 SET outcome_score = $3, outcome_confidence = $4
-                WHERE session_id = $1
-                  AND created_at BETWEEN ($2 - INTERVAL '120 seconds') AND $2
-                  AND outcome_score IS NULL
-                ORDER BY created_at DESC
-                LIMIT 1
-                """,
-                conv_id,
-                assistant_row.get("created_at", msg_time),
-                score,
-                confidence,
-            )
-
-            # Fallback: use the message timestamp if assistant created_at not available
-            if updated == "UPDATE 0":
-                await conn.execute(
-                    """
-                    UPDATE usage_events
-                    SET outcome_score = $3, outcome_confidence = $4
+                WHERE id = (
+                    SELECT id FROM usage_events
                     WHERE session_id = $1
                       AND created_at BETWEEN ($2 - INTERVAL '120 seconds') AND $2
                       AND outcome_score IS NULL
-                    """,
-                    conv_id, msg_time, score, confidence,
+                    ORDER BY created_at DESC
+                    LIMIT 1
                 )
+                """,
+                conv_id,
+                ref_time,
+                score,
+                confidence,
+            )
 
             scores_written += 1
 
@@ -886,13 +880,22 @@ async def _compute_conversation_scores() -> int:
                 t["outcome_score"] * w for t, w in zip(turns, weights)
             ) / total_w
 
+            # Resolve conversation_id from session_id (may be UUID string)
+            conv_uuid = None
+            try:
+                from uuid import UUID as _UUID
+                conv_uuid = _UUID(sid)
+            except (ValueError, AttributeError):
+                pass
+
             # Write to conversation_outcomes
             await conn.execute(
                 """
                 INSERT INTO conversation_outcomes
-                    (session_id, session_score, turn_count)
-                VALUES ($1, $2, $3)
+                    (conversation_id, session_id, session_score, turn_count)
+                VALUES ($1, $2, $3, $4)
                 """,
+                conv_uuid,
                 sid,
                 round(session_score, 3),
                 n,
@@ -1330,15 +1333,22 @@ async def process_feedback(
     """
     stats = {"activations": 0, "recalibrations": 0, "edges": 0}
 
-    # Group by interaction (entries from the same batch with same score = same interaction)
-    # For edge reinforcement, we need to know which engrams were in the same interaction
-    interactions: dict[float, list[str]] = {}
-    for entry in feedback:
+    # Group by interaction — entries with the same task_type + outcome_score
+    # were part of the same LLM call (they share an engram_ids list in one usage_event).
+    # Build interaction groups for Hebbian edge reinforcement.
+    interactions: dict[str, tuple[float, list[str]]] = {}
+    for i, entry in enumerate(feedback):
         score = entry.get("outcome_score", 0.5)
+        task_type = entry.get("task_type", "unknown")
         eid = entry.get("engram_id")
         if not eid:
             continue
-        interactions.setdefault(score, []).append(eid)
+        # Entries arrive in batch order — consecutive entries with same task_type
+        # and score are from the same usage_event
+        group_key = f"{task_type}:{score}"
+        if group_key not in interactions:
+            interactions[group_key] = (score, [])
+        interactions[group_key][1].append(eid)
 
     # Process each entry
     for entry in feedback:
@@ -1415,7 +1425,7 @@ async def process_feedback(
                     stats["recalibrations"] += 1
 
     # 4. Outcome-driven Hebbian learning: strengthen edges between co-successful engrams
-    for score, eids in interactions.items():
+    for _group_key, (score, eids) in interactions.items():
         if score <= POSITIVE_THRESHOLD or len(eids) < 2:
             continue
         # Strengthen edges between all pairs
