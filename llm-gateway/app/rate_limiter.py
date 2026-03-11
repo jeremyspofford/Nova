@@ -98,6 +98,41 @@ async def check_rate_limit(model: str) -> tuple[bool, str | None, int | None]:
         return True, None, None
 
 
+async def check_remaining_quota(model: str) -> tuple[bool, int | None]:
+    """Check if a model has remaining quota WITHOUT incrementing the counter.
+
+    Returns (has_quota, remaining_count). For models without quotas, returns (True, None).
+    Used by tier resolver to probe availability before committing.
+
+    Uses the same sliding-window key format as check_rate_limit():
+    key = f"nova:ratelimit:{prefix}", entries are sorted set members with
+    score = timestamp. We clean expired entries and count remaining.
+    """
+    prefix = _provider_prefix(model)
+    if prefix is None or prefix not in PROVIDER_QUOTAS:
+        return True, None  # unlimited (Ollama, paid APIs, subscriptions)
+
+    quota = PROVIDER_QUOTAS[prefix]
+
+    try:
+        r = await _get_redis()
+        key = f"nova:ratelimit:{prefix}"
+        now = time.time()
+        window_start = now - _WINDOW
+
+        # Clean + count in a pipeline (read-only: no zadd)
+        pipe = r.pipeline()
+        pipe.zremrangebyscore(key, "-inf", window_start)
+        pipe.zcard(key)
+        results = await pipe.execute()
+
+        current_count = results[1]
+        remaining = max(0, quota - current_count)
+        return remaining > 0, remaining
+    except Exception:
+        return True, None  # fail open
+
+
 async def close() -> None:
     """Shut down the Redis connection pool."""
     global _redis
