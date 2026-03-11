@@ -115,7 +115,10 @@ async def lifespan(app: FastAPI):
 
     from app.effectiveness import effectiveness_loop
     _effectiveness_task = asyncio.create_task(effectiveness_loop(), name="effectiveness")
-    log.info("Queue worker, reaper, and effectiveness loop started")
+
+    from app.chat_scorer import chat_scorer_loop
+    _chat_scorer_task = asyncio.create_task(chat_scorer_loop(), name="chat-scorer")
+    log.info("Queue worker, reaper, effectiveness loop, and chat scorer started")
 
     yield
 
@@ -123,8 +126,9 @@ async def lifespan(app: FastAPI):
     _queue_task.cancel()
     _reaper_task.cancel()
     _effectiveness_task.cancel()
+    _chat_scorer_task.cancel()
     # Wait briefly for graceful shutdown
-    await asyncio.gather(_queue_task, _reaper_task, _effectiveness_task, return_exceptions=True)
+    await asyncio.gather(_queue_task, _reaper_task, _effectiveness_task, _chat_scorer_task, return_exceptions=True)
 
     # Gracefully stop MCP server subprocesses
     from app.pipeline.tools import stop_all_servers
