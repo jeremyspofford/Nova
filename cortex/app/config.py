@@ -31,6 +31,15 @@ class Settings:
     # Budget
     daily_budget_usd: float = float(os.getenv("CORTEX_DAILY_BUDGET_USD", "5.00"))
 
+    # Well-known IDs from migration 021
+    cortex_user_id: str = "a0000000-0000-0000-0000-000000000001"
+    cortex_api_key: str = "sk-nova-cortex-internal"
+    journal_conversation_id: str = "c0000000-0000-0000-0000-000000000001"
+
+    # Model selection for Cortex's own LLM calls
+    planning_model: str = os.getenv("CORTEX_PLANNING_MODEL", "")  # empty = use DEFAULT_CHAT_MODEL
+    reflection_model: str = os.getenv("CORTEX_REFLECTION_MODEL", "")
+
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
