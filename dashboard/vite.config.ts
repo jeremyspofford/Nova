@@ -30,6 +30,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/recovery-api/, ''),
       },
+      // Cortex — autonomous brain service
+      '/cortex-api': {
+        target: 'http://localhost:8100',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/cortex-api/, ''),
+      },
     },
   },
 })
