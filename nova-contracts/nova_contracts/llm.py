@@ -68,13 +68,15 @@ class ToolDefinition(BaseModel):
 
 
 class CompleteRequest(BaseModel):
-    model: str
+    model: str | None = None  # None = tier resolver picks the model
     messages: list[Message]
     tools: list[ToolDefinition] = Field(default_factory=list)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = None
     stream: bool = False
     metadata: dict[str, Any] = Field(default_factory=dict)  # agent_id, task_id for cost tracking
+    tier: str | None = None       # "best", "mid", "cheap" — advisory hint for tier resolver
+    task_type: str | None = None  # from RoutingTaskType enum — for outcome tracking
 
 
 class ToolCall(BaseModel):
