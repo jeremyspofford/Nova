@@ -691,3 +691,34 @@ async def get_usage(
             limit, offset,
         )
     return [dict(r) for r in rows]
+
+
+class UsageEventRequest(BaseModel):
+    model: str | None = None
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_usd: float | None = None
+    duration_ms: int | None = None
+    outcome_score: float | None = None
+    outcome_confidence: float | None = None
+    metadata: dict | None = None
+
+
+@router.post("/api/v1/usage/events", status_code=201)
+async def create_usage_event(req: UsageEventRequest):
+    """Accept usage events from external services (e.g. cortex)."""
+    from app.db import insert_usage_event
+    await insert_usage_event(
+        api_key_id=None,
+        agent_id=None,
+        session_id=None,
+        model=req.model,
+        input_tokens=req.input_tokens,
+        output_tokens=req.output_tokens,
+        cost_usd=req.cost_usd,
+        duration_ms=req.duration_ms,
+        metadata=req.metadata,
+        outcome_score=req.outcome_score,
+        outcome_confidence=req.outcome_confidence,
+    )
+    return {"status": "created"}
