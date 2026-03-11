@@ -36,12 +36,12 @@ claude-sonnet-4-6 → gpt-4o → claude-max/claude-sonnet-4-6 → chatgpt/gpt-4o
 
 **mid:**
 ```
-groq/llama-3.3-70b-versatile → gemini/gemini-2.5-flash → cerebras/llama3.1-8b → claude-haiku
+groq/llama-3.3-70b-versatile → gemini/gemini-2.5-flash → cerebras/llama3.1-8b → claude-max/claude-haiku-4-5
 ```
 
 **cheap:**
 ```
-groq/llama-3.3-70b-versatile → cerebras/llama3.1-8b → default-ollama → gemini/gemini-2.0-flash-lite
+groq/llama-3.3-70b-versatile → cerebras/llama3.1-8b → default-ollama → gemini/gemini-2.5-flash
 ```
 
 Note: `default-ollama` is a virtual identifier that resolves to `settings.default_ollama_model` (currently `llama3.2`). The tier resolver handles this as a special case — it checks Ollama availability and substitutes the actual model name.
@@ -83,12 +83,15 @@ If `model` is explicitly set in the request, the tier system is bypassed entirel
 
 ### New Request Field
 
-`CompleteRequest` in `nova-contracts` gains optional fields (the `/stream` endpoint reuses `CompleteRequest` with `stream=True`):
+`CompleteRequest` in `nova-contracts` changes (the `/stream` endpoint reuses `CompleteRequest` with `stream=True`):
 
 ```python
-tier: str | None = None       # "best", "mid", "cheap"
-task_type: str | None = None  # validated against TaskType enum
+model: str | None = None      # CHANGED from required str to optional — enables tier-based resolution
+tier: str | None = None       # NEW — "best", "mid", "cheap"
+task_type: str | None = None  # NEW — validated against TaskType enum
 ```
+
+**Breaking change:** `model` becomes optional. All existing callers already pass `model`, so they continue working. The router, caching logic, and providers that read `request.model` must handle `None` — the tier resolver populates it before the request reaches providers. The gateway's router sets `request.model` to the resolved model name early in the handler so downstream code sees a concrete model.
 
 ### Task Type Enum
 
@@ -295,6 +298,8 @@ Every cortex LLM call includes `tier` and `task_type`:
 | Journal narration | `cheap` | `narration` | Simple text formatting |
 
 Budget ceiling (Section 4) applies on top.
+
+Note: Cortex sends raw JSON dicts to the gateway (not `CompleteRequest` instances). The `tier` and `task_type` fields are simply added to the JSON body — the gateway's Pydantic model parses them. No nova-contracts import needed in cortex.
 
 ### Orchestrator Pipeline
 
