@@ -5,99 +5,12 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- trigram for fuzzy keyword search
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Working memory: hot path, short-lived facts in active sessions.
--- Backed by Redis cache — this table is the durable fallback.
--- HNSW: m=16, ef=64 — fast rebuild, frequently purged.
+-- Drop old 4-tier memory tables (replaced by engram network)
 -- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS working_memories (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id    TEXT NOT NULL,
-    content     TEXT NOT NULL,
-    embedding   halfvec(768),           -- halfvec = 50% storage vs float4
-    metadata    JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    expires_at  TIMESTAMPTZ,
-    tsv         TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
-);
-
-CREATE INDEX IF NOT EXISTS working_mem_agent_idx    ON working_memories (agent_id);
-CREATE INDEX IF NOT EXISTS working_mem_expires_idx  ON working_memories (expires_at) WHERE expires_at IS NOT NULL;
-CREATE INDEX IF NOT EXISTS working_mem_tsv_idx      ON working_memories USING GIN (tsv);
-CREATE INDEX IF NOT EXISTS working_mem_hnsw_idx     ON working_memories
-    USING hnsw (embedding halfvec_cosine_ops) WITH (m = 16, ef_construction = 64);
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Episodic memory: conversation history, partitioned by month for lifecycle mgmt.
--- Partitioned table allows dropping old months without vacuuming.
--- HNSW: m=16, ef=64 (same as working, high-volume inserts).
--- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS episodic_memories (
-    id          UUID NOT NULL DEFAULT gen_random_uuid(),
-    agent_id    TEXT NOT NULL,
-    session_id  TEXT,
-    content     TEXT NOT NULL,
-    embedding   halfvec(768),
-    metadata    JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    tsv         TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED,
-    PRIMARY KEY (id, created_at)
-) PARTITION BY RANGE (created_at);
-
--- Create partitions for current and next 3 months — extend via cron
-CREATE TABLE IF NOT EXISTS episodic_memories_2026_01 PARTITION OF episodic_memories
-    FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE IF NOT EXISTS episodic_memories_2026_02 PARTITION OF episodic_memories
-    FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
-CREATE TABLE IF NOT EXISTS episodic_memories_2026_03 PARTITION OF episodic_memories
-    FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
-CREATE TABLE IF NOT EXISTS episodic_memories_2026_04 PARTITION OF episodic_memories
-    FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
-
-CREATE INDEX IF NOT EXISTS episodic_mem_agent_idx ON episodic_memories (agent_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS episodic_mem_session_idx ON episodic_memories (session_id) WHERE session_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS episodic_mem_tsv_idx ON episodic_memories USING GIN (tsv);
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Semantic memory: extracted facts and entity relationships.
--- HNSW: m=24, ef=128 — higher recall, less frequent rebuilds.
--- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS semantic_memories (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id    TEXT NOT NULL,
-    content     TEXT NOT NULL,
-    embedding   halfvec(768),
-    metadata    JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    version     INT NOT NULL DEFAULT 1,  -- optimistic concurrency for shared blocks
-    tsv         TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
-);
-
-CREATE INDEX IF NOT EXISTS semantic_mem_agent_idx ON semantic_memories (agent_id);
-CREATE INDEX IF NOT EXISTS semantic_mem_tsv_idx   ON semantic_memories USING GIN (tsv);
-CREATE INDEX IF NOT EXISTS semantic_mem_meta_idx  ON semantic_memories USING GIN (metadata);
-CREATE INDEX IF NOT EXISTS semantic_mem_hnsw_idx  ON semantic_memories
-    USING hnsw (embedding halfvec_cosine_ops) WITH (m = 24, ef_construction = 128);
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Procedural memory: task patterns and how-to knowledge.
--- Low volume, high-value. HNSW same as semantic.
--- ─────────────────────────────────────────────────────────────────────────────
-CREATE TABLE IF NOT EXISTS procedural_memories (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    agent_id    TEXT NOT NULL,
-    content     TEXT NOT NULL,
-    embedding   halfvec(768),
-    metadata    JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    tsv         TSVECTOR GENERATED ALWAYS AS (to_tsvector('english', content)) STORED
-);
-
-CREATE INDEX IF NOT EXISTS procedural_mem_agent_idx ON procedural_memories (agent_id);
-CREATE INDEX IF NOT EXISTS procedural_mem_tsv_idx   ON procedural_memories USING GIN (tsv);
-CREATE INDEX IF NOT EXISTS procedural_mem_hnsw_idx  ON procedural_memories
-    USING hnsw (embedding halfvec_cosine_ops) WITH (m = 24, ef_construction = 128);
+DROP TABLE IF EXISTS working_memories CASCADE;
+DROP TABLE IF EXISTS episodic_memories CASCADE;
+DROP TABLE IF EXISTS semantic_memories CASCADE;
+DROP TABLE IF EXISTS procedural_memories CASCADE;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Embedding cache: avoids re-embedding identical text (24h TTL enforced in app)
@@ -110,27 +23,152 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
 );
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Phase 6: ACT-R confidence decay + fact deduplication columns on semantic_memories
+-- Engram Network: graph-based cognitive memory
+-- Engrams are atomic memory nodes; engram_edges are weighted typed associations.
 -- ─────────────────────────────────────────────────────────────────────────────
-ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS project_id TEXT;
-ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS category TEXT;
-ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS key TEXT;
-ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS base_confidence FLOAT NOT NULL DEFAULT 1.0;
-ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ NOT NULL DEFAULT now();
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_semantic_project_category_key') THEN
-    ALTER TABLE semantic_memories ADD CONSTRAINT uq_semantic_project_category_key UNIQUE (project_id, category, key);
-  END IF;
-END $$;
-CREATE INDEX IF NOT EXISTS semantic_mem_last_accessed_idx ON semantic_memories (last_accessed_at);
-CREATE INDEX IF NOT EXISTS semantic_mem_project_idx ON semantic_memories (project_id) WHERE project_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS engrams (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    type            TEXT NOT NULL,
+        -- fact, episode, entity, preference, procedure, schema, goal, self_model
+    content         TEXT NOT NULL,
+    fragments       JSONB,              -- decomposed components (entities, actions, outcomes)
+    embedding       halfvec(768),       -- for seed activation (matches existing embedding model)
+
+    -- Temporal
+    occurred_at     TIMESTAMPTZ,        -- when the memory was formed
+    temporal_refs   JSONB,              -- {before: [uuid], after: [uuid], during: [uuid]}
+
+    -- Valence & Activation
+    importance      REAL NOT NULL DEFAULT 0.5,   -- 0.0-1.0, emotional/practical significance
+    activation      REAL NOT NULL DEFAULT 1.0,   -- 0.0-1.0, readiness to be recalled (decays)
+    access_count    INTEGER NOT NULL DEFAULT 0,
+    last_accessed   TIMESTAMPTZ,
+
+    -- Provenance
+    source_type     TEXT NOT NULL DEFAULT 'chat',
+        -- chat, pipeline, tool, consolidation, cortex, journal, external, self_reflection
+    source_id       UUID,               -- conversation_id, task_id, goal_id, etc.
+    confidence      REAL NOT NULL DEFAULT 0.8,   -- 0.0-1.0
+    superseded      BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Multi-tenancy
+    tenant_id       UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+
+    -- Embedding model tracking
+    embedding_model TEXT,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_engrams_type ON engrams(type);
+CREATE INDEX IF NOT EXISTS idx_engrams_activation ON engrams(activation) WHERE NOT superseded;
+CREATE INDEX IF NOT EXISTS idx_engrams_tenant ON engrams(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_engrams_source ON engrams(source_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_engrams_occurred ON engrams(occurred_at);
+CREATE INDEX IF NOT EXISTS idx_engrams_content_tsv ON engrams USING GIN (to_tsvector('english', content));
+CREATE INDEX IF NOT EXISTS idx_engrams_hnsw ON engrams
+    USING hnsw (embedding halfvec_cosine_ops) WITH (m = 24, ef_construction = 128);
+
+-- Engram edges: typed, weighted associations between engrams
+CREATE TABLE IF NOT EXISTS engram_edges (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_id       UUID NOT NULL REFERENCES engrams(id) ON DELETE CASCADE,
+    target_id       UUID NOT NULL REFERENCES engrams(id) ON DELETE CASCADE,
+    relation        TEXT NOT NULL,
+        -- caused_by, related_to, contradicts, preceded, enables,
+        -- part_of, instance_of, analogous_to
+    weight          REAL NOT NULL DEFAULT 0.5,   -- 0.0-1.0, association strength
+    co_activations  INTEGER NOT NULL DEFAULT 1,  -- Hebbian counter
+    last_co_activated TIMESTAMPTZ DEFAULT NOW(),
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE(source_id, target_id, relation)
+);
+
+CREATE INDEX IF NOT EXISTS idx_edges_source ON engram_edges(source_id);
+CREATE INDEX IF NOT EXISTS idx_edges_target ON engram_edges(target_id);
+CREATE INDEX IF NOT EXISTS idx_edges_relation ON engram_edges(relation);
+CREATE INDEX IF NOT EXISTS idx_edges_weight ON engram_edges(weight);
+
+-- Cold storage for superseded and pruned engrams (same schema, excluded from activation)
+CREATE TABLE IF NOT EXISTS engram_archive (
+    id              UUID PRIMARY KEY,
+    type            TEXT NOT NULL,
+    content         TEXT NOT NULL,
+    fragments       JSONB,
+    embedding       halfvec(768),
+    occurred_at     TIMESTAMPTZ,
+    temporal_refs   JSONB,
+    importance      REAL NOT NULL DEFAULT 0.5,
+    activation      REAL NOT NULL DEFAULT 0.0,
+    access_count    INTEGER NOT NULL DEFAULT 0,
+    last_accessed   TIMESTAMPTZ,
+    source_type     TEXT NOT NULL DEFAULT 'chat',
+    source_id       UUID,
+    confidence      REAL NOT NULL DEFAULT 0.8,
+    superseded      BOOLEAN NOT NULL DEFAULT TRUE,
+    tenant_id       UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+    embedding_model TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archived_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    archive_reason  TEXT
+);
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- Embedding model tracking: records which model produced each row's embedding.
--- NULL = legacy row (pre-tracking), triggers background re-embed on model change.
+-- Consolidation log + Retrieval log (Neural Router)
 -- ─────────────────────────────────────────────────────────────────────────────
-ALTER TABLE working_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
-ALTER TABLE episodic_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
-ALTER TABLE semantic_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
-ALTER TABLE procedural_memories ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+
+-- Consolidation audit trail
+CREATE TABLE IF NOT EXISTS consolidation_log (
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    trigger_type            TEXT NOT NULL,   -- idle, scheduled, threshold, manual
+    engrams_reviewed        INTEGER NOT NULL DEFAULT 0,
+    schemas_created         INTEGER NOT NULL DEFAULT 0,
+    edges_strengthened      INTEGER NOT NULL DEFAULT 0,
+    edges_pruned            INTEGER NOT NULL DEFAULT 0,
+    engrams_pruned          INTEGER NOT NULL DEFAULT 0,
+    engrams_merged          INTEGER NOT NULL DEFAULT 0,
+    contradictions_resolved INTEGER NOT NULL DEFAULT 0,
+    self_model_updates      JSONB,
+    model_used              TEXT,
+    tokens_used             INTEGER,
+    duration_ms             INTEGER,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Neural Router training data: what was retrieved vs. what was useful
+CREATE TABLE IF NOT EXISTS retrieval_log (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    query_embedding     halfvec(768),
+    query_text          TEXT,
+    context_summary     TEXT,
+    temporal_context    JSONB,         -- {time_of_day, day_of_week, active_goal}
+    engrams_surfaced    UUID[],        -- engrams returned by activation
+    engrams_used        UUID[],        -- engrams the LLM actually referenced (filled later)
+    session_id          TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_created ON retrieval_log(created_at);
+
+-- Working memory session state (tracks what's on the "desk" per session)
+CREATE TABLE IF NOT EXISTS working_memory_slots (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    session_id      TEXT NOT NULL,
+    slot_type       TEXT NOT NULL,       -- pinned, sticky, refreshed, sliding, expiring
+    engram_id       UUID REFERENCES engrams(id) ON DELETE CASCADE,
+    content         TEXT NOT NULL,        -- rendered content for this slot
+    relevance_score REAL NOT NULL DEFAULT 1.0,
+    token_count     INTEGER NOT NULL DEFAULT 0,
+    turn_added      INTEGER NOT NULL DEFAULT 0,
+    turn_last_relevant INTEGER NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wm_slots_session ON working_memory_slots(session_id);
+CREATE INDEX IF NOT EXISTS idx_wm_slots_type ON working_memory_slots(slot_type);

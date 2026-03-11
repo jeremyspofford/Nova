@@ -12,8 +12,6 @@ class Settings(BaseSettings):
 
     # Redis
     redis_url: str = "redis://redis:6379/0"
-    redis_working_memory_ttl: int = 3600       # 1 hour hot cache
-    redis_search_cache_ttl: int = 30           # 30s search result cache
     redis_embedding_cache_ttl: int = 86400     # 24h embedding cache
 
     # LLM Gateway (for embedding generation)
@@ -21,20 +19,45 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"  # Ollama default
     embedding_dimensions: int = 768
 
-    # Cleanup
-    working_memory_cleanup_interval_seconds: int = 300
-
-    # Compaction pipeline
-    compaction_enabled: bool = True
-    compaction_interval_seconds: int = 600
-    compaction_batch_size: int = 50
-    compaction_lookback_days: int = 7
-    compaction_model: str = "claude-haiku-4-5-20251001"
-
     # Embedding resilience
     embedding_fallback_model: str = "text-embedding-004"
     embedding_max_retries: int = 2
     embedding_retry_delay: float = 1.0
+
+    # Engram Network (Phase 1: Ingestion)
+    engram_ingestion_enabled: bool = True
+    engram_ingestion_queue: str = "engram:ingestion:queue"
+    engram_ingestion_batch_timeout: float = 1.0  # BRPOP timeout in seconds
+    engram_decomposition_model: str = "claude-haiku-4-5-20251001"
+    engram_entity_similarity_threshold: float = 0.92  # embedding cosine threshold for dedup
+    engram_contradiction_similarity_threshold: float = 0.85
+
+    # Engram Network (Phase 2: Spreading Activation)
+    engram_seed_count: int = 10
+    engram_max_hops: int = 3
+    engram_decay_factor: float = 0.6
+    engram_activation_threshold: float = 0.1
+    engram_max_results: int = 20
+    engram_reconstruction_model: str = "claude-haiku-4-5-20251001"
+    engram_narrative_cluster_threshold: int = 5  # min engrams for narrative reconstruction
+
+    # Engram Network (Phase 3: Working Memory Gate)
+    engram_wm_self_model_budget: int = 500
+    engram_wm_goal_budget: int = 300
+    engram_wm_sticky_budget: int = 1000
+    engram_wm_memory_budget: int = 4000
+    engram_wm_sliding_budget: int = 3000
+    engram_wm_expiring_budget: int = 200
+
+    # Engram Network (Phase 4: Consolidation)
+    engram_consolidation_enabled: bool = True
+    engram_consolidation_idle_minutes: int = 30
+    engram_consolidation_nightly_hour: int = 3  # 3 AM
+    engram_consolidation_threshold: int = 50  # new engrams trigger
+    engram_consolidation_model: str = "claude-haiku-4-5-20251001"
+    engram_edge_decay: float = 0.95
+    engram_prune_activation_floor: float = 0.01
+    engram_merge_similarity_threshold: float = 0.95
 
     # Service
     service_host: str = "0.0.0.0"
