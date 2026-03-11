@@ -345,6 +345,43 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  cortex:
+    <<: *nova-common
+    build:
+      context: .
+      dockerfile: cortex/Dockerfile
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nova_dev_password}
+      POSTGRES_DB: nova
+      REDIS_URL: redis://redis:6379/5
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      LLM_GATEWAY_URL: http://llm-gateway:8001
+      MEMORY_SERVICE_URL: http://memory-service:8002
+      RECOVERY_URL: http://recovery:8888
+      NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
+      CORTEX_ENABLED: ${CORTEX_ENABLED:-true}
+      CORTEX_CYCLE_INTERVAL: ${CORTEX_CYCLE_INTERVAL:-300}
+      CORTEX_DAILY_BUDGET_USD: ${CORTEX_DAILY_BUDGET_USD:-5.00}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8100:8100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/live', timeout=3)"]
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
   dashboard:
     <<: *nova-common
     build:
