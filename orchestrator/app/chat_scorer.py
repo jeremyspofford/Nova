@@ -267,6 +267,91 @@ async def _check_abandonments() -> int:
     return scores_written
 
 
+async def _compute_conversation_scores() -> int:
+    """Compute session-level scores for quiet conversations."""
+    redis = get_redis()
+    pool = get_pool()
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
+    scores_written = 0
+
+    async with pool.acquire() as conn:
+        # Find conversations with scored turns but no recent activity
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT ue.session_id
+            FROM usage_events ue
+            WHERE ue.session_id IS NOT NULL
+              AND ue.outcome_score IS NOT NULL
+              AND ue.created_at < $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM messages m
+                  WHERE m.conversation_id::text = ue.session_id
+                    AND m.created_at > $1
+              )
+            LIMIT 20
+            """,
+            cutoff,
+        )
+
+        for row in rows:
+            sid = row["session_id"]
+
+            # Check dedup — skip if already scored recently
+            if await redis.sismember(SCORED_CONVOS_KEY, sid):
+                continue
+
+            # Get all scored turns for this session, ordered by time
+            turns = await conn.fetch(
+                """
+                SELECT outcome_score, outcome_confidence, created_at
+                FROM usage_events
+                WHERE session_id = $1 AND outcome_score IS NOT NULL
+                ORDER BY created_at ASC
+                """,
+                sid,
+            )
+
+            if not turns:
+                continue
+
+            # Weighted average biased toward final turns
+            n = len(turns)
+            weights = [0.5 + 0.5 * (i / max(n - 1, 1)) for i in range(n)]
+            total_w = sum(weights)
+            session_score = sum(
+                t["outcome_score"] * w for t, w in zip(turns, weights)
+            ) / total_w
+
+            # Resolve conversation_id from session_id (may be UUID string)
+            conv_uuid = None
+            try:
+                from uuid import UUID as _UUID
+                conv_uuid = _UUID(sid)
+            except (ValueError, AttributeError):
+                pass
+
+            # Write to conversation_outcomes
+            await conn.execute(
+                """
+                INSERT INTO conversation_outcomes
+                    (conversation_id, session_id, session_score, turn_count)
+                VALUES ($1, $2, $3, $4)
+                """,
+                conv_uuid,
+                sid,
+                round(session_score, 3),
+                n,
+            )
+
+            # Mark as scored (2h expiry)
+            await redis.sadd(SCORED_CONVOS_KEY, sid)
+            await redis.expire(SCORED_CONVOS_KEY, 7200)
+
+            scores_written += 1
+
+    return scores_written
+
+
 async def chat_scorer_loop() -> None:
     """Background loop — score chat interactions every 30 seconds."""
     log.info("Chat scorer started")
@@ -274,11 +359,14 @@ async def chat_scorer_loop() -> None:
         try:
             msg_scores = await _process_new_messages()
             abandon_scores = await _check_abandonments()
+            conv_scores = await _compute_conversation_scores()
             if msg_scores or abandon_scores:
                 log.info(
                     "Chat scorer: %d message scores, %d abandonment scores",
                     msg_scores, abandon_scores,
                 )
+            if conv_scores:
+                log.info("Chat scorer: %d conversation scores computed", conv_scores)
         except Exception:
             log.exception("Chat scorer iteration failed")
         await asyncio.sleep(30)
