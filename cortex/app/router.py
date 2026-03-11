@@ -5,6 +5,7 @@ import logging
 
 from fastapi import APIRouter
 
+from .budget import get_budget_status
 from .db import get_pool
 
 log = logging.getLogger(__name__)
@@ -64,3 +65,9 @@ async def get_drives():
             {"name": "reflect", "priority": 5, "urgency": 0.0, "description": "Learn from experience"},
         ]
     }
+
+
+@cortex_router.get("/budget")
+async def budget():
+    """Current budget state — daily spend, remaining, tier."""
+    return await get_budget_status()
