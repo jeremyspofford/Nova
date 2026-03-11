@@ -879,50 +879,41 @@ async def _extract_task_memory(
     state: PipelineState,
 ) -> None:
     """
-    Post-pipeline: store a structured episode in memory-service so the
-    Planning Agent (Phase 7) can learn from prior task runs.
+    Post-pipeline: emit a structured episode to the engram ingestion queue
+    so Nova can learn from prior task runs.
 
-    Stores two memories per completed task:
-      - semantic  : task summary (what was asked, what was produced, key flags)
-      - procedural: code review findings (if any) — "how to avoid this next time"
+    Constructs a rich text summary of the pipeline run (task input, output,
+    flags, guardrail blocks, code review findings) and pushes it to the
+    engram queue for decomposition into the memory graph.
 
-    Uses agent_id="nova" so all memories are queryable under a single namespace.
     Failure is logged as a warning; the pipeline result is never affected.
     """
-    from ..clients import get_memory_client
+    import json as _json
+    from datetime import datetime, timezone
 
-    memories = []
+    import redis.asyncio as aioredis
 
-    # ── Semantic memory: task summary ─────────────────────────────────────
+    from ..config import settings
+
+    # Build rich text for engram decomposition
     flags = sorted(state.flags)
-    summary_lines = [
+    lines = [
+        f"Pipeline task completed.",
         f"Task: {user_input[:300]}",
         f"Output: {final_output[:400]}",
     ]
     if flags:
-        summary_lines.append(f"Flags: {', '.join(flags)}")
+        lines.append(f"Flags: {', '.join(flags)}")
 
     guardrail = state.completed.get("guardrail", {})
     if guardrail.get("blocked"):
         findings = guardrail.get("findings", [])
         if findings:
             top = findings[0]
-            summary_lines.append(
+            lines.append(
                 f"Guardrail blocked: {top.get('type', 'unknown')} — {top.get('description', '')}"
             )
 
-    memories.append({
-        "agent_id": "nova",
-        "content": "\n".join(summary_lines),
-        "tier": "semantic",
-        "metadata": {
-            "task_id": task_id,
-            "source": "pipeline_completion",
-            "flags": flags,
-        },
-    })
-
-    # ── Procedural memory: code review lessons ────────────────────────────
     review = state.completed.get("code_review", {})
     issues = review.get("issues", [])
     if issues:
@@ -931,26 +922,26 @@ async def _extract_task_memory(
             + (f" in {iss['file']}:{iss.get('line', '')}" if iss.get("file") else "")
             for iss in issues[:5]
         ]
-        memories.append({
-            "agent_id": "nova",
-            "content": f"Code review findings for task '{user_input[:100]}':\n" + "\n".join(issue_lines),
-            "tier": "procedural",
-            "metadata": {
-                "task_id": task_id,
-                "source": "code_review_agent",
-                "verdict": review.get("verdict", "unknown"),
-            },
-        })
+        lines.append("Code review findings:\n" + "\n".join(issue_lines))
+
+    raw_text = "\n".join(lines)
 
     try:
-        client = get_memory_client()
-        resp = await client.post("/api/v1/memories/bulk", json={"memories": memories}, timeout=10.0)
-        if resp.is_success:
-            logger.debug("Extracted %d memories for task %s", len(memories), task_id)
-        else:
-            logger.warning("Memory extraction HTTP %s for task %s", resp.status_code, task_id)
+        base_url = settings.redis_url.rsplit("/", 1)[0]
+        redis = aioredis.from_url(f"{base_url}/0", decode_responses=True)
+        payload = _json.dumps({
+            "raw_text": raw_text,
+            "source_type": "pipeline",
+            "source_id": task_id,
+            "session_id": task_id,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": {"task_id": task_id, "flags": flags},
+        })
+        await redis.lpush("engram:ingestion:queue", payload)
+        await redis.aclose()
+        logger.debug("Emitted pipeline memory to engram queue for task %s", task_id)
     except Exception as exc:
-        logger.warning("Memory extraction failed for task %s: %s", task_id, exc)
+        logger.warning("Engram queue push failed for task %s: %s", task_id, exc)
 
 
 async def _maybe_compact_state(state: PipelineState, task_id: str) -> None:

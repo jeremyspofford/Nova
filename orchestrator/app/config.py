@@ -57,8 +57,7 @@ class Settings(BaseSettings):
     stale_queued_seconds: int = 120
     # Extra buffer before declaring an agent session timed out
     session_timeout_buffer_seconds: int = 30
-    # Session summarization
-    session_summary_timeout_seconds: int = 7200  # 2h idle before auto-summarize
+    # Utility model (used for conversation titles, etc.)
     session_summary_model: str = "claude-haiku-4-5-20251001"
     # Redis heartbeat key TTL — should be < task_stale_seconds
     task_heartbeat_ttl_seconds: int = 120

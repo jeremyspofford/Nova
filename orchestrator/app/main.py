@@ -18,7 +18,6 @@ from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
 from app.reaper import reaper_loop
 from app.router import router
-from app.session_summary import session_summary_sweep
 from app.store import ensure_primary_agent, recover_stale_agents
 
 configure_logging("orchestrator", settings.log_level)
@@ -112,17 +111,15 @@ async def lifespan(app: FastAPI):
     # Start background tasks — stored so we can cancel on shutdown
     _queue_task   = asyncio.create_task(queue_worker(),             name="queue-worker")
     _reaper_task  = asyncio.create_task(reaper_loop(),              name="reaper")
-    _summary_task = asyncio.create_task(session_summary_sweep(),    name="session-summary")
-    log.info("Queue worker, reaper, and session summary sweep started")
+    log.info("Queue worker and reaper started")
 
     yield
 
     log.info("Orchestrator shutting down")
     _queue_task.cancel()
     _reaper_task.cancel()
-    _summary_task.cancel()
     # Wait briefly for graceful shutdown
-    await asyncio.gather(_queue_task, _reaper_task, _summary_task, return_exceptions=True)
+    await asyncio.gather(_queue_task, _reaper_task, return_exceptions=True)
 
     # Gracefully stop MCP server subprocesses
     from app.pipeline.tools import stop_all_servers

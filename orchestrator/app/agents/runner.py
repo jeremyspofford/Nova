@@ -62,7 +62,7 @@ async def run_agent_turn(
 
         nova_ctx, (memory_ctx, _mem_count), (category, classified_model) = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id),
-            _get_memory_context(agent_id, query),
+            _get_memory_context(agent_id, query, session_id),
             classify_coro,
         )
 
@@ -187,7 +187,7 @@ async def run_agent_turn_streaming(
 
         (nova_ctx, _ctx_ms), ((memory_ctx, memory_count), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
             _timed(_build_nova_context(model, agent_id, session_id)),
-            _timed(_get_memory_context(agent_id, query)),
+            _timed(_get_memory_context(agent_id, query, session_id)),
             _timed(classify_coro),
         )
 
@@ -279,10 +279,12 @@ async def run_agent_turn_streaming(
     )
 
 
-async def _get_memory_context(agent_id: str, query: str) -> tuple[str, int]:
-    """Fetch relevant memories and format them as a context string.
+async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int]:
+    """Fetch engram-powered memory context for prompt assembly.
 
-    Returns (context_string, memory_count).
+    Calls the engram /context endpoint which returns a formatted prompt string
+    with sections (self-model, active goal, reconstructed memories, key decisions,
+    open threads). Returns (context_string, section_count).
     """
     if not query:
         return "", 0
@@ -290,22 +292,20 @@ async def _get_memory_context(agent_id: str, query: str) -> tuple[str, int]:
     memory_client = get_memory_client()
     try:
         resp = await memory_client.post(
-            f"/api/v1/agents/{agent_id}/context",
-            json={"agent_id": agent_id, "query": query, "max_tokens": 4096},
+            "/api/v1/engrams/context",
+            params={"query": query, "session_id": session_id},
         )
         if resp.status_code != 200:
             return "", 0
-        ctx = resp.json()
-        memories = ctx.get("memories", [])
-        if not memories:
+        data = resp.json()
+        context = data.get("context", "")
+        if not context:
             return "", 0
-
-        lines = ["## Relevant memories from previous conversations:"]
-        for m in memories:
-            lines.append(f"- {m['content']}")
-        return "\n".join(lines), len(memories)
+        sections = data.get("sections", {})
+        section_count = sum(1 for v in sections.values() if v)
+        return context, section_count
     except Exception as e:
-        log.warning("Memory retrieval failed: %s", e)
+        log.warning("Engram memory retrieval failed: %s", e)
         return "", 0
 
 
@@ -595,23 +595,52 @@ async def _store_exchange(
     user_message: str,
     assistant_response: str,
 ) -> None:
-    """Store user message and assistant response as episodic memories."""
-    memory_client = get_memory_client()
+    """Emit the exchange to the engram ingestion queue for graph decomposition.
+
+    The engram ingestion worker (memory-service) consumes this asynchronously
+    via BRPOP, decomposes it into atomic engrams, and builds the memory graph.
+    """
+    await _emit_to_engram_queue(agent_id, session_id, user_message, assistant_response)
+
+
+_engram_redis: object | None = None
+
+
+def _get_engram_redis():
+    """Get a Redis client for the engram ingestion queue (memory-service's DB 0)."""
+    global _engram_redis
+    if _engram_redis is None:
+        import redis.asyncio as aioredis
+        # Memory-service uses Redis DB 0 — push to the same DB it consumes from
+        base_url = settings.redis_url.rsplit("/", 1)[0]  # strip /2
+        _engram_redis = aioredis.from_url(f"{base_url}/0", decode_responses=True)
+    return _engram_redis
+
+
+async def _emit_to_engram_queue(
+    agent_id: str,
+    session_id: str,
+    user_message: str,
+    assistant_response: str,
+) -> None:
+    """Push a conversation exchange to the engram ingestion queue via Redis LPUSH.
+
+    The memory-service ingestion worker consumes this asynchronously via BRPOP,
+    decomposes it into atomic engrams, and builds the memory graph.
+    Pushes to Redis DB 0 (memory-service's DB) regardless of orchestrator's DB.
+    """
     try:
-        memories = [
-            {
-                "agent_id": agent_id,
-                "content": f"User: {user_message}",
-                "tier": "episodic",
-                "metadata": {"session_id": session_id, "role": "user"},
-            },
-            {
-                "agent_id": agent_id,
-                "content": f"Assistant: {assistant_response}",
-                "tier": "episodic",
-                "metadata": {"session_id": session_id, "role": "assistant"},
-            },
-        ]
-        await memory_client.post("/api/v1/memories/bulk", json={"memories": memories})
+        redis = _get_engram_redis()
+
+        raw_text = f"User: {user_message}\n\nAssistant: {assistant_response}"
+        payload = json.dumps({
+            "raw_text": raw_text,
+            "source_type": "chat",
+            "source_id": agent_id,
+            "session_id": session_id,
+            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "metadata": {"agent_id": agent_id, "session_id": session_id},
+        })
+        await redis.lpush("engram:ingestion:queue", payload)
     except Exception as e:
-        log.warning("Failed to store conversation memories: %s", e)
+        log.debug("Failed to emit to engram queue: %s", e)

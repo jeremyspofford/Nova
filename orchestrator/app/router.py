@@ -385,24 +385,6 @@ async def chat_stream(req: ChatRequest, user: UserDep):
     )
 
 
-# ── Session summarization ─────────────────────────────────────────────────────
-
-
-class SummarizeRequest(BaseModel):
-    messages: list[dict]
-
-
-@router.post("/api/v1/chat/sessions/{session_id}/summarize")
-async def summarize_chat_session(session_id: str, req: SummarizeRequest, _user: UserDep):
-    """Summarize a completed chat session and store as semantic memory."""
-    from app.session_summary import summarize_session
-
-    summary = await summarize_session(session_id, req.messages, agent_id="nova")
-    if summary is None:
-        return {"status": "skipped", "reason": "too few messages or summarization failed"}
-    return {"status": "ok", "summary": summary}
-
-
 # ── Key management (admin-only) ───────────────────────────────────────────────
 
 class CreateKeyRequest(BaseModel):
