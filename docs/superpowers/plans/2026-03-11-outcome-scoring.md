@@ -16,16 +16,16 @@
 
 | Chunk | Status | Notes |
 |-------|--------|-------|
-| 1: Schema + DB Layer | pending | |
-| 2: Pipeline Inline Scoring | pending | |
-| 3: Cortex Usage Endpoint + Scoring | pending | |
-| 4: Chat Async Scorer | pending | |
-| 5: Conversation-Level Scoring | pending | |
-| 6: Engram ID Breadcrumbs | pending | |
-| 7: Confidence-Weighted Effectiveness Matrix | pending | |
-| 8: Memory Outcome Feedback | pending | |
-| 9: Model Exploration Budget | pending | |
-| 10: Cortex Learn Drive | pending | |
+| 1: Schema + DB Layer | done | a67b198, e9960bf, bc66bf8 |
+| 2: Pipeline Inline Scoring | done | 9271bf8 |
+| 3: Cortex Usage Endpoint + Scoring | done | c40c95b, 87f2257 |
+| 4: Chat Async Scorer | done | 15cf8d6, 5606049 |
+| 5: Conversation-Level Scoring | done | b34598b |
+| 6: Engram ID Breadcrumbs | done | 35dbed8, 30874c0 |
+| 7: Confidence-Weighted Effectiveness Matrix | done | 0a3a16b |
+| 8: Memory Outcome Feedback | done | 5c6990b, 9e2f0dd, 3a0ed72 |
+| 9: Model Exploration Budget | done | 8266213 |
+| 10: Cortex Learn Drive | done | ecca7ec |
 
 ---
 
