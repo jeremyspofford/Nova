@@ -1346,6 +1346,36 @@ Nova agent
 
 ---
 
+## 🔜 Phase 7b — Supernova (Structured Workflow Engine)
+
+> **Optional investigation phase.** Evaluate whether Nova should adopt structured development workflows — disciplined planning, iterative design refinement, TDD enforcement, systematic debugging, and verification gates — as a native capability.
+
+### Context
+
+The [superpowers](https://github.com/obra/superpowers) plugin for Claude Code demonstrates that AI agents produce dramatically better output when given structured workflows: brainstorming loops with human approval, plan decomposition into bite-sized tasks, red-green-refactor TDD cycles, systematic root-cause debugging, and verification-before-completion gates. Currently these workflows exist as prompt-injected skills for single-agent tools like Claude Code. Nova has the execution infrastructure (pipeline, task queue, cortex) to orchestrate these workflows across multiple agents with real state management — potentially a significant advantage.
+
+### Two Paths to Evaluate
+
+| Path | Description | Pros | Cons |
+|---|---|---|---|
+| **Adopt superpowers** | Use superpowers as a dependency or port its skill files into Nova's agent prompts | Proven, battle-tested workflows; active community | Designed for single-agent context injection, not multi-service orchestration; limited to prompt-level enforcement |
+| **Build Supernova** | Native workflow engine in `orchestrator/app/supernova/` that composes pipeline runs, human checkpoints, review loops, and quality gates | Real state machines with checkpointing; multi-agent orchestration; integrates with cortex, engrams, and effectiveness tracking | Significant implementation effort; workflow engines are complex |
+
+### Capabilities to Investigate
+
+- **Planning & execution workflows** — brainstorming → plan writing → task decomposition → pipeline dispatch with review checkpoints (highest priority — this is the cortex→pipeline planning path)
+- **Quality discipline** — TDD enforcement within TaskAgent, systematic debugging on pipeline failure, verification-before-completion gates
+- **Human collaboration** — brainstorming loops, design approval gates, iterative refinement through chat-api
+- **Self-improvement integration** — workflow outcomes feeding the engram system and effectiveness matrix
+
+### Key Questions to Answer
+
+- Does Nova benefit more from prompt-level discipline (injecting workflow instructions into agent system prompts) or orchestration-level discipline (a real workflow engine managing state)?
+- Can the existing pipeline + cortex architecture support structured workflows with minimal new infrastructure, or does it need a dedicated workflow layer?
+- What's the minimum viable workflow that proves the concept? (Likely: a planning workflow that decomposes a goal into pipeline tasks with review checkpoints)
+
+---
+
 ## 🔜 Phase 8 — Full Autonomous Loop + Reinforcement
 
 > Self-direction v2: Nova learns from its own history.
