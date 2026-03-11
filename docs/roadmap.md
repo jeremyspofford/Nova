@@ -2867,27 +2867,30 @@ llama-cpp:
 
 Five fixed roles: Owner > Admin > Member > Viewer > Guest. Link-based invitations with role assignment. Guest accounts auto-expire with sandboxed LLM access (admin-configured model allowlist, no tools, no system context).
 
-- [ ] `role`, `tenant_id`, `expires_at`, `status` columns on `users` table
-- [ ] `role`, `account_expires_in_hours`, `tenant_id` columns on `invite_codes` table
-- [ ] `tenants` table (single row for now) + `audit_log` table
-- [ ] `tenant_id` scaffolding on: conversations, tasks, memories, api_keys, usage_events
-- [ ] `RoleDep(min_role=...)` FastAPI dependency replacing `AdminDep`
-- [ ] JWT claims: add `role`, `tenant_id` (keep `is_admin` for backwards compat)
-- [ ] Guest isolation: no `nova_context`, no tools, no memory, guardrail system prompt
-- [ ] Guest model filtering: `guest_allowed_models` in `platform_config`, enforced in orchestrator
+- [x] `role`, `tenant_id`, `expires_at`, `status` columns on `users` table
+- [x] `role`, `account_expires_in_hours`, `tenant_id` columns on `invite_codes` table
+- [x] `tenants` table (single row for now) + `audit_log` table
+- [ ] `tenant_id` scaffolding on: conversations, tasks, memories, api_keys, usage_events *(deferred to 13b)*
+- [x] `RoleDep(min_role=...)` FastAPI dependency replacing `AdminDep`
+- [x] JWT claims: add `role`, `tenant_id` (keep `is_admin` for backwards compat)
+- [x] Guest isolation: no `nova_context`, no tools, no memory, guardrail system prompt
+- [x] Guest model filtering: `guest_allowed_models` in `platform_config`, enforced in orchestrator
 - [ ] Expiry check on every authenticated request + Redis deny-list for immediate revocation
-- [ ] `GET/PATCH/DELETE /api/v1/admin/users` endpoints
-- [ ] Invite creation with role assignment (`POST /api/v1/auth/invites` extended)
-- [ ] Migration: `is_admin=true` → owner/admin, `is_admin=false` → member
-- [ ] Dashboard: Users page (user table, invitation management, role changes)
+- [x] `GET/PATCH/DELETE /api/v1/admin/users` endpoints
+- [x] Invite creation with role assignment (`POST /api/v1/auth/invites` extended)
+- [x] Migration: `is_admin=true` → owner/admin, `is_admin=false` → member
+- [x] Dashboard: Users page (user table, invitation management, role changes)
 - [ ] Role-based nav visibility (Guest sees Chat only, Viewer is read-only)
 - [ ] `/invite/{code}` route with registration flow
 - [ ] Audit logging for role changes, invites, deactivations
+
+Completion plan for remaining items: `docs/plans/2026-03-10-phase13a-completion-design.md`
 
 ### Phase 13b — Data Isolation & User Scoping
 
 Per-user data isolation leveraging the `tenant_id` + `user_id` columns from 13a.
 
+- [ ] `tenant_id` scaffolding on remaining tables: tasks, memories (deferred from 13a)
 - [ ] All data queries scoped by `tenant_id` + `user_id` (Member/Guest) or `tenant_id` only (Admin/Owner)
 - [ ] Memory service: tenant-scoped embedding retrieval (pgvector filter by tenant)
 - [ ] Redis key namespacing: `tenant:{id}:` prefix on all keys
