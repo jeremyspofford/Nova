@@ -489,6 +489,17 @@ export interface BudgetStatus {
 export const getCortexBudget = () =>
   apiFetch<BudgetStatus>('/cortex-api/api/v1/cortex/budget')
 
+export interface JournalEntry {
+  id: string
+  role: string
+  content: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export const getCortexJournal = (limit = 20) =>
+  apiFetch<{ entries: JournalEntry[] }>(`/cortex-api/api/v1/cortex/journal?limit=${limit}`)
+
 // ── Provider status ──────────────────────────────────────────────────────────
 
 export interface ProviderStatus {
