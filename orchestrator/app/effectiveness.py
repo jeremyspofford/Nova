@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone, timedelta
 
 from .db import get_pool
 from .store import get_redis
@@ -32,10 +33,11 @@ async def compute_and_publish() -> int:
         rows = await conn.fetch("""
             SELECT model,
                    COALESCE(metadata->>'task_type', 'unknown') AS task_type,
-                   AVG(outcome_score) AS avg_score,
+                   SUM(outcome_score * outcome_confidence) / NULLIF(SUM(outcome_confidence), 0) AS avg_score,
                    COUNT(*) AS sample_count
             FROM usage_events
             WHERE outcome_score IS NOT NULL
+              AND outcome_confidence IS NOT NULL
               AND created_at > NOW() - INTERVAL '30 days'
             GROUP BY 1, 2
         """)
@@ -55,7 +57,117 @@ async def compute_and_publish() -> int:
     except Exception:
         log.warning("Redis unavailable — effectiveness matrix not published", exc_info=True)
 
+    await _detect_capability_gaps(matrix)
+
+    feedback_count = await _send_memory_feedback()
+    if feedback_count:
+        log.info("Sent %d memory outcome feedback entries", feedback_count)
+
     return len(matrix)
+
+
+CAPABILITY_GAP_KEY = "nova:signals:capability_gaps"
+
+
+async def _detect_capability_gaps(matrix: dict) -> None:
+    """Find task_types where all models underperform and signal to cortex."""
+    # Group by task_type
+    task_types: dict[str, list[dict]] = {}
+    for key, entry in matrix.items():
+        _, task_type = key.rsplit(":", 1)
+        task_types.setdefault(task_type, []).append(entry)
+
+    gaps = []
+    for task_type, entries in task_types.items():
+        total_samples = sum(e["sample_count"] for e in entries)
+        if total_samples < 20:
+            continue  # Not enough data
+        best_score = max(e["avg_score"] for e in entries)
+        if best_score < 0.5:
+            gaps.append({
+                "task_type": task_type,
+                "best_score": best_score,
+                "sample_count": total_samples,
+            })
+
+    try:
+        redis = get_redis()
+        if gaps:
+            await redis.set(CAPABILITY_GAP_KEY, json.dumps(gaps), ex=REDIS_TTL)
+            log.info("Capability gaps detected: %s", [g["task_type"] for g in gaps])
+        else:
+            await redis.delete(CAPABILITY_GAP_KEY)
+    except Exception:
+        log.warning("Failed to publish capability gaps", exc_info=True)
+
+
+FEEDBACK_CURSOR_KEY = "nova:state:outcome_feedback_cursor"
+
+
+async def _send_memory_feedback() -> int:
+    """Send outcome scores for engram-backed interactions to memory-service."""
+    redis = get_redis()
+    pool = get_pool()
+
+    cursor_raw = await redis.get(FEEDBACK_CURSOR_KEY)
+    if cursor_raw:
+        cursor = datetime.fromisoformat(cursor_raw)
+    else:
+        cursor = datetime.now(timezone.utc) - timedelta(hours=1)
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT metadata->'engram_ids' AS engram_ids,
+                   outcome_score,
+                   COALESCE(metadata->>'task_type', 'unknown') AS task_type
+            FROM usage_events
+            WHERE outcome_score IS NOT NULL
+              AND metadata->'engram_ids' IS NOT NULL
+              AND jsonb_array_length(metadata->'engram_ids') > 0
+              AND created_at > $1
+            ORDER BY created_at ASC
+            LIMIT 500
+            """,
+            cursor,
+        )
+
+    if not rows:
+        return 0
+
+    # Build feedback batch
+    feedback = []
+    for row in rows:
+        engram_ids = row["engram_ids"]  # already parsed as list by asyncpg JSONB codec
+        if not isinstance(engram_ids, list):
+            continue
+        for eid in engram_ids:
+            feedback.append({
+                "engram_id": str(eid),
+                "outcome_score": float(row["outcome_score"]),
+                "task_type": row["task_type"],
+            })
+
+    if not feedback:
+        return 0
+
+    # Send to memory-service
+    try:
+        from .clients import get_memory_client
+        client = get_memory_client()
+        resp = await client.post("/api/v1/engrams/outcome-feedback", json=feedback)
+        if resp.status_code in (200, 201):
+            log.info("Sent %d engram outcome feedback entries", len(feedback))
+        else:
+            log.warning("Memory outcome feedback failed: %d %s", resp.status_code, resp.text[:200])
+    except Exception:
+        log.warning("Failed to send memory outcome feedback", exc_info=True)
+
+    # Update cursor
+    now = datetime.now(timezone.utc)
+    await redis.set(FEEDBACK_CURSOR_KEY, now.isoformat())
+
+    return len(feedback)
 
 
 async def effectiveness_loop() -> None:
