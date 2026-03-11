@@ -462,22 +462,6 @@ def _unwrap_jsonb_str(val: str | None) -> str:
     return val or ""
 
 
-# ── Memory warmup proxy ───────────────────────────────────────────────────────
-
-@router.post("/api/v1/memory/warmup", status_code=202)
-async def memory_warmup():
-    """Proxy warmup request to memory-service to pre-load the embedding model."""
-    import httpx
-    from app.config import settings
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(f"{settings.memory_service_url}/api/v1/warmup")
-            return resp.json()
-    except Exception as e:
-        log.warning("Memory warmup proxy failed: %s", e)
-        return {"status": "unavailable"}
-
-
 # ── Identity (public) ─────────────────────────────────────────────────────────
 
 @router.get("/api/v1/identity")
