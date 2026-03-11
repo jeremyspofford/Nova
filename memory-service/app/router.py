@@ -11,7 +11,8 @@ from uuid import UUID, uuid4
 
 import base64
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -350,6 +351,28 @@ async def get_agent_context(agent_id: str, req: GetContextRequest):
         memories=selected,
         total_tokens_estimated=tokens_used,
     )
+
+
+# ── Warmup ───────────────────────────────────────────────────────────────────
+
+warmup_router = APIRouter(prefix="/api/v1", tags=["warmup"])
+
+
+async def _warmup_embedding():
+    """Fire a dummy embedding to force Ollama to load the model into RAM."""
+    try:
+        async with get_db() as session:
+            await get_embedding("warmup", session)
+        log.info("Embedding warmup complete")
+    except Exception as e:
+        log.warning("Embedding warmup failed: %s", e)
+
+
+@warmup_router.post("/warmup", status_code=202)
+async def warmup(background_tasks: BackgroundTasks):
+    """Pre-warm the embedding model so the first real request is fast."""
+    background_tasks.add_task(_warmup_embedding)
+    return JSONResponse(status_code=202, content={"status": "warming"})
 
 
 # ── File upload ──────────────────────────────────────────────────────────────

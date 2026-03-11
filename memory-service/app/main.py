@@ -17,7 +17,7 @@ from app.db.database import run_schema_migrations
 from app.health import health_router
 from app.partitions import partition_loop
 from app.reembed import reembed_loop
-from app.router import context_router, router
+from app.router import context_router, router, warmup_router, _warmup_embedding
 
 configure_logging("memory-service", settings.log_level)
 log = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
     _compaction_task = asyncio.create_task(compaction_loop(), name="compaction")
     _partition_task = asyncio.create_task(partition_loop(), name="partitions")
     _reembed_task = asyncio.create_task(reembed_loop(), name="reembed")
+    asyncio.create_task(_warmup_embedding(), name="warmup")
     log.info("Memory Service ready")
 
     yield
@@ -54,3 +55,4 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(router)
 app.include_router(context_router)
+app.include_router(warmup_router)

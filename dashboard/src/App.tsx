@@ -94,6 +94,7 @@ function AppShell() {
   useEffect(() => {
     checkBackendReady().then(ok => {
       if (!ok) setReady(false)
+      else fetch('/api/v1/memory/warmup', { method: 'POST' }).catch(() => {})
     })
   }, [])
 
