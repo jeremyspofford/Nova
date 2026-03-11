@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     chatgpt_access_token: str = ""
     chatgpt_token_dir: str = ""  # defaults to ~/.codex
 
+    # Tier-based routing defaults
+    tier_preferences_best: str = "claude-sonnet-4-6,gpt-4o,claude-max/claude-sonnet-4-6,chatgpt/gpt-4o,gemini/gemini-2.5-pro"
+    tier_preferences_mid: str = "groq/llama-3.3-70b-versatile,gemini/gemini-2.5-flash,cerebras/llama3.1-8b,claude-max/claude-haiku-4-5"
+    tier_preferences_cheap: str = "groq/llama-3.3-70b-versatile,cerebras/llama3.1-8b,default-ollama,gemini/gemini-2.5-flash"
+
     # Cost tracking
     track_costs: bool = True
 
