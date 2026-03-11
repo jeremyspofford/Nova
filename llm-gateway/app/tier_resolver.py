@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 from typing import Any
 
@@ -39,6 +40,9 @@ TIER_CEILING: dict[tuple[str, str], str] = {
 }
 
 QUALITY_THRESHOLDS = {"best": 0.80, "mid": 0.65, "cheap": 0.50}
+
+EXPLORE_RATE = 0.05        # 5% of requests explore
+EXPLORE_MIN_SAMPLES = 50   # models with fewer samples are "undersampled"
 
 # -- In-memory caches ---------------------------------------------------------
 
@@ -187,6 +191,26 @@ async def _resolve_tier_to_model(
                 candidates, task_type, effectiveness, threshold,
             )
 
+        # Exploration: occasionally try undersampled models
+        if task_type and effectiveness and random.random() < EXPLORE_RATE:
+            undersampled = [
+                m for m in candidates
+                if _sample_count(m, task_type, effectiveness) < EXPLORE_MIN_SAMPLES
+            ]
+            if undersampled:
+                chosen = random.choice(undersampled)
+                resolved = _resolve_virtual(chosen)
+                if resolved and resolved in MODEL_REGISTRY:
+                    provider = MODEL_REGISTRY[resolved]
+                    if provider.is_available:
+                        has_quota, _ = await check_remaining_quota(resolved)
+                        if has_quota:
+                            log.info(
+                                "Exploration: tier=%s task_type=%s → %s (undersampled)",
+                                try_tier, task_type, resolved,
+                            )
+                            return resolved
+
         for model_id in candidates:
             # Resolve virtual identifiers
             resolved = _resolve_virtual(model_id)
@@ -232,6 +256,13 @@ def _resolve_virtual(model_id: str) -> str | None:
             return real
         return None
     return model_id
+
+
+def _sample_count(model_id: str, task_type: str, effectiveness: dict) -> int:
+    """Get sample count for a model×task_type from effectiveness matrix."""
+    key = f"{model_id}:{task_type}"
+    entry = effectiveness.get(key)
+    return entry.get("sample_count", 0) if entry else 0
 
 
 def _filter_by_effectiveness(
