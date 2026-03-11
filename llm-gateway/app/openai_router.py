@@ -30,7 +30,7 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
 from app.openai_compat import (
@@ -44,18 +44,34 @@ from app.openai_compat import (
 )
 from app.rate_limiter import check_rate_limit
 from app.registry import MODEL_REGISTRY, DEFAULT_MODEL_KEY, get_provider
+from app.tier_resolver import resolve_model, BudgetExhaustedError
 
 log = logging.getLogger(__name__)
 openai_router = APIRouter(prefix="/v1", tags=["openai-compat"])
 
 
 @openai_router.post("/chat/completions")
-async def chat_completions(req: OAIChatCompletionRequest):
+async def chat_completions(req: OAIChatCompletionRequest, raw_request: Request):
     """OpenAI-compatible chat completion endpoint (streaming and non-streaming)."""
+    # Tier resolution: OAI requests may not have tier/task_type — heuristic inference handles it
+    caller = raw_request.headers.get("x-caller")
+    try:
+        nova_req = oai_request_to_nova(req)
+        resolved = await resolve_model(
+            model=req.model, tier=getattr(req, "tier", None),
+            task_type=getattr(req, "task_type", None),
+            request=nova_req, caller=caller,
+        )
+        req.model = resolved
+        nova_req.model = resolved
+    except BudgetExhaustedError:
+        return {"error": {"message": "Daily budget exceeded", "type": "budget_exhausted"}}
+    except ValueError as e:
+        return {"error": {"message": str(e), "type": "server_error"}}
+
     allowed, prefix, _remaining = await check_rate_limit(req.model)
     if not allowed:
         return {"error": {"message": f"Daily quota exhausted for provider '{prefix}'.", "type": "rate_limit_error"}}
-    nova_req = oai_request_to_nova(req)
     provider = await get_provider(req.model)
 
     if req.stream:

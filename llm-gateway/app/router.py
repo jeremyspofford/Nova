@@ -8,8 +8,10 @@ import json
 import logging
 from typing import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from nova_contracts import (
     CompleteRequest,
@@ -22,6 +24,7 @@ from nova_contracts import (
 from app.rate_limiter import check_rate_limit
 from app.registry import get_provider
 from app.response_cache import get_cached, set_cached
+from app.tier_resolver import BudgetExhaustedError, resolve_model
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["llm"])
@@ -36,9 +39,31 @@ async def _enforce_rate_limit(model: str) -> None:
         )
 
 
+async def _resolve_request_model(request: CompleteRequest, raw_request: Request) -> CompleteRequest:
+    """Resolve model via tier system if not explicitly set. Mutates request.model."""
+    caller = raw_request.headers.get("x-caller")
+    resolved = await resolve_model(
+        model=request.model,
+        tier=request.tier,
+        task_type=request.task_type,
+        request=request,
+        caller=caller,
+    )
+    request.model = resolved
+    return request
+
+
 @router.post("/complete", response_model=CompleteResponse)
-async def complete(request: CompleteRequest):
+async def complete(request: CompleteRequest, raw_request: Request):
     """Non-streaming LLM completion."""
+    try:
+        request = await _resolve_request_model(request, raw_request)
+    except BudgetExhaustedError:
+        tomorrow = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        return JSONResponse(status_code=429, content={"error": "budget_exhausted", "detail": "Daily budget exceeded", "resets_at": tomorrow.isoformat()})
+    except ValueError as e:
+        return JSONResponse(status_code=503, content={"error": str(e)})
+
     await _enforce_rate_limit(request.model)
 
     # Check cache (only for temperature=0 deterministic requests)
@@ -63,11 +88,19 @@ async def complete(request: CompleteRequest):
 
 
 @router.post("/stream")
-async def stream(request: CompleteRequest):
+async def stream(request: CompleteRequest, raw_request: Request):
     """
     Server-Sent Events streaming completion.
     Each chunk is a JSON line; the final chunk has finish_reason set.
     """
+    try:
+        request = await _resolve_request_model(request, raw_request)
+    except BudgetExhaustedError:
+        tomorrow = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        return JSONResponse(status_code=429, content={"error": "budget_exhausted", "detail": "Daily budget exceeded", "resets_at": tomorrow.isoformat()})
+    except ValueError as e:
+        return JSONResponse(status_code=503, content={"error": str(e)})
+
     await _enforce_rate_limit(request.model)
     provider = await get_provider(request.model)
 
