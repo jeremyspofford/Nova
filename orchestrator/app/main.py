@@ -13,6 +13,7 @@ from app.clients import close_clients
 from app.config import settings
 from app.db import close_db, init_db
 from app.auth_router import router as auth_router
+from app.goals_router import goals_router
 from app.health import health_router
 from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
@@ -154,3 +155,4 @@ app.include_router(health_router)
 app.include_router(router)
 app.include_router(auth_router)
 app.include_router(pipeline_router)
+app.include_router(goals_router)
