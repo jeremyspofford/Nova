@@ -41,6 +41,30 @@ class CycleState:
     error: str | None = None
 
 
+async def _report_outcome(
+    state: CycleState, model: str, score: float, confidence: float,
+) -> None:
+    """Report cycle outcome to orchestrator for effectiveness tracking."""
+    try:
+        orch = get_orchestrator()
+        await orch.post(
+            "/api/v1/usage/events",
+            json={
+                "model": model,
+                "outcome_score": score,
+                "outcome_confidence": confidence,
+                "metadata": {
+                    "task_type": "planning",
+                    "source": "cortex",
+                    "cycle": state.cycle_number,
+                    "drive": state.action_taken,
+                },
+            },
+        )
+    except Exception as e:
+        log.debug("Failed to report cycle outcome: %s", e)
+
+
 async def run_cycle() -> CycleState:
     """Execute one complete thinking cycle. Returns the cycle state for logging."""
     state = CycleState()
@@ -84,6 +108,7 @@ async def run_cycle() -> CycleState:
                 entry_type="narration",
                 metadata={"cycle": state.cycle_number, "action": "idle"},
             )
+            await _report_outcome(state, settings.planning_model or "unknown", 0.6, 0.5)
             return state
 
         drive = state.winner.result
@@ -99,6 +124,15 @@ async def run_cycle() -> CycleState:
         await _reflect(state)
         await _update_state(state)
 
+        # ── SCORE ───────────────────────────────────────────────────
+        _model = settings.planning_model or "unknown"
+        if state.action_taken == "idle":
+            await _report_outcome(state, _model, 0.6, 0.5)
+        elif state.error:
+            await _report_outcome(state, _model, 0.2, 0.9)
+        else:
+            await _report_outcome(state, _model, 0.7, 0.7)
+
     except Exception as e:
         state.error = str(e)
         log.error("Cycle %d failed: %s", state.cycle_number, e, exc_info=True)
@@ -110,6 +144,8 @@ async def run_cycle() -> CycleState:
             )
         except Exception:
             pass  # Don't let journal failure mask the original error
+        if state.budget_tier != "none":
+            await _report_outcome(state, settings.planning_model or "unknown", 0.2, 0.9)
 
     return state
 
