@@ -16,7 +16,7 @@ import { Models } from './pages/Models'
 import { Tasks } from './pages/Tasks'
 import { Pods } from './pages/Pods'
 import { AgentEndpoints } from './pages/AgentEndpoints'
-import { MemoryInspector } from './pages/MemoryInspector'
+import { EngramExplorer } from './pages/EngramExplorer'
 import { Recovery } from './pages/Recovery'
 import { RemoteAccess } from './pages/RemoteAccess'
 import { About } from './pages/About'
@@ -94,7 +94,6 @@ function AppShell() {
   useEffect(() => {
     checkBackendReady().then(ok => {
       if (!ok) setReady(false)
-      else fetch('/api/v1/memory/warmup', { method: 'POST' }).catch(() => {})
     })
   }, [])
 
@@ -126,7 +125,7 @@ function AppShell() {
             <Route path="/keys"    element={<PageShell><Keys /></PageShell>} />
             <Route path="/mcp"     element={<PageShell><MCP /></PageShell>} />
             <Route path="/agents"  element={<PageShell><AgentEndpoints /></PageShell>} />
-            <Route path="/memory"  element={<PageShell><MemoryInspector /></PageShell>} />
+            <Route path="/engrams" element={<PageShell><EngramExplorer /></PageShell>} />
             <Route path="/models"   element={<PageShell><Models /></PageShell>} />
             <Route path="/users"    element={<PageShell><Users /></PageShell>} />
             <Route path="/settings" element={<PageShell><Settings /></PageShell>} />

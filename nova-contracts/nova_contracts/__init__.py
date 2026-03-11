@@ -1,20 +1,3 @@
-from .memory import (
-    MemoryTier,
-    StoreMemoryRequest,
-    StoreMemoryResponse,
-    SearchMemoryRequest,
-    MemoryResult,
-    SearchMemoryResponse,
-    GetContextRequest,
-    GetContextResponse,
-    UpdateMemoryRequest,
-    BulkStoreRequest,
-    BulkStoreResponse,
-    SaveFactRequest,
-    SaveFactResponse,
-    BrowseMemoryItem,
-    BrowseMemoryResponse,
-)
 from .llm import (
     ModelCapability,
     ContentBlock,
@@ -46,13 +29,21 @@ from .chat import (
     StreamChunkMessage,
     SessionInfo,
 )
+from .engram import (
+    EngramType,
+    EdgeRelation,
+    IngestionSourceType,
+    IngestionEvent,
+    DecomposedEngram,
+    DecomposedRelationship,
+    DecomposedContradiction,
+    DecompositionResult,
+    IngestRequest,
+    IngestResponse,
+    EngramDetail,
+)
 
 __all__ = [
-    "MemoryTier", "StoreMemoryRequest", "StoreMemoryResponse",
-    "SearchMemoryRequest", "MemoryResult", "SearchMemoryResponse",
-    "GetContextRequest", "GetContextResponse", "UpdateMemoryRequest",
-    "BulkStoreRequest", "BulkStoreResponse",
-    "SaveFactRequest", "SaveFactResponse", "BrowseMemoryItem", "BrowseMemoryResponse",
     "ModelCapability", "ContentBlock", "Message", "extract_text_content",
     "ToolCallRef", "ToolDefinition",
     "CompleteRequest", "CompleteResponse", "StreamChunk",
@@ -60,4 +51,7 @@ __all__ = [
     "AgentStatus", "AgentConfig", "CreateAgentRequest", "AgentInfo",
     "TaskType", "SubmitTaskRequest", "TaskStatus", "TaskResult",
     "ChatMessageType", "ChatMessage", "StreamChunkMessage", "SessionInfo",
+    "EngramType", "EdgeRelation", "IngestionSourceType", "IngestionEvent",
+    "DecomposedEngram", "DecomposedRelationship", "DecomposedContradiction",
+    "DecompositionResult", "IngestRequest", "IngestResponse", "EngramDetail",
 ]

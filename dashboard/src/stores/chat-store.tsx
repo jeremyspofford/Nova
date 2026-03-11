@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
-import { summarizeSession, apiFetch } from '../api'
+import { apiFetch } from '../api'
 
 export interface ActivityStep {
   step: string
@@ -163,13 +163,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const newConversation = useCallback(async () => {
-    // Summarize the previous conversation before switching (fire-and-forget)
-    if (sessionIdRef.current && messagesRef.current.length >= 2) {
-      summarizeSession(
-        sessionIdRef.current,
-        messagesRef.current.map(m => ({ role: m.role, content: m.content })),
-      )
-    }
     try {
       const conv = await apiFetch<{ id: string }>('/api/v1/conversations', {
         method: 'POST',
@@ -191,13 +184,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const resetConversation = useCallback(() => {
-    // Summarize the completed conversation before clearing (fire-and-forget)
-    if (sessionIdRef.current && messagesRef.current.length >= 2) {
-      summarizeSession(
-        sessionIdRef.current,
-        messagesRef.current.map(m => ({ role: m.role, content: m.content })),
-      )
-    }
     setMessages([])
     setConversationId(null)
     setSessionId(undefined)

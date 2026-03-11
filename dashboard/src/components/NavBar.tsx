@@ -14,7 +14,7 @@ const mainLinks = [
   { to: '/keys',     label: 'Keys',     icon: Key              },
   { to: '/mcp',      label: 'MCP',      icon: Plug             },
   { to: '/agents',   label: 'Agents',   icon: Network          },
-  { to: '/memory',   label: 'Memory',   icon: Brain            },
+  { to: '/engrams',  label: 'Memory',   icon: Brain            },
   { to: '/models',   label: 'Models',   icon: Cpu              },
 ]
 

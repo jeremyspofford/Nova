@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { streamChat, uploadFile, discoverModels, resolveModel, apiFetch, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
+import { streamChat, discoverModels, resolveModel, apiFetch, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
 import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts, getStableContent } from '../../utils/cleanToolArtifacts'
@@ -172,13 +172,6 @@ export function Chat() {
     // For queued messages, user message is already in the messages array
     if (!fromQueue) {
       history.push({ role: 'user', content: userContent })
-    }
-
-    // Upload files to memory service (fire-and-forget for storage)
-    if (attachments) {
-      for (const att of attachments) {
-        uploadFile(att.file, currentSessionId).catch(() => {})
-      }
     }
 
     // Build stream options
