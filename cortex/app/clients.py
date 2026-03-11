@@ -26,7 +26,12 @@ async def init_clients() -> None:
     """Create httpx client pool. Call once at startup."""
     global _orchestrator, _llm, _memory
     _orchestrator = _make_client(settings.orchestrator_url, timeout=60.0)
-    _llm = _make_client(settings.llm_gateway_url, timeout=120.0)
+    _llm = httpx.AsyncClient(
+        base_url=settings.llm_gateway_url,
+        timeout=120.0,
+        limits=httpx.Limits(max_connections=10),
+        headers={"X-Caller": "cortex"},
+    )
     _memory = _make_client(settings.memory_service_url)
     log.info("HTTP clients ready")
 

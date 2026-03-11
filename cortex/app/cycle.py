@@ -14,7 +14,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from .budget import get_budget_status
+from .budget import get_budget_status, publish_budget_tier
 from .clients import get_llm, get_orchestrator
 from .config import settings
 from .db import get_pool
@@ -50,6 +50,9 @@ async def run_cycle() -> CycleState:
         budget = await get_budget_status()
         state.budget_tier = budget["tier"]
         state.budget_pct = budget["percent_used"]
+
+        # Publish budget tier to Redis for gateway consumption
+        await publish_budget_tier()
 
         # Read cycle count
         pool = get_pool()
@@ -147,6 +150,8 @@ Your response is the action plan (not code, just a description)."""
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.3,
             "max_tokens": 300,
+            "tier": "mid",
+            "task_type": "planning",
             "metadata": {"agent_id": "cortex", "task_id": f"cycle-{state.cycle_number}"},
         })
         if resp.status_code == 200:
