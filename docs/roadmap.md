@@ -510,43 +510,44 @@ Three new entries for Nova's MCP server catalog (agents can use these conversati
 
 ---
 
-## 🔜 Phase 6 — Memory Overhaul
+## 🔜 Phase 6 — Engram Network (Cognitive Memory Architecture)
 
-> Memory is the connective tissue of self-direction.
-> The Planning Agent (Phase 7) reads memory to avoid repeating mistakes and build on prior work.
-> Good memory is what separates a system that gets smarter over time from one that starts fresh every run.
+> Memory is Nova's mind, not its filing cabinet. The Engram Network replaces store-and-retrieve with a brain-inspired cognitive architecture: self-organizing memory graph, spreading activation retrieval, contextual reconstruction, and a consolidation daemon that transforms experience into wisdom.
+>
+> **Full design spec:** `docs/superpowers/specs/2026-03-10-engram-network-design.md`
+> **Visual slides:** `docs/engram-network/slides/`
 
-**Three-tier architecture:**
+**Architecture:** Memories are decomposed into atomic **engrams** (nodes) linked by typed, weighted **edges** (associations). Retrieval uses **spreading activation** — not cosine similarity — to find contextually relevant memories through multi-hop graph traversal.
 
-| Tier | Store | Purpose |
-|---|---|---|
-| Session | Redis | Active context window, tool results, turn history |
-| Structured | PostgreSQL | Facts (key-value + confidence), episodes (task summaries + lessons), project context |
-| Semantic | pgvector | Embedding similarity search |
+**Core components:**
 
-**Key upgrades:**
+| Component | Purpose |
+|-----------|---------|
+| **Engram Graph** | Self-organizing memory network. 8 node types (fact, episode, entity, preference, procedure, schema, goal, self_model). Typed edges (caused_by, related_to, contradicts, preceded, enables, part_of, instance_of, analogous_to). |
+| **Ingestion Worker** | Async background decomposition of raw input into engrams + edges. Entity resolution, contradiction detection. Haiku-class model, ~$0.001/turn. |
+| **Spreading Activation** | Retrieval via graph traversal: seed nodes → activation spreads through edges → convergent amplification → collect. Finds associations, not just similarity. <100ms. |
+| **Reconstruction Engine** | Assembles activated engrams into context-aware narratives. Same fragments → different recall depending on current context. First-person perspective. |
+| **Working Memory Gate** | Active context window management. Pinned/sticky/refreshed/sliding/expiring slots. No FIFO, no summarization mush. Context rot eliminated. |
+| **Self-Model** | Cluster of high-importance engrams representing Nova's identity, autobiography, capabilities, maturity. Evolves through experience. |
+| **Consolidation Daemon** | "Sleep cycle" — replays episodes, extracts patterns into schemas, strengthens edges (Hebbian), prunes dead weight, resolves contradictions. Also implements Cortex's Reflect drive. |
+| **Neural Memory Router** | Small NN (~500K params, 2ms CPU) trained on YOUR memory access patterns. Learns personal associations. Replaces cosine similarity over time. |
 
-1. **Hybrid retrieval** — `70% cosine_similarity + 30% ts_rank` (full-text). Fixes pure vector search on exact keyword lookups. All inside PostgreSQL, no extra service.
+**Implementation phases:**
 
-2. **ACT-R confidence decay** — facts age using cognitive science power-law:
-   ```
-   effective_confidence = base_confidence × (days_since_last_access ^ -0.5)
-   ```
-   Prevents stale information from contaminating Planning Agent context.
+1. **Foundation** — Engram storage + ingestion worker + decomposition + backfill migration
+2. **Retrieval** — Spreading activation + reconstruction engine + self-model bootstrap
+3. **Working Memory** — Gate cycle + prompt assembly + orchestrator integration
+4. **Consolidation** — Sleep cycle + self-model evolution + Cortex Reflect integration
+5. **Neural Router** — Observation logging → training → shadow mode → full deployment
+6. **Dashboard** — Engram Explorer + Self-Model view + consolidation logs
 
-3. **`save_fact()` upsert** — `ON CONFLICT DO UPDATE` keyed on `(project_id, category, key)` — no duplicate facts across sessions.
+**Supersedes** the original Phase 6 memory overhaul. Everything from the original design (hybrid retrieval, ACT-R decay, fact extraction, cross-session consolidation, task history) is incorporated into the Engram Network as a more powerful, unified system.
 
-4. **Embedding fallback chain** — `text-embedding-3-small` → Ollama `nomic-embed-text` (zero-pad 768→1536 dims).
+### 🔜 Future: Hierarchical Memory Transformer (Phase 6-HMT)
 
-5. **Memory Inspector page** (in dashboard) — browse facts, episodes, project context; manually flag or delete stale entries.
+> Brainstorm after Engram Network is stable and generating training data.
 
-6. **Auto fact extraction** — after each conversation or pipeline task, automatically extract entities, decisions, and lessons learned from the output. Store as semantic facts so knowledge compounds across sessions without manual curation.
-
-7. **"What do I know about X?" query endpoint** — `POST /api/v1/memories/knowledge` that combines semantic search, fact lookup, and cross-session consolidation into a single natural-language answer about a topic. Transforms memory from a retrieval system into a knowledge system.
-
-8. **Cross-session consolidation** — background task that finds related episodic memories across sessions, merges overlapping facts, and promotes recurring patterns to higher-confidence semantic facts.
-
-9. **Task history persistence** — completed task trees stored permanently with full reasoning traces: which agents ran, what they produced, what decisions were made, and why. Enables auditing how Nova reasoned through any task. Surfaced in the dashboard Task Board as "session replay".
+A small fine-tuned transformer (~7B) that learns to BE the memory system — compression, storage, retrieval, and reconstruction end-to-end. Multiple attention heads attend to different engram types. Would replace the template/LLM reconstruction engine and potentially the Neural Router with a single learned model. High risk, high reward. Requires months of Engram Network operation for training data.
 
 ---
 
