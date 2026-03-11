@@ -28,6 +28,9 @@ def log_usage(
     output_tokens: int,
     cost_usd: float | None,
     duration_ms: int | None,
+    metadata: dict | None = None,
+    outcome_score: float | None = None,
+    outcome_confidence: float | None = None,
 ) -> None:
     """Schedule a usage event insert as a background task.
 
@@ -45,6 +48,9 @@ def log_usage(
             output_tokens=output_tokens,
             cost_usd=cost_usd,
             duration_ms=duration_ms,
+            metadata=metadata,
+            outcome_score=outcome_score,
+            outcome_confidence=outcome_confidence,
         )
     )
 
