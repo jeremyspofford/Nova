@@ -47,6 +47,7 @@ router = APIRouter(tags=["pipeline"])
 class SubmitPipelineTaskRequest(BaseModel):
     user_input: str
     pod_name: str | None = None     # None → settings.default_pod_name
+    goal_id: str | None = None      # Link task to a goal (Cortex uses this)
     metadata: dict[str, Any] = {}
 
 
@@ -144,15 +145,16 @@ async def submit_pipeline_task(
         task_row = await conn.fetchrow(
             """
             INSERT INTO tasks
-                (user_input, pod_id, status, metadata,
+                (user_input, pod_id, goal_id, status, metadata,
                  retry_count, max_retries, queued_at, checkpoint)
             VALUES
-                ($1, $2::uuid, 'queued', $3::jsonb,
-                 0, $4, now(), '{}')
+                ($1, $2::uuid, $3::uuid, 'queued', $4::jsonb,
+                 0, $5, now(), '{}')
             RETURNING id, queued_at
             """,
             req.user_input,
             pod_id,
+            req.goal_id,
             {**req.metadata, "api_key_id": str(key.id) if key.id else None},  # dict → codec handles JSONB
             settings.task_default_max_retries,
         )
