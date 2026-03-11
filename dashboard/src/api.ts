@@ -404,6 +404,91 @@ export const updateAgentEndpoint = (id: string, data: Partial<AgentEndpointWrite
 export const deleteAgentEndpoint = (id: string) =>
   apiFetch<void>(`/api/v1/agent-endpoints/${id}`, { method: 'DELETE' })
 
+// ── Goals ────────────────────────────────────────────────────────────────────
+
+export interface Goal {
+  id: string
+  title: string
+  description: string | null
+  status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  priority: number
+  progress: number
+  current_plan: unknown | null
+  iteration: number
+  max_iterations: number | null
+  max_cost_usd: number | null
+  cost_so_far_usd: number
+  check_interval_seconds: number | null
+  last_checked_at: string | null
+  parent_goal_id: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export const getGoals = (status?: string) => {
+  const qs = status ? `?status=${status}` : ''
+  return apiFetch<Goal[]>(`/api/v1/goals${qs}`)
+}
+
+export const getGoal = (id: string) =>
+  apiFetch<Goal>(`/api/v1/goals/${id}`)
+
+export const createGoal = (data: { title: string; description?: string; priority?: number; max_cost_usd?: number }) =>
+  apiFetch<Goal>('/api/v1/goals', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const updateGoal = (id: string, data: Partial<Goal>) =>
+  apiFetch<Goal>(`/api/v1/goals/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+
+export const deleteGoal = (id: string) =>
+  apiFetch<void>(`/api/v1/goals/${id}`, { method: 'DELETE' })
+
+// ── Cortex ───────────────────────────────────────────────────────────────────
+
+export interface CortexStatus {
+  status: string
+  current_drive: string | null
+  cycle_count: number
+  last_cycle_at: string | null
+}
+
+export interface CortexDrive {
+  name: string
+  priority: number
+  urgency: number
+  description: string
+}
+
+export const getCortexStatus = () =>
+  apiFetch<CortexStatus>('/cortex-api/api/v1/cortex/status')
+
+export const pauseCortex = () =>
+  apiFetch<{ status: string }>('/cortex-api/api/v1/cortex/pause', { method: 'POST' })
+
+export const resumeCortex = () =>
+  apiFetch<{ status: string }>('/cortex-api/api/v1/cortex/resume', { method: 'POST' })
+
+export const getCortexDrives = () =>
+  apiFetch<{ drives: CortexDrive[] }>('/cortex-api/api/v1/cortex/drives')
+
+export interface BudgetStatus {
+  daily_budget_usd: number
+  daily_spend_usd: number
+  remaining_usd: number
+  percent_used: number
+  budget_exceeded: boolean
+  tier: string
+}
+
+export const getCortexBudget = () =>
+  apiFetch<BudgetStatus>('/cortex-api/api/v1/cortex/budget')
+
 // ── Provider status ──────────────────────────────────────────────────────────
 
 export interface ProviderStatus {
