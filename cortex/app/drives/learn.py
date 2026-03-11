@@ -1,11 +1,76 @@
-"""Learn drive — build knowledge. Stub for now."""
+"""Learn drive — identify and act on capability gaps.
+
+Reads nova:signals:capability_gaps from Redis (published hourly by the
+orchestrator's effectiveness matrix computation). When capability gaps
+exist (all models underperform for a task_type), reports high urgency
+so cortex prioritizes learning actions.
+"""
 from __future__ import annotations
 
+import json
+import logging
+
+import redis.asyncio as aioredis
+
+from ..config import settings
 from . import DriveResult
+
+log = logging.getLogger(__name__)
+
+_redis: aioredis.Redis | None = None
+CAPABILITY_GAP_KEY = "nova:signals:capability_gaps"
+
+
+async def _get_redis() -> aioredis.Redis:
+    global _redis
+    if _redis is None:
+        _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    return _redis
 
 
 async def assess() -> DriveResult:
-    return DriveResult(
-        name="learn", priority=4, urgency=0.0,
-        description="No learning signals (stub)",
-    )
+    """Check for capability gaps and report urgency."""
+    try:
+        r = await _get_redis()
+        raw = await r.get(CAPABILITY_GAP_KEY)
+        if not raw:
+            return DriveResult(
+                name="learn", priority=4, urgency=0.0,
+                description="No capability gaps detected",
+            )
+
+        gaps = json.loads(raw)
+        if not gaps:
+            return DriveResult(
+                name="learn", priority=4, urgency=0.0,
+                description="No capability gaps detected",
+            )
+
+        # Urgency scales with number and severity of gaps
+        worst_score = min(g["best_score"] for g in gaps)
+        urgency = min(1.0, 0.4 + 0.2 * len(gaps) + 0.3 * (1.0 - worst_score))
+
+        gap_summary = ", ".join(
+            f"{g['task_type']} (best={g['best_score']:.2f}, n={g['sample_count']})"
+            for g in gaps
+        )
+
+        return DriveResult(
+            name="learn",
+            priority=4,
+            urgency=round(urgency, 2),
+            description=f"Capability gaps detected: {gap_summary}",
+            proposed_action=(
+                f"Investigate capability gaps in: {', '.join(g['task_type'] for g in gaps)}. "
+                "Consider: improving context retrieval, adjusting system prompts, "
+                "or reviewing recent low-scoring interactions for patterns."
+            ),
+            context={"gaps": gaps},
+        )
+
+    except Exception as e:
+        log.debug("Learn drive assessment failed: %s", e)
+        return DriveResult(
+            name="learn", priority=4, urgency=0.0,
+            description="Learn drive error — no signal",
+        )
