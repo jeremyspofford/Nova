@@ -26,6 +26,7 @@ from app.db.database import get_db
 from .activation import spreading_activation
 from .consolidation import bootstrap_self_model, run_consolidation
 from .ingestion import ingest_direct
+from .outcome_feedback import process_feedback
 from .reconstruction import get_self_model_summary, reconstruct
 from .retrieval_logger import get_observation_count
 from .working_memory import assemble_context, format_context_prompt
@@ -408,3 +409,14 @@ async def get_graph(
         "node_count": len(nodes),
         "edge_count": len(edges),
     }
+
+
+# ── Phase 7: Outcome Feedback ───────────────────────────────────────────
+
+
+@engram_router.post("/outcome-feedback")
+async def receive_outcome_feedback(feedback: list[dict]):
+    """Receive outcome scores and adjust engram activation/importance/edges."""
+    async with get_db() as session:
+        stats = await process_feedback(session, feedback)
+    return {"status": "ok", **stats}
