@@ -36,13 +36,15 @@ claude-sonnet-4-6 → gpt-4o → claude-max/claude-sonnet-4-6 → chatgpt/gpt-4o
 
 **mid:**
 ```
-groq/llama-3.3-70b-versatile → gemini/gemini-2.5-flash → cerebras/llama-3.3-70b → claude-haiku
+groq/llama-3.3-70b-versatile → gemini/gemini-2.5-flash → cerebras/llama3.1-8b → claude-haiku
 ```
 
 **cheap:**
 ```
-cerebras/llama-3.3-70b → groq/llama-3.3-70b-versatile → local ollama → gemini/gemini-2.0-flash-lite
+groq/llama-3.3-70b-versatile → cerebras/llama3.1-8b → default-ollama → gemini/gemini-2.0-flash-lite
 ```
+
+Note: `default-ollama` is a virtual identifier that resolves to `settings.default_ollama_model` (currently `llama3.2`). The tier resolver handles this as a special case — it checks Ollama availability and substitutes the actual model name.
 
 Rationale for mid/cheap ordering: Groq (800 tok/s) and Cerebras (2000 tok/s) are free and fast. For tasks where quality isn't the bottleneck, speed matters more — a cortex cycle making 3 cheap calls at Groq speed (0.3s each) vs Claude speed (3-5s each) is the difference between 1s and 15s of latency.
 
@@ -53,7 +55,7 @@ New function `resolve_model_for_tier()` in `registry.py`:
 1. Walk the preference list for the requested tier
 2. For each candidate model:
    - Is the provider available? (`is_available` property)
-   - Does it have remaining quota? (rate limiter check)
+   - Does it have remaining quota? (read-only quota check — new `check_remaining_quota()` function in rate_limiter.py that reads without incrementing the counter)
    - Does the request fit its context window? (estimate request tokens vs `MODEL_SPECS[model].context_window`)
 3. Return the first model passing all checks
 4. If no model available in the requested tier, fall back to the next tier down (best → mid → cheap)
@@ -66,8 +68,8 @@ Preference lists stored in Redis (`nova:config:llm.tier_preferences`) as JSON, w
 ```json
 {
   "best": ["claude-sonnet-4-6", "gpt-4o", "claude-max/claude-sonnet-4-6"],
-  "mid": ["groq/llama-3.3-70b-versatile", "gemini/gemini-2.5-flash", "cerebras/llama-3.3-70b"],
-  "cheap": ["cerebras/llama-3.3-70b", "groq/llama-3.3-70b-versatile", "local-ollama"]
+  "mid": ["groq/llama-3.3-70b-versatile", "gemini/gemini-2.5-flash", "cerebras/llama3.1-8b"],
+  "cheap": ["groq/llama-3.3-70b-versatile", "cerebras/llama3.1-8b", "default-ollama"]
 }
 ```
 
@@ -81,12 +83,33 @@ If `model` is explicitly set in the request, the tier system is bypassed entirel
 
 ### New Request Field
 
-`CompleteRequest` and `StreamRequest` in `nova-contracts` gain optional fields:
+`CompleteRequest` in `nova-contracts` gains optional fields (the `/stream` endpoint reuses `CompleteRequest` with `stream=True`):
 
 ```python
 tier: str | None = None       # "best", "mid", "cheap"
-task_type: str | None = None  # "planning", "code_review", "reflection", etc.
+task_type: str | None = None  # validated against TaskType enum
 ```
+
+### Task Type Enum
+
+Defined in `nova-contracts/nova_contracts/tier.py` so all services share the same vocabulary:
+
+```python
+class TaskType(str, Enum):
+    planning = "planning"
+    task_execution = "task_execution"
+    goal_work = "goal_work"
+    code_review = "code_review"
+    guardrail = "guardrail"
+    context_retrieval = "context_retrieval"
+    decision = "decision"
+    reflection = "reflection"
+    narration = "narration"
+    extraction = "extraction"
+    chat = "chat"
+```
+
+Validated on input but stored as a string — new task types can be added without a migration.
 
 ### Three Resolution Paths (in order of precedence)
 
@@ -115,7 +138,7 @@ score <= 2   → mid
 score > 2    → best
 ```
 
-This is the **bootstrap layer** — it exists because the system needs to route before it has outcome data. It gets less important as the learning layer (Section 3) accumulates experience.
+These thresholds are initial values subject to tuning. The heuristic score is logged alongside the tier decision in `usage_events.metadata` so it can be validated against outcome data later. This is the **bootstrap layer** — it exists because the system needs to route before it has outcome data. It gets less important as the learning layer (Section 3) accumulates experience.
 
 ### Where This Lives
 
@@ -135,15 +158,18 @@ Called from `router.py` before `get_provider()`.
 
 ## 3. Outcome-Based Learning
 
-Every LLM call already logs to `usage_events` with model, tokens, cost, and metadata. The missing piece is **outcome quality** — did this call produce a good result?
+Every LLM call already logs to `usage_events` with model, tokens, and cost. The missing pieces are **task type tracking** and **outcome quality** — what kind of work was this, and did it produce a good result?
 
-### Outcome Scoring
+### Schema Changes
 
-New nullable column on `usage_events`:
+Two new columns on `usage_events`:
 
 ```sql
+ALTER TABLE usage_events ADD COLUMN metadata JSONB DEFAULT '{}';
 ALTER TABLE usage_events ADD COLUMN outcome_score REAL;  -- 0.0–1.0, NULL = not yet scored
 ```
+
+The `metadata` column stores `task_type` and other contextual data (caller identity, pipeline stage, cycle number). The orchestrator's `insert_usage_event()` function gains an optional `metadata` parameter to populate this.
 
 Scoring sources:
 
@@ -161,9 +187,12 @@ Scoring sources:
 
 ### Effectiveness Matrix
 
-Aggregated from `usage_events`, cached in Redis, refreshed hourly:
+Aggregated from `usage_events`, cached in Redis, refreshed hourly.
+
+**Computation:** The **orchestrator** runs the aggregation query (it owns the `usage_events` table and has the DB connection). A background task computes the matrix every hour and pushes the result to Redis. The gateway reads from Redis only — it has no Postgres connection.
 
 ```sql
+-- Runs on orchestrator, result pushed to Redis
 SELECT model,
        COALESCE(metadata->>'task_type', 'unknown') AS task_type,
        AVG(outcome_score) AS avg_score,
@@ -174,7 +203,9 @@ WHERE outcome_score IS NOT NULL
 GROUP BY 1, 2
 ```
 
-Redis key: `nova:cache:model_effectiveness` (JSON, TTL 1 hour)
+Redis key: `nova:cache:model_effectiveness` (JSON, TTL 1 hour, written by orchestrator)
+
+The orchestrator's `main.py` lifespan starts an `asyncio.create_task` that runs this aggregation every hour (similar pattern to the existing stale-task reaper).
 
 ### How It Influences Routing
 
@@ -223,7 +254,9 @@ The gateway reads this (5s cache) and applies it as a **ceiling** on cortex-orig
 
 ### Caller Identification
 
-The gateway identifies cortex by API key (`sk-nova-cortex-internal`). Budget capping applies **only** to cortex requests. User chat and other callers are uncapped — autonomous background spending shouldn't degrade the human's experience.
+Cortex identifies itself via an `X-Caller: cortex` header on all LLM gateway requests (added in `cortex/app/clients.py`). The gateway reads this header in the tier resolver — no auth middleware needed (the gateway is internal-only, not exposed externally). Budget capping applies **only** to requests with `X-Caller: cortex`. User chat and other callers are uncapped — autonomous background spending shouldn't degrade the human's experience.
+
+The cortex-side budget check in `_plan_action()` (returning early for `none` tier) remains the **primary** guard. The gateway-side 429 is defense-in-depth — it catches cases where cortex's cached budget state is stale.
 
 ### Budget Exhaustion
 
@@ -332,19 +365,23 @@ Request arrives at gateway (/complete or /stream)
 | File | Change |
 |------|--------|
 | `llm-gateway/app/router.py` | Call `resolve_model()` before `get_provider()` |
+| `llm-gateway/app/openai_router.py` | Same tier resolution for OpenAI-compat `/v1/chat/completions` endpoint |
 | `llm-gateway/app/registry.py` | Add `resolve_model_for_tier()`, context window check |
 | `llm-gateway/app/config.py` | Default tier preference lists |
-| `nova-contracts/nova_contracts/llm.py` | Add `tier` and `task_type` to request models |
+| `llm-gateway/app/rate_limiter.py` | Add read-only `check_remaining_quota()` for probing without incrementing |
+| `nova-contracts/nova_contracts/llm.py` | Add `tier` and `task_type` to `CompleteRequest` |
 | `cortex/app/cycle.py` | Tag LLM calls with tier + task_type |
 | `cortex/app/budget.py` | Publish budget tier to Redis |
+| `cortex/app/clients.py` | Add `X-Caller: cortex` header to LLM gateway client |
 | `orchestrator/app/pipeline/executor.py` | Tag pipeline stage calls with tier + task_type |
-| `orchestrator/app/migrations/NNN_outcome_score.sql` | Add `outcome_score` column to `usage_events` |
+| `orchestrator/app/db.py` | Extend `insert_usage_event()` with optional `metadata` and `outcome_score` params |
+| `orchestrator/app/main.py` | Add hourly background task for effectiveness matrix computation |
+| `orchestrator/app/migrations/NNN_adaptive_routing.sql` | Add `metadata JSONB` and `outcome_score REAL` columns to `usage_events` |
 
 ### No changes needed
 | File | Why |
 |------|-----|
 | `llm-gateway/app/providers/*` | Providers don't know about tiers — they receive a resolved model name |
-| `llm-gateway/app/rate_limiter.py` | Already queried by tier resolver, no interface change |
 | `llm-gateway/app/discovery.py` | Model discovery is orthogonal to tier routing |
 | `dashboard/` | No UI changes in this spec (dashboard settings for tier config is future work) |
 
