@@ -18,16 +18,16 @@ Use this section to track implementation state if the conversation resets.
 
 | Chunk | Status | Notes |
 |-------|--------|-------|
-| 1: Contracts & Tier Types | pending | |
-| 2: Rate Limiter Read-Only Check | pending | |
-| 3: Tier Resolver Core | pending | |
-| 4: Gateway Router Integration | pending | |
-| 5: Budget Publishing (Cortex) | pending | |
-| 6: Budget Ceiling (Gateway) | pending | |
-| 7: Cortex Caller Tagging | pending | |
-| 8: Pipeline Stage Tagging | pending | |
-| 9: Outcome Scoring Schema | pending | |
-| 10: Effectiveness Matrix | pending | |
+| 1: Contracts & Tier Types | done | commit e59360e |
+| 2: Rate Limiter Read-Only Check | done | commit 4052b34 |
+| 3: Tier Resolver Core | done | commit a5f396f (includes chunk 6) |
+| 4: Gateway Router Integration | done | commit bcdbe7f |
+| 5: Budget Publishing (Cortex) | done | commit d53a932 (with chunk 7) |
+| 6: Budget Ceiling (Gateway) | done | included in chunk 3 |
+| 7: Cortex Caller Tagging | done | commit d53a932 (with chunk 5) |
+| 8: Pipeline Stage Tagging | done | commit 831b520 |
+| 9: Outcome Scoring Schema | done | commit 25c6b70 (with chunk 10) |
+| 10: Effectiveness Matrix | done | commit 25c6b70 (with chunk 9) |
 
 ---
 
