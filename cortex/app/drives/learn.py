@@ -20,11 +20,21 @@ log = logging.getLogger(__name__)
 _redis: aioredis.Redis | None = None
 CAPABILITY_GAP_KEY = "nova:signals:capability_gaps"
 
+# Capability gaps are published by the orchestrator to its Redis (db2),
+# not the cortex Redis (db5). Derive the orchestrator URL from our base.
+_ORCHESTRATOR_REDIS_DB = 2
+
 
 async def _get_redis() -> aioredis.Redis:
+    """Connect to the orchestrator's Redis DB where capability gaps are published."""
     global _redis
     if _redis is None:
-        _redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+        # Replace the db number in the URL to point at orchestrator's db2
+        import re
+        base_url = re.sub(r"/\d+$", "", settings.redis_url)
+        _redis = aioredis.from_url(
+            f"{base_url}/{_ORCHESTRATOR_REDIS_DB}", decode_responses=True,
+        )
     return _redis
 
 

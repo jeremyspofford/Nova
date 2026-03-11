@@ -705,7 +705,7 @@ class UsageEventRequest(BaseModel):
 
 
 @router.post("/api/v1/usage/events", status_code=201)
-async def create_usage_event(req: UsageEventRequest):
+async def create_usage_event(req: UsageEventRequest, _key: ApiKeyDep):
     """Accept usage events from external services (e.g. cortex)."""
     from app.db import insert_usage_event
     await insert_usage_event(

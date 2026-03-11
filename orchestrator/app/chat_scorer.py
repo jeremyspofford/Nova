@@ -170,7 +170,7 @@ async def _process_new_messages() -> int:
             # Get the preceding assistant message
             assistant_row = await conn.fetchrow(
                 """
-                SELECT content FROM messages
+                SELECT content, created_at FROM messages
                 WHERE conversation_id = $1
                   AND role = 'assistant'
                   AND created_at < $2
@@ -203,7 +203,7 @@ async def _process_new_messages() -> int:
 
             # Find matching usage_event (session_id = conversation_id, within 120s)
             # PostgreSQL doesn't allow ORDER BY/LIMIT in UPDATE — use subquery
-            ref_time = assistant_row.get("created_at", msg_time)
+            ref_time = assistant_row["created_at"]
             await conn.execute(
                 """
                 UPDATE usage_events

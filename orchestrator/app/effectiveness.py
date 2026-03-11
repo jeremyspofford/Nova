@@ -120,7 +120,8 @@ async def _send_memory_feedback() -> int:
             """
             SELECT metadata->'engram_ids' AS engram_ids,
                    outcome_score,
-                   COALESCE(metadata->>'task_type', 'unknown') AS task_type
+                   COALESCE(metadata->>'task_type', 'unknown') AS task_type,
+                   created_at
             FROM usage_events
             WHERE outcome_score IS NOT NULL
               AND metadata->'engram_ids' IS NOT NULL
@@ -163,9 +164,9 @@ async def _send_memory_feedback() -> int:
     except Exception:
         log.warning("Failed to send memory outcome feedback", exc_info=True)
 
-    # Update cursor
-    now = datetime.now(timezone.utc)
-    await redis.set(FEEDBACK_CURSOR_KEY, now.isoformat())
+    # Update cursor to last processed row (not now() — avoids skipping rows when >500 pending)
+    last_created = rows[-1]["created_at"]
+    await redis.set(FEEDBACK_CURSOR_KEY, last_created.isoformat())
 
     return len(feedback)
 
