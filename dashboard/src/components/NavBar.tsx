@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser, Info, Users2 } from 'lucide-react'
+import { Key, Cpu, BarChart2, Settings, X, ListTodo, Layers, MessageSquare, Plug, Menu, Network, Brain, LogOut, ChevronDown, CircleUser, Info, Users2, Target } from 'lucide-react'
 import clsx from 'clsx'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
@@ -8,6 +8,7 @@ import { hasMinRole, type Role } from '../lib/roles'
 
 const mainLinks = [
   { to: '/',         label: 'Chat',     icon: MessageSquare    },
+  { to: '/goals',    label: 'Goals',    icon: Target           },
   { to: '/tasks',    label: 'Tasks',    icon: ListTodo         },
   { to: '/pods',     label: 'Pods',     icon: Layers           },
   { to: '/usage',    label: 'Usage',    icon: BarChart2        },

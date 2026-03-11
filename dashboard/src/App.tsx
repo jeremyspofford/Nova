@@ -17,6 +17,7 @@ import { Tasks } from './pages/Tasks'
 import { Pods } from './pages/Pods'
 import { AgentEndpoints } from './pages/AgentEndpoints'
 import { EngramExplorer } from './pages/EngramExplorer'
+import { Goals } from './pages/Goals'
 import { Recovery } from './pages/Recovery'
 import { RemoteAccess } from './pages/RemoteAccess'
 import { About } from './pages/About'
@@ -126,6 +127,7 @@ function AppShell() {
             <Route path="/mcp"     element={<PageShell><MCP /></PageShell>} />
             <Route path="/agents"  element={<PageShell><AgentEndpoints /></PageShell>} />
             <Route path="/engrams" element={<PageShell><EngramExplorer /></PageShell>} />
+            <Route path="/goals" element={<PageShell><Goals /></PageShell>} />
             <Route path="/models"   element={<PageShell><Models /></PageShell>} />
             <Route path="/users"    element={<PageShell><Users /></PageShell>} />
             <Route path="/settings" element={<PageShell><Settings /></PageShell>} />
