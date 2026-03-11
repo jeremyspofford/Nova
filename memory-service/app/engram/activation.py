@@ -1,0 +1,221 @@
+"""
+Spreading activation engine — Phase 2 of the Engram Network.
+
+Replaces cosine similarity search with graph-based associative retrieval.
+Activation flows from seed engrams through weighted edges, with convergent
+amplification boosting engrams reached by multiple independent paths.
+"""
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.embedding import get_embedding
+from app.embedding import to_pg_vector
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class ActivatedEngram:
+    """An engram with its computed activation score."""
+    id: str
+    type: str
+    content: str
+    activation: float
+    importance: float
+    confidence: float
+    convergence_paths: int
+    final_score: float
+    access_count: int
+    last_accessed: datetime | None = None
+    created_at: datetime | None = None
+    fragments: dict | None = None
+    source_type: str = "chat"
+
+
+async def spreading_activation(
+    session: AsyncSession,
+    query: str,
+    seed_count: int | None = None,
+    max_hops: int | None = None,
+    decay_factor: float | None = None,
+    activation_threshold: float | None = None,
+    max_results: int | None = None,
+    tenant_id: str = "00000000-0000-0000-0000-000000000001",
+) -> list[ActivatedEngram]:
+    """Run spreading activation over the engram graph.
+
+    1. Embed query → find top-N seeds by cosine similarity
+    2. Spread activation through edges (recursive CTE)
+    3. Apply convergent amplification
+    4. Rank by final_score = activation × importance × recency_boost
+    """
+    seed_count = seed_count or settings.engram_seed_count
+    max_hops = max_hops or settings.engram_max_hops
+    decay_factor = decay_factor or settings.engram_decay_factor
+    activation_threshold = activation_threshold or settings.engram_activation_threshold
+    max_results = max_results or settings.engram_max_results
+
+    # Get query embedding
+    query_embedding = await get_embedding(query, session)
+    embedding_str = to_pg_vector(query_embedding)
+
+    # Run the spreading activation CTE
+    # The CTE spreads activation through edges, tracking paths for convergence.
+    # We also follow edges in reverse (target→source) since associations are bidirectional.
+    result = await session.execute(
+        text("""
+            WITH RECURSIVE activation_spread AS (
+                -- Seeds: top-N by cosine similarity
+                SELECT
+                    e.id,
+                    (1 - (e.embedding <=> CAST(:embedding AS halfvec)))::real AS activation,
+                    0 AS hop,
+                    ARRAY[e.id] AS path
+                FROM engrams e
+                WHERE NOT e.superseded
+                  AND e.embedding IS NOT NULL
+                  AND e.tenant_id = CAST(:tenant_id AS uuid)
+                ORDER BY e.embedding <=> CAST(:embedding AS halfvec)
+                LIMIT :seed_count
+
+                UNION ALL
+
+                -- Spread through forward edges
+                SELECT
+                    neighbor.id,
+                    LEAST(1.0, spread.activation * edge.weight * :decay_factor)::real AS activation,
+                    spread.hop + 1,
+                    spread.path || neighbor.id
+                FROM activation_spread spread
+                JOIN engram_edges edge ON edge.source_id = spread.id
+                JOIN engrams neighbor ON neighbor.id = edge.target_id
+                WHERE spread.hop < :max_hops
+                  AND NOT neighbor.superseded
+                  AND edge.relation != 'contradicts'
+                  AND NOT (neighbor.id = ANY(spread.path))
+                  AND (spread.activation * edge.weight * :decay_factor) > :threshold
+
+                UNION ALL
+
+                -- Spread through reverse edges (bidirectional)
+                SELECT
+                    neighbor.id,
+                    LEAST(1.0, spread.activation * edge.weight * :decay_factor)::real AS activation,
+                    spread.hop + 1,
+                    spread.path || neighbor.id
+                FROM activation_spread spread
+                JOIN engram_edges edge ON edge.target_id = spread.id
+                JOIN engrams neighbor ON neighbor.id = edge.source_id
+                WHERE spread.hop < :max_hops
+                  AND NOT neighbor.superseded
+                  AND edge.relation != 'contradicts'
+                  AND NOT (neighbor.id = ANY(spread.path))
+                  AND (spread.activation * edge.weight * :decay_factor) > :threshold
+            )
+            SELECT
+                a.id,
+                e.type,
+                e.content,
+                e.importance,
+                e.confidence,
+                e.access_count,
+                e.last_accessed,
+                e.created_at,
+                e.fragments::text,
+                e.source_type,
+                MAX(a.activation) AS activation,
+                COUNT(DISTINCT a.path[1]) AS convergence_paths
+            FROM activation_spread a
+            JOIN engrams e ON e.id = a.id
+            GROUP BY a.id, e.type, e.content, e.importance, e.confidence,
+                     e.access_count, e.last_accessed, e.created_at, e.fragments, e.source_type
+            ORDER BY
+                MAX(a.activation)
+                * (1 + 0.2 * GREATEST(0, COUNT(DISTINCT a.path[1]) - 1))
+                * e.importance
+                DESC
+            LIMIT :max_results
+        """),
+        {
+            "embedding": embedding_str,
+            "tenant_id": tenant_id,
+            "seed_count": seed_count,
+            "max_hops": max_hops,
+            "decay_factor": decay_factor,
+            "threshold": activation_threshold,
+            "max_results": max_results,
+        },
+    )
+
+    now = datetime.now(timezone.utc)
+    activated = []
+    for row in result:
+        # Recency boost: 1.0 + 0.5 * max(0, 1 - days/30)
+        days = 30.0
+        if row.last_accessed:
+            la = row.last_accessed
+            if la.tzinfo is None:
+                la = la.replace(tzinfo=timezone.utc)
+            days = max((now - la).total_seconds() / 86400, 0.001)
+        recency_boost = 1.0 + 0.5 * max(0, 1 - days / 30)
+
+        # Convergent amplification
+        convergence_bonus = 1.0 + 0.2 * max(0, row.convergence_paths - 1)
+
+        final_score = row.activation * row.importance * recency_boost * convergence_bonus
+
+        import json as _json
+        fragments = None
+        if row.fragments:
+            try:
+                fragments = _json.loads(row.fragments)
+            except Exception:
+                pass
+
+        activated.append(ActivatedEngram(
+            id=str(row.id),
+            type=row.type,
+            content=row.content,
+            activation=row.activation,
+            importance=row.importance,
+            confidence=row.confidence,
+            convergence_paths=row.convergence_paths,
+            final_score=final_score,
+            access_count=row.access_count,
+            last_accessed=row.last_accessed,
+            created_at=row.created_at,
+            fragments=fragments,
+            source_type=row.source_type,
+        ))
+
+    # Update last_accessed and access_count for retrieved engrams
+    if activated:
+        ids = [a.id for a in activated]
+        await _touch_accessed(session, ids)
+
+    activated.sort(key=lambda a: a.final_score, reverse=True)
+    return activated
+
+
+async def _touch_accessed(session: AsyncSession, ids: list[str]) -> None:
+    """Bump access_count and last_accessed for retrieved engrams."""
+    try:
+        await session.execute(
+            text("""
+                UPDATE engrams
+                SET access_count = access_count + 1,
+                    last_accessed = NOW(),
+                    activation = LEAST(1.0, activation + 0.1 * (1.0 - activation))
+                WHERE id = ANY(CAST(:ids AS uuid[]))
+            """),
+            {"ids": ids},
+        )
+    except Exception:
+        log.warning("Failed to touch accessed engrams", exc_info=True)

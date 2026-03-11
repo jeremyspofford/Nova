@@ -14,7 +14,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.retrieval import to_pg_vector
 
 log = logging.getLogger(__name__)
 
@@ -203,3 +202,8 @@ async def _call_llm_gateway_batch(texts: list[str], model: str) -> list[list[flo
 def _parse_pg_vector(vec_str: str) -> list[float]:
     """Parse PostgreSQL vector string '[0.1,0.2,...]' to Python list."""
     return [float(x) for x in vec_str.strip("[]").split(",")]
+
+
+def to_pg_vector(embedding: list[float]) -> str:
+    """Serialize a Python list of floats into a pgvector-compatible string."""
+    return "[" + ",".join(str(v) for v in embedding) + "]"
