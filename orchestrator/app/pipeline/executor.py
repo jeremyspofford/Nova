@@ -308,6 +308,7 @@ async def _run_pipeline(task_id: str) -> None:
 
     # ── Backfill training log success status ──────────────────────────────
     await _backfill_training_success(task_id, success=True)
+    await _backfill_outcome_scores(task_id)
 
     # ── Pipeline complete ──────────────────────────────────────────────────
     task_result = state.completed.get("task", {})
@@ -504,6 +505,31 @@ async def _run_agent(
             stage_verdict=result.get("verdict") if agent.role == "code_review" else None,
         )
 
+        # Score stage outcome for adaptive routing
+        try:
+            _oscore, _oconf = _score_stage_outcome(agent.role, result, state.flags)
+            _meta = {
+                "task_type": _task_type,
+                "stage": agent.role,
+                "task_id": task_id,
+            }
+            from app.usage import log_usage
+            log_usage(
+                api_key_id=None,
+                agent_id=None,
+                session_id=session_id,
+                model=model,
+                input_tokens=instance._usage.get("input_tokens", 0),
+                output_tokens=instance._usage.get("output_tokens", 0),
+                cost_usd=instance._usage.get("cost_usd"),
+                duration_ms=elapsed_ms,
+                metadata=_meta,
+                outcome_score=_oscore,
+                outcome_confidence=_oconf,
+            )
+        except Exception as exc:
+            logger.debug("Stage outcome scoring failed: %s", exc)
+
         return result, session_id
 
     except Exception as exc:
@@ -598,6 +624,39 @@ async def _persist_stage_records(
                     )
     except Exception as exc:
         logger.warning("Failed to persist stage records for %s/%s: %s", task_id, agent.role, exc)
+
+
+def _score_stage_outcome(role: str, result: dict, flags: set[str]) -> tuple[float, float]:
+    """Compute outcome score + confidence for a pipeline stage.
+
+    Returns (score, confidence) where both are 0.0-1.0.
+    """
+    if role == "guardrail":
+        if result.get("blocked"):
+            return 0.2, 0.95
+        return 0.9, 0.95
+
+    if role == "code_review":
+        verdict = result.get("verdict", "pass")
+        if verdict == "pass":
+            return 0.85, 0.9
+        if verdict == "needs_refactor":
+            return 0.5, 0.85
+        return 0.2, 0.9  # reject
+
+    if role == "task":
+        if result.get("error") or not result.get("output"):
+            return 0.3, 0.9
+        return 0.8, 0.8
+
+    if role == "context":
+        return 0.7, 0.6
+
+    if role == "decision":
+        return 0.7, 0.6
+
+    # Unknown role — neutral
+    return 0.5, 0.5
 
 
 # ── Status / DB helpers ────────────────────────────────────────────────────────
@@ -1107,6 +1166,24 @@ async def _backfill_training_success(task_id: str, success: bool) -> None:
             )
     except Exception as exc:
         logger.debug("Training log backfill failed for %s: %s", task_id, exc)
+
+
+async def _backfill_outcome_scores(task_id: str) -> None:
+    """Bump outcome scores +0.1 for all usage events in a successful pipeline task."""
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE usage_events
+                SET outcome_score = LEAST(1.0, outcome_score + 0.1)
+                WHERE outcome_score IS NOT NULL
+                  AND metadata->>'task_id' = $1
+                """,
+                task_id,
+            )
+    except Exception as exc:
+        logger.debug("Outcome score backfill failed for %s: %s", task_id, exc)
 
 
 async def _audit(
