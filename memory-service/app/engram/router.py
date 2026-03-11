@@ -189,6 +189,7 @@ async def get_engram_context(
             "key_decisions": bool(ctx.key_decisions),
             "open_threads": bool(ctx.open_threads),
         },
+        "engram_ids": ctx.engram_ids,
     }
 
 
