@@ -50,8 +50,8 @@ def _score_by_keywords(user_msg: str) -> tuple[float, float] | None:
     if len(text) < 30 and _ACKNOWLEDGMENT_PATTERNS.match(text):
         return 0.9, 0.85
 
-    # Correction
-    if _CORRECTION_PATTERNS.match(text):
+    # Correction (length-bounded to avoid false positives on long messages)
+    if len(text) < 200 and _CORRECTION_PATTERNS.match(text):
         return 0.4, 0.8
 
     return None
@@ -204,7 +204,7 @@ async def _process_new_messages() -> int:
             # Find matching usage_event (session_id = conversation_id, within 120s)
             # PostgreSQL doesn't allow ORDER BY/LIMIT in UPDATE — use subquery
             ref_time = assistant_row["created_at"]
-            await conn.execute(
+            result = await conn.execute(
                 """
                 UPDATE usage_events
                 SET outcome_score = $3, outcome_confidence = $4
@@ -223,7 +223,8 @@ async def _process_new_messages() -> int:
                 confidence,
             )
 
-            scores_written += 1
+            if result and result != "UPDATE 0":
+                scores_written += 1
 
     # Update cursor
     await redis.set(CURSOR_KEY, new_cursor.isoformat())
@@ -248,7 +249,7 @@ async def _check_abandonments() -> int:
               AND ue.created_at < $1
               AND NOT EXISTS (
                   SELECT 1 FROM messages m
-                  WHERE m.conversation_id::text = ue.session_id
+                  WHERE m.conversation_id = ue.session_id::uuid
                     AND m.role = 'user'
                     AND m.created_at > ue.created_at
               )
@@ -296,8 +297,9 @@ async def _compute_conversation_scores() -> int:
         for row in rows:
             sid = row["session_id"]
 
-            # Check dedup — skip if already scored recently
-            if await redis.sismember(SCORED_CONVOS_KEY, sid):
+            # Check dedup — skip if already scored recently (per-key TTL)
+            dedup_key = f"{SCORED_CONVOS_KEY}:{sid}"
+            if await redis.exists(dedup_key):
                 continue
 
             # Get all scored turns for this session, ordered by time
@@ -314,7 +316,10 @@ async def _compute_conversation_scores() -> int:
             if not turns:
                 continue
 
-            # Weighted average biased toward final turns
+            # Weighted average biased toward final turns.
+            # Weights ramp linearly from 0.5 (first turn) to 1.0 (last turn).
+            # For n=1, max(n-1,1) prevents division by zero → weight is 0.5,
+            # so single-turn score passes through unchanged.
             n = len(turns)
             weights = [0.5 + 0.5 * (i / max(n - 1, 1)) for i in range(n)]
             total_w = sum(weights)
@@ -343,9 +348,8 @@ async def _compute_conversation_scores() -> int:
                 n,
             )
 
-            # Mark as scored (2h expiry)
-            await redis.sadd(SCORED_CONVOS_KEY, sid)
-            await redis.expire(SCORED_CONVOS_KEY, 7200)
+            # Mark as scored (2h per-key expiry — won't grow unboundedly)
+            await redis.set(dedup_key, "1", ex=7200)
 
             scores_written += 1
 

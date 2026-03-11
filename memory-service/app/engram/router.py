@@ -414,9 +414,18 @@ async def get_graph(
 # ── Phase 7: Outcome Feedback ───────────────────────────────────────────
 
 
+from pydantic import BaseModel as _BaseModel
+
+
+class OutcomeFeedbackEntry(_BaseModel):
+    engram_id: str
+    outcome_score: float
+    task_type: str = "unknown"
+
+
 @engram_router.post("/outcome-feedback")
-async def receive_outcome_feedback(feedback: list[dict]):
+async def receive_outcome_feedback(feedback: list[OutcomeFeedbackEntry]):
     """Receive outcome scores and adjust engram activation/importance/edges."""
     async with get_db() as session:
-        stats = await process_feedback(session, feedback)
+        stats = await process_feedback(session, [e.model_dump() for e in feedback])
     return {"status": "ok", **stats}

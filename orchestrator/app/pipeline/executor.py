@@ -1169,16 +1169,23 @@ async def _backfill_training_success(task_id: str, success: bool) -> None:
 
 
 async def _backfill_outcome_scores(task_id: str) -> None:
-    """Bump outcome scores +0.1 for all usage events in a successful pipeline task."""
+    """Bump outcome scores for all usage events in a successful pipeline task.
+
+    Events with an existing score get +0.1 (capped at 1.0).
+    Events with NULL score (inline scoring failed) get a baseline 0.7.
+    """
     try:
         pool = get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE usage_events
-                SET outcome_score = LEAST(1.0, outcome_score + 0.1)
-                WHERE outcome_score IS NOT NULL
-                  AND metadata->>'task_id' = $1
+                SET outcome_score = CASE
+                        WHEN outcome_score IS NOT NULL
+                            THEN LEAST(1.0, outcome_score + 0.1)
+                        ELSE 0.7
+                    END
+                WHERE metadata->>'task_id' = $1
                 """,
                 task_id,
             )

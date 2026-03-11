@@ -20,3 +20,8 @@ CREATE INDEX IF NOT EXISTS idx_conversation_outcomes_conv
 CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
     ON usage_events (session_id, created_at)
     WHERE session_id IS NOT NULL;
+
+-- Functional index for backfill query: find usage events by task_id in metadata
+CREATE INDEX IF NOT EXISTS idx_usage_events_metadata_task_id
+    ON usage_events ((metadata->>'task_id'))
+    WHERE metadata->>'task_id' IS NOT NULL;

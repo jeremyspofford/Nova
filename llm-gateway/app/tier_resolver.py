@@ -182,19 +182,22 @@ async def _resolve_tier_to_model(
     # Try requested tier, then fall back to lower tiers
     tier_idx = TIER_ORDER.index(tier) if tier in TIER_ORDER else 0
     for try_tier in TIER_ORDER[tier_idx:]:
-        candidates = prefs.get(try_tier, [])
+        all_candidates = prefs.get(try_tier, [])
 
         # Filter by effectiveness if we have data for this task_type
+        candidates = all_candidates
         if task_type and effectiveness:
             threshold = QUALITY_THRESHOLDS.get(try_tier, 0.5)
             candidates = _filter_by_effectiveness(
-                candidates, task_type, effectiveness, threshold,
+                all_candidates, task_type, effectiveness, threshold,
             )
 
-        # Exploration: occasionally try undersampled models
+        # Exploration: occasionally try undersampled models from the
+        # unfiltered list — this lets models that fell below the quality
+        # threshold get re-tested and potentially recover.
         if task_type and effectiveness and random.random() < EXPLORE_RATE:
             undersampled = [
-                m for m in candidates
+                m for m in all_candidates
                 if _sample_count(m, task_type, effectiveness) < EXPLORE_MIN_SAMPLES
             ]
             if undersampled:
