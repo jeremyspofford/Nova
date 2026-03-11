@@ -77,7 +77,7 @@ Pipeline completes
 Cortex maps its cycle outcome to a score and POSTs to the orchestrator's usage event endpoint:
 
 ```
-POST /api/v1/usage
+POST /api/v1/usage/events
 {
   "model": "<model used for planning>",
   "outcome_score": 0.7,
@@ -86,7 +86,7 @@ POST /api/v1/usage
 }
 ```
 
-This keeps data ownership clean — cortex doesn't write to the orchestrator's DB directly.
+This keeps data ownership clean — cortex doesn't write to the orchestrator's DB directly. The endpoint is `POST /api/v1/usage/events` (not `/api/v1/usage`) to avoid confusion with the existing `GET /api/v1/usage` admin reporting endpoint.
 
 ### 2.4 Chat Async Scorer
 
@@ -99,16 +99,18 @@ This keeps data ownership clean — cortex doesn't write to the orchestrator's D
 2. For each new user message, look at the preceding assistant message
 3. Apply heuristic detection (keyword matching first, embedding similarity only when needed)
 4. Compute score + confidence
-5. Find the corresponding `usage_events` row via `session_id` + timestamp proximity
-6. Write `outcome_score` and `outcome_confidence`
+5. Find the corresponding `usage_events` row by matching `session_id` (which equals `conversation_id` for authenticated users) and `created_at` within a 120-second window before the assistant message's `created_at`. If multiple rows match, pick the one closest in time. As a future improvement, the `log_usage()` call can store a `usage_event_id` in the message metadata for exact joins.
+6. UPDATE the matched `usage_events` row to set `outcome_score` and `outcome_confidence`
 
 **Embedding cost management:** Keyword-based heuristics (correction detection, acknowledgment) run first — they're free. Embedding-based heuristics (rephrasing, topic change) only run if keyword heuristics didn't produce a high-confidence result. Embeddings are batched per scoring pass and use the cheap tier.
 
-**Tracking state:** A `chat_scorer_cursor` key in Redis stores the timestamp of the last processed message, so the scorer doesn't reprocess old messages on restart.
+**Tracking state:** A `nova:state:chat_scorer_cursor` key in Redis stores the timestamp of the last processed message, so the scorer doesn't reprocess old messages on restart.
 
 ### 2.5 Conversation-Level Success Score
 
 When a conversation goes quiet (no new message for 30+ min), the chat scorer computes a session-level score: a weighted average of per-turn scores, biased toward the final turns (most recent turns weighted highest).
+
+**Dedup:** Before computing, check if a `conversation_outcomes` row already exists for this conversation with `computed_at` within the last hour. If so, skip. Track recently-scored conversation IDs in a Redis set (`nova:state:scored_conversations`, entries expire after 2 hours) for fast lookup.
 
 This is stored as a standalone metric in a new `conversation_outcomes` table:
 
@@ -132,12 +134,23 @@ When the orchestrator assembles memory context for an LLM call (pipeline or chat
 ```json
 {
   "task_type": "chat",
+  "task_id": "uuid-of-pipeline-task",
   "engram_ids": ["uuid-1", "uuid-2", "uuid-3"],
   "retrieval_log_id": "uuid-of-retrieval-log-entry"
 }
 ```
 
-This creates a traceable path from outcome score → specific memories, enabling the outcome-weighted memory feedback loop (Section 5).
+This creates a traceable path from outcome score → specific memories, enabling the outcome-weighted memory feedback loop (Section 5). The `task_id` field enables pipeline success backfill (matching usage_events to their pipeline task via `metadata->>'task_id'`).
+
+### 3.1 Plumbing Changes Required
+
+The engram ID path does not exist today — the following changes create it:
+
+1. **Memory service `/api/v1/engrams/context` response** (`memory-service/app/engram/router.py`): Add `engram_ids: list[str]` to the response body alongside the existing `context`, `sections`, and `total_tokens` fields. The working memory gate already has the activated engram IDs internally — they just need to be included in the response.
+
+2. **Orchestrator `_get_memory_context()`** (`orchestrator/app/agents/runner.py`): Update the return type from `tuple[str, int]` to a dataclass or named tuple that includes `engram_ids: list[str]`. Update callers (`run_agent_turn()` and `run_agent_turn_streaming()`) to destructure the new return type.
+
+3. **Orchestrator `log_usage()` wrapper** (`orchestrator/app/usage.py`): Extend to accept optional `metadata`, `outcome_score`, and `outcome_confidence` kwargs and pass them through to `insert_usage_event()`. The call sites in `runner.py` then pass `metadata={"engram_ids": engram_ids, "task_type": "chat"}` when memory context was used.
 
 ## 4. Scoring Confidence and Weighted Effectiveness Matrix
 
@@ -180,11 +193,14 @@ An hourly background job in the orchestrator reads recent outcome scores with as
 ```
 orchestrator (hourly, alongside effectiveness matrix computation)
   → query usage_events WHERE outcome_score IS NOT NULL
-    AND metadata->>'engram_ids' IS NOT NULL
+    AND metadata->'engram_ids' IS NOT NULL
     AND created_at > last_feedback_run
+  → extract engram_ids from metadata JSON array: metadata->'engram_ids'
   → POST /api/v1/engrams/outcome-feedback
     body: [{ "engram_id": "uuid", "outcome_score": 0.85, "task_type": "chat" }, ...]
 ```
+
+**Cursor tracking:** The last-run timestamp is stored in Redis at `nova:state:outcome_feedback_cursor` (set after each successful batch). On first run or after Redis flush, defaults to `NOW() - INTERVAL '1 hour'`.
 
 ### 5.3 Memory Service Adjustments
 
@@ -197,10 +213,14 @@ For each engram in the batch:
 - Score < 0.4: no activation change (don't punish — the memory might be fine, the model might have fumbled)
 
 **Importance recalibration (rolling):**
-- Track a rolling outcome average per engram (stored in engram metadata or a lightweight table)
+- Track rolling outcome stats per engram via three new columns on the `engrams` table (memory-service migration):
+  - `outcome_avg REAL DEFAULT NULL` — rolling average of outcome scores
+  - `outcome_count INTEGER DEFAULT 0` — number of outcome observations
+  - `last_recalibrated_at TIMESTAMPTZ DEFAULT NULL` — prevents recalibrating more than once per day
+- Updated incrementally: `outcome_avg = (outcome_avg * outcome_count + new_score) / (outcome_count + 1)`, then `outcome_count += 1`
 - When an engram has 5+ outcome observations with avg > 0.7: nudge importance up by 0.05 (capped at 1.0)
 - When an engram has 5+ outcome observations with avg < 0.4: nudge importance down by 0.05 (floor at 0.1)
-- Recalibration happens at most once per engram per day to prevent jitter
+- Recalibration happens at most once per engram per day (`last_recalibrated_at` check) to prevent jitter
 
 **Outcome-driven Hebbian learning:**
 - When multiple engrams from the same interaction both appear in a high-scoring outcome (>0.7): strengthen edges between them (`co_activations += 1`, `weight += 0.02`, capped at 1.0)
@@ -246,25 +266,32 @@ Without intervention, the effectiveness matrix creates a positive feedback loop:
 
 ### 7.2 Solution: Explore/Exploit
 
-In the tier resolver (`llm-gateway/app/tier_resolver.py`), after selecting the top model from the preference list, apply an exploration check:
+In the tier resolver (`llm-gateway/app/tier_resolver.py`), inside `_resolve_tier_to_model()`, apply exploration *before* iterating the candidate list. The current function iterates candidates in preference order and returns the first available one — there is no single "top model" to override. Instead:
 
 ```python
 import random
 
 EXPLORE_RATE = 0.05  # 5% of requests
 
-def _maybe_explore(top_model, candidates, task_type, effectiveness):
-    if random.random() > EXPLORE_RATE:
-        return top_model  # exploit (95% of the time)
-
-    # Find candidates with insufficient data (< 50 samples for this task_type)
-    undersampled = [m for m in candidates if _sample_count(m, task_type, effectiveness) < 50]
+# Inside _resolve_tier_to_model(), before the candidate iteration loop:
+if task_type and random.random() < EXPLORE_RATE:
+    # Exploration mode: filter to undersampled models, pick randomly
+    undersampled = [
+        m for m in candidates
+        if _sample_count(m, task_type, effectiveness) < EXPLORE_MIN_SAMPLES
+        and _is_available(m)  # check provider + rate limit
+    ]
     if undersampled:
-        return random.choice(undersampled)
+        chosen = random.choice(undersampled)
+        log.info("Exploration: tier=%s task_type=%s → %s (undersampled)", tier, task_type, chosen)
+        return _resolve_virtual(chosen)
 
-    # All models well-sampled — no exploration needed
-    return top_model
+# Normal exploitation path: iterate in preference order (existing code)
+for model_id in candidates:
+    ...
 ```
+
+This way exploration only fires when there are undersampled models to try, and falls through to normal preference-ordered iteration otherwise.
 
 ### 7.3 Decay
 
@@ -349,7 +376,7 @@ CREATE INDEX IF NOT EXISTS idx_usage_events_session_created
 ### 9.2 New Endpoint: Orchestrator
 
 ```
-POST /api/v1/usage
+POST /api/v1/usage/events
 {
   "model": "string",
   "input_tokens": 0,
@@ -389,15 +416,19 @@ Accepts a batch of outcome signals and applies activation/importance/edge adjust
 
 | File | Change |
 |------|--------|
-| `orchestrator/app/pipeline/executor.py` | Add `_score_stage_outcome()`, `_backfill_outcome_scores()` |
+| `orchestrator/app/pipeline/executor.py` | Add `_score_stage_outcome()`, `_backfill_outcome_scores()` (backfill matches via `metadata->>'task_id'`) |
 | `orchestrator/app/db.py` | Add `outcome_confidence` param to `insert_usage_event()` |
+| `orchestrator/app/usage.py` | Extend `log_usage()` to accept optional `metadata`, `outcome_score`, `outcome_confidence` kwargs |
 | `orchestrator/app/effectiveness.py` | Confidence-weighted aggregation, failure pattern detection, memory outcome feedback batch |
 | `orchestrator/app/main.py` | Start chat_scorer background loop in lifespan |
-| `orchestrator/app/router.py` | Add `POST /api/v1/usage` endpoint |
-| `cortex/app/cycle.py` | Score cycle outcomes, POST to orchestrator usage endpoint |
-| `llm-gateway/app/tier_resolver.py` | Add exploration budget logic in `_resolve_tier_to_model()` |
-| `memory-service/app/main.py` | Register outcome-feedback endpoint |
-| `memory-service/app/engram/` | New module or extension for outcome feedback processing (activation, importance, edge adjustments) |
+| `orchestrator/app/router.py` | Add `POST /api/v1/usage/events` endpoint for external services |
+| `orchestrator/app/agents/runner.py` | Update `_get_memory_context()` return type to include engram_ids; thread into `log_usage()` calls |
+| `cortex/app/cycle.py` | Score cycle outcomes, POST to orchestrator usage/events endpoint |
+| `cortex/app/drives/learn.py` | Read `nova:signals:capability_gaps` from Redis in `assess()` |
+| `llm-gateway/app/tier_resolver.py` | Add exploration budget logic before candidate iteration in `_resolve_tier_to_model()` |
+| `memory-service/app/engram/router.py` | Add `engram_ids` to `/api/v1/engrams/context` response; register outcome-feedback endpoint |
+| `memory-service/app/engram/` | New module for outcome feedback processing (activation, importance, edge adjustments) |
+| `memory-service/` | Migration adding `outcome_avg`, `outcome_count`, `last_recalibrated_at` columns to `engrams` table |
 
 ## 11. Future Enhancements (Out of Scope)
 
