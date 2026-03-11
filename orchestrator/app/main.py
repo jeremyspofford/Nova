@@ -112,15 +112,19 @@ async def lifespan(app: FastAPI):
     # Start background tasks — stored so we can cancel on shutdown
     _queue_task   = asyncio.create_task(queue_worker(),             name="queue-worker")
     _reaper_task  = asyncio.create_task(reaper_loop(),              name="reaper")
-    log.info("Queue worker and reaper started")
+
+    from app.effectiveness import effectiveness_loop
+    _effectiveness_task = asyncio.create_task(effectiveness_loop(), name="effectiveness")
+    log.info("Queue worker, reaper, and effectiveness loop started")
 
     yield
 
     log.info("Orchestrator shutting down")
     _queue_task.cancel()
     _reaper_task.cancel()
+    _effectiveness_task.cancel()
     # Wait briefly for graceful shutdown
-    await asyncio.gather(_queue_task, _reaper_task, return_exceptions=True)
+    await asyncio.gather(_queue_task, _reaper_task, _effectiveness_task, return_exceptions=True)
 
     # Gracefully stop MCP server subprocesses
     from app.pipeline.tools import stop_all_servers
