@@ -172,3 +172,8 @@ CREATE TABLE IF NOT EXISTS working_memory_slots (
 
 CREATE INDEX IF NOT EXISTS idx_wm_slots_session ON working_memory_slots(session_id);
 CREATE INDEX IF NOT EXISTS idx_wm_slots_type ON working_memory_slots(slot_type);
+
+-- Outcome scoring feedback columns
+ALTER TABLE engrams ADD COLUMN IF NOT EXISTS outcome_avg REAL DEFAULT NULL;
+ALTER TABLE engrams ADD COLUMN IF NOT EXISTS outcome_count INTEGER DEFAULT 0;
+ALTER TABLE engrams ADD COLUMN IF NOT EXISTS last_recalibrated_at TIMESTAMPTZ DEFAULT NULL;
