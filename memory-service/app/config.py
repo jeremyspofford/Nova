@@ -59,6 +59,20 @@ class Settings(BaseSettings):
     engram_prune_activation_floor: float = 0.01
     engram_merge_similarity_threshold: float = 0.95
 
+    # Engram Network (Phase 5: Neural Router)
+    neural_router_enabled: bool = True
+    neural_router_min_observations: int = 200
+    neural_router_embedding_threshold: int = 1000
+    neural_router_retrain_every: int = 50
+    neural_router_candidate_count: int = 50
+    neural_router_seed_count: int = 30
+    neural_router_model_check_interval: int = 60
+    neural_router_training_epochs: int = 20
+    neural_router_learning_rate: float = 1e-3
+    neural_router_validation_split: float = 0.2
+    neural_router_min_precision_gain: float = 0.0
+    neural_router_max_inactive_models: int = 5
+
     # Service
     service_host: str = "0.0.0.0"
     service_port: int = 8002
