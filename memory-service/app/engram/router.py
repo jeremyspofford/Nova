@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, Query
 from sqlalchemy import text
 
 from nova_contracts.engram import (
@@ -163,9 +163,9 @@ async def reconstruct_memory(query: str):
 
 @engram_router.post("/context")
 async def get_engram_context(
-    query: str,
-    session_id: str = "",
-    current_turn: int = 0,
+    query: str = Body(...),
+    session_id: str = Body(""),
+    current_turn: int = Body(0),
 ):
     """Assemble the full working memory context for a query.
 

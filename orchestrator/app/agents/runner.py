@@ -302,7 +302,7 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
     try:
         resp = await memory_client.post(
             "/api/v1/engrams/context",
-            params={"query": query, "session_id": session_id},
+            json={"query": query, "session_id": session_id},
         )
         if resp.status_code != 200:
             return "", 0, []
