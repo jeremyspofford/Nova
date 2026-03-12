@@ -1,12 +1,13 @@
 """
-Engram Network API router — Phases 1-6.
+Engram Network API router — Phases 1-7.
 
 Phase 1: POST /ingest, GET /stats
 Phase 2: POST /activate, POST /reconstruct
 Phase 3: POST /context, GET /self-model, POST /self-model/bootstrap
 Phase 4: POST /consolidate, GET /consolidation-log
-Phase 5: GET /router-status
+Phase 5: GET /router-status, POST /mark-used
 Phase 6: GET /graph
+Phase 7: POST /outcome-feedback
 """
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ from .consolidation import bootstrap_self_model, run_consolidation
 from .ingestion import ingest_direct
 from .outcome_feedback import process_feedback
 from .reconstruction import get_self_model_summary, reconstruct
-from .retrieval_logger import get_observation_count
+from .neural_router.serve import get_cached_model
+from .retrieval_logger import get_labeled_observation_count, get_observation_count, mark_engrams_used
 from .working_memory import assemble_context, format_context_prompt
 
 log = logging.getLogger(__name__)
@@ -191,6 +193,7 @@ async def get_engram_context(
             "open_threads": bool(ctx.open_threads),
         },
         "engram_ids": ctx.engram_ids,
+        "retrieval_log_id": ctx.retrieval_log_id,
     }
 
 
@@ -264,24 +267,54 @@ async def get_consolidation_log(limit: int = Query(default=20, le=100)):
     }
 
 
-# ── Phase 5: Neural Router Status ─────────────────────────────────────
+# ── Phase 5: Neural Router Status & Mark-Used ─────────────────────────
 
 
 @engram_router.get("/router-status")
 async def router_status():
-    """Check Neural Router readiness (needs 200+ observations)."""
+    """Neural Router status: mode, model info, observation counts."""
     async with get_db() as session:
-        count = await get_observation_count(session)
+        obs_count = await get_observation_count(session)
+        labeled_count = await get_labeled_observation_count(session)
+
+    model, arch = get_cached_model()
+
+    if model is not None:
+        mode = "embedding_reranker" if arch == "embedding" else "scalar_reranker"
+    elif obs_count >= 200:
+        mode = "ready_for_training"
+    else:
+        mode = "cosine_only"
+
     return {
-        "observation_count": count,
-        "ready": count >= 200,
-        "phase": "logging" if count < 200 else "ready_for_training",
+        "observation_count": obs_count,
+        "labeled_count": labeled_count,
+        "mode": mode,
+        "model_loaded": model is not None,
+        "architecture": arch,
+        "ready_for_training": labeled_count >= 200,
         "message": (
-            f"Collecting observations: {count}/200"
-            if count < 200
-            else f"Ready for training with {count} observations"
+            f"Active: {mode} ({obs_count} observations, {labeled_count} labeled)"
+            if model is not None
+            else f"Collecting observations: {labeled_count}/200 labeled"
         ),
     }
+
+
+@engram_router.post("/mark-used")
+async def mark_used(
+    retrieval_log_id: str = Body(...),
+    engram_ids_used: list[str] = Body(...),
+):
+    """Mark which engrams were actually used from a retrieval context.
+
+    Called by the orchestrator after the LLM response to provide ground
+    truth for Neural Router training.
+    """
+    async with get_db() as session:
+        await mark_engrams_used(session, retrieval_log_id, engram_ids_used)
+        await session.commit()
+    return {"status": "ok"}
 
 
 # ── Phase 6: Graph Visualization ───────────────────────────────────────
