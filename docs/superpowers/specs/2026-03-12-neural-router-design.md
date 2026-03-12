@@ -42,11 +42,24 @@ This is analogous to how human memory works: generic similarity gets you into th
 
 ### Trigger
 
-Memory-service pushes a Redis message to `neural_router:train_signal` when new observations since last training exceed a configurable threshold (default: 50 observations). The training container listens via BRPOP.
+Memory-service pushes a Redis message to `neural_router:train_signal` (on Redis db6 — dedicated to neural router, avoiding eviction conflicts with embedding cache on db0) when new observations since last training exceed a configurable threshold (default: 50 observations). The training container listens via BRPOP.
+
+**Startup probe:** On startup, the training container checks if any tenant has >= `neural_router_min_observations` observations with no active model. If so, it enqueues a synthetic train signal rather than waiting passively. This handles restarts, crashes, and first-time deployments where observations already exist.
+
+### Engram Usage Feedback (orchestrator → memory-service)
+
+The training pipeline depends on `retrieval_log.engrams_used` being populated after the LLM responds. The orchestrator is responsible for this callback:
+
+1. The `/api/v1/engrams/context` response includes `engram_ids` (already implemented)
+2. After the LLM response, the orchestrator calls `POST /api/v1/engrams/mark-used` with the `retrieval_log.id` and the subset of `engram_ids` that were relevant to the response
+3. Relevance determination: the orchestrator checks whether the LLM's response references content from the engram context sections. A simple heuristic (substring overlap or embedding similarity between response and engram content) is sufficient — precision matters more than recall here since false negatives just mean slightly fewer training labels.
+4. If the callback fails, `engrams_used` stays null and the observation is excluded from training (the training query filters for non-null `engrams_used`). This is safe — missing labels reduce training data volume but never corrupt it.
+
+**Note:** The `mark-used` endpoint and orchestrator callback are new work required by this spec. The existing `mark_engrams_used()` function in `retrieval_logger.py` provides the database side; the orchestrator call and relevance heuristic are new.
 
 ### Training Data Assembly
 
-1. Query `retrieval_log` for all observations with non-null `engrams_used` for the target tenant
+1. Query `retrieval_log` for all observations with non-null `engrams_used` for the target tenant (filtered by `tenant_id`)
 2. For each observation, fetch the candidate engrams (from `engrams_surfaced`)
 3. Label: `1` if engram was in `engrams_used`, `0` if surfaced but not used
 4. Extract features per candidate (see Feature Set below)
@@ -62,7 +75,7 @@ Memory-service pushes a Redis message to `neural_router:train_signal` when new o
 | Engram activation score | 1 | From spreading activation |
 | Recency (days since accessed) | 1 | `engrams.last_accessed` |
 | Engram type | 8 (one-hot) | fact/episode/entity/preference/procedure/schema/goal/self_model |
-| Time of day (normalized 0–1) | 1 | `temporal_context.time_of_day` |
+| Time of day (normalized 0–1) | 1 | `temporal_context.time_of_day` (stored as float: `hour/24 + minute/1440`) |
 | Day of week | 7 (one-hot) | `temporal_context.day_of_week` |
 | Has active goal | 1 | `temporal_context.active_goal` is non-null |
 | Convergence paths | 1 | From spreading activation |
@@ -107,7 +120,9 @@ Concat [scalar_features(25), dot(1), diff(32)] → Linear(64) → ReLU → Linea
 
 ### Validation Gate
 
-New model must achieve validation accuracy >= previous active model's accuracy. If it doesn't, the model is stored (for debugging/analysis) but not promoted to `is_active = TRUE`. This prevents regression — a bad training run can never make retrieval worse.
+New model must achieve validation **precision@20** >= previous active model's precision@20. Raw accuracy is unsuitable because the dataset is heavily class-imbalanced (most surfaced engrams are not used — a model that always predicts 0 would achieve ~85% accuracy trivially). Precision@K directly measures what we care about: "of the top K engrams the model recommends, how many were actually used?"
+
+If the new model doesn't beat the previous one, it is stored (for debugging/analysis) but not promoted to `is_active = TRUE`. This prevents regression — a bad training run can never make retrieval worse.
 
 ---
 
@@ -115,16 +130,20 @@ New model must achieve validation accuracy >= previous active model's accuracy. 
 
 ### Model Loading
 
-On startup and every 60 seconds, memory-service checks the `neural_router_models` table for a newer active model than what's cached (simple `trained_at` comparison). If found, deserializes via `torch.load()` into eval mode. Cached in memory — no DB hit per request.
+An `asyncio` background task in memory-service checks the `neural_router_models` table every 60 seconds for a newer active model than what's cached (simple `trained_at` comparison). This runs on the event loop alongside ingestion and consolidation tasks — not inline per request — to avoid thundering-herd DB queries when many concurrent requests hit the timer simultaneously.
+
+If a newer model is found, it is deserialized using PyTorch's safe loading mode (`weights_only=True`) into eval mode. **Security requirement:** safe loading mode is mandatory — without it, the default deserialization executes arbitrary Python in the stream, which is a code execution vulnerability if the `neural_router_models` table is ever compromised. Cached in memory — no DB hit per request.
 
 ### Integration Point
 
-New function `neural_rerank()` called at the end of `spreading_activation()` in `activation.py`:
+New function `neural_rerank()` called from `assemble_context()` in `working_memory.py` — **not** inside `spreading_activation()` itself. The seed widening (10 to 30) and re-ranking only apply to the `/context` code path. Other callers of `spreading_activation()` (the `/activate` debug endpoint, `/graph` visualization, `/reconstruct`) continue using the original `engram_seed_count` of 10 with no re-ranking.
 
-1. If no trained model exists → return current results unchanged (fallback)
-2. Extract features for each candidate (cheap — data already in memory from activation query)
-3. `model(feature_tensor)` → score per candidate
-4. Sort descending, return top 20
+Flow in `assemble_context()`:
+1. Call `spreading_activation()` with `seed_count=30` (widened) and `max_results=50` (more candidates)
+2. Pass candidates to `neural_rerank(query_features, candidates)`
+3. If no trained model exists, return candidates unchanged (fallback)
+4. Extract features, run model forward pass, get score per candidate
+5. Sort descending, return top 20
 
 ### Performance
 
@@ -163,14 +182,16 @@ neural-router-trainer:
     - redis
   environment:
     - DATABASE_URL=${DATABASE_URL}
-    - REDIS_URL=${REDIS_URL}
+    - REDIS_URL=${REDIS_URL}/6   # db6 — dedicated to neural router
 ```
 
 Idles on BRPOP waiting for train signals. Lightweight — near-zero resource usage when not training.
 
-Redis DB allocation: shares memory-service's db0 (training signals are ephemeral).
+Redis DB allocation: **db6** (dedicated to neural router — avoids eviction conflicts with embedding cache on db0 under `allkeys-lru` policy).
 
 ### Database Schema
+
+**New table — `neural_router_models`:**
 
 ```sql
 CREATE TABLE IF NOT EXISTS neural_router_models (
@@ -179,7 +200,7 @@ CREATE TABLE IF NOT EXISTS neural_router_models (
     architecture        TEXT NOT NULL,          -- 'scalar' or 'embedding'
     weights             BYTEA NOT NULL,
     observation_count   INTEGER NOT NULL,
-    validation_accuracy REAL,
+    validation_precision_at_k REAL,
     is_active           BOOLEAN NOT NULL DEFAULT FALSE,
     trained_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -187,6 +208,24 @@ CREATE TABLE IF NOT EXISTS neural_router_models (
 CREATE INDEX IF NOT EXISTS idx_nrm_tenant_active
     ON neural_router_models(tenant_id) WHERE is_active;
 ```
+
+**Model retention policy:** Keep the last 5 inactive models per tenant. Training container deletes older inactive rows after each successful training run. This bounds storage growth (~5 × 500KB = ~2.5MB per tenant worst case).
+
+**Schema change to `retrieval_log` — add `tenant_id`:**
+
+```sql
+ALTER TABLE retrieval_log ADD COLUMN IF NOT EXISTS tenant_id UUID
+    NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001';
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_tenant ON retrieval_log(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_used ON retrieval_log(tenant_id)
+    WHERE engrams_used IS NOT NULL;
+```
+
+The existing `get_observation_count()` must be updated to filter by `tenant_id`. Without this, observation counts are summed across tenants, causing premature mode transitions in multi-tenant deployments.
+
+**Schema change to `retrieval_log` — store time as float:**
+
+The `temporal_context` JSONB field's `time_of_day` must be stored as a normalized float (`hour/24 + minute/1440`) rather than the current `"%H:%M"` string format. Update `retrieval_logger.py` to write the float. The feature extraction code can then use it directly without parsing.
 
 Only one row per tenant has `is_active = TRUE`. Training container promotes new model atomically:
 ```sql
@@ -210,11 +249,13 @@ COMMIT;
 
 | File | Change |
 |---|---|
-| `memory-service/app/engram/activation.py` | Widen seed count when model exists (10→30), call `neural_rerank()` before returning |
+| `memory-service/app/engram/working_memory.py` | Call `spreading_activation()` with widened seed/result counts, then `neural_rerank()` |
 | `memory-service/app/engram/router.py` | Extend `/router-status` with mode, model version, accuracy, latency |
-| `memory-service/app/engram/retrieval_logger.py` | Emit Redis train signal when observation threshold crossed |
+| `memory-service/app/engram/retrieval_logger.py` | Add tenant_id to logging, store time_of_day as float, emit Redis train signal when threshold crossed |
 | `memory-service/app/config.py` | Add neural router settings |
 | `memory-service/app/db/schema.sql` | Add `neural_router_models` table |
+| `orchestrator/app/agents/runner.py` | Add engram usage callback after LLM response (call `POST /api/v1/engrams/mark-used`) |
+| `memory-service/app/engram/router.py` | Add `POST /mark-used` endpoint, extend `/router-status` |
 | `docker-compose.yml` | Add `neural-router-trainer` service |
 | `memory-service/requirements.txt` | Add `torch` (CPU-only wheel) |
 
@@ -236,7 +277,8 @@ neural_router_model_check_interval: int = 60
 neural_router_training_epochs: int = 20
 neural_router_learning_rate: float = 1e-3
 neural_router_validation_split: float = 0.2
-neural_router_min_accuracy_gain: float = 0.0
+neural_router_min_precision_gain: float = 0.0
+neural_router_max_inactive_models: int = 5
 ```
 
 **Behavioral notes:**
@@ -276,12 +318,13 @@ neural_router_min_accuracy_gain: float = 0.0
 
 ## Implementation Sequence
 
-1. Schema + config (table, settings)
-2. Model definitions (PyTorch architectures, feature extraction)
-3. Training pipeline (data assembly, training loop, validation gate, BRPOP listener)
-4. Serving (model loading, caching, `neural_rerank()`)
-5. Integration (wire into `activation.py`, widen funnel, update `/router-status`)
-6. Training container (Docker Compose service, entrypoint)
-7. Observation threshold signal (update `retrieval_logger.py`)
-8. Tests (unit + integration)
-9. Dashboard update (extend Engram Explorer with router metrics)
+1. Schema + config (new table, retrieval_log tenant_id + indexes, settings)
+2. Fix retrieval_logger (tenant_id, time_of_day as float, train signal emission)
+3. Engram usage callback (orchestrator calls mark-used after LLM response, add endpoint)
+4. Model definitions (PyTorch architectures, feature extraction)
+5. Training pipeline (data assembly, training loop, validation gate, startup probe, BRPOP listener, model retention cleanup)
+6. Serving (background model loader, caching, `neural_rerank()`)
+7. Integration (wire into `working_memory.py` assemble_context, widen funnel, update `/router-status`)
+8. Training container (Docker Compose service on Redis db6, entrypoint)
+9. Tests (unit + integration)
+10. Dashboard update (extend Engram Explorer with router metrics)
