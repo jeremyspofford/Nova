@@ -21,6 +21,7 @@ dependencies = [
     "nova-contracts",
     "tiktoken>=0.7",
     "tenacity>=9.0",
+    "torch>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]
