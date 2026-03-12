@@ -182,7 +182,7 @@ neural-router-trainer:
     - redis
   environment:
     - DATABASE_URL=${DATABASE_URL}
-    - REDIS_URL=${REDIS_URL}/6   # db6 — dedicated to neural router
+    - REDIS_URL=redis://redis:6379/6   # db6 — dedicated to neural router
 ```
 
 Idles on BRPOP waiting for train signals. Lightweight — near-zero resource usage when not training.
