@@ -177,3 +177,28 @@ CREATE INDEX IF NOT EXISTS idx_wm_slots_type ON working_memory_slots(slot_type);
 ALTER TABLE engrams ADD COLUMN IF NOT EXISTS outcome_avg REAL DEFAULT NULL;
 ALTER TABLE engrams ADD COLUMN IF NOT EXISTS outcome_count INTEGER DEFAULT 0;
 ALTER TABLE engrams ADD COLUMN IF NOT EXISTS last_recalibrated_at TIMESTAMPTZ DEFAULT NULL;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Neural Router: learned re-ranker model storage (Phase 5)
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS neural_router_models (
+    id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id                 UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+    architecture              TEXT NOT NULL,
+    weights                   BYTEA NOT NULL,
+    observation_count         INTEGER NOT NULL,
+    validation_precision_at_k REAL,
+    is_active                 BOOLEAN NOT NULL DEFAULT FALSE,
+    trained_at                TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_nrm_tenant_active
+    ON neural_router_models(tenant_id) WHERE is_active;
+
+-- Neural Router: add tenant_id to retrieval_log for per-tenant observation counts
+ALTER TABLE retrieval_log ADD COLUMN IF NOT EXISTS tenant_id UUID
+    NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001';
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_tenant ON retrieval_log(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_retrieval_log_used ON retrieval_log(tenant_id)
+    WHERE engrams_used IS NOT NULL;
