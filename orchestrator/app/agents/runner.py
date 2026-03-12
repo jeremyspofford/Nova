@@ -60,7 +60,7 @@ async def run_agent_turn(
 
         classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
 
-        nova_ctx, (memory_ctx, _mem_count, _engram_ids), (category, classified_model) = await asyncio.gather(
+        nova_ctx, (memory_ctx, _mem_count, _engram_ids, _retrieval_log_id), (category, classified_model) = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id),
             _get_memory_context(agent_id, query, session_id),
             classify_coro,
@@ -82,6 +82,9 @@ async def run_agent_turn(
 
         # 4. Store exchange in episodic memory
         await _store_exchange(agent_id, session_id, query, assistant_content)
+
+        # 4b. Mark engrams as used (ground truth for Neural Router training)
+        await _mark_engrams_used(_engram_ids, _retrieval_log_id)
 
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
@@ -161,6 +164,7 @@ async def run_agent_turn_streaming(
 
     category = None
     _engram_ids: list[str] = []
+    _retrieval_log_id: str | None = None
 
     if guest_mode:
         # Guest isolation: no context, no memory, no tools, no classification
@@ -190,7 +194,7 @@ async def run_agent_turn_streaming(
             result = await coro
             return result, int((time.monotonic() - t) * 1000)
 
-        (nova_ctx, _ctx_ms), ((memory_ctx, memory_count, _engram_ids), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
+        (nova_ctx, _ctx_ms), ((memory_ctx, memory_count, _engram_ids, _retrieval_log_id), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
             _timed(_build_nova_context(model, agent_id, session_id)),
             _timed(_get_memory_context(agent_id, query, session_id)),
             _timed(classify_coro),
@@ -269,6 +273,7 @@ async def run_agent_turn_streaming(
 
     if full_response:
         await _store_exchange(agent_id, session_id, query, "".join(full_response))
+        await _mark_engrams_used(_engram_ids, _retrieval_log_id)
 
     completed_at = datetime.now(timezone.utc)
     duration_ms = int((completed_at - started_at).total_seconds() * 1000)
@@ -288,15 +293,15 @@ async def run_agent_turn_streaming(
     )
 
 
-async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str]]:
+async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str], str | None]:
     """Fetch engram-powered memory context for prompt assembly.
 
     Calls the engram /context endpoint which returns a formatted prompt string
     with sections (self-model, active goal, reconstructed memories, key decisions,
-    open threads). Returns (context_string, section_count, engram_ids).
+    open threads). Returns (context_string, section_count, engram_ids, retrieval_log_id).
     """
     if not query:
-        return "", 0, []
+        return "", 0, [], None
 
     memory_client = get_memory_client()
     try:
@@ -305,18 +310,19 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
             json={"query": query, "session_id": session_id},
         )
         if resp.status_code != 200:
-            return "", 0, []
+            return "", 0, [], None
         data = resp.json()
         context = data.get("context", "")
         if not context:
-            return "", 0, []
+            return "", 0, [], None
         sections = data.get("sections", {})
         section_count = sum(1 for v in sections.values() if v)
         engram_ids = data.get("engram_ids", [])
-        return context, section_count, engram_ids
+        retrieval_log_id = data.get("retrieval_log_id")
+        return context, section_count, engram_ids, retrieval_log_id
     except Exception as e:
         log.warning("Engram memory retrieval failed: %s", e)
-        return "", 0, []
+        return "", 0, [], None
 
 
 async def _get_platform_identity() -> tuple[str, str]:
@@ -611,6 +617,31 @@ async def _store_exchange(
     via BRPOP, decomposes it into atomic engrams, and builds the memory graph.
     """
     await _emit_to_engram_queue(agent_id, session_id, user_message, assistant_response)
+
+
+async def _mark_engrams_used(
+    engram_ids: list[str],
+    retrieval_log_id: str | None,
+) -> None:
+    """Fire-and-forget: tell memory-service which engrams were used.
+
+    Initial heuristic: mark ALL context engrams as used. This is a coarse
+    but functional signal — the NN learns "these engrams were selected for
+    context" which is still valuable. Refinement can be added later.
+    """
+    if not retrieval_log_id or not engram_ids:
+        return
+    try:
+        memory_client = get_memory_client()
+        await memory_client.post(
+            "/api/v1/engrams/mark-used",
+            json={
+                "retrieval_log_id": retrieval_log_id,
+                "engram_ids_used": engram_ids,
+            },
+        )
+    except Exception as e:
+        log.debug("Failed to mark engrams used: %s", e)
 
 
 _engram_redis: object | None = None
