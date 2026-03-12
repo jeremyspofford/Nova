@@ -23,6 +23,11 @@ from app.embedding import get_embedding
 from .activation import ActivatedEngram, spreading_activation
 from .reconstruction import get_self_model_summary, reconstruct
 
+from datetime import datetime, timezone
+
+from .neural_router.serve import get_cached_model, neural_rerank
+from .retrieval_logger import log_retrieval
+
 log = logging.getLogger(__name__)
 
 
@@ -57,6 +62,7 @@ class WorkingMemoryContext:
     open_threads: str = ""
     total_tokens: int = 0
     engram_ids: list[str] = field(default_factory=list)
+    retrieval_log_id: str | None = None
 
 
 def _estimate_tokens(text: str) -> int:
@@ -89,7 +95,90 @@ async def assemble_context(
         ctx.total_tokens += _estimate_tokens(goal)
 
     # 3. Spreading activation on the query
-    activated = await spreading_activation(session, query)
+    # Widen the funnel when a neural router model is loaded
+    model, _ = get_cached_model()
+    if model is not None:
+        seed_count = settings.neural_router_seed_count
+        max_results = settings.neural_router_candidate_count
+    else:
+        seed_count = None  # use defaults
+        max_results = None
+
+    activated = await spreading_activation(
+        session, query,
+        seed_count=seed_count,
+        max_results=max_results,
+    )
+
+    # 3b. Neural re-ranking (if model loaded)
+    if activated and model is not None:
+        # Get query embedding for embedding-mode reranking
+        query_embedding = await get_embedding(query, session)
+
+        # Build temporal context for feature extraction
+        now = datetime.now(timezone.utc)
+        temporal_context = {
+            "time_of_day": now.hour / 24 + now.minute / 1440,
+            "day_of_week": now.strftime("%A"),
+            "active_goal": goal,
+        }
+
+        # Convert ActivatedEngram to dicts for reranking
+        candidate_dicts = []
+        for e in activated:
+            candidate_dicts.append({
+                "id": str(e.id),
+                "type": e.type,
+                "content": e.content,
+                "cosine_similarity": e.activation,
+                "importance": e.importance,
+                "activation": e.activation,
+                "last_accessed": None,
+                "convergence_paths": e.convergence_paths,
+                "outcome_avg": getattr(e, "outcome_avg", None),
+                "outcome_count": getattr(e, "outcome_count", 0),
+                "embedding": None,  # Not stored on ActivatedEngram
+                "final_score": e.final_score,
+                "source_type": e.source_type,
+            })
+
+        reranked_dicts = neural_rerank(
+            candidate_dicts,
+            query_embedding=query_embedding,
+            temporal_context=temporal_context,
+            max_results=settings.engram_max_results,
+        )
+
+        # Convert back to ActivatedEngram for reconstruction
+        activated = [
+            ActivatedEngram(
+                id=d["id"],
+                type=d["type"],
+                content=d["content"],
+                activation=d["activation"],
+                importance=d["importance"],
+                final_score=d["final_score"],
+                convergence_paths=d.get("convergence_paths", 0),
+                source_type=d.get("source_type", "chat"),
+            )
+            for d in reranked_dicts
+        ]
+
+    # 3c. Log retrieval observation for Neural Router training
+    if activated:
+        try:
+            query_emb = await get_embedding(query, session)
+            log_id = await log_retrieval(
+                session,
+                query_embedding=query_emb,
+                query_text=query,
+                engram_ids_surfaced=[str(e.id) for e in activated],
+                session_id=session_id,
+                active_goal=goal,
+            )
+            ctx.retrieval_log_id = log_id
+        except Exception:
+            log.debug("Failed to log retrieval observation", exc_info=True)
 
     # 4. Reconstruct memories from activated engrams
     if activated:
@@ -102,7 +191,6 @@ async def assemble_context(
         # Trim to memory budget
         budget = settings.engram_wm_memory_budget
         if _estimate_tokens(memory_text) > budget:
-            # Truncate to fit budget (rough cut at 4 chars/token)
             memory_text = memory_text[:budget * 4]
         ctx.memories = memory_text
         ctx.total_tokens += _estimate_tokens(memory_text)

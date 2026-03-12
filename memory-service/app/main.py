@@ -16,6 +16,7 @@ from app.embedding import get_embedding
 from app.engram.consolidation import bootstrap_self_model, consolidation_loop
 from app.engram.ingestion import ingestion_loop
 from app.engram.router import engram_router
+from app.engram.neural_router.serve import load_latest_model
 from app.health import health_router
 
 configure_logging("memory-service", settings.log_level)
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     _consolidation_task = asyncio.create_task(consolidation_loop(), name="engram-consolidation")
     asyncio.create_task(_warmup_embedding(), name="warmup")
     asyncio.create_task(_bootstrap_self_model(), name="engram-bootstrap")
+    _neural_router_task = asyncio.create_task(_neural_router_refresh(), name="neural-router-refresh")
     log.info("Memory Service ready")
 
     yield
@@ -38,10 +40,22 @@ async def lifespan(app: FastAPI):
     log.info("Memory Service shutting down")
     _ingestion_task.cancel()
     _consolidation_task.cancel()
+    _neural_router_task.cancel()
     await asyncio.gather(
-        _ingestion_task, _consolidation_task,
+        _ingestion_task, _consolidation_task, _neural_router_task,
         return_exceptions=True,
     )
+
+
+async def _neural_router_refresh():
+    """Background task: periodically check for newer neural router model."""
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                await load_latest_model(session)
+        except Exception:
+            log.debug("Neural router model refresh failed", exc_info=True)
+        await asyncio.sleep(settings.neural_router_model_check_interval)
 
 
 app = FastAPI(
