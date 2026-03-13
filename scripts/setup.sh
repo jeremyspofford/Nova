@@ -70,6 +70,12 @@ else
   fi
 fi
 
+# ── Hardware detection ─────────────────────────────────────────────────────────
+echo ""
+echo "Detecting hardware..."
+"${SCRIPT_DIR}/detect_hardware.sh" "${PROJECT_ROOT}/data/hardware.json"
+echo ""
+
 # ── Parse models to pull from models.yaml ────────────────────────────────────
 if [ "${USE_LOCAL_OLLAMA}" = "true" ]; then
   if [ ! -f "${MODELS_YAML}" ]; then
