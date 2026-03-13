@@ -32,9 +32,10 @@ export function NavBar() {
   const navigate = useNavigate()
   const location = useLocation()
   const { name } = useNovaIdentity()
-  const { isAuthenticated, user, logout } = useAuth()
+  const { isAuthenticated, user, logout, authConfig } = useAuth()
 
-  const userRole: Role = (user?.role as Role) || 'guest'
+  // Trusted network (no auth required) gets full access — they're the instance owner
+  const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
 
   // Filter links by role
   const filteredMainLinks = mainLinks.filter(link => hasMinRole(userRole, link.minRole))
