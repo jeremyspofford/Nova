@@ -68,9 +68,9 @@ No new services. The Inference Manager is a module inside the recovery service, 
 
 ### Redis Access
 
-Recovery service needs Redis access (currently connects only to Postgres). Add `REDIS_URL` to its environment in docker-compose, using **db6** (next available: orchestrator=db2, llm-gateway=db1, chat-api=db3, memory-service=db0, chat-bridge=db4, cortex=db5).
+Recovery service needs Redis access (currently connects only to Postgres). Add `REDIS_URL` to its environment in docker-compose, using **db7** (next available: orchestrator=db2, llm-gateway=db1, chat-api=db3, memory-service=db0, chat-bridge=db4, cortex=db5).
 
-Hardware detection results go to `nova:system:hardware` on db6 — a new `nova:system:*` namespace for read-only system facts (distinct from `nova:config:*` which is read-write user config). The LLM gateway reads inference config from its own db1 via the existing `nova:config:inference.*` keys, written by the orchestrator's config sync. Recovery reads `nova:config:inference.backend` cross-db from db1 to know which container to manage.
+Hardware detection results go to `nova:system:hardware` on db7 — a new `nova:system:*` namespace for read-only system facts (distinct from `nova:config:*` which is read-write user config). The LLM gateway reads inference config from its own db1 via the existing `nova:config:inference.*` keys, written by the orchestrator's config sync. Recovery reads `nova:config:inference.backend` cross-db from db1 to know which container to manage.
 
 ### Communication Paths
 
@@ -100,7 +100,7 @@ Detects:
 - Available Docker runtime (`nvidia-container-toolkit`, ROCm)
 - CPU cores, available RAM
 
-Stored in Redis as `nova:system:hardware` (on db6 — `nova:system:*` is a read-only namespace for system facts, distinct from `nova:config:*` for user settings):
+Stored in Redis as `nova:system:hardware` (on db7 — `nova:system:*` is a read-only namespace for system facts, distinct from `nova:config:*` for user settings):
 ```json
 {
   "gpus": [
@@ -159,7 +159,7 @@ When a user switches backends (e.g., Ollama → vLLM):
 
 1. Recovery sets `nova:config:inference.state` = `draining` in Redis
 2. LLM gateway sees `draining` state on next config read (5s cache), stops routing new requests to local backend. New requests fall back to cloud (if available) or return 503.
-3. Recovery waits up to **15 seconds** for in-flight requests to complete (polls gateway's active request count via `GET /health/ready` which already tracks this)
+3. Recovery waits up to **15 seconds** for in-flight requests to complete. Requires a new `GET /health/inflight` endpoint on the gateway that returns the count of active local-backend requests (new — the existing `/health/ready` only checks connectivity). Recovery polls this endpoint during drain and proceeds when count reaches 0 or timeout expires.
 4. After drain (or timeout), recovery stops the old container
 5. Recovery pulls new image (if needed) and starts new container
 6. Recovery sets `nova:config:inference.state` = `starting`
