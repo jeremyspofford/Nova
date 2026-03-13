@@ -30,5 +30,5 @@ async def emit_to_cortex(type: str, payload: dict | None = None) -> None:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         await _cortex_redis.lpush("cortex:stimuli", json.dumps(stimulus))
-    except Exception:
-        pass  # Fire and forget
+    except Exception as e:
+        log.debug("Failed to emit stimulus %s: %s", type, e)

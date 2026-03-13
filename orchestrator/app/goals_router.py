@@ -151,7 +151,7 @@ async def get_goal(goal_id: UUID, _user: UserDep):
 async def update_goal(goal_id: UUID, req: UpdateGoalRequest, _user: UserDep):
     """Update a goal (title, status, priority, progress, etc.)."""
     # Build SET clause dynamically from non-None fields
-    updates = req.model_dump(exclude_none=True)
+    updates = req.model_dump(exclude_unset=True)
     # If cron is being updated, recompute next_at
     if "schedule_cron" in updates:
         cron_val = updates["schedule_cron"]

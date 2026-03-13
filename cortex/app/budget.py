@@ -13,6 +13,7 @@ log = logging.getLogger(__name__)
 
 # Redis connection for publishing budget tier
 _redis: aioredis.Redis | None = None
+_last_tier: str | None = None
 
 
 async def _get_redis() -> aioredis.Redis:
@@ -73,7 +74,9 @@ async def publish_budget_tier() -> str:
 
     The llm-gateway reads nova:config:cortex.budget_tier to apply budget
     ceilings on cortex-originated LLM requests.
+    Emits a budget.tier_change stimulus when the tier transitions.
     """
+    global _last_tier
     status = await get_budget_status()
     tier = status["tier"]
     try:
@@ -81,4 +84,16 @@ async def publish_budget_tier() -> str:
         await r.set("nova:config:cortex.budget_tier", tier, ex=600)
     except Exception as e:
         log.warning("Failed to publish budget tier to Redis: %s", e)
+
+    # Emit stimulus on tier transition
+    if _last_tier is not None and tier != _last_tier:
+        from .stimulus import emit, BUDGET_TIER_CHANGE
+        await emit(BUDGET_TIER_CHANGE, "cortex", {
+            "old_tier": _last_tier,
+            "new_tier": tier,
+            "pct_used": status["percent_used"],
+        })
+        log.info("Budget tier changed: %s → %s", _last_tier, tier)
+    _last_tier = tier
+
     return tier

@@ -122,7 +122,7 @@ async def maybe_consolidate() -> bool:
                     return False
 
         # Trigger consolidation (fire and forget with timeout)
-        await mem.post("/api/v1/engrams/consolidate", timeout=30.0)
+        await mem.post("/api/v1/engrams/consolidate", timeout=5.0)
         log.info("Triggered idle consolidation")
         return True
     except Exception as e:
