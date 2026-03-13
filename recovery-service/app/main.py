@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
+from .inference.routes import router as inference_router
 from .routes import router
 
 logger = logging.getLogger("nova.recovery")
@@ -23,12 +24,23 @@ async def lifespan(app: FastAPI):
     from .db import init_pool, close_pool
     from .scheduler import checkpoint_loop
 
+    from .inference.hardware import sync_hardware_from_file
+    from .redis_client import close_redis
+
     await init_pool()
     checkpoint_task = asyncio.create_task(checkpoint_loop())
+
+    # Sync hardware info from data/hardware.json (written by setup.sh) into Redis
+    try:
+        await sync_hardware_from_file()
+    except Exception:
+        logger.warning("Hardware sync failed — will detect on first request", exc_info=True)
+
     logger.info("Recovery service ready — port %s, backups at %s", settings.port, settings.backup_dir)
     yield
     checkpoint_task.cancel()
     await close_pool()
+    await close_redis()
 
 
 app = FastAPI(
@@ -45,3 +57,4 @@ app.add_middleware(
 )
 
 app.include_router(router)
+app.include_router(inference_router)
