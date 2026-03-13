@@ -26,6 +26,7 @@ from app.config import settings
 from app.db.database import AsyncSessionLocal
 from app.embedding import get_embedding
 from app.embedding import to_pg_vector
+from .cortex_stimulus import emit_to_cortex
 
 log = logging.getLogger(__name__)
 
@@ -171,6 +172,11 @@ async def run_consolidation(trigger: str = "manual") -> dict:
         trigger, stats["engrams_reviewed"], stats["schemas_created"],
         stats["engrams_pruned"], stats["engrams_merged"], duration_ms,
     )
+    await emit_to_cortex("consolidation.complete", {
+        "engrams_reviewed": stats.get("engrams_reviewed", 0),
+        "schemas_created": stats.get("schemas_created", 0),
+        "contradictions_resolved": stats.get("contradictions_resolved", 0),
+    })
     return stats
 
 

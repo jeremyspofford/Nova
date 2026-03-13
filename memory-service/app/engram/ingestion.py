@@ -19,6 +19,7 @@ from app.db.database import AsyncSessionLocal
 from app.embedding import get_embedding, get_redis
 from app.embedding import to_pg_vector
 
+from .cortex_stimulus import emit_to_cortex
 from .decomposition import decompose
 from .entity_resolution import (
     find_contradiction_candidates,
@@ -197,6 +198,10 @@ async def _process_event(raw_payload: str) -> dict:
                             "Contradiction edge: '%s' contradicts '%s'",
                             new_engram_content[:60], candidate["content"][:60],
                         )
+                        await emit_to_cortex("engram.contradiction", {
+                            "engram_id": str(new_id),
+                            "conflicting_with": str(candidate["id"]),
+                        })
             except Exception:
                 log.warning("Failed to process contradiction", exc_info=True)
 
