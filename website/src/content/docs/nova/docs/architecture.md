@@ -16,8 +16,9 @@ Nova runs as a multi-service Docker Compose stack. Each service has a single res
 | **dashboard** | 3000 / 5173 | React admin UI (nginx in production, Vite dev server in development) |
 | **postgres** | 5432 | pgvector-enabled PostgreSQL 16 |
 | **redis** | 6379 | State, task queue (BRPOP), rate limiting, session memory |
-| **recovery** | 8888 | Backup/restore, factory reset, service management. Only depends on postgres -- stays alive when other services crash. |
+| **recovery** | 8888 | Backup/restore, factory reset, service management, inference backend lifecycle. Depends on postgres and Redis (db 7). |
 | **chat-bridge** | 8090 | Multi-platform chat integration (Telegram, Slack). Opt-in via `bridges` profile. |
+| **cortex** | 8100 | Autonomous brain: thinking loop, goals, drives, budget tracking |
 
 ## Inter-service communication
 
@@ -27,6 +28,7 @@ All communication between services is HTTP. Here's who calls who:
 dashboard ──proxy──▶ orchestrator  (/api)
           ──proxy──▶ llm-gateway   (/v1)
           ──proxy──▶ recovery      (/recovery-api)
+          ──proxy──▶ cortex        (/cortex-api)
 
 chat-api ──────────▶ orchestrator  (streaming endpoint)
 
@@ -38,7 +40,8 @@ orchestrator ──────▶ llm-gateway   (/complete, /stream, /embed)
              ──────▶ redis          (task queue, state)
 
 recovery ──────────▶ postgres      (backup/restore)
-         ──────────▶ Docker API    (service management)
+         ──────────▶ Docker API    (service management, inference containers)
+         ──────────▶ redis         (system state db 7, reads config db 1)
 ```
 
 The dashboard depends only on the recovery service at startup. It shows a startup screen while other services come online, so users always have visibility into system state.
@@ -82,6 +85,8 @@ Each service uses a dedicated Redis database to avoid key collisions:
 | 2 | orchestrator |
 | 3 | chat-api |
 | 4 | chat-bridge |
+| 5 | cortex |
+| 7 | recovery |
 
 ## API design
 

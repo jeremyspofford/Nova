@@ -24,8 +24,8 @@ export const differentiators: Feature[] = [
 
 export const features: Feature[] = [
   {
-    title: '4 Inference Backends',
-    description: 'Ollama, vLLM, llama.cpp, SGLang. Pick the right engine for your workload. Run multiple simultaneously.',
+    title: 'Managed Local Inference',
+    description: 'vLLM, Ollama, or cloud -- select from the UI. Nova handles container lifecycle, health monitoring, and graceful backend switching.',
   },
   {
     title: 'RadixAttention Optimization',
@@ -49,7 +49,7 @@ export const features: Feature[] = [
   },
   {
     title: 'GPU-Aware Setup',
-    description: 'Auto-detects hardware, recommends backends, supports remote GPU over LAN with Wake-on-LAN.',
+    description: 'Auto-detects GPU hardware, recommends inference backends, manages containers. Supports remote GPU over LAN with Wake-on-LAN.',
   },
   {
     title: 'Recovery & Resilience',

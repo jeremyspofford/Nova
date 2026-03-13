@@ -21,7 +21,7 @@ The LLM Gateway is Nova's model routing layer. It exposes a unified API that tra
 - **Subscription auth** -- use Claude Max/Pro and ChatGPT Plus/Pro subscriptions as zero-cost providers
 - **Rate limiting** -- per-provider daily quotas enforced via Redis sliding window
 - **Response caching** -- cache deterministic (temperature=0) completions to avoid duplicate API calls
-- **Ollama sync** -- auto-discover locally pulled Ollama models and register them at startup
+- **Local inference routing** -- auto-discovers models from the active managed backend (Ollama, vLLM) and routes via `LocalInferenceProvider`
 
 ## Routing strategies
 
@@ -29,12 +29,21 @@ The routing strategy is configurable at runtime via the platform config:
 
 | Strategy | Behavior |
 |----------|----------|
-| `local-only` | Only use Ollama. Fail if offline. |
-| `local-first` | Try Ollama first, fall back to cloud. **(default)** |
-| `cloud-only` | Skip Ollama entirely, use cloud providers. |
-| `cloud-first` | Try cloud first, use Ollama as backup. |
+| `local-only` | Only use the active local inference backend. Fail if offline. |
+| `local-first` | Try local backend first, fall back to cloud. **(default)** |
+| `cloud-only` | Skip local inference, use cloud providers only. |
+| `cloud-first` | Try cloud first, use local backend as backup. |
 
 ## Provider types
+
+### Local inference providers
+
+| Class | Description |
+|-------|-------------|
+| `LocalInferenceProvider` | Wrapper that reads active backend config from Redis (5s cache) and delegates to the appropriate provider. Recreates delegate on backend/URL change. |
+| `OpenAICompatibleProvider` | Base class for OpenAI-compatible inference servers (vLLM, SGLang) |
+| `VLLMProvider` | Thin subclass for vLLM -- chat, streaming, embeddings, function calling, structured output |
+| `OllamaProvider` | Existing Ollama provider (unchanged) |
 
 ### Subscription providers (zero API cost)
 
@@ -91,6 +100,7 @@ The routing strategy is configurable at runtime via the platform config:
 |--------|------|-------------|
 | GET | `/health/live` | Liveness probe |
 | GET | `/health/ready` | Readiness probe |
+| GET | `/health/inflight` | Count of active local-backend requests (used by drain protocol) |
 
 ## Configuration
 
@@ -107,6 +117,9 @@ The routing strategy is configurable at runtime via the platform config:
 | `REDIS_URL` | Redis connection string | `redis://redis:6379/1` |
 | `LOG_LEVEL` | Logging level | `INFO` |
 | `CORS_ALLOWED_ORIGINS` | Comma-separated allowed origins | `*` |
+| `INFERENCE_BACKEND` | Active local backend (read from Redis) | `ollama` |
+| `INFERENCE_STATE` | Backend state: ready, draining, starting, error | `ready` |
+| `INFERENCE_URL` | Override URL for active backend | *(auto-detected)* |
 
 ## Usage example
 
@@ -138,3 +151,5 @@ curl http://localhost:8001/complete \
 - **Rate limiting** -- per-provider daily quotas tracked in Redis; returns HTTP 429 when exhausted
 - **Response cache** -- temperature=0 requests are cached to avoid redundant API calls; cache is keyed on the full request body (excluding metadata)
 - **Translation layer** -- `openai_compat.py` converts between OpenAI wire format and Nova's internal `CompleteRequest`/`CompleteResponse` types
+- **Local inference abstraction** -- `LocalInferenceProvider` wraps the active backend, reading `nova:config:inference.*` from Redis. The `is_local` property on `ModelProvider` enables inflight request counting without string matching.
+- **Model discovery** -- gateway discovers models from the active backend's `/v1/models` endpoint (vLLM) or Ollama's model list. `LocalInferenceProvider` maintains a dynamic set of known local models for routing decisions.

@@ -77,18 +77,19 @@ This topology is ideal when you have a low-power always-on server (like a mini P
 
 ## Inference backend selection
 
-Nova supports multiple local inference backends beyond Ollama: vLLM, SGLang, and llama.cpp. Each has different strengths for concurrent workloads, CPU-only deployments, or agent pipeline optimization.
+Nova manages local inference backends automatically. Select your backend from the dashboard (Settings → AI & Models → Local Inference) and Nova handles the container lifecycle -- image pulling, startup, health monitoring, and graceful switching.
 
-See [Inference Backends](/nova/docs/inference-backends) for a full comparison and configuration guide.
+Supported managed backends:
+- **vLLM** -- GPU inference with continuous batching. Recommended for NVIDIA/AMD GPUs with 8+ GB VRAM.
+- **Ollama** -- Easy mode with hot-swap models. Works on CPU, good for beginners.
 
-Enable backends via Docker Compose profiles in `.env`:
+The setup script auto-detects your GPU hardware and recommends a backend. See [Inference Backends](/nova/docs/inference-backends) for details.
+
+For advanced use, backends can still be started manually via Docker Compose profiles:
 
 ```bash
-# Single backend
-COMPOSE_PROFILES=local-ollama
-
-# Multiple backends
-COMPOSE_PROFILES=local-ollama,local-sglang
+# Manual backend start (not needed if using dashboard)
+docker compose --profile local-vllm up -d nova-vllm
 ```
 
 ## Backup and restore

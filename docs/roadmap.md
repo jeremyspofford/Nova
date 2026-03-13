@@ -2,7 +2,7 @@
 
 > Living document. Keep up to date as work progresses.
 >
-> **Last updated:** 2026-03-06
+> **Last updated:** 2026-03-12
 >
 > **Vision:** A self-directed autonomous AI platform. You define a goal. Nova breaks it into
 > subtasks, executes them through a coordinated pipeline of specialized agents with built-in
@@ -2729,162 +2729,51 @@ Each cloud provider has different names and configurations:
 
 ---
 
-## 🔜 Phase 12 — Modular Local Inference Backends + GPU Upgrade
+## Phase 12 — Managed Inference Backends
 
-**Motivation:** Nova is designed for parallel autonomous workflows — multiple tasks execute concurrently via Redis BRPOP. But Ollama serializes inference requests: when 5 tasks call the LLM simultaneously, they queue behind each other. For Nova to be an always-on AI replacement (chat + autonomous workflows + coding sessions concurrently), the inference layer must handle parallel requests efficiently. This phase also addresses multi-tenancy inference needs (Phase 13).
+**Motivation:** Local AI is Nova's primary differentiator. Users need choice of inference backends based on their hardware and performance requirements, and Nova should manage the backend lifecycle so it "just works" — selectable from the dashboard, no .env editing for runtime settings.
 
-Nova should ship with **multiple inference backend options** — each has different strengths, and users should pick the right one (or run several) based on their hardware and workload. All four expose OpenAI-compatible APIs, and LiteLLM already abstracts the provider layer, so adding backends is a configuration concern, not an architecture change.
+Design spec: `docs/superpowers/specs/2026-03-12-managed-inference-backends-design.md`
 
-### Inference Backend Comparison
+### ✅ Phase 12a — vLLM Provider + Hardware Detection (Complete)
 
-| Capability | Ollama | vLLM | llama.cpp (llama-server) | SGLang |
-|-----------|--------|------|--------------------------|--------|
-| **Concurrent batching** | Sequential queue (OLLAMA_NUM_PARALLEL limited) | Continuous batching — interleaves tokens across requests | Limited parallel slots via `-np` flag | Continuous batching + RadixAttention |
-| **Multi-user serving** | Latency degrades linearly | Near-constant latency up to batch capacity | Better than Ollama, worse than vLLM/SGLang | Best-in-class for shared-prefix workloads |
-| **VRAM efficiency** | Loads/unloads full models | PagedAttention — packs KV caches efficiently | Manual KV cache sizing, efficient for single model | RadixAttention — caches common prefixes (system prompts) across requests |
-| **Model switching** | Hot-swap via `ollama pull`, evicts from VRAM | Single model per instance, restart to switch | Single model per instance | Single model per instance |
-| **Quantization** | GGUF (widest variety, community models) | GPTQ, AWQ, FP8, GGUF (recent) | GGUF native (fastest GGUF inference) | GPTQ, AWQ, FP8, GGUF |
-| **Structured output** | JSON mode (basic) | Outlines-based JSON schema enforcement | GBNF grammars (powerful, verbose) | Native JSON schema + regex constraints |
-| **CPU inference** | Yes (good) | GPU only | Yes (excellent — original purpose) | GPU only |
-| **Setup complexity** | Single binary, trivial | Python env, more config | Single binary, moderate flags | Python env, similar to vLLM |
-| **Best for** | Model exploration, single-user, quick testing | Multi-tenant production serving, high throughput | CPU-only deployments, edge, GGUF specialization | Agent workloads (prefix caching wins big when agents share system prompts) |
-| **Docker image** | `ollama/ollama` | `vllm/vllm-openai` | `ghcr.io/ggerganov/llama.cpp:server` | `lmsysorg/sglang` |
+Establishes the managed inference architecture. Users can run vLLM as a managed backend with GPU auto-detection, or continue using Ollama.
 
-### Why SGLang is especially interesting for Nova
+- [x] **Hardware detection** — `scripts/detect_hardware.sh` runs on host (has `nvidia-smi`), writes `data/hardware.json`; recovery service reads file on startup, syncs to Redis (`nova:system:hardware` on db7)
+- [x] **`OpenAICompatibleProvider`** base class — reusable for any OpenAI-compatible inference server (vLLM, SGLang, future backends)
+- [x] **`VLLMProvider`** — thin subclass: chat, streaming, embeddings, function calling, structured output
+- [x] **`LocalInferenceProvider`** wrapper — reads `nova:config:inference.backend` + `inference.state` + `inference.url` from Redis (5s cache), delegates to the active backend's provider. `is_local` property on `ModelProvider` base class enables inflight counting without string matching
+- [x] **Backend lifecycle controller** — start/stop inference containers via Docker Compose profiles, drain protocol (set `draining` → poll `GET /health/inflight` → stop old → start new → wait healthy → set `ready`), health monitor (30s interval, 3 failures → restart, exponential backoff 30→60→120s)
+- [x] **`GET /health/inflight`** endpoint on gateway — returns count of active local-backend requests for drain protocol
+- [x] **Recovery service inference API** — `GET /hardware`, `POST /hardware/detect`, `POST /backend/{name}/start`, `POST /backend/stop`, `GET /backend`, `GET /backends` (all admin-authed)
+- [x] **Config flow** — Dashboard → Orchestrator `platform_config` → Redis sync → Gateway reads. `inference.backend` seeded in migration 025
+- [x] **vLLM model discovery** — gateway queries `GET /v1/models` on active backend, `LocalInferenceProvider` maintains dynamic local model set
+- [x] **Dashboard Local Inference section** — hardware info, backend selector (vLLM/Ollama/None), live status with start/stop/refresh, remote inference toggle, no-GPU guidance. First section in Settings → AI & Models
+- [x] **Setup script integration** — `detect_hardware.sh` called during `setup.sh`
+- [x] **Redis db7** for recovery service — `nova:system:*` namespace for read-only system facts
+- [x] **Integration tests** — 11 tests across hardware detection, provider registration, inflight counting, routing, lifecycle, discovery, config flow
 
-SGLang's **RadixAttention** automatically caches shared prefixes across requests. In Nova's architecture, every pipeline agent (Context, Task, Guardrail, Code Review) has a system prompt that's identical across all task executions. With 5 parallel tasks running the same pod, that's 20 agent calls sharing large system prompt prefixes. SGLang caches these in a radix tree — subsequent requests skip re-computing attention for the shared prefix. This is a significant speedup for exactly Nova's workload pattern.
+### 🔜 Phase 12b — Model Library UI
 
-### Recommended Backend Strategy
+- [ ] New "Models" page in dashboard sidebar
+- [ ] Model catalog search (HuggingFace API for vLLM, Ollama registry for Ollama)
+- [ ] VRAM-aware filtering and size estimates
+- [ ] Embedding model selection
+- [ ] Download progress tracking via SSE
 
-| Workload | Recommended Backend | Why |
-|----------|-------------------|-----|
-| **Single user, model experimentation** | Ollama | Hot-swap models, widest GGUF library, zero config |
-| **Multi-tenant chat (Phase 13)** | vLLM or SGLang | Continuous batching handles concurrent users efficiently |
-| **Parallel agent pipelines** | SGLang | RadixAttention prefix caching across agents sharing system prompts |
-| **CPU-only / edge deployment (Phase 10)** | llama.cpp | Best CPU performance, smallest footprint |
-| **Coding sessions (multiple concurrent)** | vLLM or SGLang | Long contexts + concurrent requests need batching |
-| **Hybrid (recommended default)** | Ollama + SGLang | Ollama for variety, SGLang as primary serving engine |
+### 🔜 Phase 12c — SGLang + Remote Inference
 
-### Hardware
+- [ ] `SGLangProvider` (extends `OpenAICompatibleProvider`)
+- [ ] `RemoteInferenceProvider` (custom URL + optional auth header)
+- [ ] WoL integration moved into inference manager
+- [ ] Docker Compose profile for SGLang
 
-**Current:** Dell PC with NVIDIA RTX 3060 Ti (8 GB VRAM) — runs Ollama over LAN, woken via WoL
+### 🔜 Phase 12d — Polish & Intelligence
 
-**Target:** Upgrade to NVIDIA RTX 3090 (24 GB VRAM)
-- Same PCIe slot, same power connector style as 3060 Ti
-- Fits standard ATX cases — verify Dell case clearance (2.5-slot cooler) and PSU wattage (350W TDP, need 750W+ PSU)
-- 24 GB VRAM enables: 70B Q4 model, or 30B Q8 model, or multiple concurrent 13B contexts
-
-**Why RTX 3090:**
-| GPU | VRAM | Price (used) | Verdict |
-|-----|------|-------------|---------|
-| **RTX 3090** | **24 GB** | **~$700-800** | **Best VRAM/dollar. Same generation as 3060 Ti — guaranteed driver compat. Recommended.** |
-| RTX 3090 Ti | 24 GB | ~$800-900 | Marginal gain, 450W TDP. Not worth premium. |
-| RTX 4090 | 24 GB | ~$1600-1800 | ~40% faster compute, same VRAM. 2x price. Overkill for 2-user household. |
-| RTX 4080 | 16 GB | ~$900 | Less VRAM for more money. Bad value for inference. |
-| RTX A5000 | 24 GB | ~$1200 | Workstation card. Same VRAM at higher cost. No advantage for inference. |
-
-### Implementation
-
-**Step 1: Hardware upgrade**
-- Purchase RTX 3090 (used/refurbished)
-- Verify Dell case dimensions (length clearance for 3090 cooler) and PSU wattage before purchasing
-- Install GPU, verify with `nvidia-smi`
-
-**Step 2: Docker Compose profiles for all backends**
-
-Each backend gets its own Docker Compose profile. Users enable what they need — run one, two, or all four simultaneously on different ports.
-
-```yaml
-# Existing
-ollama:
-  image: ollama/ollama
-  profiles: ["local-ollama"]
-  ports: ["11434:11434"]
-
-# New backends
-vllm:
-  image: vllm/vllm-openai:latest
-  profiles: ["local-vllm"]
-  deploy:
-    resources:
-      reservations:
-        devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
-  volumes:
-    - vllm-models:/root/.cache/huggingface
-  environment:
-    - MODEL=${VLLM_MODEL:-meta-llama/Llama-3.1-70B-Instruct-AWQ}
-    - MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
-    - GPU_MEMORY_UTILIZATION=0.90
-  ports: ["8003:8000"]
-
-sglang:
-  image: lmsysorg/sglang:latest
-  profiles: ["local-sglang"]
-  deploy:
-    resources:
-      reservations:
-        devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
-  volumes:
-    - sglang-models:/root/.cache/huggingface
-  environment:
-    - MODEL_PATH=${SGLANG_MODEL:-meta-llama/Llama-3.1-70B-Instruct-AWQ}
-    - MEM_FRACTION_STATIC=0.88
-  ports: ["8004:30000"]
-
-llama-cpp:
-  image: ghcr.io/ggerganov/llama.cpp:server
-  profiles: ["local-llamacpp"]
-  deploy:
-    resources:
-      reservations:
-        devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
-  volumes:
-    - llamacpp-models:/models
-  environment:
-    - LLAMA_ARG_MODEL=/models/${LLAMACPP_MODEL:-model.gguf}
-    - LLAMA_ARG_CTX_SIZE=${LLAMACPP_CTX_SIZE:-4096}
-    - LLAMA_ARG_N_GPU_LAYERS=99
-    - LLAMA_ARG_PARALLEL=${LLAMACPP_PARALLEL:-4}
-  ports: ["8005:8080"]
-```
-
-**Step 3: LLM Gateway integration**
-- LiteLLM already supports all four as OpenAI-compatible providers with custom base URLs
-- Add each backend as a provider in `llm-gateway` config
-- Routing strategy configurable per-model: which backend serves which model
-- Dashboard settings page: configure active backends, assign models to backends
-
-**Step 4: Setup script integration**
-- `./setup` detects GPU and offers backend selection:
-  - No GPU → Ollama (CPU) or llama.cpp (CPU)
-  - GPU detected → recommend SGLang or vLLM for production, Ollama for experimentation
-  - Multi-backend → enable both Ollama (model variety) + SGLang (primary serving)
-- Selected profiles written to `.env` (`COMPOSE_PROFILES=local-ollama,local-sglang`)
-
-**Step 5: Dashboard backend management**
-- Models page shows which backend serves each model
-- Backend health status (running/stopped/error) with VRAM usage
-- "Start/stop backend" controls (via recovery service Docker API)
-- Benchmark button: run a quick concurrent-request test against each active backend
-
-### Testing & Validation
-
-- [ ] RTX 3090 installed, `nvidia-smi` shows 24 GB VRAM
-- [ ] Each backend starts independently via its Docker Compose profile
-- [ ] LLM Gateway routes to each backend correctly
-- [ ] Benchmark: 5 concurrent chat completions — compare latency across all 4 backends
-- [ ] Benchmark: 3 parallel pipeline tasks — measure SGLang prefix caching speedup
-- [ ] Verify multiple backends can coexist (e.g., Ollama on CPU + SGLang on GPU)
-- [ ] Setup script correctly detects GPU and recommends backends
-- [ ] Dashboard shows backend status and model assignments
-
-### Success Criteria
-
-- [ ] 5 concurrent inference requests on SGLang/vLLM complete with <2x single-request latency (vs Ollama's ~5x)
-- [ ] 70B Q4 model loads and serves on RTX 3090 via at least 2 backends
-- [ ] Nova pipeline runs 3 parallel tasks without inference bottleneck
-- [ ] Setup script offers all 4 backend options with smart defaults
-- [ ] User can switch backends without code changes (config only)
+- [ ] Auto-recommend backend based on hardware + workload
+- [ ] Model recommendations based on VRAM and use case
+- [ ] GPU memory monitoring in dashboard (live)
+- [ ] Inference performance metrics (tokens/sec, latency) in UI
 
 ---
 

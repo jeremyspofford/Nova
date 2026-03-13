@@ -32,6 +32,18 @@ cp .env.example .env
 | `LLM_ROUTING_STRATEGY` | Model routing strategy (see below) | `local-first` |
 | `DEFAULT_CHAT_MODEL` | Default model for chat interactions | `llama3.2` |
 
+## Inference backend
+
+The active inference backend is configured from the dashboard Settings page (AI & Models -- Local Inference). These settings are stored in Redis (`nova:config:inference.*`) and take effect immediately -- no restart required.
+
+| Key | Description | Default |
+|-----|-------------|---------|
+| `inference.backend` | Active backend: `ollama`, `vllm`, or `none` | `ollama` |
+| `inference.state` | Backend state: `ready`, `draining`, `starting`, `error` | `ready` |
+| `inference.url` | Override URL for the backend (auto-detected from Docker service name if empty) | *(empty)* |
+
+The setup script runs hardware detection and writes results to `data/hardware.json`. The recovery service syncs this to Redis on startup. The dashboard shows the detected hardware and recommends a backend based on GPU availability.
+
 ### Wake-on-LAN (remote GPU)
 
 | Variable | Description |
@@ -107,10 +119,10 @@ The `LLM_ROUTING_STRATEGY` variable controls how Nova selects between local and 
 
 | Strategy | Behavior |
 |----------|----------|
-| `local-only` | Only use local inference backends (Ollama, vLLM, SGLang, llama.cpp). Fails if no local backend is available. |
-| `local-first` | Try local backends first, fall back to cloud providers if unavailable. |
-| `cloud-only` | Only use cloud API providers. No local inference. |
-| `cloud-first` | Try cloud providers first, fall back to local backends if unavailable. |
+| `local-only` | Only use the active local inference backend. Fail if none is available. |
+| `local-first` | Try the local backend first, fall back to cloud providers. |
+| `cloud-only` | Only use cloud API providers. Skip local inference. |
+| `cloud-first` | Try cloud first, fall back to the local backend. |
 
 This setting is runtime-configurable from the dashboard Settings page.
 

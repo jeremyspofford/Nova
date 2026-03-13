@@ -11,10 +11,10 @@ The Recovery Service is Nova's resilience layer. It is designed to stay alive wh
 |----------|-------|
 | **Port** | 8888 |
 | **Framework** | FastAPI + asyncpg + Docker SDK |
-| **Dependencies** | PostgreSQL + Docker socket only |
+| **Dependencies** | PostgreSQL + Docker socket + Redis (db 7) |
 | **Source** | `recovery-service/` |
 
-The Recovery Service intentionally has minimal dependencies. It connects directly to PostgreSQL (for backups) and the Docker socket (for container management). It does not depend on Redis, the Orchestrator, or any other Nova service -- this ensures it remains operational even during a complete system failure.
+The Recovery Service intentionally has minimal dependencies. It connects directly to PostgreSQL (for backups), the Docker socket (for container management), and Redis db7 for `nova:system:*` data. It also cross-reads Redis db1 for `nova:config:inference.*` configuration written by the Orchestrator. It does not depend on the Orchestrator or any other Nova service -- this ensures it remains operational even during a complete system failure.
 
 ## Key responsibilities
 
@@ -23,6 +23,7 @@ The Recovery Service intentionally has minimal dependencies. It connects directl
 - **Service management** -- list container status, restart individual services or all services
 - **Environment management** -- read and update `.env` file variables (whitelist enforced, secrets masked)
 - **Compose profile management** -- start/stop optional Docker Compose profiles (Cloudflare Tunnel, Tailscale)
+- **Inference management** -- hardware detection, backend lifecycle (start/stop/health), managed container orchestration via Docker Compose profiles
 - **System status** -- rich overview combining service health, database stats, and backup info
 
 ## Key endpoints
@@ -69,6 +70,17 @@ The Recovery Service intentionally has minimal dependencies. It connects directl
 |--------|------|------|-------------|
 | POST | `/api/v1/recovery/compose-profiles` | Admin | Start/stop a compose profile (e.g., cloudflare-tunnel, tailscale) |
 
+### Inference management
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/recovery/inference/hardware` | Admin | Get detected hardware info |
+| POST | `/api/v1/recovery/inference/hardware/detect` | Admin | Re-run hardware detection |
+| POST | `/api/v1/recovery/inference/backend/{name}/start` | Admin | Start an inference backend |
+| POST | `/api/v1/recovery/inference/backend/stop` | Admin | Stop the active inference backend |
+| GET | `/api/v1/recovery/inference/backend` | Admin | Get active backend status |
+| GET | `/api/v1/recovery/inference/backends` | Admin | List all available backends |
+
 ### Health
 
 | Method | Path | Description |
@@ -84,6 +96,9 @@ The Recovery Service intentionally has minimal dependencies. It connects directl
 | `ADMIN_SECRET` | Admin authentication secret | -- |
 | `BACKUP_DIR` | Directory for storing backups | `/backups` |
 | `PORT` | Service port | `8888` |
+| `REDIS_URL` | Redis connection (db7 for system data) | `redis://redis:6379/7` |
+| `CHECKPOINT_INTERVAL_HOURS` | Auto-checkpoint interval | `6` |
+| `CHECKPOINT_MAX_KEEP` | Maximum checkpoints to retain | `5` |
 
 ## Backup and restore
 
@@ -105,6 +120,18 @@ make restore F=<file>      # Restore a specific backup
 ```
 
 The Recovery page in the Dashboard provides a visual interface for the same operations.
+
+## Inference management
+
+Recovery manages local inference backends (Ollama, vLLM) via Docker Compose profiles. Only one local backend can be active at a time.
+
+**Hardware detection** -- on startup and on demand, Recovery detects the host's GPU (NVIDIA/AMD), VRAM, Docker GPU runtime availability, CPU cores, RAM, and disk space. Results are stored in Redis as `nova:system:hardware`.
+
+**Backend lifecycle** -- Recovery handles the full lifecycle of inference backends: pulling the container image, starting the container via Compose profiles, and ongoing health monitoring. Health checks run on a 30-second interval; 3 consecutive failures trigger an automatic restart with exponential backoff.
+
+**Backend switching** -- when switching from one backend to another, Recovery uses a drain protocol that ensures zero dropped requests. The active backend continues serving in-flight requests while the new backend starts up and passes health checks before traffic is cut over.
+
+**Redis connections** -- Recovery maintains two Redis connections. It uses db7 for `nova:system:*` keys (hardware facts, backend state), and cross-reads db1 for `nova:config:inference.*` keys (inference configuration written by the Orchestrator).
 
 ## Implementation notes
 

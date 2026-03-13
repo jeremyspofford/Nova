@@ -38,18 +38,19 @@ The Dashboard is Nova's web-based admin interface. Built with React, it provides
 
 The Settings page is organized into these sections:
 
-1. **Nova Identity** -- AI name, greeting message, and persona/soul (configures how the AI presents itself)
-2. **Platform Defaults** -- task history retention
-3. **LLM Routing** -- routing strategy (local-only, local-first, cloud-only, cloud-first), Ollama URL, intelligent routing
-4. **Provider Status** -- API key presence, ping latency, test button per provider
-5. **Context Budgets** -- tune the system/tools/memory/history/working percentage split
-6. **Admin Secret** -- update the admin authentication secret
-7. **Remote Access** -- Cloudflare Tunnel and Tailscale configuration
-8. **Recovery & Services** -- backup/restore, factory reset, service management
-9. **System Status** -- live status of Queue Worker, Reaper, and MCP Servers
-10. **Appearance** -- theme presets and accent color palette
-11. **Notifications** -- desktop notification preferences
-12. **Developer Resources** -- links to API docs and service ports
+1. **Local Inference** -- backend selector (vLLM, Ollama, None), hardware info, live status, start/stop controls, remote inference toggle
+2. **Nova Identity** -- AI name, greeting message, and persona/soul (configures how the AI presents itself)
+3. **Platform Defaults** -- task history retention
+4. **LLM Routing** -- routing strategy (local-only, local-first, cloud-only, cloud-first), Ollama URL, intelligent routing
+5. **Provider Status** -- API key presence, ping latency, test button per provider
+6. **Context Budgets** -- tune the system/tools/memory/history/working percentage split
+7. **Admin Secret** -- update the admin authentication secret
+8. **Remote Access** -- Cloudflare Tunnel and Tailscale configuration
+9. **Recovery & Services** -- backup/restore, factory reset, service management
+10. **System Status** -- live status of Queue Worker, Reaper, and MCP Servers
+11. **Appearance** -- theme presets and accent color palette
+12. **Notifications** -- desktop notification preferences
+13. **Developer Resources** -- links to API docs and service ports
 
 ## Proxy configuration
 
@@ -60,6 +61,7 @@ In development, the Vite dev server proxies API requests to backend services:
 | `/api` | Orchestrator (port 8000) |
 | `/v1` | LLM Gateway (port 8001) |
 | `/recovery-api` | Recovery Service (port 8888) |
+| `/cortex-api` | Cortex (port 8100) |
 
 In production, nginx handles the same proxy rules.
 
