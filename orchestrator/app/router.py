@@ -566,6 +566,14 @@ async def update_platform_config(
         except Exception as e:
             log.warning("Failed to publish config %s to Redis: %s", key, e)
 
+    # Publish inference.* config changes to Redis for gateway pickup
+    if key.startswith("inference."):
+        try:
+            from app.config_sync import push_config_to_redis
+            await push_config_to_redis(key, req.value)
+        except Exception as e:
+            log.warning("Failed to publish config %s to Redis: %s", key, e)
+
     return _config_row(dict(row))
 
 
