@@ -18,7 +18,7 @@ from .budget import get_budget_status, publish_budget_tier
 from .clients import get_llm, get_orchestrator
 from .config import settings
 from .db import get_pool
-from .drives import DriveResult, DriveWinner, evaluate
+from .drives import DriveContext, DriveResult, DriveWinner, evaluate
 from .drives import serve, maintain, improve, learn, reflect
 from .journal import read_user_replies_since, write_entry
 
@@ -36,6 +36,7 @@ class CycleState:
     drive_results: list[DriveResult] = field(default_factory=list)
     winner: DriveWinner | None = None
     user_messages: list[dict] = field(default_factory=list)
+    stimuli: list[dict] = field(default_factory=list)
     action_taken: str = "none"
     outcome: str = ""
     error: str | None = None
@@ -65,9 +66,10 @@ async def _report_outcome(
         log.debug("Failed to report cycle outcome: %s", e)
 
 
-async def run_cycle() -> CycleState:
+async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
     """Execute one complete thinking cycle. Returns the cycle state for logging."""
     state = CycleState()
+    state.stimuli = stimuli or []
 
     try:
         # ── PERCEIVE ──────────────────────────────────────────────────────
@@ -89,9 +91,16 @@ async def run_cycle() -> CycleState:
         state.user_messages = await read_user_replies_since(last_cycle_at)
 
         # ── EVALUATE ──────────────────────────────────────────────────────
+        drive_ctx = DriveContext(
+            stimuli=state.stimuli,
+            memory_context="",
+            budget_tier=state.budget_tier,
+            cycle_count=state.cycle_number,
+        )
+
         for drive_module in ALL_DRIVES:
             try:
-                result = await drive_module.assess()
+                result = await drive_module.assess(drive_ctx)
                 state.drive_results.append(result)
             except Exception as e:
                 log.warning("Drive %s.assess() failed: %s", drive_module.__name__, e)
@@ -161,6 +170,11 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
         msgs = "; ".join(m["content"][:100] for m in state.user_messages[:3])
         user_msg_summary = f"\nUser messages since last cycle: {msgs}"
 
+    stimulus_summary = ""
+    if state.stimuli:
+        stim_types = ", ".join(s.get("type", "?") for s in state.stimuli[:5])
+        stimulus_summary = f"\nStimuli this cycle: {stim_types}"
+
     prompt = f"""You are Nova's autonomous brain (Cortex). You are deciding what to do this cycle.
 
 Winning drive: {drive.name} (urgency {drive.urgency}, score {state.winner.score:.2f})
@@ -169,7 +183,7 @@ Proposed action: {drive.proposed_action or 'none specified'}
 Context: {json.dumps(drive.context, default=str)}
 
 Budget: {state.budget_pct:.0f}% used today (tier: {state.budget_tier})
-Cycle: #{state.cycle_number}{user_msg_summary}
+Cycle: #{state.cycle_number}{user_msg_summary}{stimulus_summary}
 
 Based on this, decide what SPECIFIC action to take. Be concise (1-3 sentences).
 If the drive is "serve" and there are stale goals, pick the highest-priority one and describe what to do next.
