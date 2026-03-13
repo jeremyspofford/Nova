@@ -36,3 +36,25 @@ class TestHardwareDetection:
         data = r.json()
         assert "detected_at" in data
         assert "recommended_backend" in data
+
+
+class TestVLLMProviderRegistration:
+    """Test that vLLM provider appears in the gateway's provider catalog."""
+
+    async def test_vllm_in_provider_catalog(self, llm_gateway: httpx.AsyncClient):
+        """LLM gateway should list vllm as a known provider."""
+        r = await llm_gateway.get("/health/providers")
+        assert r.status_code == 200
+        providers = r.json()
+        slugs = [p["slug"] for p in providers]
+        assert "vllm" in slugs
+
+    async def test_vllm_provider_unavailable_when_not_running(self, llm_gateway: httpx.AsyncClient):
+        """vLLM provider should show as unavailable when container isn't running."""
+        r = await llm_gateway.get("/health/providers")
+        assert r.status_code == 200
+        providers = r.json()
+        vllm = next((p for p in providers if p["slug"] == "vllm"), None)
+        assert vllm is not None
+        # vLLM container not running in test env, so should be unavailable
+        assert vllm["available"] is False

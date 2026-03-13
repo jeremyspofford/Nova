@@ -1,4 +1,5 @@
 """Base provider for any server exposing an OpenAI-compatible API (vLLM, SGLang, etc.)."""
+import asyncio
 import json
 import logging
 import time
@@ -44,6 +45,7 @@ class OpenAICompatibleProvider(ModelProvider):
         self._healthy: bool = False
         self._health_check_interval = 15.0
         self._last_health_check = 0.0
+        self._health_lock = asyncio.Lock()
 
     @property
     def name(self) -> str:
@@ -63,15 +65,21 @@ class OpenAICompatibleProvider(ModelProvider):
         if (now - self._last_health_check) < self._health_check_interval:
             return self._healthy
 
-        try:
-            async with httpx.AsyncClient(timeout=3.0) as client:
-                r = await client.get(f"{self._base_url}/health")
-                self._healthy = r.status_code == 200
-        except (httpx.HTTPError, httpx.TimeoutException):
-            self._healthy = False
+        async with self._health_lock:
+            # Re-check after acquiring lock (another coroutine may have updated)
+            now = time.monotonic()
+            if (now - self._last_health_check) < self._health_check_interval:
+                return self._healthy
 
-        self._last_health_check = now
-        return self._healthy
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    r = await client.get(f"{self._base_url}/health")
+                    self._healthy = r.status_code == 200
+            except httpx.HTTPError:
+                self._healthy = False
+
+            self._last_health_check = now
+            return self._healthy
 
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
         """Send a chat completion request."""
@@ -117,10 +125,11 @@ class OpenAICompatibleProvider(ModelProvider):
                     delta = choice.get("delta", {})
                     content = delta.get("content", "")
 
-                    if content:
+                    finish_reason = choice.get("finish_reason")
+                    if content or finish_reason:
                         yield StreamChunk(
                             delta=content,
-                            finish_reason=choice.get("finish_reason"),
+                            finish_reason=finish_reason,
                         )
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:

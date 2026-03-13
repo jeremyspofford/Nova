@@ -54,6 +54,7 @@ from app.providers import (
     ModelProvider,
     OllamaCloudFallback,
     OllamaProvider,
+    VLLMProvider,
     discover_chatgpt_token,
     discover_claude_oauth_token,
 )
@@ -125,6 +126,10 @@ if _chatgpt_subscription.is_available:
     log.info("✓ ChatGPT Plus/Pro subscription active → models: chatgpt/*")
 else:
     log.info("  ChatGPT subscription not detected  (run `codex login`)")
+
+# ── Local inference backends (managed containers) ─────────────────────────────
+
+_vllm = VLLMProvider()
 
 
 # ── Cloud fallback chain (without Ollama) ────────────────────────────────────
@@ -481,6 +486,8 @@ def get_provider_catalog() -> list[dict]:
          "available": bool(settings.anthropic_api_key),   "default_model": "claude-sonnet-4-6"},
         {"slug": "openai",      "name": "OpenAI API",          "type": "paid",         "instance": _litellm,
          "available": bool(settings.openai_api_key),      "default_model": "gpt-4o"},
+        {"slug": "vllm",        "name": "vLLM",                "type": "local",        "instance": _vllm,
+         "available": _vllm.is_available,                 "default_model": None},
     ]
 
     # Count models per provider
