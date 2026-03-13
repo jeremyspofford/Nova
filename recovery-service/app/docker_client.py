@@ -23,6 +23,7 @@ OPTIONAL_SERVICES = {
     "chat-bridge": "bridges",
     "website": "website",
     "ollama": "local-ollama",
+    "nova-vllm": "local-vllm",
     "cloudflared": "cloudflare-tunnel",
     "tailscale": "tailscale",
 }

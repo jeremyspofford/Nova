@@ -73,6 +73,29 @@ class TestVLLMProviderRegistration:
         assert vllm["available"] is False
 
 
+class TestBackendLifecycle:
+    """Tests for backend lifecycle management via recovery service."""
+
+    async def test_get_backend_status(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        """Recovery should report current backend status."""
+        r = await recovery.get("/api/v1/recovery/inference/backend", headers=admin_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert "backend" in data
+        assert "state" in data
+        assert data["state"] in ["ready", "stopped", "draining", "starting", "error"]
+
+    async def test_list_available_backends(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        """Recovery should list all available backends with their status."""
+        r = await recovery.get("/api/v1/recovery/inference/backends", headers=admin_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, list)
+        names = [b["name"] for b in data]
+        assert "ollama" in names
+        assert "vllm" in names
+
+
 class TestLocalInferenceRouting:
     """Tests for the LocalInferenceProvider routing wrapper."""
 

@@ -1,8 +1,11 @@
 """API routes for inference backend management."""
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.inference.controller import (
+    get_backend_status, list_backends, start_backend, stop_backend,
+)
 from app.inference.hardware import detect_hardware, get_backend_recommendation, get_hardware
 from app.routes import _check_admin
 
@@ -25,3 +28,35 @@ async def redetect_hardware(_: None = Depends(_check_admin)):
     hw = await detect_hardware()
     recommendation = get_backend_recommendation(hw)
     return {**hw, "recommended_backend": recommendation}
+
+
+# ── Backend lifecycle ─────────────────────────────────────────────────────────
+
+
+@router.get("/backend")
+async def get_inference_backend(_: None = Depends(_check_admin)):
+    """Get current inference backend status."""
+    return await get_backend_status()
+
+
+@router.get("/backends")
+async def list_inference_backends(_: None = Depends(_check_admin)):
+    """List all available inference backends."""
+    return await list_backends()
+
+
+@router.post("/backend/stop")
+async def stop_inference_backend(_: None = Depends(_check_admin)):
+    """Stop the active inference backend."""
+    return await stop_backend()
+
+
+@router.post("/backend/{backend_name}/start")
+async def start_inference_backend(backend_name: str, _: None = Depends(_check_admin)):
+    """Start (or switch to) an inference backend."""
+    try:
+        return await start_backend(backend_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except TimeoutError as e:
+        raise HTTPException(status_code=504, detail=str(e))
