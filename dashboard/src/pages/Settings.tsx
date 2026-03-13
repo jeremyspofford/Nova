@@ -16,6 +16,7 @@ import { TrustedNetworksSection } from './settings/TrustedNetworksSection'
 import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
 import { AccountSection } from './settings/AccountSection'
 import { GuestAccessSection } from './settings/GuestAccessSection'
+import { LocalInferenceSection } from './settings/LocalInferenceSection'
 import { useAuth } from '../stores/auth-store'
 
 // ── Category tabs ────────────────────────────────────────────────────────────
@@ -158,6 +159,7 @@ export function Settings() {
 
         {activeCategory === 'ai' && (
           <>
+            <LocalInferenceSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
             <LLMRoutingSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
             <PipelineModelsSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
             <ProviderStatusSection />

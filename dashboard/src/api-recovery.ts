@@ -9,7 +9,7 @@ import { getAuthHeaders } from './api'
 
 const BASE = '/recovery-api'
 
-async function recoveryFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function recoveryFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const resp = await fetch(`${BASE}${path}`, {
     ...options,
     headers: {
