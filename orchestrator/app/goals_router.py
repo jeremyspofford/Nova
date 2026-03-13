@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query
@@ -16,6 +16,14 @@ log = logging.getLogger(__name__)
 goals_router = APIRouter(tags=["goals"])
 
 
+def _validate_and_compute_next(cron_expr: str) -> datetime:
+    """Validate a cron expression and return the next fire time."""
+    from croniter import croniter
+    if not croniter.is_valid(cron_expr):
+        raise HTTPException(status_code=400, detail=f"Invalid cron expression: {cron_expr}")
+    return croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+
+
 # ── Request / Response models ─────────────────────────────────────────────────
 
 class CreateGoalRequest(BaseModel):
@@ -26,6 +34,9 @@ class CreateGoalRequest(BaseModel):
     max_cost_usd: float | None = None
     check_interval_seconds: int | None = 3600
     parent_goal_id: UUID | None = None
+    schedule_cron: str | None = None
+    max_completions: int | None = None
+    created_via: str = "api"
 
 
 class UpdateGoalRequest(BaseModel):
@@ -37,6 +48,8 @@ class UpdateGoalRequest(BaseModel):
     max_iterations: int | None = None
     max_cost_usd: float | None = None
     check_interval_seconds: int | None = None
+    schedule_cron: str | None = Field(default=None, description="Cron expression or None to clear")
+    max_completions: int | None = None
 
 
 class GoalResponse(BaseModel):
@@ -54,6 +67,12 @@ class GoalResponse(BaseModel):
     check_interval_seconds: int | None
     last_checked_at: datetime | None
     parent_goal_id: UUID | None
+    schedule_cron: str | None
+    schedule_next_at: datetime | None
+    schedule_last_ran_at: datetime | None
+    max_completions: int | None
+    completion_count: int
+    created_via: str
     created_by: str
     created_at: datetime
     updated_at: datetime
@@ -65,17 +84,25 @@ class GoalResponse(BaseModel):
 async def create_goal(req: CreateGoalRequest, user: UserDep):
     """Create a new goal."""
     pool = get_pool()
+    schedule_next_at = None
+    if req.schedule_cron:
+        schedule_next_at = _validate_and_compute_next(req.schedule_cron)
+
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO goals (title, description, priority, max_iterations,
-                               max_cost_usd, check_interval_seconds, parent_goal_id, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                               max_cost_usd, check_interval_seconds, parent_goal_id,
+                               created_by, schedule_cron, schedule_next_at,
+                               max_completions, created_via)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING *
             """,
             req.title, req.description, req.priority, req.max_iterations,
             req.max_cost_usd, req.check_interval_seconds,
             req.parent_goal_id, user.email,
+            req.schedule_cron, schedule_next_at,
+            req.max_completions, req.created_via,
         )
     log.info("Goal created: %s — %s", row["id"], req.title)
     return _row_to_goal(row)
@@ -119,6 +146,13 @@ async def update_goal(goal_id: UUID, req: UpdateGoalRequest, _user: UserDep):
     """Update a goal (title, status, priority, progress, etc.)."""
     # Build SET clause dynamically from non-None fields
     updates = req.model_dump(exclude_none=True)
+    # If cron is being updated, recompute next_at
+    if "schedule_cron" in updates:
+        cron_val = updates["schedule_cron"]
+        if cron_val:
+            updates["schedule_next_at"] = _validate_and_compute_next(cron_val)
+        else:
+            updates["schedule_next_at"] = None
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -171,6 +205,12 @@ def _row_to_goal(row) -> GoalResponse:
         check_interval_seconds=row["check_interval_seconds"],
         last_checked_at=row["last_checked_at"],
         parent_goal_id=row["parent_goal_id"],
+        schedule_cron=row["schedule_cron"],
+        schedule_next_at=row["schedule_next_at"],
+        schedule_last_ran_at=row["schedule_last_ran_at"],
+        max_completions=row["max_completions"],
+        completion_count=row["completion_count"],
+        created_via=row["created_via"],
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],

@@ -19,6 +19,7 @@ dependencies = [
     "asyncpg>=0.30",
     "PyJWT>=2.8",
     "bcrypt>=4.1",
+    "croniter>=1.0",
 ]
 
 [project.optional-dependencies]
