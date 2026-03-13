@@ -28,6 +28,9 @@ dist/
 # Backups
 backups/
 
+# Machine-specific runtime data (hardware detection output, etc.)
+data/
+
 # OS
 .DS_Store
 *.log
