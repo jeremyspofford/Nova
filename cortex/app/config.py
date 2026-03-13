@@ -28,6 +28,17 @@ class Settings:
     cycle_interval_seconds: int = int(os.getenv("CORTEX_CYCLE_INTERVAL", "300"))
     enabled: bool = os.getenv("CORTEX_ENABLED", "true").lower() == "true"
 
+    # Adaptive intervals
+    max_idle_interval: int = int(os.getenv("CORTEX_MAX_IDLE_INTERVAL", "1800"))
+    active_interval: int = int(os.getenv("CORTEX_ACTIVE_INTERVAL", "30"))
+    moderate_interval: int = int(os.getenv("CORTEX_MODERATE_INTERVAL", "60"))
+
+    # Memory integration
+    memory_enabled: bool = os.getenv("CORTEX_MEMORY_ENABLED", "true").lower() == "true"
+    reflect_to_engrams: bool = os.getenv("CORTEX_REFLECT_TO_ENGRAMS", "true").lower() == "true"
+    idle_consolidation: bool = os.getenv("CORTEX_IDLE_CONSOLIDATION", "true").lower() == "true"
+    consolidation_cooldown: int = int(os.getenv("CORTEX_CONSOLIDATION_COOLDOWN", "1800"))
+
     # Budget
     daily_budget_usd: float = float(os.getenv("CORTEX_DAILY_BUDGET_USD", "5.00"))
 
