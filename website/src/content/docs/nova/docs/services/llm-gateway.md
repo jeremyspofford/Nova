@@ -40,9 +40,11 @@ The routing strategy is configurable at runtime via the platform config:
 
 | Class | Description |
 |-------|-------------|
-| `LocalInferenceProvider` | Wrapper that reads active backend config from Redis (5s cache) and delegates to the appropriate provider. Recreates delegate on backend/URL change. |
+| `LocalInferenceProvider` | Wrapper that reads active backend config from Redis (5s cache) and delegates to the appropriate provider (Ollama, vLLM, SGLang, or custom). Recreates delegate on backend/URL change. |
 | `OpenAICompatibleProvider` | Base class for OpenAI-compatible inference servers (vLLM, SGLang) |
 | `VLLMProvider` | Thin subclass for vLLM -- chat, streaming, embeddings, function calling, structured output |
+| `SGLangProvider` | Thin subclass for SGLang -- same capabilities as vLLM, benefits from RadixAttention prefix caching |
+| `RemoteInferenceProvider` | For user-managed OpenAI-compatible servers -- custom URL + optional auth header via `extra_headers` |
 | `OllamaProvider` | Existing Ollama provider (unchanged) |
 
 ### Subscription providers (zero API cost)
@@ -86,6 +88,12 @@ The routing strategy is configurable at runtime via the platform config:
 |--------|------|-------------|
 | POST | `/v1/chat/completions` | Chat completions (streaming and non-streaming) |
 | GET | `/v1/models` | List all registered model IDs |
+
+### Inference metrics
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/inference/stats` | Performance metrics -- tokens/sec, latency, request counts for the active local backend |
 
 ### Discovery
 
@@ -151,5 +159,7 @@ curl http://localhost:8001/complete \
 - **Rate limiting** -- per-provider daily quotas tracked in Redis; returns HTTP 429 when exhausted
 - **Response cache** -- temperature=0 requests are cached to avoid redundant API calls; cache is keyed on the full request body (excluding metadata)
 - **Translation layer** -- `openai_compat.py` converts between OpenAI wire format and Nova's internal `CompleteRequest`/`CompleteResponse` types
-- **Local inference abstraction** -- `LocalInferenceProvider` wraps the active backend, reading `nova:config:inference.*` from Redis. The `is_local` property on `ModelProvider` enables inflight request counting without string matching.
-- **Model discovery** -- gateway discovers models from the active backend's `/v1/models` endpoint (vLLM) or Ollama's model list. `LocalInferenceProvider` maintains a dynamic set of known local models for routing decisions.
+- **Local inference abstraction** -- `LocalInferenceProvider` wraps the active backend, reading `nova:config:inference.*` from Redis. Supports `ollama`, `vllm`, `sglang`, and `custom` backend types. The `is_local` property on `ModelProvider` enables inflight request counting without string matching.
+- **Model discovery** -- gateway discovers models from the active backend's `/v1/models` endpoint (vLLM/SGLang) or Ollama's model list. `LocalInferenceProvider` maintains a dynamic set of known local models for routing decisions.
+- **Inference metrics** -- the `/v1/inference/stats` endpoint tracks tokens per second, average latency, and request counts for the active local backend, displayed in the dashboard's Models page.
+- **Extra headers** -- `OpenAICompatibleProvider` supports `extra_headers` for custom authentication, used by `RemoteInferenceProvider` to pass user-configured auth to custom endpoints.

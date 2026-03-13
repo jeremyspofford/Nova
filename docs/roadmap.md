@@ -2753,27 +2753,31 @@ Establishes the managed inference architecture. Users can run vLLM as a managed 
 - [x] **Redis db7** for recovery service — `nova:system:*` namespace for read-only system facts
 - [x] **Integration tests** — 11 tests across hardware detection, provider registration, inflight counting, routing, lifecycle, discovery, config flow
 
-### 🔜 Phase 12b — Model Library UI
+### ✅ Phase 12b — Model Library UI (Complete)
 
-- [ ] New "Models" page in dashboard sidebar
-- [ ] Model catalog search (HuggingFace API for vLLM, Ollama registry for Ollama)
-- [ ] VRAM-aware filtering and size estimates
-- [ ] Embedding model selection
-- [ ] Download progress tracking via SSE
+- [x] Backend-aware Models page (Ollama pull/delete, vLLM/SGLang HF search + model switch)
+- [x] vLLM model switching via drain protocol (`POST /backend/{backend}/switch-model`)
+- [x] HuggingFace model catalog search (`GET /models/search`)
+- [x] Curated recommended models (`data/recommended_models.json`, `GET /models/recommended`)
+- [x] VRAM-aware filtering and size estimates
+- [x] Onboarding wizard — 6-step first-visit flow (hardware detection → engine → model → download → ready)
+- [x] Re-runnable wizard from Settings
 
-### 🔜 Phase 12c — SGLang + Remote Inference
+### ✅ Phase 12c — SGLang + Remote Inference (Complete)
 
-- [ ] `SGLangProvider` (extends `OpenAICompatibleProvider`)
-- [ ] `RemoteInferenceProvider` (custom URL + optional auth header)
-- [ ] WoL integration moved into inference manager
-- [ ] Docker Compose profile for SGLang
+- [x] `SGLangProvider` extends `OpenAICompatibleProvider`
+- [x] `RemoteInferenceProvider` for custom OpenAI-compatible endpoints (URL + auth)
+- [x] `extra_headers` support on `OpenAICompatibleProvider` base class
+- [x] `LocalInferenceProvider` handles sglang + custom backend types
+- [x] Docker Compose `nova-sglang` service with `local-sglang` profile
+- [x] Settings UI: SGLang + Custom backend options with URL/auth config
 
-### 🔜 Phase 12d — Polish & Intelligence
+### ✅ Phase 12d — Polish & Intelligence (Complete)
 
-- [ ] Auto-recommend backend based on hardware + workload
-- [ ] Model recommendations based on VRAM and use case
-- [ ] GPU memory monitoring in dashboard (live)
-- [ ] Inference performance metrics (tokens/sec, latency) in UI
+- [x] Auto-recommend backend + model based on hardware (`GET /recommendation`)
+- [x] GPU monitoring via docker exec nvidia-smi (`GET /hardware/gpu-stats`)
+- [x] Inference performance metrics on gateway (`GET /v1/inference/stats`)
+- [x] Dashboard GPU stats cards and recommendation banner
 
 ---
 

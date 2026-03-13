@@ -80,6 +80,11 @@ The Recovery Service intentionally has minimal dependencies. It connects directl
 | POST | `/api/v1/recovery/inference/backend/stop` | Admin | Stop the active inference backend |
 | GET | `/api/v1/recovery/inference/backend` | Admin | Get active backend status |
 | GET | `/api/v1/recovery/inference/backends` | Admin | List all available backends |
+| POST | `/api/v1/recovery/inference/backend/{backend}/switch-model` | Admin | Switch model on a single-model backend (vLLM/SGLang) via drain protocol |
+| GET | `/api/v1/recovery/inference/models/search` | Admin | Search HuggingFace/Ollama model catalogs |
+| GET | `/api/v1/recovery/inference/models/recommended` | Admin | Curated model recommendations filtered by VRAM |
+| GET | `/api/v1/recovery/inference/recommendation` | Admin | Auto-recommend backend + model based on hardware |
+| GET | `/api/v1/recovery/hardware/gpu-stats` | Admin | Live GPU utilization (via docker exec nvidia-smi) |
 
 ### Health
 
@@ -123,13 +128,21 @@ The Recovery page in the Dashboard provides a visual interface for the same oper
 
 ## Inference management
 
-Recovery manages local inference backends (Ollama, vLLM) via Docker Compose profiles. Only one local backend can be active at a time.
+Recovery manages local inference backends (Ollama, vLLM, SGLang) via Docker Compose profiles. Only one local backend can be active at a time.
 
 **Hardware detection** -- on startup and on demand, Recovery detects the host's GPU (NVIDIA/AMD), VRAM, Docker GPU runtime availability, CPU cores, RAM, and disk space. Results are stored in Redis as `nova:system:hardware`.
 
 **Backend lifecycle** -- Recovery handles the full lifecycle of inference backends: pulling the container image, starting the container via Compose profiles, and ongoing health monitoring. Health checks run on a 30-second interval; 3 consecutive failures trigger an automatic restart with exponential backoff.
 
 **Backend switching** -- when switching from one backend to another, Recovery uses a drain protocol that ensures zero dropped requests. The active backend continues serving in-flight requests while the new backend starts up and passes health checks before traffic is cut over.
+
+**Model switching** -- for single-model backends (vLLM, SGLang), Recovery handles model switching via the drain protocol. The `POST /inference/backend/{backend}/switch-model` endpoint drains in-flight requests, stops the container, updates the model, and restarts with the new model loaded.
+
+**Model discovery** -- Recovery provides model catalog search (`GET /inference/models/search`) that queries HuggingFace for vLLM/SGLang-compatible models and the Ollama registry for Ollama models. Results include VRAM estimates for hardware-aware filtering. A curated set of recommended models is served from `data/recommended_models.json` via `GET /inference/models/recommended`.
+
+**Auto-recommendation** -- the `GET /inference/recommendation` endpoint analyzes detected hardware and recommends both a backend and a model. It considers GPU vendor, available VRAM, and whether a Docker GPU runtime is available.
+
+**GPU monitoring** -- when an NVIDIA GPU is present, `GET /hardware/gpu-stats` returns live utilization, VRAM usage, temperature, and power draw by running `nvidia-smi` inside the active inference container via Docker exec.
 
 **Redis connections** -- Recovery maintains two Redis connections. It uses db7 for `nova:system:*` keys (hardware facts, backend state), and cross-reads db1 for `nova:config:inference.*` keys (inference configuration written by the Orchestrator).
 

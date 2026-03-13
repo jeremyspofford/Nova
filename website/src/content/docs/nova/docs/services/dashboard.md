@@ -26,7 +26,7 @@ The Dashboard is Nova's web-based admin interface. Built with React, it provides
 | **Pods** | `/pods` | Pod management -- create, configure, enable/disable pods; visual pipeline editor |
 | **Usage** | `/usage` | Monthly/weekly/daily usage charts by model with sort toggle |
 | **Keys** | `/keys` | API key management -- create, revoke, one-time reveal with copy |
-| **Models** | `/models` | Browse all registered models grouped by provider |
+| **Models** | `/models` | Backend-aware model management -- Ollama pull/delete, vLLM/SGLang HuggingFace search + model switch, GPU stats, recommendations |
 | **MCP** | `/mcp` | MCP server management -- add from catalog, configure, reload |
 | **Memory Inspector** | `/memory` | Browse, search, and delete stored memories across all tiers |
 | **Agent Endpoints** | `/agent-endpoints` | External agent delegation configuration |
@@ -38,7 +38,7 @@ The Dashboard is Nova's web-based admin interface. Built with React, it provides
 
 The Settings page is organized into these sections:
 
-1. **Local Inference** -- backend selector (vLLM, Ollama, None), hardware info, live status, start/stop controls, remote inference toggle
+1. **Local Inference** -- backend selector (vLLM, SGLang, Ollama, Custom, None), hardware info, live status, start/stop controls, remote inference toggle, custom endpoint URL/auth config
 2. **Nova Identity** -- AI name, greeting message, and persona/soul (configures how the AI presents itself)
 3. **Platform Defaults** -- task history retention
 4. **LLM Routing** -- routing strategy (local-only, local-first, cloud-only, cloud-first), Ollama URL, intelligent routing
@@ -76,6 +76,29 @@ All API calls go through `apiFetch<T>()` in `src/api.ts`, which:
 ## Startup behavior
 
 The Dashboard depends only on the Recovery service at startup. While other services are coming online, it shows a startup screen with service health status. Once the Orchestrator reports healthy, the full UI becomes available.
+
+## Onboarding wizard
+
+First-time users see a 6-step onboarding wizard that walks through inference setup:
+
+1. **Welcome** -- introduction to local AI
+2. **Hardware detection** -- GPU, VRAM, CPU, RAM scan
+3. **Engine selection** -- backend recommendation based on hardware
+4. **Model selection** -- VRAM-aware model suggestions with curated recommendations
+5. **Download** -- model pull with progress tracking
+6. **Ready** -- setup confirmation
+
+The wizard can be re-launched from Settings at any time. Completion state is persisted so it only appears on first visit.
+
+## Backend-aware Models page
+
+The Models page adapts its UI based on the active inference backend:
+
+- **Ollama** -- pull models from the Ollama registry, delete local models, view download progress
+- **vLLM / SGLang** -- search HuggingFace for compatible models, switch the loaded model via drain protocol, view VRAM estimates
+- **All backends** -- GPU stats cards (utilization, VRAM, temperature, power) when an NVIDIA GPU is detected, recommendation banner suggesting optimal backend + model for the hardware
+
+Model switching on vLLM/SGLang triggers the drain protocol: in-flight requests complete, the container restarts with the new model, and the UI shows the transition state.
 
 ## Build verification
 
