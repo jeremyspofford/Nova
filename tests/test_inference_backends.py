@@ -98,6 +98,14 @@ class TestBackendLifecycle:
         assert "vllm" in names
 
 
+class TestSGLangProvider:
+    async def test_sglang_backend_listed(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get("/api/v1/recovery/inference/backends", headers=admin_headers)
+        assert r.status_code == 200
+        names = [b["name"] for b in r.json()]
+        assert "sglang" in names
+
+
 class TestVLLMDiscovery:
     """Tests for vLLM model discovery."""
 

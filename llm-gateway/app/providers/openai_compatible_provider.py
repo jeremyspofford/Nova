@@ -30,6 +30,7 @@ class OpenAICompatibleProvider(ModelProvider):
         provider_name: str,
         capabilities: Optional[Set[ModelCapability]] = None,
         timeout: float = 120.0,
+        extra_headers: Optional[dict[str, str]] = None,
     ):
         self._base_url = base_url.rstrip("/")
         self._name = provider_name
@@ -39,6 +40,7 @@ class OpenAICompatibleProvider(ModelProvider):
             ModelCapability.embeddings,
         }
         self._timeout = timeout
+        self._extra_headers = extra_headers or {}
         # Start pessimistic — check_health() will flip to True when the server
         # is reachable.  This avoids a window where the catalog reports
         # "available" before the first health probe has run.
@@ -76,7 +78,7 @@ class OpenAICompatibleProvider(ModelProvider):
                 return self._healthy
 
             try:
-                async with httpx.AsyncClient(timeout=3.0) as client:
+                async with httpx.AsyncClient(timeout=3.0, headers=self._extra_headers) as client:
                     r = await client.get(f"{self._base_url}/health")
                     self._healthy = r.status_code == 200
             except httpx.HTTPError:
@@ -91,7 +93,7 @@ class OpenAICompatibleProvider(ModelProvider):
         self._assert_available()
         payload = self._build_chat_payload(request, stream=False)
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=self._extra_headers) as client:
             r = await client.post(f"{self._base_url}/v1/chat/completions", json=payload)
             r.raise_for_status()
             data = r.json()
@@ -112,7 +114,7 @@ class OpenAICompatibleProvider(ModelProvider):
         self._assert_available()
         payload = self._build_chat_payload(request, stream=True)
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=self._extra_headers) as client:
             async with client.stream(
                 "POST", f"{self._base_url}/v1/chat/completions", json=payload
             ) as response:
@@ -145,7 +147,7 @@ class OpenAICompatibleProvider(ModelProvider):
             "model": request.model or "default",
         }
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
+        async with httpx.AsyncClient(timeout=self._timeout, headers=self._extra_headers) as client:
             r = await client.post(f"{self._base_url}/v1/embeddings", json=payload)
             r.raise_for_status()
             data = r.json()

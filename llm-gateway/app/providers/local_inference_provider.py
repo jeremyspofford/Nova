@@ -30,9 +30,11 @@ class LocalInferenceProvider(ModelProvider):
     Wrapper that reads active backend config from Redis and delegates.
 
     Config keys (in Redis nova:config:*):
-    - inference.backend: "ollama" | "vllm" | "sglang" | "none"
+    - inference.backend: "ollama" | "vllm" | "sglang" | "custom" | "none"
     - inference.state: "ready" | "draining" | "starting" | "error"
     - inference.url: override URL (empty = default for backend)
+    - inference.custom_url: URL for the custom backend
+    - inference.custom_auth_header: Authorization header for the custom backend
     """
 
     def __init__(self):
@@ -92,6 +94,11 @@ class LocalInferenceProvider(ModelProvider):
                 backend = await _get_redis_config("inference.backend", "ollama")
                 state = await _get_redis_config("inference.state", "ready")
                 url_override = await _get_redis_config("inference.url", "")
+                custom_url = ""
+                custom_auth = ""
+                if backend == "custom":
+                    custom_url = await _get_redis_config("inference.custom_url", "")
+                    custom_auth = await _get_redis_config("inference.custom_auth_header", "")
             except Exception:
                 logger.debug("Failed to read inference config from Redis, keeping current state")
                 return
@@ -101,24 +108,32 @@ class LocalInferenceProvider(ModelProvider):
             if backend != self._current_backend or url_override != self._current_url:
                 self._current_backend = backend
                 self._current_url = url_override
-                self._delegate = self._create_delegate(backend, url_override)
+                self._delegate = self._create_delegate(backend, url_override,
+                                                       custom_url=custom_url, custom_auth=custom_auth)
                 self._local_models.clear()
                 logger.info("Local inference backend changed to: %s", backend)
 
-    def _create_delegate(self, backend: str, url_override: str) -> Optional[ModelProvider]:
+    def _create_delegate(self, backend: str, url_override: str,
+                         custom_url: str = "", custom_auth: str = "") -> Optional[ModelProvider]:
         """Create a new provider instance for the given backend."""
         if backend == "none":
             return None
 
         url = url_override or DEFAULT_URLS.get(backend, "")
-        if not url:
-            logger.warning("No URL for backend %s", backend)
-            return None
 
         if backend == "ollama":
-            return OllamaProvider(base_url=url)
+            return OllamaProvider(base_url=url or DEFAULT_URLS["ollama"])
         elif backend == "vllm":
-            return VLLMProvider(base_url=url)
+            return VLLMProvider(base_url=url or DEFAULT_URLS["vllm"])
+        elif backend == "sglang":
+            from .sglang_provider import SGLangProvider
+            return SGLangProvider(base_url=url or DEFAULT_URLS["sglang"])
+        elif backend == "custom":
+            if not custom_url:
+                logger.warning("Custom backend selected but no URL configured")
+                return None
+            from .remote_provider import RemoteInferenceProvider
+            return RemoteInferenceProvider(url=custom_url, auth_header=custom_auth or None)
         else:
             logger.warning("Unknown backend: %s", backend)
             return None

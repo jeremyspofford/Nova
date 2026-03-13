@@ -51,3 +51,15 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+
+  nova-sglang:
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

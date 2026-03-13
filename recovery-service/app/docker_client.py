@@ -24,6 +24,7 @@ OPTIONAL_SERVICES = {
     "website": "website",
     "ollama": "local-ollama",
     "nova-vllm": "local-vllm",
+    "nova-sglang": "local-sglang",
     "cloudflared": "cloudflare-tunnel",
     "tailscale": "tailscale",
 }

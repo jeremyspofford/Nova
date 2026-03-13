@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 BACKENDS = {
     "ollama": {"profile": "local-ollama", "service": "ollama", "container": "nova-ollama"},
     "vllm": {"profile": "local-vllm", "service": "nova-vllm", "container": "nova-vllm"},
+    "sglang": {"profile": "local-sglang", "service": "nova-sglang", "container": "nova-sglang"},
 }
 
 # Backends that support model switching (single-model servers)
@@ -204,6 +205,14 @@ async def _wait_for_healthy(container_name: str, backend: str, timeout: float = 
                 try:
                     async with httpx.AsyncClient(timeout=3.0) as client:
                         r = await client.get("http://nova-vllm:8000/health")
+                        if r.status_code == 200:
+                            return
+                except Exception:
+                    pass
+            elif backend == "sglang":
+                try:
+                    async with httpx.AsyncClient(timeout=3.0) as client:
+                        r = await client.get("http://nova-sglang:8000/health")
                         if r.status_code == 200:
                             return
                 except Exception:

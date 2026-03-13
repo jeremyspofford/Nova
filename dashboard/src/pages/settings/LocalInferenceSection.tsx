@@ -22,7 +22,9 @@ interface BackendStatus {
 
 const BACKENDS = [
   { value: "vllm", label: "vLLM", description: "Production GPU inference (NVIDIA/AMD)" },
+  { value: "sglang", label: "SGLang", description: "High-throughput GPU inference" },
   { value: "ollama", label: "Ollama", description: "Easy mode / CPU fallback" },
+  { value: "custom", label: "Custom", description: "User-managed OpenAI-compatible server" },
   { value: "none", label: "None", description: "Cloud providers only" },
 ] as const;
 
@@ -43,6 +45,10 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
   const configBackend = useConfigValue(entries, "inference.backend", "ollama");
   const remoteUrl = useConfigValue(entries, "inference.url", "");
   const wolMac = useConfigValue(entries, "llm.wol_mac", "");
+  const customUrl = useConfigValue(entries, "inference.custom_url", "");
+  const customAuth = useConfigValue(entries, "inference.custom_auth_header", "");
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const { data: hardware } = useQuery<HardwareInfo>({
     queryKey: ["inference-hardware"],
@@ -190,6 +196,61 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Custom Backend Config */}
+      {(status?.backend || configBackend) === "custom" && (
+        <div className="mt-4 space-y-3">
+          <ConfigField
+            label="Server URL"
+            configKey="inference.custom_url"
+            value={customUrl}
+            onSave={onSave}
+            saving={saving}
+            placeholder="http://192.168.1.50:8000"
+            description="URL of your OpenAI-compatible inference server"
+          />
+          <ConfigField
+            label="Auth Header"
+            configKey="inference.custom_auth_header"
+            value={customAuth}
+            onSave={onSave}
+            saving={saving}
+            placeholder="Bearer sk-..."
+            description="Optional Authorization header value"
+          />
+          <button
+            onClick={async () => {
+              if (!customUrl) return;
+              setTestingConnection(true);
+              setTestResult(null);
+              try {
+                const headers: Record<string, string> = {};
+                if (customAuth) headers["Authorization"] = customAuth;
+                const r = await fetch(customUrl.replace(/\/$/, "") + "/health", {
+                  headers,
+                  signal: AbortSignal.timeout(5000),
+                });
+                setTestResult(r.ok
+                  ? { ok: true, message: `Connected (HTTP ${r.status})` }
+                  : { ok: false, message: `Server returned HTTP ${r.status}` });
+              } catch (e) {
+                setTestResult({ ok: false, message: e instanceof Error ? e.message : "Connection failed" });
+              } finally {
+                setTestingConnection(false);
+              }
+            }}
+            disabled={!customUrl || testingConnection}
+            className="px-3 py-1.5 text-sm rounded-lg bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {testingConnection ? "Testing..." : "Test Connection"}
+          </button>
+          {testResult && (
+            <p className={`text-sm ${testResult.ok ? "text-emerald-500" : "text-red-400"}`}>
+              {testResult.message}
+            </p>
+          )}
         </div>
       )}
 
