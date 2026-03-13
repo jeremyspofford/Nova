@@ -64,10 +64,13 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // Prevent iOS keyboard from shifting the viewport
+  // Prevent iOS keyboard from shifting the viewport (mobile only)
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv || !containerRef.current) return
+    // Only apply on touch devices — on desktop, visualViewport.height includes
+    // the NavBar area, which would push the chat input below the fold
+    if (!('ontouchstart' in window)) return
 
     const onResize = () => {
       if (containerRef.current) {

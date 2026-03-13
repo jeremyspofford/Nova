@@ -65,7 +65,13 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
   const startBackend = useMutation({
     mutationFn: (backend: string) =>
       recoveryFetch(`/api/v1/recovery/inference/backend/${backend}/start`, { method: "POST" }),
-    onSuccess: () => {
+    onMutate: (backend) => {
+      // Optimistic update: immediately show "Starting..." so user gets instant feedback
+      queryClient.setQueryData<BackendStatus>(["inference-backend-status"], (old) =>
+        old ? { ...old, backend, state: "starting" } : { backend, state: "starting", container_status: null },
+      );
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["inference-backend-status"] });
     },
   });
@@ -73,7 +79,12 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
   const stopBackend = useMutation({
     mutationFn: () =>
       recoveryFetch("/api/v1/recovery/inference/backend/stop", { method: "POST" }),
-    onSuccess: () => {
+    onMutate: () => {
+      queryClient.setQueryData<BackendStatus>(["inference-backend-status"], (old) =>
+        old ? { ...old, state: "draining" } : undefined,
+      );
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["inference-backend-status"] });
     },
   });

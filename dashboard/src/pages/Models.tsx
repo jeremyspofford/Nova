@@ -13,9 +13,10 @@ import Card from '../components/Card'
 import { RECOMMENDED_OLLAMA_MODELS, CLOUD_PROVIDER_ORDER } from '../constants'
 import {
   RefreshCw, Trash2, Download, Check, HardDrive, Cloud, Loader2,
-  AlertTriangle, ExternalLink, Server, X, Info,
+  AlertTriangle, ExternalLink, Server, X, Info, Play,
 } from 'lucide-react'
 import { formatBytes } from '../lib/format'
+import { recoveryFetch } from '../api-recovery'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,7 @@ export function Models() {
 
   const pulled = useQuery({
     queryKey: ['ollama-pulled'],
-    queryFn: getOllamaPulled,
+    queryFn: () => getOllamaPulled().catch(() => [] as OllamaPulledModel[]),
     staleTime: 30_000,
   })
 
@@ -80,6 +81,17 @@ export function Models() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ollama-pulled'] })
       qc.invalidateQueries({ queryKey: ['model-catalog'] })
+    },
+  })
+
+  const startOllama = useMutation({
+    mutationFn: () =>
+      recoveryFetch('/api/v1/recovery/inference/backend/ollama/start', { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ollama-pulled'] })
+      qc.invalidateQueries({ queryKey: ['ollama-status'] })
+      qc.invalidateQueries({ queryKey: ['model-catalog'] })
+      qc.invalidateQueries({ queryKey: ['inference-backend-status'] })
     },
   })
 
@@ -180,13 +192,27 @@ export function Models() {
           {pulled.isLoading && (
             <div className="px-4 py-6 text-sm text-neutral-500 dark:text-neutral-400 text-center">Loading…</div>
           )}
-          {pulled.error && (
-            <div className="px-4 py-4 text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-              {ollamaHealthy ? 'Failed to list models' : 'Ollama is unreachable'}
+          {!pulled.isLoading && pulled.data && pulled.data.length === 0 && !ollamaHealthy && (
+            <div className="px-4 py-4 flex items-center justify-between">
+              <div className="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                Ollama is not running.
+              </div>
+              <button
+                onClick={() => startOllama.mutate()}
+                disabled={startOllama.isPending}
+                className="flex items-center gap-1.5 rounded-lg bg-teal-600 dark:bg-teal-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700 dark:hover:bg-teal-600 disabled:opacity-50 transition-colors"
+              >
+                {startOllama.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5" />
+                )}
+                Start Ollama
+              </button>
             </div>
           )}
-          {pulled.data && pulled.data.length === 0 && (
+          {!pulled.isLoading && pulled.data && pulled.data.length === 0 && ollamaHealthy && (
             <div className="px-4 py-6 text-sm text-neutral-500 dark:text-neutral-400 text-center">
               No models pulled yet. Pull a model below to get started.
             </div>
