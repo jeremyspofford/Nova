@@ -1,5 +1,7 @@
 """API routes for inference backend management."""
+import json
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -14,6 +16,8 @@ from app.routes import _check_admin
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/recovery/inference", tags=["inference"])
+
+RECOMMENDED_MODELS_PATH = Path("/app/data/recommended_models.json")
 
 
 @router.get("/hardware")
@@ -93,3 +97,23 @@ async def search_models_endpoint(
 ):
     """Search model catalogs (HuggingFace for vLLM/SGLang, Ollama registry)."""
     return await do_search_models(q, backend, max_vram_gb)
+
+
+@router.get("/models/recommended")
+async def get_recommended_models(
+    backend: str | None = None,
+    max_vram_gb: float | None = None,
+    _: None = Depends(_check_admin),
+):
+    """Return curated recommended models, optionally filtered."""
+    try:
+        models = json.loads(RECOMMENDED_MODELS_PATH.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+    if backend:
+        models = [m for m in models if backend in m.get("backends", [])]
+    if max_vram_gb:
+        models = [m for m in models if m.get("min_vram_gb", 0) <= max_vram_gb]
+
+    return models

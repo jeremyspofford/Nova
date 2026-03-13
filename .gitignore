@@ -29,7 +29,8 @@ dist/
 backups/
 
 # Machine-specific runtime data (hardware detection output, etc.)
-data/
+data/*
+!data/recommended_models.json
 
 # OS
 .DS_Store

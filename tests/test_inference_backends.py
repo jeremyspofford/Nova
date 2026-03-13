@@ -186,6 +186,26 @@ class TestModelSearch:
         assert "state" in data
 
 
+class TestRecommendedModels:
+    """Tests for the recommended models endpoint."""
+
+    async def test_get_recommended_models(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get("/api/v1/recovery/inference/models/recommended", headers=admin_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+        assert "id" in data[0]
+        assert "category" in data[0]
+
+    async def test_recommended_models_filter_by_backend(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get("/api/v1/recovery/inference/models/recommended?backend=ollama", headers=admin_headers)
+        assert r.status_code == 200
+        data = r.json()
+        for m in data:
+            assert "ollama" in m["backends"]
+
+
 class TestInferenceConfigFlow:
     """End-to-end test: config change flows from orchestrator to gateway."""
 
