@@ -335,23 +335,25 @@ async def _compute_conversation_scores() -> int:
             except (ValueError, AttributeError):
                 pass
 
-            # Write to conversation_outcomes
-            await conn.execute(
-                """
-                INSERT INTO conversation_outcomes
-                    (conversation_id, session_id, session_score, turn_count)
-                VALUES ($1, $2, $3, $4)
-                """,
-                conv_uuid,
-                sid,
-                round(session_score, 3),
-                n,
-            )
+            # Write to conversation_outcomes (skip if conversation doesn't exist)
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO conversation_outcomes
+                        (conversation_id, session_id, session_score, turn_count)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    conv_uuid,
+                    sid,
+                    round(session_score, 3),
+                    n,
+                )
+                scores_written += 1
+            except Exception as e:
+                log.debug("Skipping conversation outcome for %s: %s", sid, e)
 
-            # Mark as scored (2h per-key expiry — won't grow unboundedly)
+            # Mark as scored regardless (2h per-key expiry — won't grow unboundedly)
             await redis.set(dedup_key, "1", ex=7200)
-
-            scores_written += 1
 
     return scores_written
 
