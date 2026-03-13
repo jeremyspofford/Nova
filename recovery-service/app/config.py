@@ -17,6 +17,9 @@ class Settings:
     # Admin auth
     admin_secret: str = os.getenv("NOVA_ADMIN_SECRET", "nova-admin-secret-change-me")
 
+    # Redis
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/7")
+
     # Automatic checkpoints
     checkpoint_interval_hours: int = int(os.getenv("CHECKPOINT_INTERVAL_HOURS", "6"))
     checkpoint_max_keep: int = int(os.getenv("CHECKPOINT_MAX_KEEP", "5"))

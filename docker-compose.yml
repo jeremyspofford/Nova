@@ -379,15 +379,19 @@ services:
       BACKUP_RETAIN_DAYS: ${BACKUP_RETAIN_DAYS:-30}
       NOVA_ENV_FILE: /project/.env
       COMPOSE_PROJECT_DIR: /project
+      REDIS_URL: redis://redis:6379/7
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups:rw
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./.env:/project/.env:rw
       - ./docker-compose.yml:/project/docker-compose.yml:ro
+      - ./data:/app/data:ro
     ports:
       - "8888:8888"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
