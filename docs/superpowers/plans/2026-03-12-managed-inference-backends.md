@@ -1441,7 +1441,7 @@ async def list_backends() -> list[dict]:
     """List all available backends with their container status."""
     results = []
     for name, info in BACKENDS.items():
-        status = await check_container_status(info["container"])
+        status = check_container_status(info["container"])
         results.append({
             "name": name,
             "profile": info["profile"],
