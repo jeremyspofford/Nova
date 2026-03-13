@@ -14,6 +14,15 @@ BACKENDS = {
     "vllm": {"profile": "local-vllm", "service": "nova-vllm", "container": "nova-vllm"},
 }
 
+# Backends that support model switching (single-model servers)
+SWITCHABLE_BACKENDS = {"vllm", "sglang"}
+
+# Env var name per backend for the model
+MODEL_ENV_VARS = {"vllm": "VLLM_MODEL", "sglang": "SGLANG_MODEL"}
+
+# Track active switch progress
+_switch_progress: Optional[dict] = None
+
 _health_task: Optional[asyncio.Task] = None
 _health_failures: int = 0
 _health_backoff: float = 30.0
@@ -26,7 +35,11 @@ async def get_backend_status() -> dict:
     if backend in BACKENDS:
         info = BACKENDS[backend]
         container_status = check_container_status(info["container"])
-    return {"backend": backend, "state": state, "container_status": container_status}
+    result = {"backend": backend, "state": state, "container_status": container_status}
+    progress = get_switch_progress()
+    if progress:
+        result["switch_progress"] = progress
+    return result
 
 
 async def list_backends() -> list[dict]:
@@ -78,6 +91,74 @@ async def stop_backend(backend: Optional[str] = None) -> dict:
 
 async def switch_backend(new_backend: str) -> dict:
     return await start_backend(new_backend)
+
+
+async def switch_model(backend: str, model: str) -> dict:
+    """Switch the model on a single-model backend (vLLM, SGLang).
+    Runs drain protocol, updates .env, restarts container.
+    """
+    if backend not in SWITCHABLE_BACKENDS:
+        raise ValueError(f"Backend '{backend}' does not support model switching. "
+                         f"Switchable backends: {sorted(SWITCHABLE_BACKENDS)}")
+    if backend not in BACKENDS:
+        raise ValueError(f"Unknown backend: {backend}")
+
+    current_state = await read_config("inference.state", "stopped")
+    current_backend = await read_config("inference.backend", "none")
+
+    if current_backend != backend:
+        raise ValueError(f"Cannot switch model: backend '{backend}' is not active "
+                         f"(current: '{current_backend}')")
+    if current_state == "switching":
+        raise ValueError("A model switch is already in progress")
+
+    asyncio.create_task(_do_switch_model(backend, model))
+    return {"status": "accepted", "backend": backend, "model": model}
+
+
+async def _do_switch_model(backend: str, model: str) -> None:
+    """Background task: drain, update env, restart container."""
+    global _switch_progress
+    info = BACKENDS[backend]
+    env_var = MODEL_ENV_VARS[backend]
+
+    try:
+        _switch_progress = {"step": "draining", "detail": "Waiting for in-flight requests..."}
+        await write_config_state("inference.state", "switching")
+
+        await _drain_requests(timeout=15)
+
+        _switch_progress = {"step": "stopping", "detail": f"Stopping {backend}..."}
+        _stop_health_monitor()
+        await stop_profiled_service(info["profile"], info["service"])
+
+        _switch_progress = {"step": "updating", "detail": f"Setting model to {model}..."}
+        from app.env_manager import patch_env
+        patch_env({env_var: model})
+
+        _switch_progress = {"step": "starting", "detail": f"Starting {backend} with {model}..."}
+        await start_profiled_service(info["profile"], info["service"])
+
+        _switch_progress = {"step": "loading", "detail": "Loading model into GPU..."}
+        await _wait_for_healthy(info["container"], backend, timeout=180)
+
+        await write_config_state("inference.state", "ready")
+        _switch_progress = {"step": "ready", "detail": f"Now serving {model}"}
+        logger.info("Model switch complete: %s → %s", backend, model)
+
+        _start_health_monitor(backend)
+    except Exception as e:
+        await write_config_state("inference.state", "error")
+        _switch_progress = {"step": "error", "detail": str(e)}
+        logger.error("Model switch failed for %s: %s", backend, e)
+    finally:
+        await asyncio.sleep(60)
+        _switch_progress = None
+
+
+def get_switch_progress() -> Optional[dict]:
+    """Return current switch progress, or None if no switch in progress."""
+    return _switch_progress
 
 
 async def _stop_backend(backend: str) -> None:

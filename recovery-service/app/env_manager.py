@@ -32,6 +32,10 @@ ENV_WHITELIST = {
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
     "REGISTRATION_MODE",
+    # Inference model config (used by docker compose for vLLM/SGLang containers)
+    "VLLM_MODEL",
+    "SGLANG_MODEL",
+    "VLLM_GPU_MEMORY_UTILIZATION",
 }
 
 # Keys whose values should be masked in GET responses

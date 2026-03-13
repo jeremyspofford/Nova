@@ -85,7 +85,7 @@ class TestBackendLifecycle:
         data = r.json()
         assert "backend" in data
         assert "state" in data
-        assert data["state"] in ["ready", "stopped", "draining", "starting", "error"]
+        assert data["state"] in ["ready", "stopped", "draining", "starting", "switching", "error"]
 
     async def test_list_available_backends(self, recovery: httpx.AsyncClient, admin_headers: dict):
         """Recovery should list all available backends with their status."""
@@ -120,6 +120,70 @@ class TestLocalInferenceRouting:
         providers = r.json()
         slugs = [p["slug"] for p in providers]
         assert any(s in slugs for s in ["groq", "anthropic", "openai", "gemini"])
+
+
+class TestModelSwitch:
+    """Tests for model switching via recovery service."""
+
+    async def test_env_whitelist_includes_model_vars(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        """VLLM_MODEL should be patchable via the env API."""
+        r = await recovery.patch(
+            "/api/v1/recovery/env",
+            headers=admin_headers,
+            json={"updates": {"VLLM_MODEL": "meta-llama/Llama-3.2-3B-Instruct"}},
+        )
+        assert r.status_code == 200
+
+    async def test_switch_model_rejects_unknown_backend(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.post(
+            "/api/v1/recovery/inference/backend/fake/switch-model",
+            headers=admin_headers,
+            json={"model": "some-model"},
+        )
+        assert r.status_code == 400
+
+    async def test_switch_model_rejects_ollama(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.post(
+            "/api/v1/recovery/inference/backend/ollama/switch-model",
+            headers=admin_headers,
+            json={"model": "llama3.2"},
+        )
+        assert r.status_code == 400
+
+    async def test_switch_model_endpoint_exists(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.post(
+            "/api/v1/recovery/inference/backend/vllm/switch-model",
+            headers=admin_headers,
+            json={"model": "meta-llama/Llama-3.2-3B-Instruct"},
+        )
+        # 202 = accepted, 400 = backend not active (OK in test env)
+        assert r.status_code in (202, 400)
+
+
+class TestModelSearch:
+    """Tests for the model catalog search endpoint."""
+
+    async def test_search_models_requires_auth(self, recovery: httpx.AsyncClient):
+        r = await recovery.get("/api/v1/recovery/inference/models/search?q=llama&backend=vllm")
+        assert r.status_code == 401
+
+    async def test_search_models_returns_results(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get(
+            "/api/v1/recovery/inference/models/search?q=llama&backend=vllm",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, list)
+        if len(data) > 0:
+            assert "id" in data[0]
+
+    async def test_switch_progress_in_backend_status(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get("/api/v1/recovery/inference/backend", headers=admin_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert "backend" in data
+        assert "state" in data
 
 
 class TestInferenceConfigFlow:

@@ -2,11 +2,13 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.inference.controller import (
-    get_backend_status, list_backends, start_backend, stop_backend,
+    get_backend_status, list_backends, start_backend, stop_backend, switch_model,
 )
 from app.inference.hardware import detect_hardware, get_backend_recommendation, get_hardware
+from app.inference.model_search import search_models as do_search_models
 from app.routes import _check_admin
 
 logger = logging.getLogger(__name__)
@@ -60,3 +62,34 @@ async def start_inference_backend(backend_name: str, _: None = Depends(_check_ad
         raise HTTPException(status_code=400, detail=str(e))
     except TimeoutError as e:
         raise HTTPException(status_code=504, detail=str(e))
+
+
+# ── Model switching ──────────────────────────────────────────────────────────
+
+
+class SwitchModelRequest(BaseModel):
+    model: str
+
+
+@router.post("/backend/{backend_name}/switch-model", status_code=202)
+async def switch_inference_model(
+    backend_name: str,
+    body: SwitchModelRequest,
+    _: None = Depends(_check_admin),
+):
+    """Switch the model on a single-model backend (vLLM, SGLang)."""
+    try:
+        return await switch_model(backend_name, body.model)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/models/search")
+async def search_models_endpoint(
+    q: str,
+    backend: str = "vllm",
+    max_vram_gb: float | None = None,
+    _: None = Depends(_check_admin),
+):
+    """Search model catalogs (HuggingFace for vLLM/SGLang, Ollama registry)."""
+    return await do_search_models(q, backend, max_vram_gb)
