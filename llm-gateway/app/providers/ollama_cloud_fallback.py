@@ -36,6 +36,10 @@ class OllamaCloudFallback(ModelProvider):
         return f"ollama-cloud-fallback({self._ollama.name},{self._cloud.name})"
 
     @property
+    def is_local(self) -> bool:
+        return True
+
+    @property
     def capabilities(self) -> set[ModelCapability]:
         return self._ollama.capabilities | self._cloud.capabilities
 

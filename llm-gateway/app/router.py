@@ -29,6 +29,12 @@ from app.tier_resolver import BudgetExhaustedError, resolve_model
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["llm"])
 
+_local_inflight = 0
+
+
+def get_local_inflight() -> int:
+    return _local_inflight
+
 
 async def _enforce_rate_limit(model: str) -> None:
     allowed, prefix, remaining = await check_rate_limit(model)
@@ -75,7 +81,17 @@ async def complete(request: CompleteRequest, raw_request: Request):
             return CompleteResponse(**cached)
 
     provider = await get_provider(request.model)
-    response = await provider.complete(request)
+    is_local = provider.is_local
+
+    global _local_inflight
+    if is_local:
+        _local_inflight += 1
+    try:
+        response = await provider.complete(request)
+    finally:
+        if is_local:
+            _local_inflight -= 1
+
     log.info(
         "complete model=%s in=%d out=%d cost=$%.4f",
         response.model, response.input_tokens, response.output_tokens, response.cost_usd or 0,
@@ -103,8 +119,12 @@ async def stream(request: CompleteRequest, raw_request: Request):
 
     await _enforce_rate_limit(request.model)
     provider = await get_provider(request.model)
+    is_local = provider.is_local
 
     async def generate() -> AsyncIterator[bytes]:
+        global _local_inflight
+        if is_local:
+            _local_inflight += 1
         try:
             async for chunk in provider.stream(request):
                 yield f"data: {chunk.model_dump_json()}\n\n".encode()
@@ -116,6 +136,9 @@ async def stream(request: CompleteRequest, raw_request: Request):
             error_payload = json.dumps({"error": str(e), "provider": provider.name})
             yield f"data: {error_payload}\n\n".encode()
             yield b"data: [DONE]\n\n"
+        finally:
+            if is_local:
+                _local_inflight -= 1
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -132,7 +155,16 @@ async def embed(request: EmbedRequest):
         return EmbedResponse(**cached)
 
     provider = await get_provider(request.model)
-    response = await provider.embed(request)
+    is_local = provider.is_local
+
+    global _local_inflight
+    if is_local:
+        _local_inflight += 1
+    try:
+        response = await provider.embed(request)
+    finally:
+        if is_local:
+            _local_inflight -= 1
 
     await set_cached("embed", cache_body, response.model_dump())
     return response

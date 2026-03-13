@@ -38,6 +38,19 @@ class TestHardwareDetection:
         assert "recommended_backend" in data
 
 
+class TestGatewayInflight:
+    """Tests for the /health/inflight endpoint."""
+
+    async def test_inflight_endpoint_exists(self, llm_gateway: httpx.AsyncClient):
+        """Gateway should expose /health/inflight with a count."""
+        r = await llm_gateway.get("/health/inflight")
+        assert r.status_code == 200
+        data = r.json()
+        assert "local_inflight" in data
+        assert isinstance(data["local_inflight"], int)
+        assert data["local_inflight"] >= 0
+
+
 class TestVLLMProviderRegistration:
     """Test that vLLM provider appears in the gateway's provider catalog."""
 

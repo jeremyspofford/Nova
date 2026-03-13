@@ -59,6 +59,10 @@ class OpenAICompatibleProvider(ModelProvider):
     def is_available(self) -> bool:
         return self._healthy
 
+    @property
+    def is_local(self) -> bool:
+        return True
+
     async def check_health(self) -> bool:
         """Quick health check against the server."""
         now = time.monotonic()

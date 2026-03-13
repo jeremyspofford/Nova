@@ -119,6 +119,13 @@ async def ollama_status():
     return result
 
 
+@health_router.get("/inflight")
+async def health_inflight():
+    """Return count of in-flight requests to local inference backends."""
+    from app.router import get_local_inflight
+    return {"local_inflight": get_local_inflight()}
+
+
 @health_router.get("/startup")
 async def startup():
     return {"status": "started"}

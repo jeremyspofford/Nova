@@ -67,6 +67,10 @@ class OllamaProvider(ModelProvider):
         }
 
     @property
+    def is_local(self) -> bool:
+        return True
+
+    @property
     def healthy(self) -> bool:
         """Current cached health status."""
         return self._healthy

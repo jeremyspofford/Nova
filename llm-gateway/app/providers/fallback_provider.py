@@ -38,6 +38,10 @@ class FallbackProvider(ModelProvider):
         return f"fallback({','.join(p.name for p in self._providers)})"
 
     @property
+    def is_local(self) -> bool:
+        return any(p.is_local for p in self._providers)
+
+    @property
     def capabilities(self) -> set[ModelCapability]:
         # Union of all provider capabilities
         result: set[ModelCapability] = set()

@@ -51,6 +51,11 @@ class ModelProvider(ABC):
         """Override in providers that require credentials. Default: always available."""
         return True
 
+    @property
+    def is_local(self) -> bool:
+        """True if this provider dispatches to a local inference backend."""
+        return False
+
     def _assert_available(self) -> None:
         """Raise RuntimeError if the provider is not available. Call at start of complete()/stream()."""
         if not self.is_available:
