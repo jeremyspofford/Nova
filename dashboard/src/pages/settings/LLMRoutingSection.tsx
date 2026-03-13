@@ -177,7 +177,7 @@ function DefaultModelPicker({
       </select>
 
       <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-        Model used for chat and pipeline when no override is set. &quot;Auto&quot; picks the best model from your authenticated providers.
+        Model used for chat and pipeline when no override is set. &quot;Auto&quot; picks the best available cloud provider, or the largest local model if no cloud keys are configured. Select a specific model for consistent results.
       </p>
     </div>
   )

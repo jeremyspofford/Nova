@@ -512,17 +512,28 @@ def _best_ollama_model() -> str | None:
     if not candidates:
         return None
 
-    return max(candidates, key=_param_score)
+    # Sort by param count (desc), then alphabetically for deterministic tiebreak
+    candidates.sort(key=lambda m: (-_param_score(m), m))
+    return candidates[0]
 
 
 async def resolve_auto_model() -> str:
     """Iterate the preference list and return the first model whose provider is available.
-    Falls back to best Ollama model, then llama3.2."""
+    Falls back to preferred local model, best Ollama model, then llama3.2."""
     for model_id, slug, _ in _AUTO_PREFERENCE:
         if _is_provider_available(slug):
             return model_id
 
-    # Try best pulled Ollama model
+    # Check if user has a preferred local model configured
+    try:
+        from app.registry import _get_redis_config, _OLLAMA_MODELS
+        preferred = await _get_redis_config("llm.preferred_local_model", "")
+        if preferred and preferred in _OLLAMA_MODELS:
+            return preferred
+    except Exception:
+        pass
+
+    # Fall back to largest pulled Ollama model
     best_local = _best_ollama_model()
     if best_local:
         return best_local
