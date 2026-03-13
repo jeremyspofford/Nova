@@ -1,6 +1,8 @@
 """Integration tests for managed inference backends."""
 from __future__ import annotations
 
+import asyncio
+
 import httpx
 import pytest
 
@@ -118,3 +120,33 @@ class TestLocalInferenceRouting:
         providers = r.json()
         slugs = [p["slug"] for p in providers]
         assert any(s in slugs for s in ["groq", "anthropic", "openai", "gemini"])
+
+
+class TestInferenceConfigFlow:
+    """End-to-end test: config change flows from orchestrator to gateway."""
+
+    async def test_set_inference_backend_via_orchestrator(
+        self,
+        orchestrator: httpx.AsyncClient,
+        llm_gateway: httpx.AsyncClient,
+        admin_headers: dict,
+    ):
+        """Setting inference.backend via orchestrator should reach the gateway."""
+        try:
+            r = await orchestrator.patch(
+                "/api/v1/config/inference.backend",
+                json={"value": '"vllm"'},
+                headers=admin_headers,
+            )
+            assert r.status_code == 200
+
+            await asyncio.sleep(6)
+
+            r = await llm_gateway.get("/health/providers")
+            assert r.status_code == 200
+        finally:
+            await orchestrator.patch(
+                "/api/v1/config/inference.backend",
+                json={"value": '"ollama"'},
+                headers=admin_headers,
+            )
