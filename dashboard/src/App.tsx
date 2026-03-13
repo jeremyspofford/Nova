@@ -24,6 +24,7 @@ import { About } from './pages/About'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
+import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto max-w-6xl w-full">{children}</main>
@@ -85,6 +86,32 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   return <Login />
 }
 
+function OnboardingGate({ children }: { children: React.ReactNode }) {
+  const [checked, setChecked] = useState(false)
+  const [needsOnboarding, setNeedsOnboarding] = useState(false)
+
+  useEffect(() => {
+    if (window.location.pathname === '/onboarding') { setChecked(true); return }
+    fetch('/api/v1/config/onboarding.completed', {
+      headers: { 'Content-Type': 'application/json' },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const completed = data?.value === '"true"' || data?.value === 'true'
+        setNeedsOnboarding(!completed)
+        setChecked(true)
+      })
+      .catch(() => { setNeedsOnboarding(true); setChecked(true) })
+  }, [])
+
+  if (!checked) return null
+  if (needsOnboarding && window.location.pathname !== '/onboarding') {
+    window.location.href = '/onboarding'
+    return null
+  }
+  return <>{children}</>
+}
+
 function AppShell() {
   // Optimistic: assume backend is up. Normal refreshes render instantly.
   // Only show startup screen if the health check actually fails.
@@ -110,6 +137,7 @@ function AppShell() {
 
   return (
     <AuthGate>
+    <OnboardingGate>
     <ChatProvider>
     <BrowserRouter>
       <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
@@ -136,11 +164,13 @@ function AppShell() {
             <Route path="/about" element={<PageShell><About /></PageShell>} />
             <Route path="/invite/:code" element={<Invite />} />
             <Route path="/expired" element={<Expired />} />
+            <Route path="/onboarding" element={<OnboardingWizard />} />
           </Routes>
         </div>
       </div>
     </BrowserRouter>
     </ChatProvider>
+    </OnboardingGate>
     </AuthGate>
   )
 }
