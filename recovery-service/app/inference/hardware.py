@@ -1,5 +1,6 @@
 """Hardware detection -- GPU, CPU, RAM, disk."""
 import json
+import json as _json
 import logging
 import os
 import shutil
@@ -13,6 +14,7 @@ from app.redis_client import write_system, read_system
 logger = logging.getLogger(__name__)
 
 HARDWARE_JSON_PATH = Path("/app/data/hardware.json")
+RECOMMENDED_MODELS_PATH = Path("/app/data/recommended_models.json")
 
 
 async def detect_hardware() -> dict[str, Any]:
@@ -74,6 +76,76 @@ def get_backend_recommendation(hardware: dict[str, Any]) -> str:
         return "vllm"
 
     return "ollama"
+
+
+async def get_full_recommendation(hardware: dict | None = None) -> dict:
+    """Return recommended backend + model based on hardware."""
+    if hardware is None:
+        hardware = await get_hardware()
+
+    backend = get_backend_recommendation(hardware)
+    gpus = hardware.get("gpus", [])
+    total_vram = sum(g.get("vram_gb", 0) for g in gpus)
+
+    try:
+        models = _json.loads(RECOMMENDED_MODELS_PATH.read_text())
+    except (FileNotFoundError, _json.JSONDecodeError):
+        models = []
+
+    candidates = [
+        m for m in models
+        if backend in m.get("backends", [])
+        and m.get("category") != "embedding"
+        and (total_vram == 0 or m.get("min_vram_gb", 0) <= total_vram)
+    ]
+    candidates.sort(key=lambda m: m.get("min_vram_gb", 0), reverse=True)
+    model = candidates[0] if candidates else None
+
+    model_id = ""
+    if model:
+        model_id = model.get("ollama_id", model["id"]) if backend == "ollama" else model["id"]
+
+    reason = f"{'GPU detected (' + str(total_vram) + ' GB VRAM)' if total_vram > 0 else 'No GPU detected'}"
+    if model:
+        reason += f". {model['name']} fits your hardware."
+
+    return {"backend": backend, "model": model_id, "reason": reason}
+
+
+async def get_gpu_stats() -> dict | None:
+    """Get live GPU stats by exec-ing nvidia-smi in the inference container."""
+    from app.inference.controller import get_backend_status, BACKENDS
+
+    status = await get_backend_status()
+    backend = status.get("backend", "none")
+    if backend not in BACKENDS:
+        return None
+
+    container = BACKENDS[backend]["container"]
+    try:
+        result = subprocess.run(
+            ["docker", "exec", container,
+             "nvidia-smi",
+             "--query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+
+        parts = result.stdout.strip().split(", ")
+        if len(parts) < 4:
+            return None
+
+        return {
+            "gpu_utilization_pct": int(parts[0]),
+            "vram_used_gb": round(int(parts[1]) / 1024, 1),
+            "vram_total_gb": round(int(parts[2]) / 1024, 1),
+            "temperature_c": int(parts[3]),
+        }
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+        logger.debug("GPU stats unavailable: %s", e)
+        return None
 
 
 def _detect_gpus() -> list[dict]:

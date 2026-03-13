@@ -214,6 +214,31 @@ class TestRecommendedModels:
             assert "ollama" in m["backends"]
 
 
+class TestRecommendation:
+    async def test_recommendation_includes_model(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get("/api/v1/recovery/inference/recommendation", headers=admin_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert "backend" in data
+        assert "model" in data
+        assert "reason" in data
+
+
+class TestGPUStats:
+    async def test_gpu_stats_endpoint(self, recovery: httpx.AsyncClient, admin_headers: dict):
+        r = await recovery.get("/api/v1/recovery/inference/hardware/gpu-stats", headers=admin_headers)
+        assert r.status_code == 200
+
+
+class TestInferenceStats:
+    async def test_inference_stats_endpoint(self, llm_gateway: httpx.AsyncClient):
+        r = await llm_gateway.get("/v1/inference/stats")
+        assert r.status_code == 200
+        data = r.json()
+        assert "requests_5m" in data
+        assert "avg_tokens_per_sec" in data
+
+
 class TestInferenceConfigFlow:
     """End-to-end test: config change flows from orchestrator to gateway."""
 

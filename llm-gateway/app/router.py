@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time as _time
+from collections import deque
 from typing import AsyncIterator
 
 from datetime import datetime, timedelta, timezone
@@ -30,10 +32,20 @@ log = logging.getLogger(__name__)
 router = APIRouter(tags=["llm"])
 
 _local_inflight = 0
+_inference_metrics: deque = deque(maxlen=1000)
 
 
 def get_local_inflight() -> int:
     return _local_inflight
+
+
+def record_inference_metric(tokens: int, duration_s: float, ttft_ms: float):
+    """Record a completed inference request metric."""
+    _inference_metrics.append({
+        "ts": _time.time(),
+        "tokens_per_sec": tokens / duration_s if duration_s > 0 else 0,
+        "ttft_ms": ttft_ms,
+    })
 
 
 async def _enforce_rate_limit(model: str) -> None:
@@ -168,6 +180,31 @@ async def embed(request: EmbedRequest):
 
     await set_cached("embed", cache_body, response.model_dump())
     return response
+
+
+@router.get("/v1/inference/stats")
+async def get_inference_stats():
+    """Return rolling inference performance metrics."""
+    cutoff = _time.time() - 300
+    recent = [m for m in _inference_metrics if m["ts"] > cutoff]
+
+    if not recent:
+        return {
+            "requests_5m": 0,
+            "avg_tokens_per_sec": 0,
+            "avg_ttft_ms": 0,
+            "error_rate_pct": 0,
+        }
+
+    avg_tps = sum(m["tokens_per_sec"] for m in recent) / len(recent)
+    avg_ttft = sum(m["ttft_ms"] for m in recent) / len(recent)
+
+    return {
+        "requests_5m": len(recent),
+        "avg_tokens_per_sec": round(avg_tps, 1),
+        "avg_ttft_ms": round(avg_ttft, 0),
+        "error_rate_pct": 0,
+    }
 
 
 @router.get("/models", response_model=list[ModelInfo])

@@ -18,7 +18,7 @@ import {
 import { formatBytes } from '../lib/format'
 import { recoveryFetch } from '../api-recovery'
 import {
-  getBackendStatus, searchModels, switchModel, getRecommendedModels,
+  getBackendStatus, searchModels, switchModel, getRecommendedModels, getGPUStats,
   type BackendStatus, type ModelSearchResult, type RecommendedModel,
 } from '../api-recovery'
 
@@ -82,6 +82,13 @@ export function Models() {
     queryFn: () => getRecommendedModels(backendStatus.data?.backend ?? undefined),
     enabled: !!backendStatus.data?.backend,
     staleTime: 60_000,
+  })
+
+  const gpuStats = useQuery({
+    queryKey: ['gpu-stats'],
+    queryFn: getGPUStats,
+    refetchInterval: 10_000,
+    enabled: (backendStatus.data?.backend ?? 'ollama') !== 'none',
   })
 
   const activeBackend = backendStatus.data?.backend ?? 'ollama'
@@ -520,6 +527,24 @@ export function Models() {
             </div>
           )}
         </Card>
+
+        {/* GPU Stats */}
+        {gpuStats.data && (
+          <div className="grid grid-cols-3 gap-3">
+            <Card className="p-3 text-center">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">GPU Utilization</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{gpuStats.data.gpu_utilization_pct}%</p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">VRAM</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{gpuStats.data.vram_used_gb} / {gpuStats.data.vram_total_gb} GB</p>
+            </Card>
+            <Card className="p-3 text-center">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">Temperature</p>
+              <p className="mt-1 text-lg font-semibold text-neutral-900 dark:text-neutral-100">{gpuStats.data.temperature_c}&deg;C</p>
+            </Card>
+          </div>
+        )}
 
         {/* Search HuggingFace models */}
         <Card className="p-4 space-y-4">

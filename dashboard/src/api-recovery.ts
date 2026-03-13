@@ -295,3 +295,26 @@ export const switchModel = (backend: string, model: string) =>
     `/api/v1/recovery/inference/backend/${backend}/switch-model`,
     { method: 'POST', body: JSON.stringify({ model }) },
   )
+
+// ── GPU Stats ────────────────────────────────────────────────────────────────
+
+export interface GPUStats {
+  gpu_utilization_pct: number
+  vram_used_gb: number
+  vram_total_gb: number
+  temperature_c: number
+}
+
+export const getGPUStats = () =>
+  recoveryFetch<GPUStats | null>('/api/v1/recovery/inference/hardware/gpu-stats')
+
+// ── Inference Recommendation ─────────────────────────────────────────────────
+
+export interface InferenceRecommendation {
+  backend: string
+  model: string
+  reason: string
+}
+
+export const getRecommendation = () =>
+  recoveryFetch<InferenceRecommendation>('/api/v1/recovery/inference/recommendation')

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.inference.controller import (
     get_backend_status, list_backends, start_backend, stop_backend, switch_model,
 )
-from app.inference.hardware import detect_hardware, get_backend_recommendation, get_hardware
+from app.inference.hardware import detect_hardware, get_backend_recommendation, get_full_recommendation, get_gpu_stats, get_hardware
 from app.inference.model_search import search_models as do_search_models
 from app.routes import _check_admin
 
@@ -34,6 +34,18 @@ async def redetect_hardware(_: None = Depends(_check_admin)):
     hw = await detect_hardware()
     recommendation = get_backend_recommendation(hw)
     return {**hw, "recommended_backend": recommendation}
+
+
+@router.get("/hardware/gpu-stats")
+async def get_gpu_stats_endpoint(_: None = Depends(_check_admin)):
+    """Return live GPU utilization stats (or null if unavailable)."""
+    return await get_gpu_stats()
+
+
+@router.get("/recommendation")
+async def get_inference_recommendation(_: None = Depends(_check_admin)):
+    """Return recommended backend and model based on detected hardware."""
+    return await get_full_recommendation()
 
 
 # ── Backend lifecycle ─────────────────────────────────────────────────────────

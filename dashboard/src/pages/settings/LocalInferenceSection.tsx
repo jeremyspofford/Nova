@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle } from "lucide-react";
+import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle, Lightbulb } from "lucide-react";
 import { Section, ConfigField, useConfigValue, type ConfigSectionProps } from "./shared";
 import { recoveryFetch } from "../../api-recovery";
+import { getRecommendation, type InferenceRecommendation } from "../../api-recovery";
 
 interface HardwareInfo {
   gpus: Array<{ vendor: string; model: string; vram_gb: number; index: number }>;
@@ -49,6 +50,13 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
   const customAuth = useConfigValue(entries, "inference.custom_auth_header", "");
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const { data: recommendation } = useQuery<InferenceRecommendation>({
+    queryKey: ["inference-recommendation"],
+    queryFn: getRecommendation,
+    staleTime: 60_000,
+    retry: 1,
+  });
 
   const { data: hardware } = useQuery<HardwareInfo>({
     queryKey: ["inference-hardware"],
@@ -110,6 +118,21 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
 
   return (
     <Section id="local-inference" icon={Cpu} title="Local Inference" description="Manage your local AI inference backend">
+      {/* Recommendation Banner */}
+      {recommendation && status && recommendation.backend !== status.backend && status.backend !== "none" && (
+        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm flex items-start gap-2">
+          <Lightbulb className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <span className="font-medium text-amber-800 dark:text-amber-300">Recommendation:</span>{" "}
+            <span className="text-amber-700 dark:text-amber-400">{recommendation.reason}</span>
+            <span className="text-amber-600 dark:text-amber-500 ml-1">
+              Consider switching to <strong>{recommendation.backend}</strong>
+              {recommendation.model && <> with <code className="text-xs">{recommendation.model}</code></>}.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Hardware Info */}
       {hardware && (
         <div className="mb-4 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg text-sm">
