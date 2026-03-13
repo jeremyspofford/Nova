@@ -16,47 +16,37 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
-DECOMPOSITION_SYSTEM_PROMPT = """You are a memory decomposition agent. You break down conversation text into atomic memory units called engrams.
+DECOMPOSITION_SYSTEM_PROMPT = """You extract facts from conversations into structured JSON memory units.
 
-Return ONLY valid JSON matching this exact schema — no other text, no markdown fences:
-{
-  "engrams": [
-    {
-      "type": "fact|episode|entity|preference|procedure",
-      "content": "concise statement capturing one atomic piece of information",
-      "importance": 0.0-1.0,
-      "entities_referenced": ["entity_name_1", "entity_name_2"],
-      "temporal": {"when": "iso8601 or relative description"}
-    }
-  ],
-  "relationships": [
-    {
-      "from_index": 0,
-      "to_index": 1,
-      "relation": "caused_by|related_to|preceded|enables|part_of|contradicts",
-      "strength": 0.0-1.0
-    }
-  ],
-  "contradictions": [
-    {
-      "new_index": 0,
-      "existing_content_hint": "description of what this contradicts"
-    }
-  ]
-}
+CRITICAL: Focus on what the USER says about themselves, their preferences, their work, and their requests. The assistant's responses are context, but the user's statements are what matter for memory.
+
+Return ONLY valid JSON — no other text, no markdown fences, no explanation:
+{"engrams":[{"type":"fact","content":"...","importance":0.5,"entities_referenced":[]}],"relationships":[],"contradictions":[]}
+
+Types: fact (knowledge/claims), entity (people/places/tools), preference (likes/dislikes), episode (events), procedure (how-to)
+
+Importance: 0.3=trivial, 0.5=normal, 0.7=significant, 0.9=critical (user identity, core preferences)
+
+EXAMPLES:
+
+User: "My name is Jeremy and I'm a software engineer"
+Assistant: "Nice to meet you Jeremy!"
+Output: {"engrams":[{"type":"entity","content":"The user's name is Jeremy","importance":0.9,"entities_referenced":["Jeremy"]},{"type":"fact","content":"Jeremy is a software engineer","importance":0.7,"entities_referenced":["Jeremy"]}],"relationships":[{"from_index":0,"to_index":1,"relation":"related_to","strength":0.8}],"contradictions":[]}
+
+User: "I prefer Python over JavaScript"
+Assistant: "Python is great for backend work"
+Output: {"engrams":[{"type":"preference","content":"The user prefers Python over JavaScript","importance":0.6,"entities_referenced":["Python","JavaScript"]}],"relationships":[],"contradictions":[]}
+
+User: "Good morning!"
+Assistant: "Good morning! How can I help?"
+Output: {"engrams":[],"relationships":[],"contradictions":[]}
 
 Rules:
-- Extract ONLY clear, factual information. Skip greetings, filler, and transient context.
-- Each engram should be ONE atomic piece of information.
-- Entity engrams are for people, places, tools, concepts that are referenced.
-- Fact engrams are for objective knowledge claims.
-- Episode engrams are for specific events with temporal context.
-- Preference engrams are for expressed likes, dislikes, or choices.
-- Procedure engrams are for how-to knowledge or step-by-step processes.
-- importance: 0.1 = trivial, 0.5 = normal, 0.8 = significant, 1.0 = critical
-- If the text contains little useful information, return {"engrams": [], "relationships": [], "contradictions": []}.
-- entities_referenced should list entity names mentioned in the engram (for linking).
-- contradictions.existing_content_hint: describe the prior belief this new info contradicts."""
+- Extract info about the USER, not the assistant
+- User's name, role, company, preferences = high importance (0.7-0.9)
+- Greetings, filler, small talk = return empty engrams list
+- Each engram = ONE atomic fact
+- Always include entities_referenced (can be empty list)"""
 
 DECOMPOSITION_USER_TEMPLATE = """Decompose this conversation exchange into atomic engrams:
 
@@ -73,11 +63,22 @@ async def decompose(raw_text: str) -> DecompositionResult:
         return DecompositionResult()
 
     try:
+        # Resolve model — if "auto", ask the gateway for the best available
+        model = settings.engram_decomposition_model
+        if model == "auto":
+            try:
+                async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=5.0) as c:
+                    r = await c.get("/v1/models/resolve")
+                    if r.status_code == 200:
+                        model = r.json().get("model", "llama3.1:8b")
+            except Exception:
+                model = "llama3.1:8b"
+
         async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=60.0) as client:
             resp = await client.post(
                 "/complete",
                 json={
-                    "model": settings.engram_decomposition_model,
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": DECOMPOSITION_SYSTEM_PROMPT},
                         {"role": "user", "content": DECOMPOSITION_USER_TEMPLATE.format(raw_text=raw_text)},

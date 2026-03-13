@@ -98,7 +98,15 @@ async def _process_event(raw_payload: str) -> dict:
     raw_text = event.get("raw_text", "")
     source_type = event.get("source_type", "chat")
     source_id = event.get("source_id")
-    occurred_at = event.get("occurred_at")
+    occurred_at_raw = event.get("occurred_at")
+    # Parse ISO string to datetime — asyncpg requires datetime objects, not strings
+    occurred_at = None
+    if occurred_at_raw:
+        from datetime import datetime, timezone
+        try:
+            occurred_at = datetime.fromisoformat(occurred_at_raw.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            occurred_at = datetime.now(timezone.utc)
     metadata = event.get("metadata", {})
 
     if not raw_text.strip():
