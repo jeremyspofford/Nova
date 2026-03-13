@@ -120,12 +120,12 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
 function OverviewTab() {
   const { data: stats, isLoading } = useQuery<EngramStats>({
     queryKey: ['engram-stats'],
-    queryFn: () => apiFetch('/memory/api/v1/engrams/stats'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
   })
 
   const { data: routerStatus } = useQuery<RouterStatus>({
     queryKey: ['engram-router-status'],
-    queryFn: () => apiFetch('/memory/api/v1/engrams/router-status'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/router-status'),
   })
 
   if (isLoading) return <p className="text-neutral-500 p-4">Loading...</p>
@@ -230,7 +230,7 @@ function GraphTab() {
       if (searchQuery) params.set('query', searchQuery)
       params.set('depth', '2')
       params.set('max_nodes', '50')
-      return apiFetch(`/memory/api/v1/engrams/graph?${params}`)
+      return apiFetch(`/mem/api/v1/engrams/graph?${params}`)
     },
     enabled: true,
   })
@@ -245,7 +245,7 @@ function GraphTab() {
   const exploreNode = (nodeId: string) => {
     setSelectedNode(null)
     // Re-fetch with center_id
-    apiFetch<GraphData>(`/memory/api/v1/engrams/graph?center_id=${nodeId}&depth=2&max_nodes=50`)
+    apiFetch<GraphData>(`/mem/api/v1/engrams/graph?center_id=${nodeId}&depth=2&max_nodes=50`)
       .then((data) => {
         // Trigger a re-render by updating the query
         setSearchQuery(`__node:${nodeId}`)
@@ -393,11 +393,11 @@ function GraphTab() {
 function SelfModelTab() {
   const { data, isLoading, refetch } = useQuery<{ self_model: string }>({
     queryKey: ['engram-self-model'],
-    queryFn: () => apiFetch('/memory/api/v1/engrams/self-model'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/self-model'),
   })
 
   const bootstrap = useMutation({
-    mutationFn: () => apiFetch('/memory/api/v1/engrams/self-model/bootstrap', { method: 'POST' }),
+    mutationFn: () => apiFetch('/mem/api/v1/engrams/self-model/bootstrap', { method: 'POST' }),
     onSuccess: () => refetch(),
   })
 
@@ -436,7 +436,7 @@ function SelfModelTab() {
 function SelfModelEngrams() {
   const { data: graph } = useQuery<GraphData>({
     queryKey: ['engram-self-model-graph'],
-    queryFn: () => apiFetch('/memory/api/v1/engrams/graph?query=self+identity+personality&depth=1&max_nodes=20'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?query=self+identity+personality&depth=1&max_nodes=20'),
   })
 
   if (!graph || graph.nodes.length === 0) return null
@@ -467,11 +467,11 @@ function SelfModelEngrams() {
 function ConsolidationTab() {
   const { data, isLoading, refetch } = useQuery<{ count: number; entries: ConsolidationEntry[] }>({
     queryKey: ['engram-consolidation-log'],
-    queryFn: () => apiFetch('/memory/api/v1/engrams/consolidation-log?limit=20'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/consolidation-log?limit=20'),
   })
 
   const consolidate = useMutation({
-    mutationFn: () => apiFetch('/memory/api/v1/engrams/consolidate', { method: 'POST' }),
+    mutationFn: () => apiFetch('/mem/api/v1/engrams/consolidate', { method: 'POST' }),
     onSuccess: () => refetch(),
   })
 
