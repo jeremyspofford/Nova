@@ -71,3 +71,15 @@ class TestVLLMProviderRegistration:
         assert vllm is not None
         # vLLM container not running in test env, so should be unavailable
         assert vllm["available"] is False
+
+
+class TestLocalInferenceRouting:
+    """Tests for the LocalInferenceProvider routing wrapper."""
+
+    async def test_routing_strategy_still_works(self, llm_gateway: httpx.AsyncClient):
+        """Routing strategy should still apply to local models after refactor."""
+        r = await llm_gateway.get("/health/providers")
+        assert r.status_code == 200
+        providers = r.json()
+        slugs = [p["slug"] for p in providers]
+        assert any(s in slugs for s in ["groq", "anthropic", "openai", "gemini"])

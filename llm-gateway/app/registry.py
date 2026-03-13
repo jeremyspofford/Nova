@@ -51,6 +51,7 @@ from app.providers import (
     FallbackProvider,
     GeminiADCProvider,
     LiteLLMProvider,
+    LocalInferenceProvider,
     ModelProvider,
     OllamaCloudFallback,
     OllamaProvider,
@@ -131,6 +132,9 @@ else:
 
 _vllm = VLLMProvider()
 
+# ── Local inference wrapper (delegates to active backend: Ollama, vLLM, etc.) ─
+_local = LocalInferenceProvider()
+
 
 # ── Cloud fallback chain (without Ollama) ────────────────────────────────────
 
@@ -172,7 +176,7 @@ _cloud_fallback = _build_cloud_fallback()
 # ── Default fallback chain (Ollama + cloud) ──────────────────────────────────
 
 def _build_default_fallback() -> FallbackProvider:
-    chain: list[ModelProvider] = [_ollama]  # always local-first
+    chain: list[ModelProvider] = [_local]  # always local-first
 
     if settings.groq_api_key:
         chain.append(_groq)
@@ -199,15 +203,6 @@ def _build_default_fallback() -> FallbackProvider:
 
 
 _default_fallback = _build_default_fallback()
-
-
-# ── Ollama-with-cloud-fallback provider ──────────────────────────────────────
-
-_ollama_with_fallback = OllamaCloudFallback(ollama=_ollama, cloud=_cloud_fallback)
-
-# ── Cloud-first fallback (cloud first, Ollama as backup) ─────────────────────
-
-_cloud_first_fallback = OllamaCloudFallback(ollama=_cloud_fallback, cloud=_ollama)
 
 
 # ── Routing strategy from Redis ──────────────────────────────────────────────
@@ -312,6 +307,11 @@ _OLLAMA_MODELS = {
 def _is_ollama_model(model: str) -> bool:
     """Check if a model is an Ollama-local model (no provider prefix)."""
     return model in _OLLAMA_MODELS
+
+
+def _is_local_model(model: str) -> bool:
+    """Check if a model belongs to the active local inference backend."""
+    return model in _OLLAMA_MODELS or _local.is_local_model(model)
 
 
 async def sync_ollama_models() -> int:
@@ -521,30 +521,33 @@ def get_provider_catalog() -> list[dict]:
 
 async def get_provider(model: str) -> ModelProvider:
     """
-    Look up the provider for a model ID, applying the routing strategy for Ollama models.
-    Non-Ollama models always route to their designated provider.
+    Look up the provider for a model ID, applying the routing strategy for local models.
+    Non-local models always route to their designated provider.
     """
-    # Non-Ollama models — direct lookup, no strategy applied
-    if not _is_ollama_model(model):
+    # Refresh local backend config (cached 5s, no-op most calls)
+    await _local.refresh_config()
+
+    # Non-local models — direct lookup, no strategy applied
+    if not _is_local_model(model):
         provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY[DEFAULT_MODEL_KEY]
         if model not in MODEL_REGISTRY:
             log.warning("Unknown model '%s', using default fallback provider", model)
         return provider
 
-    # Ollama model — apply routing strategy
+    # Local model — apply routing strategy
     strategy = await get_routing_strategy()
 
     if strategy == "local-only":
-        return _ollama
+        return _local
     elif strategy == "local-first":
-        return _ollama_with_fallback
+        return OllamaCloudFallback(ollama=_local, cloud=_cloud_fallback)
     elif strategy == "cloud-only":
         return _cloud_fallback
     elif strategy == "cloud-first":
-        return _cloud_first_fallback
+        return OllamaCloudFallback(ollama=_cloud_fallback, cloud=_local)
     else:
         log.warning("Unknown routing strategy '%s', using local-first", strategy)
-        return _ollama_with_fallback
+        return OllamaCloudFallback(ollama=_local, cloud=_cloud_fallback)
 
 
 def get_provider_sync(model: str) -> ModelProvider:
@@ -556,3 +559,8 @@ def get_provider_sync(model: str) -> ModelProvider:
 def get_ollama_provider() -> OllamaProvider:
     """Direct access to the Ollama provider instance (for health checks)."""
     return _ollama
+
+
+def get_local_provider() -> LocalInferenceProvider:
+    """Access the local inference wrapper (for catalog and discovery)."""
+    return _local

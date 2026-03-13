@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     ollama_cloud_fallback_embed_model: str = "text-embedding-004"
     llm_routing_strategy: str = "local-first"    # local-only | local-first | cloud-only | cloud-first
 
+    # Inference backend config (read from Redis nova:config:inference.*)
+    inference_backend: str = "ollama"  # ollama, vllm, sglang, none
+    inference_state: str = "ready"     # ready, draining, starting, error
+    inference_url: str = ""            # Override URL (empty = use default for backend)
+
     # ── Per-provider default models — override in .env to swap models ──────────
     # These control which model a provider uses when no explicit model is given.
     # e.g. set DEFAULT_CEREBRAS_MODEL=cerebras/llama-3.1-8b for a faster/cheaper model

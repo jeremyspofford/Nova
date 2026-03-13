@@ -18,7 +18,7 @@ from typing import Any
 
 from .config import settings
 from .rate_limiter import check_remaining_quota
-from .registry import MODEL_REGISTRY, MODEL_SPECS, _is_ollama_model
+from .registry import MODEL_REGISTRY, MODEL_SPECS
 
 log = logging.getLogger(__name__)
 

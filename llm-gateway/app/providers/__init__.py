@@ -8,6 +8,7 @@ from .claude_subscription_provider import ClaudeSubscriptionProvider, discover_c
 from .chatgpt_subscription_provider import ChatGPTSubscriptionProvider, discover_chatgpt_token
 from .openai_compatible_provider import OpenAICompatibleProvider
 from .vllm_provider import VLLMProvider
+from .local_inference_provider import LocalInferenceProvider
 
 __all__ = [
     "ModelProvider",
@@ -22,4 +23,5 @@ __all__ = [
     "discover_chatgpt_token",
     "OpenAICompatibleProvider",
     "VLLMProvider",
+    "LocalInferenceProvider",
 ]
