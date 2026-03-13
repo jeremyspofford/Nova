@@ -228,3 +228,70 @@ export interface ChatIntegrationsStatus {
 
 export const getChatIntegrationsStatus = () =>
   recoveryFetch<ChatIntegrationsStatus>('/api/v1/recovery/chat-integrations/status')
+
+// ── Inference Model Management ───────────────────────────────────────────────
+
+export interface BackendStatus {
+  backend: string
+  state: string
+  container_status: { status: string } | null
+  switch_progress?: {
+    step: string
+    detail: string
+  }
+}
+
+export const getBackendStatus = () =>
+  recoveryFetch<BackendStatus>('/api/v1/recovery/inference/backend')
+
+export interface HardwareInfo {
+  gpus: Array<{ vendor: string; model: string; vram_gb: number; index: number }>
+  docker_gpu_runtime: string | null
+  cpu_cores: number
+  ram_gb: number
+  disk_free_gb: number
+  recommended_backend: string
+}
+
+export const getHardwareInfo = () =>
+  recoveryFetch<HardwareInfo>('/api/v1/recovery/inference/hardware')
+
+export interface ModelSearchResult {
+  id: string
+  description: string
+  downloads: number
+  likes: number
+  vram_estimate_gb: number | null
+  quantized: boolean
+  tags: string[]
+}
+
+export const searchModels = (q: string, backend: string = 'vllm', maxVramGb?: number) => {
+  const params = new URLSearchParams({ q, backend })
+  if (maxVramGb) params.set('max_vram_gb', String(maxVramGb))
+  return recoveryFetch<ModelSearchResult[]>(`/api/v1/recovery/inference/models/search?${params}`)
+}
+
+export interface RecommendedModel {
+  id: string
+  ollama_id?: string
+  name: string
+  category: string
+  min_vram_gb: number
+  backends: string[]
+  description: string
+}
+
+export const getRecommendedModels = (backend?: string, maxVramGb?: number) => {
+  const params = new URLSearchParams()
+  if (backend) params.set('backend', backend)
+  if (maxVramGb) params.set('max_vram_gb', String(maxVramGb))
+  const qs = params.toString()
+  return recoveryFetch<RecommendedModel[]>(`/api/v1/recovery/inference/models/recommended${qs ? '?' + qs : ''}`)
+}
+
+export const switchModel = (backend: string, model: string) =>
+  recoveryFetch<{ status: string; backend: string; model: string }>(
+    `/api/v1/recovery/inference/backend/${backend}/switch-model`,
+    { method: 'POST', body: JSON.stringify({ model }) },
+  )

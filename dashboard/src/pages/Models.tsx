@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   discoverModels,
@@ -17,6 +17,10 @@ import {
 } from 'lucide-react'
 import { formatBytes } from '../lib/format'
 import { recoveryFetch } from '../api-recovery'
+import {
+  getBackendStatus, searchModels, switchModel, getRecommendedModels,
+  type BackendStatus, type ModelSearchResult, type RecommendedModel,
+} from '../api-recovery'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,6 +71,23 @@ export function Models() {
     staleTime: 30_000,
   })
 
+  const backendStatus = useQuery({
+    queryKey: ['inference-backend-status'],
+    queryFn: getBackendStatus,
+    staleTime: 5_000,
+  })
+
+  const recommended = useQuery({
+    queryKey: ['recommended-models', backendStatus.data?.backend],
+    queryFn: () => getRecommendedModels(backendStatus.data?.backend ?? undefined),
+    enabled: !!backendStatus.data?.backend,
+    staleTime: 60_000,
+  })
+
+  const activeBackend = backendStatus.data?.backend ?? 'ollama'
+  const backendState = backendStatus.data?.state ?? 'stopped'
+  const isSwitching = backendState === 'switching'
+
   // Mutations
   const pullMutation = useMutation({
     mutationFn: pullOllamaModel,
@@ -94,6 +115,46 @@ export function Models() {
       qc.invalidateQueries({ queryKey: ['inference-backend-status'] })
     },
   })
+
+  const [modelSearchQuery, setModelSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<ModelSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+
+  const switchModelMutation = useMutation({
+    mutationFn: ({ backend, model }: { backend: string; model: string }) =>
+      switchModel(backend, model),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inference-backend-status'] })
+      qc.invalidateQueries({ queryKey: ['model-catalog'] })
+    },
+  })
+
+  const handleModelSearch = async () => {
+    if (!modelSearchQuery.trim()) return
+    setSearching(true)
+    try {
+      const results = await searchModels(modelSearchQuery, activeBackend)
+      setSearchResults(results)
+    } catch {
+      setSearchResults([])
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  const handleSwitchModel = (model: string) => {
+    if (!confirm(`Switch to ${model}? This restarts ${activeBackend} (~30-120s). Cloud providers remain available.`)) return
+    switchModelMutation.mutate({ backend: activeBackend, model })
+  }
+
+  // Poll faster during model switch
+  useEffect(() => {
+    if (!isSwitching) return
+    const interval = setInterval(() => {
+      qc.invalidateQueries({ queryKey: ['inference-backend-status'] })
+    }, 2000)
+    return () => clearInterval(interval)
+  }, [isSwitching, qc])
 
   // Handlers
   const handlePull = async (name: string) => {
@@ -172,7 +233,8 @@ export function Models() {
       {/* Onboarding Banner */}
       {showOnboarding && <OnboardingBanner onDismiss={dismissOnboarding} />}
 
-      {/* Section A: Local Models (Ollama) */}
+      {/* Section A: Local Models */}
+      {activeBackend === 'ollama' && (
       <section className="space-y-4">
         <div className="flex items-center gap-3">
           <HardDrive className="h-5 w-5 text-teal-600 dark:text-teal-400" />
@@ -406,6 +468,198 @@ export function Models() {
           </div>
         </Card>
       </section>
+      )}
+
+      {/* Section A: Local Models (vLLM/SGLang) */}
+      {(activeBackend === 'vllm' || activeBackend === 'sglang') && (
+      <section className="space-y-4">
+        <div className="flex items-center gap-3">
+          <HardDrive className="h-5 w-5 text-teal-600 dark:text-teal-400" />
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Local Models</h2>
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${
+            backendState === 'running'
+              ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400'
+              : backendState === 'switching'
+              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+              : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+          }`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${
+              backendState === 'running' ? 'bg-emerald-500'
+                : backendState === 'switching' ? 'bg-amber-500 animate-pulse'
+                : 'bg-red-500'
+            }`} />
+            {activeBackend.toUpperCase()} — {backendState}
+          </span>
+        </div>
+
+        {/* Active model status */}
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3 border-b border-neutral-200 dark:border-neutral-800 flex items-center justify-between">
+            <h3 className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Active Model</h3>
+            <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
+              {backendStatus.data?.container_status?.status ?? 'unknown'}
+            </span>
+          </div>
+          {isSwitching && backendStatus.data?.switch_progress && (
+            <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/10 border-b border-amber-200 dark:border-amber-800">
+              <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
+                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                <span className="font-medium">{backendStatus.data.switch_progress.step}</span>
+              </div>
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-500 ml-6">
+                {backendStatus.data.switch_progress.detail}
+              </p>
+            </div>
+          )}
+          {switchModelMutation.isError && (
+            <div className="px-4 py-3 bg-red-50 dark:bg-red-900/10 border-b border-red-200 dark:border-red-800">
+              <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                <span>Switch failed: {(switchModelMutation.error as Error)?.message ?? 'Unknown error'}</span>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Search HuggingFace models */}
+        <Card className="p-4 space-y-4">
+          <h3 className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Search HuggingFace Models</h3>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={modelSearchQuery}
+              onChange={e => setModelSearchQuery(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleModelSearch()}
+              placeholder="Search models (e.g. llama 8b, mistral, qwen)"
+              className="flex-1 rounded-lg border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-teal-500/50"
+            />
+            <button
+              onClick={handleModelSearch}
+              disabled={!modelSearchQuery.trim() || searching}
+              className="flex items-center gap-1.5 rounded-lg bg-teal-600 dark:bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 dark:hover:bg-teal-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {searching ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <ExternalLink className="h-4 w-4" />
+              )}
+              Search
+            </button>
+          </div>
+
+          {/* Search results */}
+          {searchResults.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs text-neutral-500 dark:text-neutral-400">{searchResults.length} result(s)</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {searchResults.map(result => (
+                  <div
+                    key={result.id}
+                    className="rounded-lg border border-neutral-200 dark:border-neutral-700 px-3 py-2.5 text-xs"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100 break-all">
+                          {result.id}
+                        </span>
+                        {result.quantized && (
+                          <span className="ml-1.5 rounded bg-teal-100 dark:bg-teal-900/40 px-1 py-0.5 text-[10px] font-medium text-teal-700 dark:text-teal-400">
+                            quantized
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {result.description && (
+                      <p className="mt-1 text-neutral-500 dark:text-neutral-400 leading-tight line-clamp-2">
+                        {result.description}
+                      </p>
+                    )}
+                    <div className="mt-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-neutral-400 dark:text-neutral-500">
+                        <span className="text-[10px]">{result.downloads.toLocaleString()} downloads</span>
+                        {result.vram_estimate_gb != null && (
+                          <span className="text-[10px] font-mono">~{result.vram_estimate_gb} GB VRAM</span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => handleSwitchModel(result.id)}
+                        disabled={isSwitching || switchModelMutation.isPending}
+                        className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors disabled:opacity-50"
+                      >
+                        {switchModelMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                        Load
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+
+        {/* Recommended models */}
+        {recommended.data && recommended.data.length > 0 && (
+          <Card className="p-4 space-y-3">
+            <h3 className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Recommended Models</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              {recommended.data.map(rec => (
+                <div
+                  key={rec.id}
+                  className="rounded-lg border border-neutral-200 dark:border-neutral-700 px-3 py-2.5 text-xs"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono font-medium text-neutral-900 dark:text-neutral-100">
+                      {rec.name}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-neutral-500 dark:text-neutral-400 leading-tight">{rec.description}</p>
+                  <div className="mt-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-block rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+                        {rec.category}
+                      </span>
+                      <span className="inline-block rounded-full bg-amber-100 dark:bg-amber-900/30 px-1.5 py-0.5 text-[10px] font-mono text-amber-600 dark:text-amber-400">
+                        {rec.min_vram_gb} GB+
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleSwitchModel(rec.id)}
+                      disabled={isSwitching || switchModelMutation.isPending}
+                      className="flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium text-teal-600 dark:text-teal-400 hover:bg-teal-50 dark:hover:bg-teal-900/20 transition-colors disabled:opacity-50"
+                    >
+                      {switchModelMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                      Load
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </section>
+      )}
+
+      {/* Section A: No backend configured */}
+      {activeBackend === 'none' && (
+      <section className="space-y-4">
+        <div className="flex items-center gap-3">
+          <HardDrive className="h-5 w-5 text-neutral-400 dark:text-neutral-500" />
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-100">Local Models</h2>
+        </div>
+        <Card className="p-6 text-center space-y-3">
+          <Server className="h-8 w-8 text-neutral-300 dark:text-neutral-600 mx-auto" />
+          <p className="text-sm text-neutral-600 dark:text-neutral-400">
+            No local inference backend is configured.
+          </p>
+          <a
+            href="/settings"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 dark:bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 dark:hover:bg-teal-600 transition-colors"
+          >
+            Configure in Settings <ExternalLink className="h-4 w-4" />
+          </a>
+        </Card>
+      </section>
+      )}
 
       {/* Section B: Cloud Providers */}
       <section className="space-y-4">
