@@ -55,6 +55,12 @@ async function checkBackendReady(): Promise<boolean> {
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, loading, authConfig } = useAuth()
 
+  // Recovery page bypasses auth — it has its own admin auth via X-Admin-Secret,
+  // and must be reachable when the orchestrator (which serves auth config) is down
+  if (window.location.pathname === '/recovery') {
+    return <>{children}</>
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">

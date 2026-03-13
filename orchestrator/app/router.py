@@ -308,9 +308,11 @@ async def chat_stream(req: ChatRequest, user: UserDep):
             raise HTTPException(status_code=403, detail=str(e))
         explicit_model = True  # prevent intelligent routing from overriding
     else:
-        from app.model_resolver import resolve_default_model
+        from app.model_resolver import resolve_default_model, is_auto_resolved
         model = req.model or await resolve_default_model()
-        explicit_model = bool(req.model)
+        # Treat as explicit if user sent a model OR if the admin configured a specific default
+        # (only "auto" should trigger intelligent routing override)
+        explicit_model = bool(req.model) or not await is_auto_resolved()
     task_id = uuid4()
     # Use conversation_id as session_id when available (for memory-service compatibility)
     session_id = req.conversation_id or req.session_id or str(uuid4())

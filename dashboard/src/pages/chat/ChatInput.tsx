@@ -136,7 +136,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           title={`Override ${aiName}'s default model for this conversation`}
           className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-2 py-1 text-[16px] sm:text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
         >
-          <option value="">Auto{resolvedModel ? ` (${resolvedModel})` : ''}</option>
+          <option value="">{resolvedModel ? resolvedModel : 'Default'}</option>
           {models.map(m => (
             <option key={m.id} value={m.id}>{m.id} ({m.provider})</option>
           ))}
