@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.auth import UserDep
 from app.db import get_pool
+from app.stimulus import emit_stimulus
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +106,11 @@ async def create_goal(req: CreateGoalRequest, user: UserDep):
             req.max_completions, req.created_via,
         )
     log.info("Goal created: %s — %s", row["id"], req.title)
+    await emit_stimulus("goal.created", {
+        "goal_id": str(row["id"]),
+        "title": req.title,
+        "schedule_cron": req.schedule_cron,
+    })
     return _row_to_goal(row)
 
 

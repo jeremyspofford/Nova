@@ -26,6 +26,7 @@ from nova_contracts import (
 
 from app.clients import get_llm_client, get_memory_client
 from app.config import settings
+from app.stimulus import emit_stimulus
 from app.tools import ALL_TOOLS, execute_tool, get_all_tools
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,15 @@ async def run_agent_turn(
 
         user_messages = [m for m in messages if m.get("role") == "user"]
         query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
+
+        # Notify Cortex of new user message (fire-and-forget)
+        try:
+            await emit_stimulus("message.received", {
+                "session_id": session_id,
+                "preview": query[:100] if query else "",
+            })
+        except Exception:
+            pass
 
         # 1. Fetch context concurrently (+ intelligent routing when auto-model)
         from app.model_classifier import classify_and_resolve
@@ -161,6 +171,15 @@ async def run_agent_turn_streaming(
     started_at = datetime.now(timezone.utc)
     user_messages = [m for m in messages if m.get("role") == "user"]
     query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
+
+    # Notify Cortex of new user message (fire-and-forget)
+    try:
+        await emit_stimulus("message.received", {
+            "session_id": session_id,
+            "preview": query[:100] if query else "",
+        })
+    except Exception:
+        pass
 
     category = None
     _engram_ids: list[str] = []
