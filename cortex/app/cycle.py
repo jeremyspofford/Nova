@@ -282,8 +282,14 @@ async def _execute_action(drive: DriveResult, plan: str, state: CycleState) -> s
         return await _execute_serve(drive, plan, state)
     elif drive.name == "maintain":
         return await _execute_maintain(drive, plan)
+    elif drive.name == "improve":
+        return await _execute_improve(drive, plan)
+    elif drive.name == "reflect":
+        return await _execute_reflect(drive, plan, state)
+    elif drive.name == "learn":
+        return await _execute_learn(drive, plan, state)
     else:
-        return f"Drive '{drive.name}' has no executor yet (stub)"
+        return f"Drive '{drive.name}' has no executor"
 
 
 async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> str:
@@ -333,6 +339,44 @@ async def _execute_maintain(drive: DriveResult, plan: str) -> str:
 
     # For now, just report. Future: trigger recovery actions.
     return f"Health issues detected: {', '.join(degraded)}. Logged for attention. Plan: {plan}"
+
+
+async def _execute_improve(drive: DriveResult, plan: str) -> str:
+    """Execute an improve action — log improvement opportunity."""
+    contradictions = drive.context.get("contradictions", [])
+    router_status = drive.context.get("router_status")
+
+    parts = []
+    if contradictions:
+        parts.append(f"Noted {len(contradictions)} engram contradictions for review")
+    if router_status:
+        parts.append(f"Neural router status: {router_status.get('mode', 'unknown')}")
+    parts.append(f"Plan: {plan[:200]}")
+
+    return "; ".join(parts) if parts else "No specific improvement action taken"
+
+
+async def _execute_reflect(drive: DriveResult, plan: str, state: CycleState) -> str:
+    """Execute a reflect action — summarize recent patterns."""
+    from .drives.reflect import reset_reflect_counter
+    reset_reflect_counter()
+
+    # Write a reflection journal entry
+    await write_entry(
+        f"**Reflection** — {plan[:500]}",
+        entry_type="reflection",
+        metadata={"cycle": state.cycle_number, "drive": "reflect"},
+    )
+    return f"Reflection recorded. {plan[:200]}"
+
+
+async def _execute_learn(drive: DriveResult, plan: str, state: CycleState) -> str:
+    """Execute a learn action — log learning opportunity."""
+    gaps = drive.context.get("gaps", [])
+    if gaps:
+        gap_types = ", ".join(g.get("task_type", "unknown") for g in gaps)
+        return f"Investigating capability gaps: {gap_types}. Plan: {plan[:200]}"
+    return f"Learning action: {plan[:200]}"
 
 
 async def _reflect(state: CycleState) -> None:
