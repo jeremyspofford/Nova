@@ -74,45 +74,35 @@ async def spreading_activation(
             WITH RECURSIVE activation_spread AS (
                 -- Seeds: top-N by cosine similarity
                 SELECT
-                    e.id,
-                    (1 - (e.embedding <=> CAST(:embedding AS halfvec)))::real AS activation,
+                    s.id,
+                    s.activation,
                     0 AS hop,
-                    ARRAY[e.id] AS path
-                FROM engrams e
-                WHERE NOT e.superseded
-                  AND e.embedding IS NOT NULL
-                  AND e.tenant_id = CAST(:tenant_id AS uuid)
-                ORDER BY e.embedding <=> CAST(:embedding AS halfvec)
-                LIMIT :seed_count
+                    ARRAY[s.id] AS path
+                FROM (
+                    SELECT e.id,
+                           (1 - (e.embedding <=> CAST(:embedding AS halfvec)))::real AS activation
+                    FROM engrams e
+                    WHERE NOT e.superseded
+                      AND e.embedding IS NOT NULL
+                      AND e.tenant_id = CAST(:tenant_id AS uuid)
+                    ORDER BY e.embedding <=> CAST(:embedding AS halfvec)
+                    LIMIT :seed_count
+                ) s
 
                 UNION ALL
 
-                -- Spread through forward edges
+                -- Spread through edges (both directions — bidirectional graph)
                 SELECT
                     neighbor.id,
                     LEAST(1.0, spread.activation * edge.weight * :decay_factor)::real AS activation,
                     spread.hop + 1,
                     spread.path || neighbor.id
                 FROM activation_spread spread
-                JOIN engram_edges edge ON edge.source_id = spread.id
-                JOIN engrams neighbor ON neighbor.id = edge.target_id
-                WHERE spread.hop < :max_hops
-                  AND NOT neighbor.superseded
-                  AND edge.relation != 'contradicts'
-                  AND NOT (neighbor.id = ANY(spread.path))
-                  AND (spread.activation * edge.weight * :decay_factor) > :threshold
-
-                UNION ALL
-
-                -- Spread through reverse edges (bidirectional)
-                SELECT
-                    neighbor.id,
-                    LEAST(1.0, spread.activation * edge.weight * :decay_factor)::real AS activation,
-                    spread.hop + 1,
-                    spread.path || neighbor.id
-                FROM activation_spread spread
-                JOIN engram_edges edge ON edge.target_id = spread.id
-                JOIN engrams neighbor ON neighbor.id = edge.source_id
+                JOIN engram_edges edge ON (edge.source_id = spread.id OR edge.target_id = spread.id)
+                JOIN engrams neighbor ON neighbor.id = CASE
+                    WHEN edge.source_id = spread.id THEN edge.target_id
+                    ELSE edge.source_id
+                END
                 WHERE spread.hop < :max_hops
                   AND NOT neighbor.superseded
                   AND edge.relation != 'contradicts'
