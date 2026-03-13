@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .budget import get_budget_status, publish_budget_tier
+from .scheduler import check_schedules
 from .clients import get_llm, get_orchestrator
 from .config import settings
 from .db import get_pool
@@ -89,6 +90,15 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         # Check for user replies since last cycle
         last_cycle_at = row["last_cycle_at"] if row and row["last_cycle_at"] else datetime(2020, 1, 1, tzinfo=timezone.utc)
         state.user_messages = await read_user_replies_since(last_cycle_at)
+
+        # Check for due scheduled goals (self-inject stimuli)
+        try:
+            schedule_stimuli = await check_schedules()
+            if schedule_stimuli:
+                state.stimuli.extend(schedule_stimuli)
+                log.info("Injected %d schedule stimuli", len(schedule_stimuli))
+        except Exception as e:
+            log.warning("Schedule check failed: %s", e)
 
         # ── EVALUATE ──────────────────────────────────────────────────────
         drive_ctx = DriveContext(
