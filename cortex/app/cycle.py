@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .budget import get_budget_status, publish_budget_tier
+from .memory import perceive_with_memory, reflect_to_engrams, maybe_consolidate, mark_engrams_used
 from .scheduler import check_schedules
 from .clients import get_llm, get_orchestrator
 from .config import settings
@@ -38,6 +39,9 @@ class CycleState:
     winner: DriveWinner | None = None
     user_messages: list[dict] = field(default_factory=list)
     stimuli: list[dict] = field(default_factory=list)
+    memory_context: str = ""
+    engram_ids: list[str] = field(default_factory=list)
+    retrieval_log_id: str | None = None
     action_taken: str = "none"
     outcome: str = ""
     error: str | None = None
@@ -100,10 +104,23 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         except Exception as e:
             log.warning("Schedule check failed: %s", e)
 
+        # Query engram memory for context
+        goal_context = ""
+        if state.stimuli:
+            for s in state.stimuli:
+                if s.get("type") == "goal.schedule_due":
+                    goal_context = s.get("payload", {}).get("title", "")
+                    break
+
+        mem_result = await perceive_with_memory(state.stimuli, goal_context)
+        state.memory_context = mem_result["memory_context"]
+        state.engram_ids = mem_result["engram_ids"]
+        state.retrieval_log_id = mem_result["retrieval_log_id"]
+
         # ── EVALUATE ──────────────────────────────────────────────────────
         drive_ctx = DriveContext(
             stimuli=state.stimuli,
-            memory_context="",
+            memory_context=state.memory_context,
             budget_tier=state.budget_tier,
             cycle_count=state.cycle_number,
         )
@@ -120,6 +137,17 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         if state.winner is None:
             state.action_taken = "idle"
             state.outcome = "No drives have urgency — nothing to do"
+
+            # Use idle time for memory consolidation
+            if state.budget_tier != "none":
+                try:
+                    consolidated = await maybe_consolidate()
+                    if consolidated:
+                        state.action_taken = "idle_consolidation"
+                        state.outcome = "Triggered memory consolidation during idle"
+                except Exception as e:
+                    log.debug("Idle consolidation failed: %s", e)
+
             await _update_state(state)
             await write_entry(
                 f"Cycle {state.cycle_number}: idle. Budget {state.budget_pct:.0f}% used ({state.budget_tier}). "
@@ -141,6 +169,23 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
 
         # ── REFLECT ──────────────────────────────────────────────────────
         await _reflect(state)
+
+        # Write cycle outcome to engram memory
+        if state.action_taken not in ("idle", "none", "idle_consolidation"):
+            await reflect_to_engrams(
+                cycle_number=state.cycle_number,
+                drive=state.action_taken,
+                urgency=state.winner.result.urgency if state.winner else 0,
+                action_summary=state.winner.result.proposed_action or state.action_taken if state.winner else state.action_taken,
+                outcome=state.outcome[:500],
+                goal_id=state.winner.result.context.get("scheduled_goal_ids", [None])[0] if state.winner else None,
+                budget_tier=state.budget_tier,
+            )
+
+        # Mark engrams used (all retrieved engrams — coarse heuristic)
+        if state.retrieval_log_id and state.engram_ids:
+            await mark_engrams_used(state.retrieval_log_id, state.engram_ids)
+
         await _update_state(state)
 
         # ── SCORE ───────────────────────────────────────────────────
@@ -184,6 +229,9 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
     if state.stimuli:
         stim_types = ", ".join(s.get("type", "?") for s in state.stimuli[:5])
         stimulus_summary = f"\nStimuli this cycle: {stim_types}"
+
+    if state.memory_context:
+        stimulus_summary += f"\n\nRelevant memories:\n{state.memory_context[:1000]}"
 
     prompt = f"""You are Nova's autonomous brain (Cortex). You are deciding what to do this cycle.
 
