@@ -96,6 +96,18 @@ class TestBackendLifecycle:
         assert "vllm" in names
 
 
+class TestVLLMDiscovery:
+    """Tests for vLLM model discovery."""
+
+    async def test_discover_includes_vllm_provider(self, llm_gateway: httpx.AsyncClient):
+        """Model discovery should include vLLM as a provider (even if unavailable)."""
+        r = await llm_gateway.get("/v1/models/discover")
+        assert r.status_code == 200
+        data = r.json()
+        slugs = [p["slug"] for p in data]
+        assert "vllm" in slugs
+
+
 class TestLocalInferenceRouting:
     """Tests for the LocalInferenceProvider routing wrapper."""
 

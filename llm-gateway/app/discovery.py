@@ -47,6 +47,7 @@ async def _get_redis() -> aioredis.Redis:
 
 AUTH_METHODS: dict[str, list[str]] = {
     "ollama": ["Always available (local)"],
+    "vllm": ["Available when vLLM is the active inference backend"],
     "claude-max": [
         "CLAUDE_CODE_OAUTH_TOKEN env var",
         "~/.claude/.credentials.json (auto-detected on Linux)",
@@ -116,6 +117,31 @@ async def _discover_ollama() -> list[DiscoveredModel]:
     except Exception as e:
         log.debug("Ollama discovery failed: %s", e)
         return []
+
+
+async def _discover_vllm() -> list[DiscoveredModel]:
+    """Discover models from a running vLLM server."""
+    models = []
+    try:
+        from app.registry import _get_redis_config
+        url = await _get_redis_config("inference.url", "") or "http://nova-vllm:8000"
+        backend = await _get_redis_config("inference.backend", "ollama")
+        if backend != "vllm":
+            return []
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{url}/v1/models")
+            if r.status_code == 200:
+                data = r.json()
+                for m in data.get("data", []):
+                    model_id = m.get("id", "")
+                    if model_id:
+                        from app.registry import MODEL_REGISTRY
+                        registered = model_id in MODEL_REGISTRY
+                        models.append(DiscoveredModel(id=model_id, registered=registered))
+    except Exception as e:
+        log.debug("vLLM discovery failed: %s", e)
+    return models
 
 
 async def _discover_groq() -> list[DiscoveredModel]:
@@ -307,6 +333,7 @@ async def _discover_from_model_map(slug: str) -> list[DiscoveredModel]:
 
 _PROVIDER_META = [
     {"slug": "ollama",      "name": "Ollama",           "type": "local"},
+    {"slug": "vllm",        "name": "vLLM",             "type": "local"},
     {"slug": "claude-max",  "name": "Claude Max/Pro",   "type": "subscription"},
     {"slug": "anthropic",   "name": "Anthropic API",    "type": "paid"},
     {"slug": "openai",      "name": "OpenAI API",       "type": "paid"},
@@ -321,6 +348,7 @@ _PROVIDER_META = [
 # Maps slug → discovery coroutine
 _DISCOVERY_FNS: dict[str, Any] = {
     "ollama": _discover_ollama,
+    "vllm": _discover_vllm,
     "groq": _discover_groq,
     "anthropic": _discover_anthropic,
     "openai": _discover_openai,
@@ -341,6 +369,7 @@ def _is_provider_available(slug: str) -> bool:
 
     checks = {
         "ollama": lambda: True,
+        "vllm": lambda: settings.inference_backend == "vllm",
         "claude-max": lambda: bool(discover_claude_oauth_token()),
         "chatgpt": lambda: bool(discover_chatgpt_token()),
         "groq": lambda: bool(settings.groq_api_key),
