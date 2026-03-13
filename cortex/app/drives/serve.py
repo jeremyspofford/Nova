@@ -4,6 +4,7 @@ Urgency is based on:
 - Number of active goals
 - Whether any goals have pending tasks or need new work
 - Time since last check
+- Stimulus events (message received, goal created, schedule due)
 """
 from __future__ import annotations
 
@@ -11,21 +12,19 @@ import logging
 from datetime import datetime, timezone
 
 from ..db import get_pool
-from . import DriveResult
+from . import DriveContext, DriveResult
 
 log = logging.getLogger(__name__)
 
 
-async def assess() -> DriveResult:
-    """Assess serve drive urgency based on active goals."""
+async def assess(ctx: DriveContext | None = None) -> DriveResult:
+    """Assess serve drive urgency based on active goals and stimuli."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        # Count active goals
         active_count = await conn.fetchval(
             "SELECT COUNT(*) FROM goals WHERE status = 'active'"
         )
 
-        # Find goals needing attention (not checked recently)
         stale_goals = await conn.fetch(
             """
             SELECT id, title, priority, progress, check_interval_seconds, last_checked_at
@@ -38,7 +37,6 @@ async def assess() -> DriveResult:
             """,
         )
 
-        # Count in-flight tasks for active goals
         active_tasks = await conn.fetchval(
             """
             SELECT COUNT(*) FROM tasks t
@@ -47,19 +45,33 @@ async def assess() -> DriveResult:
             """
         )
 
-    if active_count == 0:
+    if active_count == 0 and (ctx is None or not ctx.stimuli_of_type(
+        "message.received", "goal.created", "goal.schedule_due"
+    )):
         return DriveResult(
             name="serve", priority=1, urgency=0.0,
             description="No active goals",
         )
 
-    # Urgency increases with stale goals
-    stale_ratio = len(stale_goals) / max(active_count, 1)
+    # Base urgency from stale goals
+    stale_ratio = len(stale_goals) / max(active_count, 1) if active_count > 0 else 0
     urgency = min(1.0, 0.2 + stale_ratio * 0.6)
 
-    # If tasks are already in-flight, reduce urgency (work is happening)
+    # If tasks are already in-flight, reduce urgency
     if active_tasks > 0:
         urgency *= 0.5
+
+    # Stimulus boosts
+    if ctx:
+        schedule_due = ctx.stimuli_of_type("goal.schedule_due")
+        if schedule_due:
+            urgency = max(urgency, 0.9)
+
+        if ctx.stimuli_of_type("message.received"):
+            urgency = min(1.0, urgency + 0.3)
+
+        if ctx.stimuli_of_type("goal.created"):
+            urgency = min(1.0, urgency + 0.2)
 
     goal_summaries = [
         {"id": str(g["id"]), "title": g["title"], "priority": g["priority"],
@@ -67,11 +79,22 @@ async def assess() -> DriveResult:
         for g in stale_goals
     ]
 
+    scheduled_goal_ids = []
+    if ctx:
+        for s in ctx.stimuli_of_type("goal.schedule_due"):
+            gid = s.get("payload", {}).get("goal_id")
+            if gid:
+                scheduled_goal_ids.append(gid)
+
     return DriveResult(
         name="serve",
         priority=1,
         urgency=round(urgency, 2),
         description=f"{active_count} active goals, {len(stale_goals)} need attention",
         proposed_action=f"Work on goal: {stale_goals[0]['title']}" if stale_goals else None,
-        context={"stale_goals": goal_summaries, "active_tasks": active_tasks},
+        context={
+            "stale_goals": goal_summaries,
+            "active_tasks": active_tasks,
+            "scheduled_goal_ids": scheduled_goal_ids,
+        },
     )

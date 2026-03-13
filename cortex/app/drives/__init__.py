@@ -28,6 +28,19 @@ class DriveWinner:
     score: float  # priority_weight * urgency
 
 
+@dataclass
+class DriveContext:
+    """Context passed to each drive's assess() method."""
+    stimuli: list[dict] = field(default_factory=list)
+    memory_context: str = ""
+    budget_tier: str = "best"
+    cycle_count: int = 0
+
+    def stimuli_of_type(self, *types: str) -> list[dict]:
+        """Filter stimuli by type."""
+        return [s for s in self.stimuli if s.get("type") in types]
+
+
 # Priority weights — lower priority number = higher weight
 PRIORITY_WEIGHTS = {1: 5.0, 2: 4.0, 3: 3.0, 4: 2.0, 5: 1.0}
 

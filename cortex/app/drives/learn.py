@@ -13,7 +13,7 @@ import logging
 import redis.asyncio as aioredis
 
 from ..config import settings
-from . import DriveResult
+from . import DriveContext, DriveResult
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ async def _get_redis() -> aioredis.Redis:
     return _redis
 
 
-async def assess() -> DriveResult:
+async def assess(ctx: DriveContext | None = None) -> DriveResult:
     """Check for capability gaps and report urgency."""
     try:
         r = await _get_redis()
