@@ -101,7 +101,7 @@ async def _apply_rate_limit(api_key_id: UUID, rate_limit_rpm: int) -> None:
     so it auto-expires without a cleanup job. Raises HTTP 429 if the
     counter exceeds rate_limit_rpm for the current minute.
     """
-    window = int(time.time() / 60)
+    window = int(_time.time() / 60)
     rkey = f"nova:ratelimit:{api_key_id}:{window}"
     redis = get_redis()
     count = await redis.incr(rkey)
@@ -223,16 +223,75 @@ async def require_user(
         try:
             from app.jwt_auth import verify_access_token
             payload = verify_access_token(token)
+            user_id = payload["sub"]
             role = payload.get("role", "admin" if payload.get("is_admin") else "member")
             tenant_id = payload.get("tenant_id", "00000000-0000-0000-0000-000000000001")
+
+            # Check Redis deny-list (immediate token revocation)
+            try:
+                redis = get_redis()
+                denied = await redis.get(f"nova:auth:denied:{user_id}")
+                if denied:
+                    # Fire-and-forget audit
+                    try:
+                        from app.db import get_pool
+                        from app.audit import audit_rbac
+                        pool = get_pool()
+                        ip = request.client.host if request.client else None
+                        asyncio.create_task(audit_rbac(
+                            pool, user_id, "token_denied",
+                            details={"reason": json.loads(denied).get("reason", "unknown") if denied else "unknown"},
+                            ip=ip, tenant_id=tenant_id,
+                        ))
+                    except Exception:
+                        pass
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Your access has been updated. Please log in again.",
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # Redis unavailable — allow request through
+
+            # Check account expiry
+            try:
+                from app.db import get_pool
+                from datetime import datetime, timezone
+                pool = get_pool()
+                row = await pool.fetchrow(
+                    "SELECT status, expires_at FROM users WHERE id = $1::uuid", user_id
+                )
+                if row:
+                    if row["status"] != "active":
+                        raise HTTPException(status_code=403, detail="Account deactivated")
+                    if row["expires_at"] and row["expires_at"] < datetime.now(timezone.utc):
+                        # Audit the expiry
+                        try:
+                            from app.audit import audit_rbac
+                            ip = request.client.host if request.client else None
+                            asyncio.create_task(audit_rbac(
+                                pool, user_id, "account_expired",
+                                ip=ip, tenant_id=tenant_id,
+                            ))
+                        except Exception:
+                            pass
+                        raise HTTPException(status_code=403, detail="Account expired")
+            except HTTPException:
+                raise
+            except Exception:
+                pass  # DB unavailable — allow request through
+
             return AuthenticatedUser(
-                id=payload["sub"],
+                id=user_id,
                 email=payload["email"],
                 display_name=payload.get("display_name", ""),
                 is_admin=payload.get("is_admin", False),
                 role=role,
                 tenant_id=tenant_id,
             )
+        except HTTPException:
+            raise
         except Exception:
             pass  # Fall through to admin secret check
 
@@ -280,3 +339,22 @@ ActiveUserDep = Annotated[AuthenticatedUser, Depends(check_account_active)]
 OwnerDep = Annotated[AuthenticatedUser, Depends(require_role("owner"))]
 AdminRoleDep = Annotated[AuthenticatedUser, Depends(require_role("admin"))]
 MemberDep = Annotated[AuthenticatedUser, Depends(require_role("member"))]
+
+
+# ── Token deny-list helpers ────────────────────────────────────────────────
+
+_DENY_TTL = 900  # 15 min — matches JWT access token lifetime
+
+
+async def deny_user_token(user_id: str, reason: str = "access_updated") -> None:
+    """Add a user to the Redis deny-list, forcing re-authentication.
+
+    Called when an admin changes a user's role, deactivates them, updates
+    expiry, or when a user changes their own password.
+    """
+    try:
+        redis = get_redis()
+        payload = json.dumps({"reason": reason, "at": _time.time()})
+        await redis.set(f"nova:auth:denied:{user_id}", payload, ex=_DENY_TTL)
+    except Exception:
+        log.warning("Failed to set deny-list for user %s", user_id)

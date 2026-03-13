@@ -119,10 +119,16 @@ async def update_user_role(user_id: str, role: str, actor_id: str | None = None)
         UUID(user_id), role, is_admin,
     )
     if row and actor_id:
-        await pool.execute(
-            "INSERT INTO rbac_audit_log (actor_id, action, target_id, details, tenant_id) VALUES ($1, 'role_change', $2, $3, $4)",
-            UUID(actor_id), UUID(user_id), json.dumps({"new_role": role}), row["tenant_id"],
+        from app.audit import audit_rbac
+        await audit_rbac(
+            pool, actor_id, "role_change",
+            target_id=user_id,
+            details={"new_role": role},
+            tenant_id=row["tenant_id"],
         )
+        # Deny current tokens so user must re-authenticate with new role
+        from app.auth import deny_user_token
+        await deny_user_token(user_id, reason="role_changed")
     return _user_dict(row) if row else None
 
 
@@ -132,8 +138,13 @@ async def deactivate_user(user_id: str, actor_id: str) -> bool:
         "UPDATE users SET status = 'deactivated', updated_at = NOW() WHERE id = $1", UUID(user_id)
     )
     await pool.execute("DELETE FROM refresh_tokens WHERE user_id = $1", UUID(user_id))
-    await pool.execute(
-        "INSERT INTO rbac_audit_log (actor_id, action, target_id, tenant_id) VALUES ($1, 'user_deactivated', $2, (SELECT tenant_id FROM users WHERE id = $2))",
-        UUID(actor_id), UUID(user_id),
+    from app.audit import audit_rbac
+    await audit_rbac(
+        pool, actor_id, "user_deactivated",
+        target_id=user_id,
+        tenant_id=None,  # will use default
     )
+    # Deny current tokens immediately
+    from app.auth import deny_user_token
+    await deny_user_token(user_id, reason="deactivated")
     return "UPDATE 1" in result

@@ -6,23 +6,23 @@ import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
 import { hasMinRole, type Role } from '../lib/roles'
 
-const mainLinks = [
-  { to: '/',         label: 'Chat',     icon: MessageSquare    },
-  { to: '/goals',    label: 'Goals',    icon: Target           },
-  { to: '/tasks',    label: 'Tasks',    icon: ListTodo         },
-  { to: '/pods',     label: 'Pods',     icon: Layers           },
-  { to: '/usage',    label: 'Usage',    icon: BarChart2        },
-  { to: '/keys',     label: 'Keys',     icon: Key              },
-  { to: '/mcp',      label: 'MCP',      icon: Plug             },
-  { to: '/agents',   label: 'Agents',   icon: Network          },
-  { to: '/engrams',  label: 'Memory',   icon: Brain            },
-  { to: '/models',   label: 'Models',   icon: Cpu              },
+const mainLinks: { to: string; label: string; icon: typeof MessageSquare; minRole: Role }[] = [
+  { to: '/',         label: 'Chat',     icon: MessageSquare, minRole: 'guest'  },
+  { to: '/goals',    label: 'Goals',    icon: Target,        minRole: 'member' },
+  { to: '/tasks',    label: 'Tasks',    icon: ListTodo,      minRole: 'viewer' },
+  { to: '/pods',     label: 'Pods',     icon: Layers,        minRole: 'viewer' },
+  { to: '/usage',    label: 'Usage',    icon: BarChart2,     minRole: 'viewer' },
+  { to: '/keys',     label: 'Keys',     icon: Key,           minRole: 'member' },
+  { to: '/mcp',      label: 'MCP',      icon: Plug,          minRole: 'member' },
+  { to: '/agents',   label: 'Agents',   icon: Network,       minRole: 'member' },
+  { to: '/engrams',  label: 'Memory',   icon: Brain,         minRole: 'member' },
+  { to: '/models',   label: 'Models',   icon: Cpu,           minRole: 'viewer' },
 ]
 
-const systemLinks = [
-  { to: '/users',         label: 'Users',    icon: Users2      },
-  { to: '/settings',      label: 'Settings', icon: Settings    },
-  { to: '/about',         label: 'About',    icon: Info        },
+const systemLinks: { to: string; label: string; icon: typeof Settings; minRole: Role }[] = [
+  { to: '/users',         label: 'Users',    icon: Users2,   minRole: 'admin'  },
+  { to: '/settings',      label: 'Settings', icon: Settings, minRole: 'member' },
+  { to: '/about',         label: 'About',    icon: Info,     minRole: 'viewer' },
 ]
 
 export function NavBar() {
@@ -34,13 +34,11 @@ export function NavBar() {
   const { name } = useNovaIdentity()
   const { isAuthenticated, user, logout } = useAuth()
 
-  // Filter system links based on role
-  const filteredSystemLinks = systemLinks.filter(link => {
-    if (link.to === '/users') {
-      return user?.role && hasMinRole(user.role as Role, 'admin')
-    }
-    return true
-  })
+  const userRole: Role = (user?.role as Role) || 'guest'
+
+  // Filter links by role
+  const filteredMainLinks = mainLinks.filter(link => hasMinRole(userRole, link.minRole))
+  const filteredSystemLinks = systemLinks.filter(link => hasMinRole(userRole, link.minRole))
 
   // Close user menu on click outside
   useEffect(() => {
@@ -64,7 +62,7 @@ export function NavBar() {
 
           {/* Desktop nav */}
           <div className="hidden md:flex gap-1">
-            {mainLinks.map(({ to, label, icon: Icon }) => (
+            {filteredMainLinks.map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}
@@ -118,47 +116,22 @@ export function NavBar() {
                     )}
                   </div>
                 )}
-                {user?.role && hasMinRole(user.role as Role, 'admin') && (
+                {filteredSystemLinks.map(({ to, label, icon: Icon }) => (
                   <NavLink
-                    to="/users"
+                    key={to}
+                    to={to}
                     onClick={() => setUserMenuOpen(false)}
                     className={clsx(
                       'flex items-center gap-2 px-3 py-2 text-sm transition-colors',
-                      location.pathname === '/users'
+                      (to === '/settings' ? location.pathname.startsWith('/settings') : location.pathname === to)
                         ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
                         : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100'
                     )}
                   >
-                    <Users2 size={14} />
-                    Users
+                    <Icon size={14} />
+                    {label}
                   </NavLink>
-                )}
-                <NavLink
-                  to="/settings"
-                  onClick={() => setUserMenuOpen(false)}
-                  className={clsx(
-                    'flex items-center gap-2 px-3 py-2 text-sm transition-colors',
-                    location.pathname.startsWith('/settings')
-                      ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
-                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100'
-                  )}
-                >
-                  <Settings size={14} />
-                  Settings
-                </NavLink>
-                <NavLink
-                  to="/about"
-                  onClick={() => setUserMenuOpen(false)}
-                  className={clsx(
-                    'flex items-center gap-2 px-3 py-2 text-sm transition-colors',
-                    location.pathname === '/about'
-                      ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
-                      : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100'
-                  )}
-                >
-                  <Info size={14} />
-                  About
-                </NavLink>
+                ))}
                 {isAuthenticated && (
                   <button
                     onClick={() => { setUserMenuOpen(false); logout() }}
@@ -185,7 +158,7 @@ export function NavBar() {
       {mobileMenuOpen && (
         <div className="md:hidden sticky top-[57px] z-50 border-b border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900 px-4 py-2">
           <div className="grid grid-cols-3 gap-1">
-            {[...mainLinks, ...filteredSystemLinks].map(({ to, label, icon: Icon }) => (
+            {[...filteredMainLinks, ...filteredSystemLinks].map(({ to, label, icon: Icon }) => (
               <NavLink
                 key={to}
                 to={to}

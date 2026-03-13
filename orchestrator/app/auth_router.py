@@ -114,7 +114,7 @@ async def get_network_status(request: Request):
 # ── Registration ─────────────────────────────────────────────────────────────
 
 @router.post("/api/v1/auth/register", response_model=AuthResponse)
-async def register(req: RegisterRequest):
+async def register(req: RegisterRequest, request: Request):
     from app.users import create_user, get_user_by_email, count_users
     from app.jwt_auth import create_access_token, create_refresh_token
 
@@ -187,6 +187,15 @@ async def register(req: RegisterRequest):
                 "UPDATE invite_codes SET used_by = $1, used_at = NOW() WHERE code = $2",
                 UUID(user["id"]), req.invite_code,
             )
+        # Audit invite acceptance
+        from app.audit import audit_rbac
+        ip = request.client.host if request.client else None
+        asyncio.create_task(audit_rbac(
+            pool, user["id"], "invite_accepted",
+            target_id=str(invite["id"]) if invite else None,
+            details={"invite_id": str(invite["id"]) if invite else None, "role": invite_role},
+            ip=ip, tenant_id=invite_tenant_id,
+        ))
 
     access = create_access_token(
         user["id"], user["email"], user["is_admin"],
@@ -205,15 +214,30 @@ async def register(req: RegisterRequest):
 # ── Login ────────────────────────────────────────────────────────────────────
 
 @router.post("/api/v1/auth/login", response_model=AuthResponse)
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     from app.users import get_user_by_email
     from app.jwt_auth import create_access_token, create_refresh_token
+    from app.db import get_pool
+    from app.audit import audit_rbac
+
+    pool = get_pool()
+    ip = request.client.host if request.client else None
 
     user = await get_user_by_email(req.email.lower())
     if not user or not user.get("password_hash"):
+        asyncio.create_task(audit_rbac(
+            pool, None, "login_failed",
+            details={"email": req.email.lower(), "reason": "invalid_email"},
+            ip=ip,
+        ))
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     if not _verify_password(req.password, user["password_hash"]):
+        asyncio.create_task(audit_rbac(
+            pool, user["id"], "login_failed",
+            details={"email": req.email.lower(), "reason": "bad_password"},
+            ip=ip, tenant_id=user.get("tenant_id"),
+        ))
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     access = create_access_token(
@@ -222,6 +246,12 @@ async def login(req: LoginRequest):
         tenant_id=str(user.get("tenant_id", "00000000-0000-0000-0000-000000000001")),
     )
     refresh = await create_refresh_token(user["id"])
+
+    asyncio.create_task(audit_rbac(
+        pool, user["id"], "login_success",
+        details={"email": user["email"], "provider": "local"},
+        ip=ip, tenant_id=user.get("tenant_id"),
+    ))
 
     return AuthResponse(
         access_token=access,
@@ -251,9 +281,18 @@ async def refresh_tokens(req: RefreshRequest):
 # ── Logout ───────────────────────────────────────────────────────────────────
 
 @router.post("/api/v1/auth/logout", status_code=204)
-async def logout(req: LogoutRequest):
+async def logout(req: LogoutRequest, request: Request, user: UserDep):
     from app.jwt_auth import revoke_refresh_token
+    from app.db import get_pool
+    from app.audit import audit_rbac
+
     await revoke_refresh_token(req.refresh_token)
+
+    pool = get_pool()
+    ip = request.client.host if request.client else None
+    asyncio.create_task(audit_rbac(
+        pool, user.id, "logout", ip=ip, tenant_id=user.tenant_id,
+    ))
 
 
 # ── Profile ──────────────────────────────────────────────────────────────────
@@ -277,10 +316,12 @@ async def update_me(req: UpdateProfileRequest, user: UserDep):
 
 
 @router.patch("/api/v1/auth/password", status_code=204)
-async def change_password(req: ChangePasswordRequest, user: UserDep):
+async def change_password(req: ChangePasswordRequest, user: UserDep, request: Request):
     """Change the authenticated user's password."""
     from app.users import get_user_by_id
     from app.db import get_pool
+    from app.auth import deny_user_token
+    from app.audit import audit_rbac
 
     full_user = await get_user_by_id(user.id)
     if not full_user or not full_user.get("password_hash"):
@@ -299,6 +340,14 @@ async def change_password(req: ChangePasswordRequest, user: UserDep):
             "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
             new_hash, UUID(user.id),
         )
+
+    # Deny current tokens so all sessions must re-authenticate
+    await deny_user_token(user.id, reason="password_changed")
+
+    ip = request.client.host if request.client else None
+    asyncio.create_task(audit_rbac(
+        pool, user.id, "password_changed", ip=ip, tenant_id=user.tenant_id,
+    ))
 
 
 # ── Google OAuth ─────────────────────────────────────────────────────────────
@@ -423,13 +472,57 @@ async def list_invites(user: UserDep):
     return [dict(r) for r in rows]
 
 
+@router.get("/api/v1/auth/invites/validate/{code}")
+async def validate_invite(code: str):
+    """Public endpoint: validate an invite code and return its metadata."""
+    from app.db import get_pool
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT ic.id, ic.role, ic.expires_at, ic.account_expires_in_hours, ic.created_at,
+                      u.display_name AS created_by_name
+               FROM invite_codes ic
+               LEFT JOIN users u ON u.id = ic.created_by
+               WHERE ic.code = $1""",
+            code,
+        )
+    if not row or row.get("used_by") is not None:
+        # Check if it was used or doesn't exist
+        pass
+
+    if not row:
+        return {"valid": False}
+
+    # Check if used (need separate query since we didn't select used_by above)
+    async with pool.acquire() as conn:
+        used = await conn.fetchval(
+            "SELECT used_by FROM invite_codes WHERE code = $1", code
+        )
+    if used is not None:
+        return {"valid": False}
+
+    # Check expiry
+    from datetime import datetime, timezone
+    if row["expires_at"] and row["expires_at"] < datetime.now(timezone.utc):
+        return {"valid": False}
+
+    return {
+        "valid": True,
+        "role": row["role"],
+        "created_by_name": row["created_by_name"] or "An admin",
+        "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+        "account_expires_in_hours": row["account_expires_in_hours"],
+    }
+
+
 @router.delete("/api/v1/auth/invites/{invite_id}", status_code=204)
-async def revoke_invite(invite_id: UUID, user: UserDep):
+async def revoke_invite(invite_id: UUID, user: UserDep, request: Request):
     from app.roles import has_min_role
     if not has_min_role(user.role, "admin"):
         raise HTTPException(status_code=403, detail="Requires admin role")
 
     from app.db import get_pool
+    from app.audit import audit_rbac
     pool = get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -438,6 +531,14 @@ async def revoke_invite(invite_id: UUID, user: UserDep):
         )
     if result != "DELETE 1":
         raise HTTPException(status_code=404, detail="Invite not found or already used")
+
+    ip = request.client.host if request.client else None
+    asyncio.create_task(audit_rbac(
+        pool, user.id, "invite_revoked",
+        target_id=invite_id,
+        details={"invite_id": str(invite_id)},
+        ip=ip, tenant_id=user.tenant_id,
+    ))
 
 
 # ── Admin user management ────────────────────────────────────────────────────
@@ -530,6 +631,8 @@ async def update_user_admin(user_id: str, body: AdminUpdateUser, user: UserDep):
             )
             if body.status == "deactivated":
                 await conn.execute("DELETE FROM refresh_tokens WHERE user_id = $1", UUID(user_id))
+                from app.auth import deny_user_token
+                await deny_user_token(user_id, reason="deactivated")
 
     if body.expires_at is not None:
         from datetime import datetime
@@ -542,6 +645,8 @@ async def update_user_admin(user_id: str, body: AdminUpdateUser, user: UserDep):
                 "UPDATE users SET expires_at = $1, updated_at = NOW() WHERE id = $2",
                 expires, UUID(user_id),
             )
+        from app.auth import deny_user_token
+        await deny_user_token(user_id, reason="expiry_updated")
 
     updated = await get_user_by_id(user_id)
     return _safe_user(updated)
