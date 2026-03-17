@@ -89,7 +89,9 @@ async def _do_start_backend(backend: str) -> None:
             await _stop_backend(current)
 
         _switch_progress = {"step": "starting", "detail": f"Starting {backend}..."}
-        await start_profiled_service(info["profile"], info["service"])
+        result = await start_profiled_service(info["profile"], info["service"])
+        if not result.get("ok"):
+            raise RuntimeError(result.get("error", "Failed to start container"))
 
         # vLLM/SGLang need longer — first start downloads model from HuggingFace
         timeout = 600 if backend in SWITCHABLE_BACKENDS else 120

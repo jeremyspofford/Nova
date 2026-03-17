@@ -93,6 +93,14 @@ CREATE INDEX IF NOT EXISTS idx_edges_target ON engram_edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_edges_relation ON engram_edges(relation);
 CREATE INDEX IF NOT EXISTS idx_edges_weight ON engram_edges(weight);
 
+-- Composite indexes for consolidation queries
+CREATE INDEX IF NOT EXISTS idx_engrams_active_created
+    ON engrams(created_at) WHERE NOT superseded;
+CREATE INDEX IF NOT EXISTS idx_engrams_prune_candidates
+    ON engrams(activation, access_count) WHERE NOT superseded;
+CREATE INDEX IF NOT EXISTS idx_edges_decay_candidates
+    ON engram_edges(created_at) WHERE co_activations <= 1;
+
 -- Cold storage for superseded and pruned engrams (same schema, excluded from activation)
 CREATE TABLE IF NOT EXISTS engram_archive (
     id              UUID PRIMARY KEY,

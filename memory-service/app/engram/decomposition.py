@@ -16,6 +16,51 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
+# Cache the resolved model so we don't probe every call
+_resolved_model: str | None = None
+
+
+async def resolve_model(model: str) -> str:
+    """Resolve 'auto' to a concrete model by asking the gateway what's available."""
+    global _resolved_model
+    if model != "auto":
+        return model
+    if _resolved_model:
+        return _resolved_model
+
+    # Try the gateway's model resolution endpoint
+    try:
+        async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=5.0) as c:
+            r = await c.get("/v1/models/resolve")
+            if r.status_code == 200:
+                _resolved_model = r.json().get("model", "")
+                if _resolved_model:
+                    log.info("Auto-resolved decomposition model: %s", _resolved_model)
+                    return _resolved_model
+    except Exception:
+        pass
+
+    # Fallback: probe common local models
+    for candidate in ["llama3.1:8b", "llama3.2", "llama3.2:3b", "mistral", "qwen2.5"]:
+        try:
+            async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=10.0) as c:
+                r = await c.post("/complete", json={
+                    "model": candidate,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                })
+                if r.status_code == 200:
+                    _resolved_model = candidate
+                    log.info("Auto-resolved decomposition model via probe: %s", candidate)
+                    return _resolved_model
+        except Exception:
+            continue
+
+    log.warning("Could not auto-resolve decomposition model, using llama3.1:8b")
+    _resolved_model = "llama3.1:8b"
+    return _resolved_model
+
+
 DECOMPOSITION_SYSTEM_PROMPT = """You extract facts from conversations into structured JSON memory units.
 
 CRITICAL: Focus on what the USER says about themselves, their preferences, their work, and their requests. The assistant's responses are context, but the user's statements are what matter for memory.
@@ -63,16 +108,7 @@ async def decompose(raw_text: str) -> DecompositionResult:
         return DecompositionResult()
 
     try:
-        # Resolve model — if "auto", ask the gateway for the best available
-        model = settings.engram_decomposition_model
-        if model == "auto":
-            try:
-                async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=5.0) as c:
-                    r = await c.get("/v1/models/resolve")
-                    if r.status_code == 200:
-                        model = r.json().get("model", "llama3.1:8b")
-            except Exception:
-                model = "llama3.1:8b"
+        model = await resolve_model(settings.engram_decomposition_model)
 
         async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=60.0) as client:
             resp = await client.post(

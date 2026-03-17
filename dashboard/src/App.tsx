@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { getAuthHeaders } from './api'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { NavBar } from './components/NavBar'
@@ -99,11 +100,11 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (window.location.pathname === '/onboarding') { setChecked(true); return }
     fetch('/api/v1/config/onboarding.completed', {
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        const completed = data?.value === '"true"' || data?.value === 'true'
+        const completed = data?.value === true || data?.value === 'true'
         setNeedsOnboarding(!completed)
         setChecked(true)
       })

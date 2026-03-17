@@ -10,6 +10,7 @@ from nova_contracts.llm import (
     CompleteRequest, CompleteResponse, StreamChunk,
     EmbedRequest, EmbedResponse, ModelCapability,
 )
+from app.config import settings
 from .base import ModelProvider
 from .ollama_provider import OllamaProvider
 from .vllm_provider import VLLMProvider
@@ -17,7 +18,7 @@ from .vllm_provider import VLLMProvider
 logger = logging.getLogger(__name__)
 
 DEFAULT_URLS = {
-    "ollama": "http://ollama:11434",
+    "ollama": settings.ollama_base_url,  # Use resolved URL (auto/host already expanded)
     "vllm": "http://nova-vllm:8000",
     "sglang": "http://nova-sglang:8000",
 }

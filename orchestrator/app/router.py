@@ -515,6 +515,20 @@ async def list_platform_config(_admin: AdminDep) -> list[dict]:
     return [_config_row(dict(r)) for r in rows]
 
 
+@router.get("/api/v1/config/{key}")
+async def get_platform_config(key: str, _admin: AdminDep) -> dict:
+    """Return a single platform config entry by key. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT key, value, description, is_secret, updated_at "
+            "FROM platform_config WHERE key = $1", key
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
+    return _config_row(dict(row))
+
+
 @router.patch("/api/v1/config/{key}")
 async def update_platform_config(
     key: str, req: ConfigUpdateRequest, _admin: AdminDep

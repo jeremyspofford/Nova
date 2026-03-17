@@ -413,6 +413,8 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./.env:/project/.env:rw
       - ./docker-compose.yml:/project/docker-compose.yml:ro
+      - ./docker-compose.gpu.yml:/project/docker-compose.gpu.yml:ro
+      - ./docker-compose.rocm.yml:/project/docker-compose.rocm.yml:ro
       - ./data:/app/data:ro
     ports:
       - "8888:8888"

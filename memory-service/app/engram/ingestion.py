@@ -19,6 +19,7 @@ from app.db.database import AsyncSessionLocal
 from app.embedding import get_embedding, get_redis
 from app.embedding import to_pg_vector
 
+from .consolidation import notify_new_engrams
 from .cortex_stimulus import emit_to_cortex
 from .decomposition import decompose
 from .entity_resolution import (
@@ -32,6 +33,9 @@ log = logging.getLogger(__name__)
 
 # Default tenant for single-instance Nova
 DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
+
+# Concurrency limit for LLM decomposition calls (backpressure)
+_decomposition_semaphore = asyncio.Semaphore(5)
 
 
 async def ingestion_loop() -> None:
@@ -59,7 +63,15 @@ async def ingestion_loop() -> None:
             if isinstance(raw_payload, bytes):
                 raw_payload = raw_payload.decode("utf-8")
 
-            await _process_event(raw_payload)
+            # Validate JSON before processing
+            try:
+                json.loads(raw_payload)
+            except json.JSONDecodeError:
+                log.warning("Malformed ingestion event (not valid JSON), skipping: %s", raw_payload[:200])
+                continue
+
+            async with _decomposition_semaphore:
+                await _process_event(raw_payload)
 
         except asyncio.CancelledError:
             log.info("Engram ingestion worker shutting down")
@@ -225,6 +237,11 @@ async def _process_event(raw_payload: str) -> dict:
         "Ingested: %d created, %d updated, %d edges from: %s",
         engrams_created, engrams_updated, edges_created, raw_text[:80],
     )
+
+    # Notify consolidation daemon about new engrams (threshold trigger)
+    if engrams_created > 0:
+        notify_new_engrams(engrams_created)
+
     return summary
 
 

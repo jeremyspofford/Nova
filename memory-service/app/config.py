@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"  # Ollama default
     embedding_dimensions: int = 768
 
-    # Embedding resilience — fallback to OpenAI-compatible embedding if primary fails
-    embedding_fallback_model: str = "openai/text-embedding-3-small"
+    # Embedding resilience — fallback model if primary fails (text-embedding-004 = free Gemini)
+    embedding_fallback_model: str = "text-embedding-004"
     embedding_max_retries: int = 2
     embedding_retry_delay: float = 1.0
 
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     engram_ingestion_enabled: bool = True
     engram_ingestion_queue: str = "engram:ingestion:queue"
     engram_ingestion_batch_timeout: float = 1.0  # BRPOP timeout in seconds
-    engram_decomposition_model: str = "llama3.1:8b"
+    engram_decomposition_model: str = "auto"
     engram_entity_similarity_threshold: float = 0.92  # embedding cosine threshold for dedup
     engram_contradiction_similarity_threshold: float = 0.85
 
@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     engram_decay_factor: float = 0.6
     engram_activation_threshold: float = 0.1
     engram_max_results: int = 20
-    engram_reconstruction_model: str = "llama3.1:8b"
+    engram_reconstruction_model: str = "auto"
     engram_narrative_cluster_threshold: int = 5  # min engrams for narrative reconstruction
 
     # Engram Network (Phase 3: Working Memory Gate)
@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     engram_consolidation_idle_minutes: int = 30
     engram_consolidation_nightly_hour: int = 3  # 3 AM
     engram_consolidation_threshold: int = 50  # new engrams trigger
-    engram_consolidation_model: str = "llama3.1:8b"
+    engram_consolidation_model: str = "auto"
     engram_edge_decay: float = 0.95
     engram_prune_activation_floor: float = 0.01
     engram_merge_similarity_threshold: float = 0.95

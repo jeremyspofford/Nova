@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 # Track state across consolidation cycles
 _last_consolidation_at: float = 0.0
 _engrams_since_last: int = 0
+_consolidation_lock = asyncio.Lock()
 
 
 async def consolidation_loop() -> None:
@@ -83,101 +84,126 @@ def notify_new_engrams(count: int = 1) -> None:
 
 
 async def run_consolidation(trigger: str = "manual") -> dict:
-    """Run a full consolidation cycle. Returns summary stats."""
+    """Run a full consolidation cycle. Returns summary stats.
+
+    Uses a mutex to prevent concurrent consolidation cycles from corrupting data.
+    Each phase is isolated — a failure in one phase doesn't kill the cycle.
+    """
     global _engrams_since_last
 
-    start_time = time.monotonic()
-    log.info("Consolidation starting (trigger=%s)", trigger)
+    if _consolidation_lock.locked():
+        log.info("Consolidation already running, skipping trigger=%s", trigger)
+        return {"skipped": True, "reason": "already_running"}
 
-    stats = {
-        "engrams_reviewed": 0,
-        "schemas_created": 0,
-        "edges_strengthened": 0,
-        "edges_pruned": 0,
-        "engrams_pruned": 0,
-        "engrams_merged": 0,
-        "contradictions_resolved": 0,
-        "self_model_updates": {},
-    }
+    async with _consolidation_lock:
+        start_time = time.monotonic()
+        log.info("Consolidation starting (trigger=%s)", trigger)
 
-    async with AsyncSessionLocal() as session:
-        # Phase 1: Replay & Review — count recent engrams
-        count_row = await session.execute(
-            text("""
-                SELECT count(*) FROM engrams
-                WHERE NOT superseded
-                  AND created_at > NOW() - INTERVAL '24 hours'
-            """)
+        stats = {
+            "engrams_reviewed": 0,
+            "schemas_created": 0,
+            "edges_strengthened": 0,
+            "edges_pruned": 0,
+            "engrams_pruned": 0,
+            "engrams_merged": 0,
+            "contradictions_resolved": 0,
+            "self_model_updates": {},
+        }
+
+        async with AsyncSessionLocal() as session:
+            # Phase 1: Replay & Review — count recent engrams (expanded to 7 days)
+            count_row = await session.execute(
+                text("""
+                    SELECT count(*) FROM engrams
+                    WHERE NOT superseded
+                      AND created_at > NOW() - INTERVAL '7 days'
+                """)
+            )
+            stats["engrams_reviewed"] = count_row.scalar() or 0
+
+            # Phase 2: Pattern Extraction → Schema engrams
+            try:
+                schemas_created = await _extract_patterns(session)
+                stats["schemas_created"] = schemas_created
+            except Exception:
+                log.warning("Consolidation Phase 2 (pattern extraction) failed", exc_info=True)
+
+            # Phase 3: Edge Strengthening & Weakening (Hebbian)
+            try:
+                strengthened, weakened = await _hebbian_update(session)
+                stats["edges_strengthened"] = strengthened
+                stats["edges_pruned"] = weakened
+            except Exception:
+                log.warning("Consolidation Phase 3 (Hebbian update) failed", exc_info=True)
+
+            # Phase 4: Contradiction Resolution
+            try:
+                resolved = await _resolve_contradictions(session)
+                stats["contradictions_resolved"] = resolved
+            except Exception:
+                log.warning("Consolidation Phase 4 (contradiction resolution) failed", exc_info=True)
+
+            # Phase 5: Pruning & Merging
+            try:
+                pruned = await _prune_dead_engrams(session)
+                merged = await _merge_duplicates(session)
+                stats["engrams_pruned"] = pruned
+                stats["engrams_merged"] = merged
+            except Exception:
+                log.warning("Consolidation Phase 5 (pruning/merging) failed", exc_info=True)
+
+            # Phase 6: Self-Model Update
+            try:
+                self_updates = await _update_self_model(session)
+                stats["self_model_updates"] = self_updates
+            except Exception:
+                log.warning("Consolidation Phase 6 (self-model update) failed", exc_info=True)
+
+            # Log to consolidation_log BEFORE final commit (atomic with changes)
+            duration_ms = int((time.monotonic() - start_time) * 1000)
+            await session.execute(
+                text("""
+                    INSERT INTO consolidation_log
+                        (trigger_type, engrams_reviewed, schemas_created,
+                         edges_strengthened, edges_pruned, engrams_pruned,
+                         engrams_merged, contradictions_resolved,
+                         self_model_updates, model_used, duration_ms)
+                    VALUES
+                        (:trigger, :reviewed, :schemas, :strengthened, :pruned_edges,
+                         :pruned_engrams, :merged, :contradictions,
+                         CAST(:self_updates AS jsonb), :model, :duration)
+                """),
+                {
+                    "trigger": trigger,
+                    "reviewed": stats["engrams_reviewed"],
+                    "schemas": stats["schemas_created"],
+                    "strengthened": stats["edges_strengthened"],
+                    "pruned_edges": stats["edges_pruned"],
+                    "pruned_engrams": stats["engrams_pruned"],
+                    "merged": stats["engrams_merged"],
+                    "contradictions": stats["contradictions_resolved"],
+                    "self_updates": json.dumps(stats["self_model_updates"]),
+                    "model": settings.engram_consolidation_model,
+                    "duration": duration_ms,
+                },
+            )
+            await session.commit()
+
+        _engrams_since_last = 0
+        log.info(
+            "Consolidation complete (%s): %d reviewed, %d schemas, %d pruned, %d merged, %dms",
+            trigger, stats["engrams_reviewed"], stats["schemas_created"],
+            stats["engrams_pruned"], stats["engrams_merged"], duration_ms,
         )
-        stats["engrams_reviewed"] = count_row.scalar() or 0
-
-        # Phase 2: Pattern Extraction → Schema engrams
-        schemas_created = await _extract_patterns(session)
-        stats["schemas_created"] = schemas_created
-
-        # Phase 3: Edge Strengthening & Weakening (Hebbian)
-        strengthened, weakened = await _hebbian_update(session)
-        stats["edges_strengthened"] = strengthened
-        stats["edges_pruned"] = weakened
-
-        # Phase 4: Contradiction Resolution
-        resolved = await _resolve_contradictions(session)
-        stats["contradictions_resolved"] = resolved
-
-        # Phase 5: Pruning & Merging
-        pruned = await _prune_dead_engrams(session)
-        merged = await _merge_duplicates(session)
-        stats["engrams_pruned"] = pruned
-        stats["engrams_merged"] = merged
-
-        # Phase 6: Self-Model Update
-        self_updates = await _update_self_model(session)
-        stats["self_model_updates"] = self_updates
-
-        await session.commit()
-
-        # Log to consolidation_log
-        duration_ms = int((time.monotonic() - start_time) * 1000)
-        await session.execute(
-            text("""
-                INSERT INTO consolidation_log
-                    (trigger_type, engrams_reviewed, schemas_created,
-                     edges_strengthened, edges_pruned, engrams_pruned,
-                     engrams_merged, contradictions_resolved,
-                     self_model_updates, model_used, duration_ms)
-                VALUES
-                    (:trigger, :reviewed, :schemas, :strengthened, :pruned_edges,
-                     :pruned_engrams, :merged, :contradictions,
-                     CAST(:self_updates AS jsonb), :model, :duration)
-            """),
-            {
-                "trigger": trigger,
-                "reviewed": stats["engrams_reviewed"],
-                "schemas": stats["schemas_created"],
-                "strengthened": stats["edges_strengthened"],
-                "pruned_edges": stats["edges_pruned"],
-                "pruned_engrams": stats["engrams_pruned"],
-                "merged": stats["engrams_merged"],
-                "contradictions": stats["contradictions_resolved"],
-                "self_updates": json.dumps(stats["self_model_updates"]),
-                "model": settings.engram_consolidation_model,
-                "duration": duration_ms,
-            },
-        )
-        await session.commit()
-
-    _engrams_since_last = 0
-    log.info(
-        "Consolidation complete (%s): %d reviewed, %d schemas, %d pruned, %d merged, %dms",
-        trigger, stats["engrams_reviewed"], stats["schemas_created"],
-        stats["engrams_pruned"], stats["engrams_merged"], duration_ms,
-    )
-    await emit_to_cortex("consolidation.complete", {
-        "engrams_reviewed": stats.get("engrams_reviewed", 0),
-        "schemas_created": stats.get("schemas_created", 0),
-        "contradictions_resolved": stats.get("contradictions_resolved", 0),
-    })
-    return stats
+        try:
+            await emit_to_cortex("consolidation.complete", {
+                "engrams_reviewed": stats.get("engrams_reviewed", 0),
+                "schemas_created": stats.get("schemas_created", 0),
+                "contradictions_resolved": stats.get("contradictions_resolved", 0),
+            })
+        except Exception:
+            log.warning("Failed to emit consolidation stimulus to cortex", exc_info=True)
+        return stats
 
 
 async def _extract_patterns(session) -> int:
@@ -261,11 +287,13 @@ async def _extract_patterns(session) -> int:
 async def _synthesize_schema(entity_name: str, items_text: str) -> str:
     """Use LLM to extract a generalized pattern from related engrams."""
     try:
+        from .decomposition import resolve_model
+        model = await resolve_model(settings.engram_consolidation_model)
         async with httpx.AsyncClient(base_url=settings.llm_gateway_url, timeout=30.0) as client:
             resp = await client.post(
                 "/complete",
                 json={
-                    "model": settings.engram_consolidation_model,
+                    "model": model,
                     "messages": [
                         {"role": "system", "content": "Extract a single generalized pattern from these observations. Return one concise sentence."},
                         {"role": "user", "content": f"Entity: {entity_name}\n\nObservations:\n{items_text}"},
@@ -289,6 +317,9 @@ async def _hebbian_update(session) -> tuple[int, int]:
     """Phase 3: Strengthen co-activated edges, weaken unused ones.
 
     edge.weight = edge.weight × decay + co_activation_boost
+
+    Only decays/prunes edges older than 7 days to protect young graphs from
+    the death spiral where new edges get decayed and pruned every cycle.
     """
     # Strengthen: edges with recent co-activations
     result = await session.execute(
@@ -303,25 +334,28 @@ async def _hebbian_update(session) -> tuple[int, int]:
     )
     strengthened = len(result.fetchall())
 
-    # Weaken: decay all edge weights slightly
+    # Weaken: decay edge weights slightly — only for edges older than 7 days
+    # (protect young edges from being decayed before they get a chance to strengthen)
     result = await session.execute(
         text("""
             UPDATE engram_edges
             SET weight = GREATEST(0.01, weight * :decay)
             WHERE co_activations <= 1
               AND weight > 0.01
+              AND created_at < NOW() - INTERVAL '7 days'
             RETURNING id
         """),
         {"decay": settings.engram_edge_decay},
     )
     weakened = len(result.fetchall())
 
-    # Prune edges that have decayed to near-zero
+    # Prune edges that have decayed to near-zero AND are old
     result = await session.execute(
         text("""
             DELETE FROM engram_edges
             WHERE weight < 0.02
               AND co_activations <= 1
+              AND created_at < NOW() - INTERVAL '14 days'
             RETURNING id
         """)
     )

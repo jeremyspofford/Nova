@@ -31,20 +31,29 @@ async def lifespan(app: FastAPI):
     _ingestion_task = asyncio.create_task(ingestion_loop(), name="engram-ingestion")
     _consolidation_task = asyncio.create_task(consolidation_loop(), name="engram-consolidation")
     asyncio.create_task(_warmup_embedding(), name="warmup")
+    asyncio.create_task(_verify_decomposition_model(), name="verify-decomp-model")
     asyncio.create_task(_bootstrap_self_model(), name="engram-bootstrap")
     _neural_router_task = asyncio.create_task(_neural_router_refresh(), name="neural-router-refresh")
     log.info("Memory Service ready")
 
     yield
 
-    log.info("Memory Service shutting down")
+    log.info("Memory Service shutting down — waiting up to 15s for active work to finish")
+    # Give tasks a grace period to complete current work before cancelling
     _ingestion_task.cancel()
     _consolidation_task.cancel()
     _neural_router_task.cancel()
-    await asyncio.gather(
-        _ingestion_task, _consolidation_task, _neural_router_task,
-        return_exceptions=True,
-    )
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(
+                _ingestion_task, _consolidation_task, _neural_router_task,
+                return_exceptions=True,
+            ),
+            timeout=15.0,
+        )
+    except asyncio.TimeoutError:
+        log.warning("Shutdown grace period expired — some tasks may not have completed")
+    log.info("Memory Service shutdown complete")
 
 
 async def _neural_router_refresh():
@@ -77,6 +86,16 @@ async def _warmup_embedding():
         log.info("Embedding warmup complete")
     except Exception:
         log.warning("Embedding warmup failed (model may not be available yet)", exc_info=True)
+
+
+async def _verify_decomposition_model():
+    """Verify decomposition model is reachable at startup. Logs a clear warning if not."""
+    from app.engram.decomposition import resolve_model
+    try:
+        model = await resolve_model(settings.engram_decomposition_model)
+        log.info("Decomposition model resolved: %s", model)
+    except Exception:
+        log.warning("Decomposition model unavailable — ingestion will skip decomposition until a model is available")
 
 
 async def _bootstrap_self_model():
