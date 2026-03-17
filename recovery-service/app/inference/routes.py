@@ -69,15 +69,13 @@ async def stop_inference_backend(_: None = Depends(_check_admin)):
     return await stop_backend()
 
 
-@router.post("/backend/{backend_name}/start")
+@router.post("/backend/{backend_name}/start", status_code=202)
 async def start_inference_backend(backend_name: str, _: None = Depends(_check_admin)):
-    """Start (or switch to) an inference backend."""
+    """Start (or switch to) an inference backend. Returns immediately; poll /backend for progress."""
     try:
         return await start_backend(backend_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except TimeoutError as e:
-        raise HTTPException(status_code=504, detail=str(e))
 
 
 # ── Model switching ──────────────────────────────────────────────────────────

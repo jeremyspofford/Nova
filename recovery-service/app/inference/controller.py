@@ -57,26 +57,56 @@ async def list_backends() -> list[dict]:
 
 
 async def start_backend(backend: str) -> dict:
+    """Fire-and-forget backend start. Returns immediately; poll status for progress."""
     if backend not in BACKENDS:
         raise ValueError(f"Unknown backend: {backend}. Valid: {list(BACKENDS.keys())}")
-    info = BACKENDS[backend]
-    current = await read_config("inference.backend", "")
-    if current and current != backend and current != "none":
-        await _stop_backend(current)
+
+    current_state = await read_config("inference.state", "stopped")
+    current_backend = await read_config("inference.backend", "none")
+
+    # Idempotent: if this backend is already starting, just return success
+    if current_state in ("starting", "switching") and current_backend == backend:
+        return {"status": "already_starting", "backend": backend}
+    if current_state in ("starting", "switching"):
+        raise ValueError(f"Cannot start {backend}: already {current_state} {current_backend}")
 
     await write_config_state("inference.state", "starting")
     await write_config_state("inference.backend", backend)
+    asyncio.create_task(_do_start_backend(backend))
+    return {"status": "accepted", "backend": backend}
+
+
+async def _do_start_backend(backend: str) -> None:
+    """Background task: start backend container and wait for healthy."""
+    global _switch_progress
+    info = BACKENDS[backend]
+
     try:
+        # Stop current backend if switching
+        current = await read_config("inference.backend", "")
+        if current and current != backend and current != "none":
+            _switch_progress = {"step": "stopping", "detail": f"Stopping {current}..."}
+            await _stop_backend(current)
+
+        _switch_progress = {"step": "starting", "detail": f"Starting {backend}..."}
         await start_profiled_service(info["profile"], info["service"])
-        await _wait_for_healthy(info["container"], backend, timeout=120)
+
+        # vLLM/SGLang need longer — first start downloads model from HuggingFace
+        timeout = 600 if backend in SWITCHABLE_BACKENDS else 120
+        _switch_progress = {"step": "loading", "detail": f"Waiting for {backend} to be ready..."}
+        await _wait_for_healthy(info["container"], backend, timeout=timeout)
+
         await write_config_state("inference.state", "ready")
+        _switch_progress = {"step": "ready", "detail": f"{backend} is ready"}
         logger.info("Backend %s started successfully", backend)
+        _start_health_monitor(backend)
     except Exception as e:
         await write_config_state("inference.state", "error")
+        _switch_progress = {"step": "error", "detail": str(e)}
         logger.error("Failed to start backend %s: %s", backend, e)
-        raise
-    _start_health_monitor(backend)
-    return await get_backend_status()
+    finally:
+        await asyncio.sleep(60)
+        _switch_progress = None
 
 
 async def stop_backend(backend: Optional[str] = None) -> dict:

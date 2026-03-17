@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
-import { Loader2, Check, AlertTriangle } from 'lucide-react'
+import { useEffect, useState, useRef, useCallback } from 'react'
+import { Loader2, Check, AlertTriangle, RotateCcw } from 'lucide-react'
 import { recoveryFetch, getBackendStatus, type BackendStatus } from '../../../api-recovery'
 
 interface Props {
@@ -36,13 +36,17 @@ export function Downloading({ backend, model, onNext }: Props) {
   const [phase, setPhase] = useState<Phase>('starting')
   const [detail, setDetail] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const started = useRef(false)
+  const [attempt, setAttempt] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
-    if (started.current) return
-    started.current = true
+  const retry = useCallback(() => {
+    setError(null)
+    setPhase('starting')
+    setDetail('')
+    setAttempt(a => a + 1)
+  }, [])
 
+  useEffect(() => {
     async function startBackend() {
       try {
         // For cloud-only, just complete immediately
@@ -51,12 +55,12 @@ export function Downloading({ backend, model, onNext }: Props) {
           return
         }
 
-        // Start the backend
+        // Start the backend (returns 202 immediately)
         await recoveryFetch(`/api/v1/recovery/inference/backend/${backend}/start`, {
           method: 'POST',
         })
 
-        // For Ollama, trigger model pull after backend starts
+        // For Ollama, trigger model pull after backend accepts
         if (backend === 'ollama') {
           setPhase('downloading')
           setDetail(`Pulling ${model}...`)
@@ -107,7 +111,7 @@ export function Downloading({ backend, model, onNext }: Props) {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
     }
-  }, [backend, model])
+  }, [backend, model, attempt])
 
   // Auto-advance when ready
   useEffect(() => {
@@ -178,9 +182,16 @@ export function Downloading({ backend, model, onNext }: Props) {
             <AlertTriangle className="w-4 h-4" />
             <span className="text-sm font-medium">Error</span>
           </div>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center max-w-sm">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center max-w-sm mb-4">
             {error}
           </p>
+          <button
+            onClick={retry}
+            className="flex items-center gap-2 px-5 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Retry
+          </button>
         </div>
       )}
     </div>
