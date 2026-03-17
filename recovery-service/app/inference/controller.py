@@ -293,7 +293,9 @@ async def _health_monitor_loop(backend: str) -> None:
                 if _health_failures >= 3:
                     logger.error("Backend %s: 3 consecutive failures, attempting restart", backend)
                     try:
+                        await write_config_state("inference.state", "starting")
                         await start_profiled_service(info["profile"], info["service"])
+                        await _wait_for_healthy(container_name, backend, timeout=120)
                         _health_failures = 0
                         _health_backoff = 30.0
                         await write_config_state("inference.state", "ready")

@@ -48,9 +48,9 @@ async def perceive_with_memory(stimuli: list[dict], goal_context: str = "") -> d
                 "engram_ids": data.get("engram_ids", []),
                 "retrieval_log_id": data.get("retrieval_log_id"),
             }
-        log.debug("Memory context request returned %d", resp.status_code)
+        log.warning("Memory context request returned %d", resp.status_code)
     except Exception as e:
-        log.debug("Failed to get memory context: %s", e)
+        log.warning("Failed to get memory context: %s", e)
 
     return {"memory_context": "", "engram_ids": [], "retrieval_log_id": None}
 

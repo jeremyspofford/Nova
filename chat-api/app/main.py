@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from nova_contracts.logging import configure_logging
 
 from app.config import settings
+from app.session import close_redis
 from app.websocket import handle_websocket
 
 configure_logging("chat-api", settings.log_level)
@@ -21,6 +22,7 @@ async def lifespan(app: FastAPI):
     log.info("Chat API starting on ws://0.0.0.0:%d/ws/chat", settings.service_port)
     yield
     log.info("Chat API shutting down")
+    await close_redis()
 
 
 app = FastAPI(

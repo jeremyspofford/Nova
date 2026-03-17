@@ -68,7 +68,7 @@ async def _report_outcome(
             },
         )
     except Exception as e:
-        log.debug("Failed to report cycle outcome: %s", e)
+        log.warning("Failed to report cycle outcome: %s", e)
 
 
 async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
@@ -130,7 +130,7 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
                 result = await drive_module.assess(drive_ctx)
                 state.drive_results.append(result)
             except Exception as e:
-                log.warning("Drive %s.assess() failed: %s", drive_module.__name__, e)
+                log.error("Drive %s.assess() failed: %s", drive_module.__name__, e)
 
         state.winner = evaluate(state.drive_results, state.budget_tier)
 

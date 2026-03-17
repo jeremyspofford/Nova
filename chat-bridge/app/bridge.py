@@ -28,6 +28,14 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
+async def close_redis() -> None:
+    """Close the module-level Redis connection. Call at shutdown."""
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None
+
+
 def _auth_headers() -> dict[str, str]:
     headers = {}
     if settings.nova_api_key:

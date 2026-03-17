@@ -72,8 +72,8 @@ async def _authenticate(websocket: WebSocket) -> bool:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
             return False
-    except (json.JSONDecodeError, Exception):
-        pass
+    except Exception as e:
+        log.warning("Auth message parse/validation failed: %s", e)
 
     await websocket.send_json({
         "type": ChatMessageType.error,

@@ -9,6 +9,7 @@ from nova_contracts.logging import configure_logging
 
 from app.adapters.base import PlatformAdapter
 from app.adapters.telegram import TelegramAdapter
+from app.bridge import close_redis
 from app.config import settings
 
 configure_logging("chat-bridge", settings.log_level)
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI):
                 await adapter.shutdown()
             except Exception as e:
                 log.error("Error shutting down adapter %s: %s", adapter.platform_name, e)
+    await close_redis()
     log.info("Chat bridge shut down")
 
 

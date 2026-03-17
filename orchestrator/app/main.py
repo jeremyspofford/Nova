@@ -19,7 +19,7 @@ from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
 from app.reaper import reaper_loop
 from app.router import router
-from app.store import ensure_primary_agent, recover_stale_agents
+from app.store import close_redis, ensure_primary_agent, recover_stale_agents
 
 configure_logging("orchestrator", settings.log_level)
 log = logging.getLogger(__name__)
@@ -136,6 +136,7 @@ async def lifespan(app: FastAPI):
     await stop_all_servers()
 
     await close_clients()
+    await close_redis()
     await close_db()
 
 

@@ -39,9 +39,8 @@ def get_orchestrator_client() -> httpx.AsyncClient:
     """Self-referencing client for cross-agent task dispatch."""
     global _orchestrator_client
     if _orchestrator_client is None or _orchestrator_client.is_closed:
-        # Loopback to our own port — works inside Docker on the same container
         _orchestrator_client = httpx.AsyncClient(
-            base_url="http://localhost:8000",
+            base_url=f"http://{settings.service_host}:{settings.service_port}",
             timeout=120.0,
             limits=httpx.Limits(max_connections=10),
         )
