@@ -223,13 +223,36 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 
 ### B. Pipeline Task Performance (next)
 
-| Optimization | Description |
-|---|---|
-| **Parallel stage execution** | Run Context + Guardrail in parallel where possible (no data dependency) |
-| **Stage skipping for simple tasks** | Skip Code Review for non-code tasks; skip Guardrail for low-risk queries |
-| **Context caching across stages** | Share retrieved context between Context Agent and Task Agent without re-fetching |
-| **Streaming pipeline progress** | Show which stage is running in the dashboard (Context → Task → ...) |
-| **Adaptive stage count** | Simple questions skip the full Quartet — direct answer with optional guardrail |
+> **Full design spec:** `docs/superpowers/specs/2026-03-17-performance-optimization-design.md`
+>
+> Current: 18-47s typical pipeline, 132s worst case. ~80% of wall time is LLM inference.
+> Target: 8-15s trivial, 15-30s standard. Chat time-to-first-token <2s.
+
+**Tier 1 — Quick Wins:**
+
+| Optimization | Description | Impact |
+|---|---|---|
+| **Skip tool pre-resolution in chat** | Most chat messages don't need tools. Stream immediately, handle tool calls mid-stream instead of resolving all tools before streaming starts. `runner.py` | 3-10s faster first-token |
+| **Parallelize Guardrail + Code Review** | Independent assessments of same output. Set `parallel_group='review'` on both agents in default pod config. `executor.py` already has parallel group support. | 2-5s per pipeline |
+| **Queue worker concurrency control** | Add `pipeline_max_concurrent` semaphore (default 5). Prevents resource exhaustion while allowing parallel task execution. `queue.py`, `config.py` | Throughput scaling |
+| **Verify LLM response caching** | Gateway has `response_cache_ttl: 300` — verify cache hit/miss for embeddings and deterministic calls. Add logging. | Cache hits = instant |
+
+**Tier 2 — Model-Tier Optimization:**
+
+| Optimization | Description | Impact |
+|---|---|---|
+| **Right-size models per stage** | Context Agent → `tier:cheap` (just reads files). Code Review → `tier:mid`. Keep Task Agent on `tier:best`. DB migration on `pod_agents.model`. | 3-8s savings |
+| **Prompt caching (Anthropic)** | Pipeline system prompts are static. Add `cache_control: {"type": "ephemeral"}` to system messages when using Anthropic models. Cached prefixes process faster + cheaper. | 1-5s + 50-90% cost reduction on cached tokens |
+| **Adaptive stage skipping** | Use complexity classifier to skip unnecessary stages: trivial tasks skip Context Agent, non-code tasks skip Code Review. Update `run_condition` configs. | 2-10s on eligible tasks |
+
+**Tier 3 — Architecture Changes:**
+
+| Optimization | Description | Impact |
+|---|---|---|
+| **Streaming-first chat** | New `stream_agent_turn()` function that streams from the first LLM call. Tool calls execute mid-stream with "thinking" indicator to client. Eliminates pre-resolution entirely. `runner.py`, `router.py` | Near-instant first token |
+| **Speculative pipeline execution** | Start Guardrail during Task Agent's last tool round. Start Code Review before Tier 2 completes (Tier 2 is rare ~5%). Overlap saves 3-7s. | 3-7s overlap savings |
+| **Memory context pre-warming** | For active sessions, pre-fetch memory context in background after each response. Cache in Redis (60s TTL). Next message uses pre-warmed context. | 200-500ms per message |
+| **Stage merging for simple tasks** | For trivial/simple complexity: skip Context Agent, give Task Agent read-only tools (list_dir, read_file, search_codebase). Single agent call instead of two. | 5-10s on simple tasks |
 
 ### C. Smart Model Auto-Detection
 
