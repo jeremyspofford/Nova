@@ -2,7 +2,7 @@
 
 > Living document. Keep up to date as work progresses.
 >
-> **Last updated:** 2026-03-12
+> **Last updated:** 2026-03-17
 >
 > **Vision:** A self-directed autonomous AI platform. You define a goal. Nova breaks it into
 > subtasks, executes them through a coordinated pipeline of specialized agents with built-in
@@ -510,7 +510,7 @@ Three new entries for Nova's MCP server catalog (agents can use these conversati
 
 ---
 
-## 🔜 Phase 6 — Engram Network (Cognitive Memory Architecture)
+## ✅ Phase 6 — Engram Network (Cognitive Memory Architecture)
 
 > Memory is Nova's mind, not its filing cabinet. The Engram Network replaces store-and-retrieve with a brain-inspired cognitive architecture: self-organizing memory graph, spreading activation retrieval, contextual reconstruction, and a consolidation daemon that transforms experience into wisdom.
 >
@@ -557,6 +557,46 @@ A small fine-tuned transformer (~7B) that learns to BE the memory system — com
 > Investigation found most items already resolved incrementally during prior phases.
 > Remaining fixes: `datetime.utcnow()` → `datetime.now(timezone.utc)` in chat-api,
 > stale `review_running` comment in migration 002.
+
+---
+
+## ✅ Phase 6d — Platform Hardening & Engram Production Readiness
+
+> Full production-readiness audit and fix pass across all services.
+> Memory system was "feature complete" but broken at runtime — embeddings failing,
+> consolidation doing nothing, edge death spiral. Same patterns found across all services.
+
+**Memory system fixes (2026-03-17):**
+
+| Fix | Impact |
+|---|---|
+| **Gateway auto-resolves `OLLAMA_BASE_URL=auto`** | Embeddings work on any deployment (Docker, WSL2, native) |
+| **LocalInferenceProvider uses resolved URL** | Was ignoring `settings.ollama_base_url`, using hardcoded default |
+| **Consolidation expanded to 7-day review window** | Was reviewing 0 engrams (24h window missed everything) |
+| **Edge death spiral fixed** | Young edges (<7d) protected from decay; prune only after 14d |
+| **Consolidation mutex** | `asyncio.Lock` prevents concurrent cycles corrupting data |
+| **Phase isolation in consolidation** | Each phase wrapped in try/except — one failure doesn't kill cycle |
+| **Ingestion backpressure** | `asyncio.Semaphore(5)` limits concurrent LLM decomposition calls |
+| **Ingestion queue validation** | JSON validation before processing; skip malformed, don't crash |
+| **Model auto-resolution** | Decomposition/reconstruction/consolidation models default to `auto` with probe-based fallback |
+| **notify_new_engrams() wired** | Consolidation threshold trigger was dead — now called from ingestion |
+| **Composite indexes** | `idx_engrams_active_created`, `idx_engrams_prune_candidates`, `idx_edges_decay_candidates` |
+| **Graceful shutdown** | 15-second timeout for background tasks before cancellation |
+
+**Cross-platform fixes (2026-03-17):**
+
+| Fix | Services |
+|---|---|
+| **Redis connection leak** — added `close_redis()` + lifespan cleanup | orchestrator, cortex, chat-api, chat-bridge |
+| **Hardcoded `localhost:8000`** → config-based URL | orchestrator/clients.py |
+| **Silent auth failures** — `except Exception: pass` → logs warnings | chat-api/websocket.py |
+| **Wrong log levels** — critical failures at DEBUG (invisible in prod) → WARNING/ERROR | cortex/cycle.py, cortex/memory.py |
+| **Recovery state race** — set `inference.state=ready` only AFTER container healthy | recovery-service |
+
+**Dev tooling added:**
+- `/nova-diagnostics` — unified health check across all services, Redis config, queue depths, memory stats
+- `/nova-test-debug` — automatic root-cause tracing when tests fail
+- `/nova-queue-inspect` — human-readable Redis task queue inspector
 
 ---
 
@@ -1174,6 +1214,12 @@ This phase is internally ordered to maximize value at each step:
 
 > **This is the goal the entire platform is built toward.**
 > You define a goal. Nova works toward it. You come back when it's done — or when it needs you.
+>
+> **Research basis:** Comprehensive landscape analysis of AutoGPT, BabyAGI, CrewAI, LangGraph,
+> OpenHands, SWE-Agent, Claude Agent SDK, AutoGen, and smolagents (2026-03-17). Key insight:
+> iterative refinement with self-evaluation beats single-pass planning — GPT-3.5 with an agentic
+> loop achieved 95.1% on HumanEval vs GPT-4 zero-shot at 67.0% (Andrew Ng). Nova's cortex cycle
+> is already well-aligned with the best patterns in the literature.
 
 ### Architecture
 
@@ -1186,20 +1232,23 @@ User: "Improve test coverage in auth module to 80%"
          │  goal_store: tracks │
          │  goal, progress,    │
          │  iteration history  │
+         │  working_memory     │  ◄── NEW: structured scratchpad per goal
+         │  success_criteria   │  ◄── NEW: testable conditions
          └──────────┬──────────┘
                     │
                     ▼
          ┌─────────────────────┐
-         │   Planning Agent    │  ◄── reads memory (lessons from prior runs)
+         │   Planning Agent    │  ◄── reads engram memory (lessons from prior runs)
          │                     │  ◄── reads codebase state (Phase 3 tools)
-         │  Goal → subtasks    │
-         │  Re-plans on each   │
-         │  Evaluation report  │
+         │  Goal → subtask     │  ◄── reads similar past goals (goal-similarity index)
+         │  tree (hierarchical)│
+         │  Re-plans on each   │  ◄── ReAct: includes expected observations per step
+         │  Evaluation report  │  ◄── Budget-aware: estimates cost before decomposing
          └──────────┬──────────┘
                     │
                     ▼
          ┌─────────────────────┐
-         │   Task Queue        │
+         │   Task Queue        │  ← parallel_group: independent subtasks run concurrently
          │   (Redis BRPOP)     │
          └──────────┬──────────┘
                     │
@@ -1211,37 +1260,82 @@ User: "Improve test coverage in auth module to 80%"
                     │
                     ▼
          ┌─────────────────────┐
-         │  Evaluation Agent   │  → writes lessons to memory
-         │                     │  → reports progress delta to Goal Layer
-         │  advanced? yes/no   │
-         │  what's next?       │
-         │  escalate? why?     │
+         │  Evaluation Agent   │  → structured assessment (not just pass/fail)
+         │                     │  → { progress_delta, confidence, blockers,
+         │  progress_delta     │      lessons_learned, next_action }
+         │  confidence score   │  → writes lessons to engram memory
+         │  stall detection    │  → reports progress delta to Goal Layer
          └────┬───────────┬────┘
               │           │
               ▼           ▼
        Continue loop   Human escalation
-       (back to        (blocked / uncertain /
-       Planner)         budget exceeded /
+       (back to        (stalled 3+ cycles /
+       Planner)         confidence < threshold /
+                        budget exceeded /
                         goal complete)
 ```
+
+### Design Principles (from landscape research)
+
+| Principle | Source | Application |
+|---|---|---|
+| **Iterative refinement over upfront planning** | Andrew Ng, smolagents, Anthropic | Plan one step, execute, observe, plan next. Don't generate full plans upfront. |
+| **Single-agent simplicity over multi-agent complexity** | Latent Space 2024, Anthropic | Quartet is structured stages of one pipeline, not independent agents. Keep it that way. |
+| **Orchestrator-Workers pattern** | Anthropic "Building Effective Agents" | Planning Agent is the orchestrator; pipeline runs are the workers. |
+| **Code-as-action for complex tasks** | OpenHands, smolagents (CodeAct) | For complex subtasks, let the agent write Python scripts (20%+ improvement over JSON tool calls). |
+| **Composite memory scoring** | CrewAI | `score = 0.5×semantic + 0.3×recency + 0.2×importance` for engram retrieval. |
+| **ReAct grounding** | ReAct paper (2022) | Each plan step includes expected observations. Evaluation compares actual vs expected. |
+| **Stall detection** | Microsoft AutoGen | Track progress_delta across cycles. 3+ consecutive zero-progress cycles → re-plan or escalate. |
+| **Minimal tool surface** | OpenHands, SWE-Agent | 5-6 well-designed tools beat hundreds of narrow APIs. Prefer code execution over granular tools. |
 
 ### New Components
 
 | Component | Description |
 |---|---|
-| **Goal Store** | PostgreSQL `goals` table — status, progress %, current subtask, iteration count, cost so far |
-| **Planning Agent** | New agent role — takes goal + memory + codebase state → ordered subtask list. Re-plans after every Evaluation report |
-| **Evaluation Agent** | New agent role — assesses whether a subtask advanced the goal, determines next action, writes memory |
-| **Loop Controller** | Orchestrates the Planning → Queue → Quartet → Evaluation cycle. Enforces budget/iteration limits. Triggers human escalation |
-| **Goal Dashboard page** | Submit goals, watch loop progress in real time, inspect Planning Agent's current plan, see evaluation history |
+| **Goal Store** | PostgreSQL `goals` table — status, progress %, current subtask, iteration count, cost, **success_criteria** (testable conditions), **working_memory** (structured scratchpad: verified_facts, completed_subtasks, pending, blockers, hypotheses) |
+| **Planning Agent** | New agent role — takes goal + memory + similar past goals → **hierarchical** subtask tree. Re-plans after every Evaluation report. **Budget-aware**: estimates cost before decomposing. Uses `complexity_classifier` to set decomposition depth. |
+| **Evaluation Agent** | New agent role — produces structured assessment: `{ progress_delta, confidence, blockers, lessons_learned, next_action: "continue" | "replan" | "escalate" }`. Checks success_criteria, not just "did the task complete." |
+| **Loop Controller** | Orchestrates the Planning → Queue → Quartet → Evaluation cycle. Enforces budget/iteration limits. **Stall detection**: 3+ zero-progress cycles → re-plan or escalate. Triggers human escalation. |
+| **Goal Dashboard page** | Submit goals with success criteria, watch loop progress in real time, inspect Planning Agent's current plan tree, see evaluation history, progress_delta chart |
+| **Goal-Similarity Index** | When a new goal arrives, search engrams for similar past goals. If found, seed the plan with the proven approach. Highest-leverage feature for continuous improvement. |
 
 ### Safety Mechanisms for Autonomous Operation
 
-- **Budget limit** per goal — hard stop at max_cost_usd
-- **Iteration limit** — Planning Agent must escalate after N iterations without progress
+- **Budget-aware planning** — before decomposing a goal, estimate total cost. If estimated cost > budget, simplify plan or escalate. Connect cortex budget system to Planning Agent decisions.
+- **Iteration limit with stall detection** — track `progress_delta` per cycle. 3+ consecutive zero-progress cycles → re-plan or escalate. Not just "N iterations", but "N iterations without progress."
 - **Guardrail Agent** on every subtask — autonomous ≠ unchecked
+- **Structured escalation triggers** — stall detection, confidence below threshold, cost overrun, ambiguous requirements. Each produces a structured message the user can act on.
 - **Evaluation Agent** determines if a subtask genuinely advanced the goal — prevents runaway loops
 - **Human review queue** — escalation point, not a failure state
+- **Sandbox execution** — Phase 3b sandbox tiers should be implemented before full autonomous operation
+
+### Memory Enhancements for Phase 7
+
+| Enhancement | Description |
+|---|---|
+| **Composite retrieval scoring** | Replace pure cosine with `0.5×semantic + 0.3×recency + 0.2×importance`. Add `recency_half_life_days` param (default 30). |
+| **Structured goal reflections** | On goal completion, generate "lessons learned" engram: `{ goal_type, approach, what_worked, what_failed, time, cost }` |
+| **Per-goal working memory** | Each active goal gets structured state: `{ verified_facts, completed_subtasks, pending, blockers, hypotheses, progress_history }`. Cortex reads during PERCEIVE, updates during REFLECT. |
+| **Goal-similarity search** | Index past goal engrams. On new goal, find similar past goals and seed plan with proven approach. |
+
+### What NOT to Do (from research)
+
+- **Don't build a multi-agent framework.** Single-agent simplicity outperforms in production (Latent Space 2024, Anthropic).
+- **Don't generate full plans upfront.** Iterative refinement consistently outperforms plan-then-execute.
+- **Don't over-engineer memory.** CrewAI consolidated 4 memory types → 1. Start simple (composite scoring), add graph structure only when retrieval quality measurably suffers.
+- **Don't use JSON tool calls for complex actions.** Code-as-action (CodeAct) shows 20%+ improvement. For complex subtasks, let the agent write Python scripts.
+
+### Key References
+
+- Anthropic, "Building Effective Agents" — anthropic.com/research/building-effective-agents
+- Andrew Ng agentic design patterns — GPT-3.5+agentic (95.1%) vs GPT-4 zero-shot (67.0%)
+- CrewAI memory scoring — docs.crewai.com/concepts/memory
+- Microsoft GraphRAG — knowledge graph retrieval
+- "Agents That Matter" — arxiv.org/abs/2407.01502 (cost-accuracy tradeoff)
+- CodeAct — arxiv.org/abs/2402.01030 (code as unified action space, ICML 2024)
+- ReAct — arxiv.org/abs/2210.03629 (reasoning + acting)
+- Generative Agents — arxiv.org/abs/2304.03442 (memory + reflection)
+- Voyager — arxiv.org/abs/2305.16291 (skill library + self-verification)
 
 ---
 
