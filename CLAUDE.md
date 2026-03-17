@@ -20,7 +20,7 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 - **cortex** (8100) — Autonomous brain: thinking loop, goals, drives, budget tracking (FastAPI + asyncpg)
 - **redis** (6379) — State, task queue (BRPOP), rate limiting, session memory
 
-**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/memories/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), recovery (`/recovery-api`), and cortex (`/cortex-api`). Chat-api forwards to orchestrator's streaming endpoint. Chat-bridge calls orchestrator (`/api/v1/tasks/stream`) to relay messages from external platforms. Cortex calls orchestrator (task dispatch, goal management), llm-gateway (planning, evaluation), and memory-service (read/write knowledge). Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
+**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/engrams/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), recovery (`/recovery-api`), and cortex (`/cortex-api`). Chat-api forwards to orchestrator's streaming endpoint. Chat-bridge calls orchestrator (`/api/v1/tasks/stream`) to relay messages from external platforms. Cortex calls orchestrator (task dispatch, goal management), llm-gateway (planning, evaluation), and memory-service (read/write knowledge). Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
 
 **Shared contracts:** `nova-contracts/` is a Pydantic-only package defining the API contract between services (chat, llm, memory, orchestrator models). Any service satisfying these models is a drop-in replacement.
 
@@ -81,6 +81,8 @@ Additional validation:
 - Config via `pydantic_settings.BaseSettings` reading from `.env`
 - Orchestrator uses raw asyncpg queries (no ORM); memory-service uses SQLAlchemy async
 - Fault-tolerant: try/except + `logger.warning` — never crash on missing optional config
+- **Log levels matter:** ERROR for unrecoverable failures, WARNING for recoverable issues that affect functionality, INFO for state changes, DEBUG for detailed flow. Never log critical failures at DEBUG — they become invisible in production (LOG_LEVEL=INFO).
+- **Redis cleanup:** Every service with `get_redis()` must have a corresponding `close_redis()` called in the FastAPI lifespan shutdown path. Connection leaks accumulate across restarts.
 - Snake_case everywhere; JSONB for flexible fields; UUID primary keys; TIMESTAMPTZ
 
 **React/TypeScript (dashboard):**
@@ -94,11 +96,68 @@ Additional validation:
 - API key auth: `Authorization: Bearer sk-nova-<hash>` or `X-API-Key`
 - Streaming: SSE with JSON lines
 
+## Engram Memory System
+
+The old 4-tier memory (working/episodic/semantic/procedural) has been replaced by the **Engram Network** — a graph-based cognitive memory system. Code lives in `memory-service/app/engram/`.
+
+**Key components:**
+- **Ingestion** (`ingestion.py`) — Async Redis queue worker decomposes raw text into structured engrams via LLM. Backpressure via `Semaphore(5)`.
+- **Spreading Activation** (`activation.py`) — Graph traversal retrieval via recursive CTE. Seeds by cosine similarity, then spreads through weighted edges.
+- **Working Memory** (`working_memory.py`) — Five-tier slot system (pinned, sticky, refreshed, sliding, expiring) with token budgeting.
+- **Consolidation** (`consolidation.py`) — Background "sleep cycle" with 6 phases: replay, pattern extraction, Hebbian learning, contradiction resolution, pruning/merging, self-model update. Mutex-protected.
+- **Neural Router** (`neural_router/`) — Learned ML re-ranker (PyTorch). Trains on retrieval feedback after 200+ labeled observations.
+- **Outcome Feedback** (`outcome_feedback.py`) — Post-LLM scoring adjusts engram activation/importance.
+
+**API:** All endpoints at `/api/v1/engrams/` — `POST /ingest`, `POST /context` (main entry point for orchestrator), `POST /activate`, `POST /consolidate`, `GET /stats`, `GET /graph`.
+
+**Orchestrator integration:** `run_agent_turn()` calls `POST /api/v1/engrams/context` for memory, then `POST /mark-used` for feedback. New exchanges are pushed to Redis `engram:ingestion:queue` for async decomposition.
+
+**LLM models default to "auto"** — decomposition, reconstruction, and consolidation models auto-resolve by probing the gateway for available models. Override via `ENGRAM_DECOMPOSITION_MODEL` etc. in `.env`.
+
+## Runtime Configuration (Redis)
+
+Several settings are runtime-configurable via Redis (db 1, prefix `nova:config:`), overridable from the Dashboard UI:
+
+| Key | Values | Effect |
+|---|---|---|
+| `inference.backend` | `ollama`, `vllm`, `sglang`, `none` | Which local inference backend the gateway uses |
+| `inference.state` | `ready`, `starting`, `error`, `draining` | Whether local inference is accepting requests |
+| `llm.routing_strategy` | `local-first`, `local-only`, `cloud-first`, `cloud-only` | How the gateway routes requests between local and cloud |
+| `llm.ollama_url` | URL | Runtime Ollama endpoint override |
+
+**Gotcha:** Stale Redis config values survive container restarts. If inference is broken, check `inference.state` and `inference.backend` in Redis before debugging code. The gateway resolves `OLLAMA_BASE_URL=auto` at startup but Redis overrides take precedence at runtime.
+
 ## Key Configuration
 
 - `.env` — DB password, admin secret, API keys for providers, `DEFAULT_CHAT_MODEL`, `NOVA_WORKSPACE`, `LOG_LEVEL`, `REQUIRE_AUTH`
+- `OLLAMA_BASE_URL` — Set to `auto` (probes host, falls back to Docker), `host` (always use host machine), or explicit URL
 - `models.yaml` — Ollama models to auto-pull on startup
 - Context budgets in orchestrator config: system=10%, tools=15%, memory=40%, history=20%, working=15%
+
+## Debugging
+
+Quick diagnostics when something is broken:
+
+```bash
+# Container status
+docker compose ps
+
+# Service health (all at once)
+for p in 8000 8001 8002 8080 8100 8888; do echo -n "localhost:$p → "; curl -sf -m 2 http://localhost:$p/health/ready | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN"; done
+
+# Redis config state (stale values are a common root cause)
+docker compose exec redis redis-cli -n 1 MGET nova:config:inference.backend nova:config:inference.state nova:config:llm.routing_strategy
+
+# Queue depths
+docker compose exec redis redis-cli -n 2 LLEN nova:queue:tasks
+docker compose exec redis redis-cli -n 0 LLEN engram:ingestion:queue
+
+# Memory system health
+curl -s http://localhost:8002/api/v1/engrams/stats | python3 -m json.tool
+
+# Recent errors across all services
+docker compose logs --tail 30 2>&1 | grep -i "error\|exception" | tail -20
+```
 
 ## Website & Documentation
 
