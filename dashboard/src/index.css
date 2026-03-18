@@ -1,3 +1,5 @@
+@import '@fontsource-variable/geist-mono';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -32,6 +34,40 @@
   --neutral-800: 41 37 36;
   --neutral-900: 28 25 23;
   --neutral-950: 12 10 9;
+}
+
+/* ── Semantic design tokens (aliases into the palette scale above) ──────── */
+/* Light mode defaults */
+:root {
+  --surface-root: var(--neutral-50);
+  --surface-default: 255 255 255;
+  --surface-card: var(--card, 255 255 255);
+  --surface-card-hover: var(--neutral-100);
+  --surface-elevated: var(--neutral-100);
+  --surface-input: 255 255 255;
+  --text-primary: var(--neutral-900);
+  --text-secondary: var(--neutral-500);
+  --text-tertiary: var(--neutral-400);
+  --text-disabled: var(--neutral-300);
+  --border-default: var(--neutral-200);
+  --border-subtle: var(--neutral-100);
+  --border-focus: var(--accent-500);
+}
+/* Dark mode */
+html.dark {
+  --surface-root: var(--neutral-950);
+  --surface-default: var(--neutral-900);
+  --surface-card: var(--card, var(--neutral-900));
+  --surface-card-hover: var(--neutral-800);
+  --surface-elevated: var(--neutral-800);
+  --surface-input: var(--neutral-900);
+  --text-primary: var(--neutral-50);
+  --text-secondary: var(--neutral-400);
+  --text-tertiary: var(--neutral-500);
+  --text-disabled: var(--neutral-700);
+  --border-default: var(--neutral-800);
+  --border-subtle: var(--neutral-800);
+  --border-focus: var(--accent-400);
 }
 
 @layer base {
@@ -137,6 +173,21 @@
 textarea::-webkit-scrollbar { width: 4px; }
 textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-300)); border-radius: 2px; }
 .dark textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-600)); }
+
+/* ── Skeleton shimmer loading ───────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, rgb(var(--neutral-200)) 25%, rgb(var(--neutral-100)) 50%, rgb(var(--neutral-200)) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+html.dark .skeleton {
+  background: linear-gradient(90deg, rgb(var(--neutral-800)) 25%, rgb(var(--neutral-700)) 50%, rgb(var(--neutral-800)) 75%);
+  background-size: 200% 100%;
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
 
 /* ── Markdown rendering in chat bubbles ──────────────────────────────────── */
 .markdown-body > :first-child { margin-top: 0; }
