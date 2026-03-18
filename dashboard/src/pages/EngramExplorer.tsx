@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
-  Search, Network, Brain, RefreshCw, Zap, GitMerge,
-  ChevronDown, ChevronRight, Activity, Clock, AlertTriangle,
+  Network, Brain, RefreshCw, Zap, GitMerge,
+  Activity, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { apiFetch } from '../api'
-import Card from '../components/Card'
-import { Input, Button, Badge } from '../components/ui'
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Card, Badge, Metric, ProgressBar, Tabs, Table, Button, SearchInput,
+  EmptyState, Skeleton,
+} from '../components/ui'
+import type { SemanticColor } from '../lib/design-tokens'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface EngramNode {
   id: string
@@ -70,55 +74,51 @@ interface RouterStatus {
   message: string
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Type badge color mapping ─────────────────────────────────────────────────
 
-const TYPE_COLORS: Record<string, string> = {
-  fact:        'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
-  episode:     'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300',
-  entity:      'bg-teal-100 dark:bg-teal-900/40 text-teal-700 dark:text-teal-300',
-  preference:  'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300',
-  procedure:   'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
-  schema:      'bg-pink-100 dark:bg-pink-900/40 text-pink-700 dark:text-pink-300',
-  goal:        'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300',
-  self_model:  'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300',
+const TYPE_BADGE_COLOR: Record<string, SemanticColor> = {
+  fact:        'info',
+  episode:     'warning',
+  entity:      'accent',
+  preference:  'success',
+  procedure:   'neutral',
+  schema:      'danger',
+  goal:        'accent',
+  self_model:  'info',
 }
 
-function TypeBadge({ type }: { type: string }) {
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_COLORS[type] ?? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400'}`}>
-      {type}
-    </span>
-  )
-}
+const ALL_TYPES = ['fact', 'episode', 'entity', 'preference', 'procedure', 'schema', 'goal', 'self_model']
 
-function ScoreBar({ value, label, color = 'bg-teal-500' }: { value: number; label: string; color?: string }) {
+// ── Score bar helper ─────────────────────────────────────────────────────────
+
+function ScoreBar({ value, label }: { value: number; label: string }) {
   const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100)
   return (
     <div className="flex items-center gap-1.5" title={`${label}: ${pct}%`}>
-      <span className="text-xs text-neutral-500 dark:text-neutral-400 w-16 shrink-0">{label}</span>
-      <div className="flex-1 h-1.5 rounded-full bg-neutral-200 dark:bg-neutral-700">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs text-neutral-500 dark:text-neutral-400 w-8 text-right">{pct}%</span>
+      <span className="text-caption text-content-tertiary w-16 shrink-0">{label}</span>
+      <ProgressBar value={pct} size="sm" className="flex-1" />
+      <span className="text-caption text-content-tertiary w-8 text-right">{pct}%</span>
     </div>
   )
 }
 
-// ── Tab Navigation ────────────────────────────────────────────────────────────
+// ── Tab config ───────────────────────────────────────────────────────────────
 
-type TabId = 'overview' | 'graph' | 'self-model' | 'consolidation'
-
-const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'overview',       label: 'Overview',       icon: <Activity className="w-4 h-4" /> },
-  { id: 'graph',          label: 'Graph Explorer',  icon: <Network className="w-4 h-4" /> },
-  { id: 'self-model',     label: 'Self-Model',      icon: <Brain className="w-4 h-4" /> },
-  { id: 'consolidation',  label: 'Consolidation',   icon: <GitMerge className="w-4 h-4" /> },
+const TABS = [
+  { id: 'explorer', label: 'Explorer', icon: Activity },
+  { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'self-model', label: 'Self-Model', icon: Brain },
+  { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
 ]
 
-// ── Overview Tab ──────────────────────────────────────────────────────────────
+// ── Explorer Tab ─────────────────────────────────────────────────────────────
 
-function OverviewTab() {
-  const { data: stats, isLoading } = useQuery<EngramStats>({
+function ExplorerTab() {
+  const [searchQuery, setSearchQuery] = useState('')
+  const [activeSearch, setActiveSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
+
+  const { data: stats, isLoading: statsLoading } = useQuery<EngramStats>({
     queryKey: ['engram-stats'],
     queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
   })
@@ -128,102 +128,150 @@ function OverviewTab() {
     queryFn: () => apiFetch('/mem/api/v1/engrams/router-status'),
   })
 
-  if (isLoading) return <p className="text-neutral-500 p-4">Loading...</p>
-  if (!stats) return <p className="text-neutral-500 p-4">No data</p>
+  const { data: graph, isLoading: graphLoading } = useQuery<GraphData>({
+    queryKey: ['engram-explorer', activeSearch],
+    queryFn: () => {
+      const params = new URLSearchParams()
+      if (activeSearch) params.set('query', activeSearch)
+      params.set('depth', '1')
+      params.set('max_nodes', '50')
+      return apiFetch(`/mem/api/v1/engrams/graph?${params}`)
+    },
+    enabled: true,
+  })
+
+  const handleSearch = (val: string) => {
+    setSearchQuery(val)
+    // Debounced via SearchInput, trigger search
+    setActiveSearch(val)
+  }
+
+  if (statsLoading) return <Skeleton lines={6} />
+  if (!stats) return <p className="text-content-tertiary p-4">No data</p>
+
+  const filteredNodes = graph?.nodes?.filter(n => !typeFilter || n.type === typeFilter) ?? []
 
   return (
     <div className="space-y-6">
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-semibold text-teal-600 dark:text-teal-400">{stats.total_engrams}</div>
-          <div className="text-xs text-neutral-500 mt-1">Total Engrams</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-semibold text-teal-600 dark:text-teal-400">{stats.total_edges}</div>
-          <div className="text-xs text-neutral-500 mt-1">Edges</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-semibold text-amber-600 dark:text-amber-400">{stats.total_archived}</div>
-          <div className="text-xs text-neutral-500 mt-1">Archived</div>
-        </Card>
-        <Card className="p-4 text-center">
-          <div className="text-2xl font-semibold text-indigo-600 dark:text-indigo-400">
-            {routerStatus?.observation_count ?? 0}
-          </div>
-          <div className="text-xs text-neutral-500 mt-1">Router Observations</div>
-        </Card>
+      {/* Stats bar */}
+      <div className="flex flex-wrap gap-6">
+        <Metric label="Total Engrams" value={stats.total_engrams} />
+        <Metric label="Edges" value={stats.total_edges} />
+        <Metric label="Archived" value={stats.total_archived} />
+        <Metric label="Router Observations" value={routerStatus?.observation_count ?? 0} />
       </div>
 
-      {/* Engrams by Type */}
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold mb-3">Engrams by Type</h3>
-        <div className="space-y-2">
-          {Object.entries(stats.by_type).map(([type, { total, superseded }]) => (
-            <div key={type} className="flex items-center gap-3">
-              <TypeBadge type={type} />
-              <div className="flex-1 h-2 rounded-full bg-neutral-200 dark:bg-neutral-700">
-                <div
-                  className="h-full rounded-full bg-teal-500"
-                  style={{ width: `${Math.min(100, (total / Math.max(stats.total_engrams, 1)) * 100)}%` }}
-                />
-              </div>
-              <span className="text-sm text-neutral-600 dark:text-neutral-400 w-16 text-right">
-                {total}
-              </span>
-              {superseded > 0 && (
-                <span className="text-xs text-neutral-400">({superseded} superseded)</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </Card>
+      {/* Type distribution */}
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setTypeFilter(null)}
+          className={!typeFilter ? undefined : 'opacity-50'}
+        >
+          <Badge color="neutral" size="sm">All</Badge>
+        </button>
+        {Object.entries(stats.by_type).map(([type, { total }]) => (
+          <button
+            key={type}
+            onClick={() => setTypeFilter(typeFilter === type ? null : type)}
+            className={typeFilter && typeFilter !== type ? 'opacity-40' : undefined}
+          >
+            <Badge color={TYPE_BADGE_COLOR[type] ?? 'neutral'} size="sm">
+              {type} ({total})
+            </Badge>
+          </button>
+        ))}
+      </div>
 
-      {/* Edges by Relation */}
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold mb-3">Edges by Relation</h3>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {Object.entries(stats.by_relation).map(([relation, { count, avg_weight }]) => (
-            <div key={relation} className="p-3 rounded-lg bg-neutral-50 dark:bg-neutral-800">
-              <div className="text-sm font-medium">{relation.replace(/_/g, ' ')}</div>
-              <div className="text-lg font-semibold text-teal-600 dark:text-teal-400">{count}</div>
-              <div className="text-xs text-neutral-400">avg weight: {avg_weight}</div>
-            </div>
+      {/* Search */}
+      <SearchInput
+        value={searchQuery}
+        onChange={handleSearch}
+        placeholder="Semantic search engrams..."
+        debounceMs={500}
+      />
+
+      {/* Engram list */}
+      {graphLoading ? (
+        <Skeleton lines={5} />
+      ) : filteredNodes.length === 0 ? (
+        <EmptyState
+          icon={Network}
+          title="No engrams found"
+          description={activeSearch ? `No results for "${activeSearch}"` : "Memory is empty. Engrams are created through conversations."}
+        />
+      ) : (
+        <div className="space-y-2">
+          <p className="text-caption text-content-tertiary">{filteredNodes.length} engrams</p>
+          {filteredNodes.map(node => (
+            <Card key={node.id} variant="hoverable" className="p-4">
+              <div className="flex items-start gap-3">
+                <Badge color={TYPE_BADGE_COLOR[node.type] ?? 'neutral'} size="sm">
+                  {node.type}
+                </Badge>
+                <div className="flex-1 min-w-0">
+                  <p className="text-compact text-content-primary line-clamp-2">{node.content}</p>
+                  <div className="flex gap-4 mt-2">
+                    <ScoreBar value={node.importance} label="Imp" />
+                    <ScoreBar value={node.activation} label="Act" />
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-caption text-content-tertiary">{node.access_count}x</span>
+                  {node.created_at && (
+                    <span className="text-micro text-content-tertiary">
+                      {new Date(node.created_at).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </Card>
           ))}
         </div>
-      </Card>
+      )}
 
       {/* Neural Router Status */}
       {routerStatus && (
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold mb-3">Neural Router</h3>
+        <Card variant="default" className="p-5">
+          <h3 className="text-compact font-semibold text-content-primary mb-3">Neural Router</h3>
           <div className="flex items-center gap-3 mb-2">
-            <Zap className={`w-4 h-4 ${routerStatus.ready ? 'text-emerald-500' : 'text-amber-500'}`} />
-            <span className="text-sm">{routerStatus.message}</span>
+            <Zap className={`w-4 h-4 ${routerStatus.ready ? 'text-success' : 'text-warning'}`} />
+            <span className="text-compact text-content-secondary">{routerStatus.message}</span>
           </div>
-          <div className="h-2 rounded-full bg-neutral-200 dark:bg-neutral-700">
-            <div
-              className={`h-full rounded-full transition-all ${routerStatus.ready ? 'bg-emerald-500' : 'bg-amber-500'}`}
-              style={{ width: `${Math.min(100, (routerStatus.observation_count / 200) * 100)}%` }}
-            />
-          </div>
-          <div className="text-xs text-neutral-400 mt-1">
+          <ProgressBar
+            value={Math.min(100, (routerStatus.observation_count / 200) * 100)}
+            size="md"
+          />
+          <p className="text-caption text-content-tertiary mt-1">
             {routerStatus.observation_count} / 200 observations
-          </div>
+          </p>
         </Card>
       )}
+
+      {/* Edges by Relation */}
+      <Card variant="default" className="p-5">
+        <h3 className="text-compact font-semibold text-content-primary mb-3">Edges by Relation</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {Object.entries(stats.by_relation).map(([relation, { count, avg_weight }]) => (
+            <div key={relation} className="p-3 rounded-sm bg-surface-elevated">
+              <div className="text-compact font-medium text-content-primary">{relation.replace(/_/g, ' ')}</div>
+              <div className="text-display font-mono text-accent">{count}</div>
+              <div className="text-micro text-content-tertiary">avg weight: {avg_weight}</div>
+            </div>
+          ))}
+        </div>
+      </Card>
     </div>
   )
 }
 
-// ── Graph Explorer Tab ────────────────────────────────────────────────────────
+// ── Graph Tab ────────────────────────────────────────────────────────────────
 
 function GraphTab() {
   const [query, setQuery] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedNode, setSelectedNode] = useState<EngramNode | null>(null)
 
-  const { data: graph, isLoading, refetch } = useQuery<GraphData>({
+  const { data: graph, isLoading } = useQuery<GraphData>({
     queryKey: ['engram-graph', searchQuery],
     queryFn: () => {
       const params = new URLSearchParams()
@@ -241,13 +289,10 @@ function GraphTab() {
     setSelectedNode(null)
   }
 
-  // Explore from a specific node
   const exploreNode = (nodeId: string) => {
     setSelectedNode(null)
-    // Re-fetch with center_id
     apiFetch<GraphData>(`/mem/api/v1/engrams/graph?center_id=${nodeId}&depth=2&max_nodes=50`)
-      .then((data) => {
-        // Trigger a re-render by updating the query
+      .then(() => {
         setSearchQuery(`__node:${nodeId}`)
       })
   }
@@ -255,46 +300,48 @@ function GraphTab() {
   return (
     <div className="space-y-4">
       <form onSubmit={handleSearch} className="flex gap-2">
-        <Input
+        <SearchInput
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={setQuery}
           placeholder="Search engram graph..."
+          debounceMs={0}
           className="flex-1"
         />
-        <Button type="submit">
-          <Search className="w-4 h-4 mr-1" /> Explore
+        <Button type="submit" icon={<Network size={14} />}>
+          Explore
         </Button>
       </form>
 
-      {isLoading && <p className="text-neutral-500 p-4">Loading graph...</p>}
+      {isLoading && <Skeleton lines={5} />}
 
       {graph && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Node List */}
           <div className="lg:col-span-2 space-y-2">
-            <div className="text-xs text-neutral-400 mb-2">
+            <p className="text-caption text-content-tertiary">
               {graph.node_count} nodes, {graph.edge_count} edges
-            </div>
+            </p>
             {graph.nodes.map((node) => (
               <Card
                 key={node.id}
-                className={`p-3 cursor-pointer transition-colors hover:border-teal-400 ${
-                  selectedNode?.id === node.id ? 'border-teal-500 dark:border-teal-500' : ''
-                }`}
+                variant="hoverable"
+                className={`p-3 ${selectedNode?.id === node.id ? 'border-accent' : ''}`}
                 onClick={() => setSelectedNode(node)}
               >
                 <div className="flex items-start gap-2">
-                  <TypeBadge type={node.type} />
+                  <Badge color={TYPE_BADGE_COLOR[node.type] ?? 'neutral'} size="sm">
+                    {node.type}
+                  </Badge>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-neutral-700 dark:text-neutral-300 line-clamp-2">
+                    <p className="text-compact text-content-primary line-clamp-2">
                       {node.content}
                     </p>
                     <div className="flex gap-3 mt-1">
-                      <ScoreBar value={node.activation} label="Act" color="bg-teal-500" />
-                      <ScoreBar value={node.importance} label="Imp" color="bg-amber-500" />
+                      <ScoreBar value={node.activation} label="Act" />
+                      <ScoreBar value={node.importance} label="Imp" />
                     </div>
                   </div>
-                  <span className="text-xs text-neutral-400 shrink-0">
+                  <span className="text-caption text-content-tertiary shrink-0">
                     {node.access_count}x
                   </span>
                 </div>
@@ -306,43 +353,46 @@ function GraphTab() {
           <div className="space-y-4">
             {selectedNode ? (
               <>
-                <Card className="p-4">
-                  <h3 className="text-sm font-semibold mb-2">Engram Detail</h3>
-                  <div className="space-y-2 text-sm">
+                <Card variant="default" className="p-4">
+                  <h3 className="text-compact font-semibold text-content-primary mb-2">Engram Detail</h3>
+                  <div className="space-y-2 text-compact">
                     <div className="flex gap-2 items-center">
-                      <TypeBadge type={selectedNode.type} />
+                      <Badge color={TYPE_BADGE_COLOR[selectedNode.type] ?? 'neutral'} size="sm">
+                        {selectedNode.type}
+                      </Badge>
                       {selectedNode.superseded && (
-                        <Badge color="danger" size="sm">
-                          superseded
-                        </Badge>
+                        <Badge color="danger" size="sm">superseded</Badge>
                       )}
                     </div>
-                    <p className="text-neutral-700 dark:text-neutral-300">{selectedNode.content}</p>
-                    <div className="space-y-1 pt-2 border-t border-neutral-200 dark:border-neutral-700">
-                      <ScoreBar value={selectedNode.activation} label="Activation" color="bg-teal-500" />
-                      <ScoreBar value={selectedNode.importance} label="Importance" color="bg-amber-500" />
-                      <ScoreBar value={selectedNode.confidence} label="Confidence" color="bg-emerald-500" />
+                    <p className="text-content-secondary">{selectedNode.content}</p>
+                    <div className="space-y-1 pt-2 border-t border-border-subtle">
+                      <ScoreBar value={selectedNode.activation} label="Activation" />
+                      <ScoreBar value={selectedNode.importance} label="Importance" />
+                      <ScoreBar value={selectedNode.confidence} label="Confidence" />
                     </div>
-                    <div className="text-xs text-neutral-400 space-y-0.5 pt-2">
+                    <div className="text-caption text-content-tertiary space-y-0.5 pt-2">
                       <div>Source: {selectedNode.source_type}</div>
                       <div>Accessed: {selectedNode.access_count} times</div>
                       {selectedNode.created_at && (
                         <div>Created: {new Date(selectedNode.created_at).toLocaleDateString()}</div>
                       )}
-                      <div className="font-mono text-[10px] break-all mt-1 opacity-50">{selectedNode.id}</div>
+                      <div className="font-mono text-micro break-all mt-1 opacity-50">{selectedNode.id}</div>
                     </div>
                   </div>
                   <Button
-                    className="mt-3 w-full text-xs"
+                    variant="secondary"
+                    size="sm"
+                    className="mt-3 w-full"
                     onClick={() => exploreNode(selectedNode.id)}
+                    icon={<Network size={12} />}
                   >
-                    <Network className="w-3 h-3 mr-1" /> Explore from here
+                    Explore from here
                   </Button>
                 </Card>
 
                 {/* Connected Edges */}
-                <Card className="p-4">
-                  <h3 className="text-sm font-semibold mb-2">Connections</h3>
+                <Card variant="default" className="p-4">
+                  <h3 className="text-compact font-semibold text-content-primary mb-2">Connections</h3>
                   <div className="space-y-1.5">
                     {graph.edges
                       .filter((e) => e.source === selectedNode.id || e.target === selectedNode.id)
@@ -353,32 +403,32 @@ function GraphTab() {
                         return (
                           <div
                             key={i}
-                            className="flex items-center gap-1.5 text-xs p-1.5 rounded hover:bg-neutral-50 dark:hover:bg-neutral-800 cursor-pointer"
+                            className="flex items-center gap-1.5 text-caption p-1.5 rounded-sm hover:bg-surface-card-hover cursor-pointer transition-colors"
                             onClick={() => {
                               const n = graph.nodes.find((n) => n.id === otherId)
                               if (n) setSelectedNode(n)
                             }}
                           >
-                            <span className="text-neutral-400">{isOutgoing ? '\u2192' : '\u2190'}</span>
-                            <span className="font-medium text-neutral-500">{edge.relation.replace(/_/g, ' ')}</span>
-                            <span className="flex-1 truncate text-neutral-600 dark:text-neutral-400">
+                            <span className="text-content-tertiary">{isOutgoing ? '\u2192' : '\u2190'}</span>
+                            <span className="font-medium text-content-secondary">{edge.relation.replace(/_/g, ' ')}</span>
+                            <span className="flex-1 truncate text-content-tertiary">
                               {otherNode?.content.slice(0, 60) ?? otherId.slice(0, 8)}
                             </span>
-                            <span className="text-neutral-400">{edge.weight.toFixed(2)}</span>
+                            <span className="text-content-tertiary">{edge.weight.toFixed(2)}</span>
                           </div>
                         )
                       })}
                     {graph.edges.filter(
                       (e) => e.source === selectedNode.id || e.target === selectedNode.id
                     ).length === 0 && (
-                      <p className="text-xs text-neutral-400">No connections in this subgraph</p>
+                      <p className="text-caption text-content-tertiary">No connections in this subgraph</p>
                     )}
                   </div>
                 </Card>
               </>
             ) : (
-              <Card className="p-4">
-                <p className="text-sm text-neutral-400">Click a node to see details</p>
+              <Card variant="default" className="p-4">
+                <p className="text-compact text-content-tertiary">Click a node to see details</p>
               </Card>
             )}
           </div>
@@ -388,7 +438,7 @@ function GraphTab() {
   )
 }
 
-// ── Self-Model Tab ────────────────────────────────────────────────────────────
+// ── Self-Model Tab ───────────────────────────────────────────────────────────
 
 function SelfModelTab() {
   const { data, isLoading, refetch } = useQuery<{ self_model: string }>({
@@ -403,27 +453,36 @@ function SelfModelTab() {
 
   return (
     <div className="space-y-4">
-      <Card className="p-5">
+      <Card variant="default" className="p-5">
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold flex items-center gap-2">
-            <Brain className="w-4 h-4 text-indigo-500" />
+          <h3 className="text-compact font-semibold flex items-center gap-2 text-content-primary">
+            <Brain className="w-4 h-4 text-accent" />
             Self-Model Summary
           </h3>
           <div className="flex gap-2">
-            <Button onClick={() => refetch()} className="text-xs">
-              <RefreshCw className="w-3 h-3 mr-1" /> Refresh
+            <Button variant="secondary" size="sm" onClick={() => refetch()} icon={<RefreshCw size={12} />}>
+              Refresh
             </Button>
-            <Button onClick={() => bootstrap.mutate()} className="text-xs">
-              <Zap className="w-3 h-3 mr-1" /> Bootstrap
-            </Button>
+            {(!data?.self_model) && (
+              <Button size="sm" onClick={() => bootstrap.mutate()} loading={bootstrap.isPending} icon={<Zap size={12} />}>
+                Bootstrap
+              </Button>
+            )}
           </div>
         </div>
         {isLoading ? (
-          <p className="text-neutral-400">Loading...</p>
-        ) : (
-          <p className="text-sm text-neutral-700 dark:text-neutral-300 leading-relaxed whitespace-pre-wrap">
-            {data?.self_model || 'No self-model data. Click Bootstrap to seed initial identity engrams.'}
+          <Skeleton lines={4} />
+        ) : data?.self_model ? (
+          <p className="text-compact text-content-secondary leading-relaxed whitespace-pre-wrap">
+            {data.self_model}
           </p>
+        ) : (
+          <EmptyState
+            icon={Brain}
+            title="No self-model data"
+            description="Click Bootstrap to seed initial identity engrams."
+            action={{ label: 'Bootstrap', onClick: () => bootstrap.mutate() }}
+          />
         )}
       </Card>
 
@@ -445,15 +504,15 @@ function SelfModelEngrams() {
   if (selfNodes.length === 0) return null
 
   return (
-    <Card className="p-5">
-      <h3 className="text-sm font-semibold mb-3">Identity Engrams</h3>
+    <Card variant="default" className="p-5">
+      <h3 className="text-compact font-semibold text-content-primary mb-3">Identity Engrams</h3>
       <div className="space-y-2">
         {selfNodes.map((node) => (
-          <div key={node.id} className="p-3 rounded-lg bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30">
-            <p className="text-sm text-neutral-700 dark:text-neutral-300">{node.content}</p>
+          <div key={node.id} className="p-3 rounded-sm bg-surface-elevated border border-border-subtle">
+            <p className="text-compact text-content-secondary">{node.content}</p>
             <div className="flex gap-4 mt-1">
-              <span className="text-xs text-neutral-400">importance: {node.importance}</span>
-              <span className="text-xs text-neutral-400">confidence: {node.confidence}</span>
+              <span className="text-caption text-content-tertiary">importance: {node.importance}</span>
+              <span className="text-caption text-content-tertiary">confidence: {node.confidence}</span>
             </div>
           </div>
         ))}
@@ -462,7 +521,7 @@ function SelfModelEngrams() {
   )
 }
 
-// ── Consolidation Tab ─────────────────────────────────────────────────────────
+// ── Consolidation Tab ────────────────────────────────────────────────────────
 
 function ConsolidationTab() {
   const { data, isLoading, refetch } = useQuery<{ count: number; entries: ConsolidationEntry[] }>({
@@ -480,44 +539,45 @@ function ConsolidationTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Consolidation History</h3>
-        <Button onClick={() => consolidate.mutate()} disabled={consolidate.isPending} className="text-xs">
-          <RefreshCw className={`w-3 h-3 mr-1 ${consolidate.isPending ? 'animate-spin' : ''}`} />
+        <h3 className="text-compact font-semibold text-content-primary">Consolidation History</h3>
+        <Button
+          size="sm"
+          onClick={() => consolidate.mutate()}
+          loading={consolidate.isPending}
+          icon={<RefreshCw size={12} />}
+        >
           {consolidate.isPending ? 'Running...' : 'Run Now'}
         </Button>
       </div>
 
-      {isLoading && <p className="text-neutral-500 p-4">Loading...</p>}
+      {isLoading && <Skeleton lines={5} />}
 
       {data?.entries.length === 0 && (
-        <Card className="p-5 text-center">
-          <p className="text-sm text-neutral-400">No consolidation runs yet.</p>
-          <p className="text-xs text-neutral-400 mt-1">
-            Consolidation triggers automatically on idle (30min), nightly (3 AM), or after 50+ new engrams.
-          </p>
-        </Card>
+        <EmptyState
+          icon={GitMerge}
+          title="No consolidation runs yet"
+          description="Consolidation triggers automatically on idle (30min), nightly (3 AM), or after 50+ new engrams."
+        />
       )}
 
       {data?.entries.map((entry) => (
-        <Card key={entry.id} className="p-4">
+        <Card key={entry.id} variant="default" className="p-4">
           <div
             className="flex items-center gap-3 cursor-pointer"
             onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
           >
             {expandedId === entry.id ? (
-              <ChevronDown className="w-4 h-4 text-neutral-400 shrink-0" />
+              <ChevronDown className="w-4 h-4 text-content-tertiary shrink-0" />
             ) : (
-              <ChevronRight className="w-4 h-4 text-neutral-400 shrink-0" />
+              <ChevronRight className="w-4 h-4 text-content-tertiary shrink-0" />
             )}
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <Badge color="neutral" size="sm">
-                  {entry.trigger}
-                </Badge>
-                <span className="text-xs text-neutral-400">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge color="neutral" size="sm">{entry.trigger}</Badge>
+                <span className="text-caption text-content-tertiary">
                   {entry.created_at ? new Date(entry.created_at).toLocaleString() : 'unknown'}
                 </span>
-                <span className="text-xs text-neutral-400 ml-auto">{entry.duration_ms}ms</span>
+                <span className="text-caption text-content-tertiary ml-auto">{entry.duration_ms}ms</span>
               </div>
             </div>
           </div>
@@ -531,9 +591,9 @@ function ConsolidationTab() {
               <StatCell label="Engrams Pruned" value={entry.engrams_pruned} />
               <StatCell label="Merged" value={entry.engrams_merged} />
               <StatCell label="Contradictions" value={entry.contradictions_resolved} />
-              <div className="p-2 rounded bg-neutral-50 dark:bg-neutral-800">
-                <div className="text-xs text-neutral-400">Maturity</div>
-                <div className="text-sm font-medium">
+              <div className="p-2 rounded-sm bg-surface-elevated">
+                <div className="text-caption text-content-tertiary">Maturity</div>
+                <div className="text-compact font-medium text-content-primary">
                   {(entry.self_model_updates as Record<string, string>)?.maturity_stage ?? '-'}
                 </div>
               </div>
@@ -547,47 +607,29 @@ function ConsolidationTab() {
 
 function StatCell({ label, value }: { label: string; value: number }) {
   return (
-    <div className="p-2 rounded bg-neutral-50 dark:bg-neutral-800">
-      <div className="text-xs text-neutral-400">{label}</div>
-      <div className="text-lg font-semibold text-teal-600 dark:text-teal-400">{value}</div>
+    <div className="p-2 rounded-sm bg-surface-elevated">
+      <div className="text-caption text-content-tertiary">{label}</div>
+      <div className="text-display font-mono text-accent">{value}</div>
     </div>
   )
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+// ── Main Component ───────────────────────────────────────────────────────────
 
 export function EngramExplorer() {
-  const [activeTab, setActiveTab] = useState<TabId>('overview')
+  const [activeTab, setActiveTab] = useState('explorer')
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold flex items-center gap-2">
-          <Network className="w-5 h-5 text-teal-600" />
-          Engram Network
-        </h1>
-      </div>
+    <div className="px-4 py-6 sm:px-6 space-y-6">
+      <PageHeader title="Memory" />
 
-      {/* Tab Bar */}
-      <div className="flex gap-1 p-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 w-fit">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors ${
-              activeTab === tab.id
-                ? 'bg-white dark:bg-neutral-700 shadow-sm font-medium'
-                : 'text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'
-            }`}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={TABS}
+        activeTab={activeTab}
+        onChange={setActiveTab}
+      />
 
-      {/* Tab Content */}
-      {activeTab === 'overview' && <OverviewTab />}
+      {activeTab === 'explorer' && <ExplorerTab />}
       {activeTab === 'graph' && <GraphTab />}
       {activeTab === 'self-model' && <SelfModelTab />}
       {activeTab === 'consolidation' && <ConsolidationTab />}
