@@ -1,5 +1,7 @@
 import { Server, Cloud, Cpu } from 'lucide-react'
 import type { HardwareInfo } from '../../../api-recovery'
+import { Button, Badge } from '../../../components/ui'
+import clsx from 'clsx'
 
 type Engine = 'vllm' | 'ollama' | 'cloud'
 
@@ -61,11 +63,11 @@ export function ChooseEngine({ hardware, selected, onSelect, onNext, onBack }: P
   })
 
   return (
-    <div className="flex flex-col items-center py-12 px-4">
-      <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+    <div className="flex flex-col items-center py-12 px-6">
+      <h2 className="text-h3 text-content-primary mb-2">
         Choose Your Engine
       </h2>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-6 text-center max-w-md">
+      <p className="text-compact text-content-secondary mb-6 text-center max-w-md">
         Select how Nova should run AI models.
       </p>
 
@@ -79,26 +81,25 @@ export function ChooseEngine({ hardware, selected, onSelect, onNext, onBack }: P
             <button
               key={engine.id}
               onClick={() => onSelect(engine.id)}
-              className={`w-full text-left rounded-lg border p-4 transition-colors ${
+              className={clsx(
+                'w-full text-left rounded-lg border p-4 transition-colors',
                 isSelected
-                  ? 'border-teal-500 bg-teal-500/5'
-                  : 'border-neutral-200 dark:border-neutral-800 hover:border-neutral-300 dark:hover:border-neutral-700'
-              }`}
+                  ? 'border-accent bg-accent/5'
+                  : 'border-border-subtle hover:border-border',
+              )}
             >
               <div className="flex items-start gap-3">
-                <Icon className={`w-5 h-5 mt-0.5 shrink-0 ${isSelected ? 'text-teal-500' : 'text-neutral-400'}`} />
+                <Icon className={clsx('w-5 h-5 mt-0.5 shrink-0', isSelected ? 'text-accent' : 'text-content-tertiary')} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                    <span className="text-compact font-medium text-content-primary">
                       {engine.label}
                     </span>
                     {isRecommended && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-600 dark:text-teal-400">
-                        Recommended
-                      </span>
+                      <Badge color="accent" size="sm">Recommended</Badge>
                     )}
                   </div>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">
+                  <p className="text-caption text-content-secondary mt-1">
                     {engine.description}
                   </p>
                 </div>
@@ -109,18 +110,8 @@ export function ChooseEngine({ hardware, selected, onSelect, onNext, onBack }: P
       </div>
 
       <div className="flex gap-3 mt-8">
-        <button
-          onClick={onBack}
-          className="px-5 py-2.5 rounded-lg border border-neutral-200 dark:border-neutral-800 text-sm text-neutral-600 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-900 transition-colors"
-        >
-          Back
-        </button>
-        <button
-          onClick={onNext}
-          className="px-6 py-2.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium transition-colors"
-        >
-          Continue
-        </button>
+        <Button variant="outline" onClick={onBack}>Back</Button>
+        <Button onClick={onNext}>Continue</Button>
       </div>
     </div>
   )

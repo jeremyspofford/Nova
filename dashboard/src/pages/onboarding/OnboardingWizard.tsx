@@ -1,4 +1,6 @@
 import { useState, useCallback } from 'react'
+import clsx from 'clsx'
+import { Check } from 'lucide-react'
 import { updatePlatformConfig } from '../../api'
 import type { HardwareInfo } from '../../api-recovery'
 import { Welcome } from './steps/Welcome'
@@ -12,6 +14,15 @@ type Step = 'welcome' | 'hardware' | 'engine' | 'model' | 'downloading' | 'ready
 
 const stepOrder: Step[] = ['welcome', 'hardware', 'engine', 'model', 'downloading', 'ready']
 
+const stepLabels: Record<Step, string> = {
+  welcome: 'Welcome',
+  hardware: 'Hardware',
+  engine: 'Engine',
+  model: 'Model',
+  downloading: 'Setup',
+  ready: 'Ready',
+}
+
 export function OnboardingWizard() {
   const [step, setStep] = useState<Step>('welcome')
   const [hardware, setHardware] = useState<HardwareInfo | null>(null)
@@ -22,7 +33,7 @@ export function OnboardingWizard() {
     try {
       await updatePlatformConfig('onboarding.completed', '"true"')
     } catch {
-      // Best-effort — don't block the user
+      // Best-effort -- don't block the user
     }
     window.location.href = '/chat'
   }, [])
@@ -33,7 +44,6 @@ export function OnboardingWizard() {
 
   const handleHardwareNext = useCallback((hw: HardwareInfo) => {
     setHardware(hw)
-    // Pre-select recommended engine
     const totalVram = hw.gpus.reduce((s, g) => s + g.vram_gb, 0)
     if (totalVram >= 8) setEngine('vllm')
     else setEngine('ollama')
@@ -59,24 +69,53 @@ export function OnboardingWizard() {
   const currentIdx = stepOrder.indexOf(step)
 
   return (
-    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 flex flex-col items-center justify-center">
-      <div className="w-full max-w-lg mx-auto px-4">
-        {/* Progress dots */}
-        <div className="flex items-center justify-center gap-2 mb-8">
-          {stepOrder.map((s, i) => (
-            <div
-              key={s}
-              className={`h-1.5 rounded-full transition-all ${
-                i <= currentIdx
-                  ? 'w-6 bg-teal-500'
-                  : 'w-1.5 bg-neutral-300 dark:bg-neutral-700'
-              }`}
-            />
-          ))}
+    <div className="min-h-screen bg-surface-root flex flex-col items-center justify-center">
+      <div className="w-full max-w-xl mx-auto px-4">
+        {/* Step progress indicator */}
+        <div className="flex items-center justify-center gap-1 mb-8">
+          {stepOrder.map((s, i) => {
+            const isDone = i < currentIdx
+            const isCurrent = i === currentIdx
+            const isPending = i > currentIdx
+
+            return (
+              <div key={s} className="flex items-center">
+                {/* Step circle */}
+                <div className="flex flex-col items-center">
+                  <div
+                    className={clsx(
+                      'w-8 h-8 rounded-full flex items-center justify-center text-caption font-medium transition-colors',
+                      isDone && 'bg-success text-white',
+                      isCurrent && 'bg-accent text-neutral-950',
+                      isPending && 'bg-surface-elevated text-content-tertiary border border-border-subtle',
+                    )}
+                  >
+                    {isDone ? <Check size={14} /> : i + 1}
+                  </div>
+                  <span className={clsx(
+                    'mt-1 text-micro',
+                    isCurrent ? 'text-content-primary font-medium' : 'text-content-tertiary',
+                  )}>
+                    {stepLabels[s]}
+                  </span>
+                </div>
+
+                {/* Connector line */}
+                {i < stepOrder.length - 1 && (
+                  <div
+                    className={clsx(
+                      'w-6 sm:w-10 h-0.5 mx-1 mt-[-14px]',
+                      i < currentIdx ? 'bg-success' : 'bg-border-subtle',
+                    )}
+                  />
+                )}
+              </div>
+            )
+          })}
         </div>
 
-        {/* Step content */}
-        <div className="bg-white dark:bg-neutral-900 rounded-2xl border border-neutral-200 dark:border-neutral-800 shadow-sm">
+        {/* Step content card */}
+        <div className="bg-surface-card rounded-lg border border-border-subtle shadow-sm">
           {step === 'welcome' && (
             <Welcome onNext={() => setStep('hardware')} onSkip={handleSkip} />
           )}

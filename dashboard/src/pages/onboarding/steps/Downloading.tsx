@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Loader2, Check, AlertTriangle, RotateCcw } from 'lucide-react'
 import { recoveryFetch, getBackendStatus, type BackendStatus } from '../../../api-recovery'
+import { Button } from '../../../components/ui'
+import clsx from 'clsx'
 
 interface Props {
   backend: string
@@ -49,18 +51,15 @@ export function Downloading({ backend, model, onNext }: Props) {
   useEffect(() => {
     async function startBackend() {
       try {
-        // For cloud-only, just complete immediately
         if (backend === 'cloud') {
           setPhase('ready')
           return
         }
 
-        // Start the backend (returns 202 immediately)
         await recoveryFetch(`/api/v1/recovery/inference/backend/${backend}/start`, {
           method: 'POST',
         })
 
-        // For Ollama, trigger model pull after backend accepts
         if (backend === 'ollama') {
           setPhase('downloading')
           setDetail(`Pulling ${model}...`)
@@ -74,13 +73,11 @@ export function Downloading({ backend, model, onNext }: Props) {
           }
         }
 
-        // For vLLM, the start already handles model loading via env var
         if (backend === 'vllm') {
           setPhase('downloading')
           setDetail(`Loading ${model}...`)
         }
 
-        // Start polling
         pollRef.current = setInterval(async () => {
           try {
             const status = await getBackendStatus()
@@ -122,11 +119,11 @@ export function Downloading({ backend, model, onNext }: Props) {
   }, [phase, onNext])
 
   return (
-    <div className="flex flex-col items-center py-16 px-4">
-      <h2 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
+    <div className="flex flex-col items-center py-16 px-6">
+      <h2 className="text-h3 text-content-primary mb-2">
         Setting Up
       </h2>
-      <p className="text-sm text-neutral-500 dark:text-neutral-400 mb-10 text-center max-w-md">
+      <p className="text-compact text-content-secondary mb-10 text-center max-w-md">
         {backend === 'cloud' ? 'Configuring cloud providers...' : `Installing ${model} via ${backend}...`}
       </p>
 
@@ -139,28 +136,26 @@ export function Downloading({ backend, model, onNext }: Props) {
 
           return (
             <div key={p} className="flex items-center gap-3">
-              <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                isDone
-                  ? 'bg-teal-500'
-                  : isCurrent
-                    ? 'bg-teal-500/20'
-                    : 'bg-neutral-200 dark:bg-neutral-800'
-              }`}>
+              <div className={clsx(
+                'w-6 h-6 rounded-full flex items-center justify-center shrink-0',
+                isDone && 'bg-success',
+                isCurrent && 'bg-accent/20',
+                !isDone && !isCurrent && 'bg-surface-elevated',
+              )}>
                 {isDone ? (
                   <Check className="w-3.5 h-3.5 text-white" />
                 ) : isCurrent ? (
-                  <Loader2 className="w-3.5 h-3.5 text-teal-500 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 text-accent animate-spin" />
                 ) : (
                   <div className="w-2 h-2 rounded-full bg-neutral-400 dark:bg-neutral-600" />
                 )}
               </div>
-              <span className={`text-sm ${
-                isDone
-                  ? 'text-neutral-500 dark:text-neutral-400'
-                  : isCurrent
-                    ? 'text-neutral-900 dark:text-neutral-100 font-medium'
-                    : 'text-neutral-400 dark:text-neutral-600'
-              }`}>
+              <span className={clsx(
+                'text-compact',
+                isDone && 'text-content-secondary',
+                isCurrent && 'text-content-primary font-medium',
+                !isDone && !isCurrent && 'text-content-tertiary',
+              )}>
                 {phaseLabels[p]}
               </span>
             </div>
@@ -170,7 +165,7 @@ export function Downloading({ backend, model, onNext }: Props) {
 
       {/* Detail text */}
       {detail && phase !== 'ready' && phase !== 'error' && (
-        <p className="mt-6 text-xs text-neutral-400 dark:text-neutral-500 text-center max-w-sm truncate">
+        <p className="mt-6 text-caption text-content-tertiary text-center max-w-sm truncate">
           {detail}
         </p>
       )}
@@ -178,20 +173,16 @@ export function Downloading({ backend, model, onNext }: Props) {
       {/* Error state */}
       {error && (
         <div className="mt-6 flex flex-col items-center">
-          <div className="flex items-center gap-2 text-amber-600 dark:text-amber-400 mb-2">
+          <div className="flex items-center gap-2 text-warning mb-2">
             <AlertTriangle className="w-4 h-4" />
-            <span className="text-sm font-medium">Error</span>
+            <span className="text-compact font-medium">Error</span>
           </div>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 text-center max-w-sm mb-4">
+          <p className="text-caption text-content-secondary text-center max-w-sm mb-4">
             {error}
           </p>
-          <button
-            onClick={retry}
-            className="flex items-center gap-2 px-5 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
+          <Button icon={<RotateCcw className="w-3.5 h-3.5" />} onClick={retry}>
             Retry
-          </button>
+          </Button>
         </div>
       )}
     </div>
