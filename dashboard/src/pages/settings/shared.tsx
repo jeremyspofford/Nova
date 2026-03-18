@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Save, RotateCcw } from 'lucide-react'
+import { Save, RotateCcw, CheckCircle2, XCircle } from 'lucide-react'
 import { Button, Input, Textarea } from '../../components/ui'
 import type { PlatformConfigEntry } from '../../api'
 
@@ -101,6 +101,27 @@ export function ConfigField({
         />
       )}
     </div>
+  )
+}
+
+// ── Service Status Badge ─────────────────────────────────────────────────────
+// Used by RemoteAccessSection and ChatIntegrationsSection to show running/stopped/unconfigured state.
+
+export function ServiceStatusBadge({ configured, running }: { configured: boolean; running: boolean }) {
+  if (running) return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
+      <CheckCircle2 size={12} /> Running
+    </span>
+  )
+  if (configured) return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30 px-2 py-0.5 rounded-full">
+      <XCircle size={12} /> Stopped
+    </span>
+  )
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 rounded-full">
+      Not configured
+    </span>
   )
 }
 
