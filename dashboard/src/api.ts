@@ -623,3 +623,84 @@ export interface NovaIdentity {
 export const getNovaIdentity = () =>
   apiFetch<NovaIdentity>('/api/v1/identity')
 
+// ── Dashboard overview endpoints ─────────────────────────────────────────────
+
+export interface PipelineStats {
+  active_count: number
+  queued_count: number
+  completed_today: number
+  completed_this_week: number
+  failed_today: number
+  success_rate_7d: number
+  avg_duration_ms: number
+}
+
+export interface UsageSummary {
+  total_cost_usd: number
+  total_requests: number
+  by_model: Array<{ model: string; cost_usd: number; requests: number }>
+  by_day: Array<{ date: string; cost_usd: number; requests: number }>
+  vs_previous_period_pct: number
+}
+
+export interface HealthOverview {
+  services: Array<{ name: string; status: string; latency_ms: number }>
+  avg_latency_ms: number
+  overall_status: string
+}
+
+export interface ActivityEvent {
+  id: number
+  event_type: string
+  service: string
+  severity: string
+  summary: string
+  metadata: Record<string, unknown>
+  created_at: string
+}
+
+export interface PipelineLatency {
+  avg_total_ms: number
+  p50_ms: number
+  p95_ms: number
+  by_stage: Array<{ stage: string; avg_ms: number }>
+}
+
+export interface GoalStats {
+  active: number
+  completed: number
+  failed: number
+  paused: number
+  success_rate: number
+  avg_iterations: number
+  avg_cost_usd: number
+  total_cost_usd: number
+}
+
+export interface RoutingStats {
+  by_model: Array<{ model: string; requests: number; avg_tokens: number; avg_latency_ms: number; cost_usd: number }>
+  fallback_rate_pct: number
+  category_distribution: Record<string, number>
+}
+
+export const getPipelineStats = () =>
+  apiFetch<PipelineStats>('/api/v1/pipeline/stats')
+
+export const getUsageSummary = (period: string) =>
+  apiFetch<UsageSummary>(`/api/v1/usage/summary?period=${period}`)
+
+export const getHealthOverview = () =>
+  apiFetch<HealthOverview>('/api/v1/health/overview')
+
+export const getActivityFeed = (limit = 20) =>
+  apiFetch<ActivityEvent[]>(`/api/v1/activity?limit=${limit}`)
+
+export const getPipelineLatency = () =>
+  apiFetch<PipelineLatency>('/api/v1/pipeline/stats/latency')
+
+export const getGoalStats = () =>
+  apiFetch<GoalStats>('/api/v1/goals/stats')
+
+export const getRoutingStats = (period = '7d') =>
+  apiFetch<RoutingStats>(`/api/v1/models/routing-stats?period=${period}`)
+

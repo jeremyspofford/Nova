@@ -6,7 +6,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime
+import time as _time
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query
@@ -590,6 +591,18 @@ async def update_platform_config(
         except Exception as e:
             log.warning("Failed to publish config %s to Redis: %s", key, e)
 
+    # Emit activity event for config changes
+    try:
+        from app.activity import emit_activity
+        pool = get_pool()
+        await emit_activity(
+            pool, "config_updated", "orchestrator",
+            f"Config '{key}' updated",
+            metadata={"key": key},
+        )
+    except Exception:
+        pass
+
     return _config_row(dict(row))
 
 
@@ -746,3 +759,274 @@ async def create_usage_event(req: UsageEventRequest, _key: ApiKeyDep):
         outcome_confidence=req.outcome_confidence,
     )
     return {"status": "created"}
+
+
+# ── Usage summary (dashboard overview) ────────────────────────────────────────
+
+@router.get("/api/v1/usage/summary")
+async def usage_summary(
+    _admin: AdminDep,
+    period: str = Query(default="week", regex="^(day|week|month|year)$"),
+) -> dict:
+    """Aggregated usage summary for a given period. Admin-only."""
+    period_days = {"day": 1, "week": 7, "month": 30, "year": 365}
+    days = period_days.get(period, 7)
+    now = datetime.now(timezone.utc)
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        # Current period totals
+        totals = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(cost_usd), 0)::float AS total_cost_usd,
+                   COUNT(*) AS total_requests
+            FROM usage_events
+            WHERE created_at >= $1
+            """,
+            current_start,
+        )
+        # Previous period totals (for comparison)
+        prev_totals = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(cost_usd), 0)::float AS total_cost_usd
+            FROM usage_events
+            WHERE created_at >= $1 AND created_at < $2
+            """,
+            previous_start, current_start,
+        )
+        # By model
+        by_model_rows = await conn.fetch(
+            """
+            SELECT model,
+                   COALESCE(SUM(cost_usd), 0)::float AS cost_usd,
+                   COUNT(*) AS requests
+            FROM usage_events
+            WHERE created_at >= $1
+            GROUP BY model
+            ORDER BY requests DESC
+            """,
+            current_start,
+        )
+        # By day
+        by_day_rows = await conn.fetch(
+            """
+            SELECT DATE(created_at) AS date,
+                   COALESCE(SUM(cost_usd), 0)::float AS cost_usd,
+                   COUNT(*) AS requests
+            FROM usage_events
+            WHERE created_at >= $1
+            GROUP BY DATE(created_at)
+            ORDER BY date
+            """,
+            current_start,
+        )
+
+    prev_cost = float(prev_totals["total_cost_usd"]) if prev_totals else 0
+    current_cost = float(totals["total_cost_usd"])
+    vs_previous_pct = (
+        round(((current_cost - prev_cost) / prev_cost) * 100, 1)
+        if prev_cost > 0 else 0.0
+    )
+
+    return {
+        "total_cost_usd": current_cost,
+        "total_requests": totals["total_requests"],
+        "by_model": [
+            {"model": r["model"], "cost_usd": r["cost_usd"], "requests": r["requests"]}
+            for r in by_model_rows
+        ],
+        "by_day": [
+            {"date": r["date"].isoformat(), "cost_usd": r["cost_usd"], "requests": r["requests"]}
+            for r in by_day_rows
+        ],
+        "vs_previous_period_pct": vs_previous_pct,
+    }
+
+
+# ── Health overview (dashboard) ───────────────────────────────────────────────
+
+@router.get("/api/v1/health/overview")
+async def health_overview(_admin: AdminDep) -> dict:
+    """Ping all services and report latency. Admin-only."""
+    import httpx
+
+    services_to_check = [
+        ("llm-gateway", "http://llm-gateway:8001/health/ready"),
+        ("memory-service", "http://memory-service:8002/health/ready"),
+        ("cortex", "http://cortex:8100/health/ready"),
+        ("recovery", "http://recovery:8888/health/ready"),
+    ]
+
+    results = []
+
+    # Orchestrator is self — always up if this endpoint is responding
+    results.append({"name": "orchestrator", "status": "healthy", "latency_ms": 0})
+
+    # HTTP service checks
+    async def _check_http(name: str, url: str) -> dict:
+        start = _time.monotonic()
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                resp = await client.get(url)
+                latency = int((_time.monotonic() - start) * 1000)
+                status = "healthy" if resp.status_code == 200 else "degraded"
+                return {"name": name, "status": status, "latency_ms": latency}
+        except Exception:
+            latency = int((_time.monotonic() - start) * 1000)
+            return {"name": name, "status": "down", "latency_ms": latency}
+
+    http_tasks = [_check_http(name, url) for name, url in services_to_check]
+    http_results = await asyncio.gather(*http_tasks)
+    results.extend(http_results)
+
+    # Postgres check
+    start = _time.monotonic()
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+        latency = int((_time.monotonic() - start) * 1000)
+        results.append({"name": "postgres", "status": "healthy", "latency_ms": latency})
+    except Exception:
+        latency = int((_time.monotonic() - start) * 1000)
+        results.append({"name": "postgres", "status": "down", "latency_ms": latency})
+
+    # Redis check
+    start = _time.monotonic()
+    try:
+        from app.store import get_redis as get_app_redis
+        redis = get_app_redis()
+        await redis.ping()
+        latency = int((_time.monotonic() - start) * 1000)
+        results.append({"name": "redis", "status": "healthy", "latency_ms": latency})
+    except Exception:
+        latency = int((_time.monotonic() - start) * 1000)
+        results.append({"name": "redis", "status": "down", "latency_ms": latency})
+
+    # Compute aggregate
+    latencies = [r["latency_ms"] for r in results if r["latency_ms"] > 0]
+    avg_latency = int(sum(latencies) / len(latencies)) if latencies else 0
+    statuses = {r["status"] for r in results}
+    if "down" in statuses:
+        overall = "degraded"
+    elif "degraded" in statuses:
+        overall = "degraded"
+    else:
+        overall = "healthy"
+
+    return {
+        "services": results,
+        "avg_latency_ms": avg_latency,
+        "overall_status": overall,
+    }
+
+
+# ── Activity feed ──────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/activity")
+async def activity_feed(
+    _admin: AdminDep,
+    limit: int = Query(default=20, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> list[dict]:
+    """Recent activity events for the dashboard feed. Admin-only."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, event_type, service, severity, summary, metadata, created_at
+            FROM activity_events
+            ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
+            """,
+            limit, offset,
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["created_at"] = d["created_at"].isoformat()
+        # metadata is stored as JSONB text — parse it
+        meta = d.get("metadata")
+        if isinstance(meta, str):
+            try:
+                d["metadata"] = json.loads(meta)
+            except Exception:
+                d["metadata"] = {}
+        result.append(d)
+    return result
+
+
+# ── Model routing stats ───────────────────────────────────────────────────────
+
+@router.get("/api/v1/models/routing-stats")
+async def model_routing_stats(
+    _admin: AdminDep,
+    period: str = Query(default="7d"),
+) -> dict:
+    """Per-model usage aggregation for routing analytics. Admin-only."""
+    # Parse period string (e.g. "7d", "30d", "1d")
+    try:
+        days = int(period.rstrip("d"))
+    except (ValueError, AttributeError):
+        days = 7
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT model,
+              COUNT(*) AS requests,
+              COALESCE(AVG(input_tokens + output_tokens), 0)::int AS avg_tokens,
+              COALESCE(AVG(duration_ms), 0)::int AS avg_latency_ms,
+              COALESCE(SUM(cost_usd), 0)::float AS cost_usd
+            FROM usage_events
+            WHERE created_at >= $1
+            GROUP BY model
+            ORDER BY requests DESC
+            """,
+            cutoff,
+        )
+        # Fallback rate: count events where metadata has 'was_fallback' = true
+        fallback_row = await conn.fetchrow(
+            """
+            SELECT
+              COUNT(*) FILTER (WHERE metadata->>'was_fallback' = 'true') AS fallback_count,
+              COUNT(*) AS total
+            FROM usage_events
+            WHERE created_at >= $1
+            """,
+            cutoff,
+        )
+        # Category distribution from metadata
+        cat_rows = await conn.fetch(
+            """
+            SELECT metadata->>'category' AS category, COUNT(*) AS cnt
+            FROM usage_events
+            WHERE created_at >= $1
+              AND metadata->>'category' IS NOT NULL
+            GROUP BY metadata->>'category'
+            """,
+            cutoff,
+        )
+
+    total = fallback_row["total"] if fallback_row else 0
+    fallback_count = fallback_row["fallback_count"] if fallback_row else 0
+    fallback_rate = round((fallback_count / total) * 100, 1) if total > 0 else 0.0
+
+    return {
+        "by_model": [
+            {
+                "model": r["model"],
+                "requests": r["requests"],
+                "avg_tokens": r["avg_tokens"],
+                "avg_latency_ms": r["avg_latency_ms"],
+                "cost_usd": r["cost_usd"],
+            }
+            for r in rows
+        ],
+        "fallback_rate_pct": fallback_rate,
+        "category_distribution": {r["category"]: r["cnt"] for r in cat_rows},
+    }

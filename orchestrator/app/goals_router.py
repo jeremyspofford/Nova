@@ -136,6 +136,41 @@ async def list_goals(
     return [_row_to_goal(r) for r in rows]
 
 
+@goals_router.get("/api/v1/goals/stats")
+async def goal_stats(_user: UserDep) -> dict:
+    """Aggregate goal statistics for the dashboard."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+              COUNT(*) FILTER (WHERE status = 'active') AS active,
+              COUNT(*) FILTER (WHERE status = 'completed') AS completed,
+              COUNT(*) FILTER (WHERE status = 'failed') AS failed,
+              COUNT(*) FILTER (WHERE status = 'paused') AS paused,
+              COALESCE(AVG(iteration) FILTER (WHERE status IN ('completed','failed')), 0) AS avg_iterations,
+              COALESCE(AVG(cost_so_far_usd) FILTER (WHERE status IN ('completed','failed')), 0)::float AS avg_cost_usd,
+              COALESCE(SUM(cost_so_far_usd), 0)::float AS total_cost_usd
+            FROM goals
+            """
+        )
+    total_terminal = (row["completed"] or 0) + (row["failed"] or 0)
+    success_rate = (
+        round((row["completed"] or 0) / total_terminal, 4)
+        if total_terminal > 0 else 0.0
+    )
+    return {
+        "active": row["active"] or 0,
+        "completed": row["completed"] or 0,
+        "failed": row["failed"] or 0,
+        "paused": row["paused"] or 0,
+        "success_rate": success_rate,
+        "avg_iterations": round(float(row["avg_iterations"]), 1),
+        "avg_cost_usd": round(row["avg_cost_usd"], 6),
+        "total_cost_usd": round(row["total_cost_usd"], 6),
+    }
+
+
 @goals_router.get("/api/v1/goals/{goal_id}", response_model=GoalResponse)
 async def get_goal(goal_id: UUID, _user: UserDep):
     """Get a single goal by ID."""
@@ -181,6 +216,22 @@ async def update_goal(goal_id: UUID, req: UpdateGoalRequest, _user: UserDep):
     if not row:
         raise HTTPException(status_code=404, detail="Goal not found")
     log.info("Goal updated: %s", goal_id)
+
+    # Emit activity event on status changes
+    if "status" in updates:
+        try:
+            from app.activity import emit_activity
+            new_status = updates["status"]
+            severity = "warning" if new_status == "failed" else "info"
+            await emit_activity(
+                pool, "goal_status_changed", "orchestrator",
+                f"Goal '{row['title'][:60]}' status changed to {new_status}",
+                severity=severity,
+                metadata={"goal_id": str(goal_id), "status": new_status},
+            )
+        except Exception:
+            pass
+
     return _row_to_goal(row)
 
 

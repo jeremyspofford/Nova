@@ -128,6 +128,12 @@ async def mark_task_failed(task_id: str, error: str) -> None:
         )
     await _backfill_training_success(task_id, success=False)
     await _audit(task_id, "task_failed", "error", {"error": error})
+    # Emit activity event for dashboard feed
+    try:
+        from ..activity import emit_activity
+        await emit_activity(pool, "task_failed", "pipeline", f"Task {task_id[:8]}... failed: {error[:120]}", severity="error", metadata={"task_id": task_id, "error": error[:500]})
+    except Exception:
+        pass
 
 
 # ── Core pipeline logic ────────────────────────────────────────────────────────
@@ -700,6 +706,16 @@ async def _persist_stage_records(
                         finding.get("description", ""),
                         finding.get("evidence"),
                     )
+                # Emit activity for high/critical guardrail findings
+                high_findings = [f for f in result.get("findings", []) if f.get("severity") in ("high", "critical")]
+                if high_findings:
+                    from ..activity import emit_activity
+                    await emit_activity(
+                        pool, "guardrail_finding", "pipeline",
+                        f"Guardrail flagged {len(high_findings)} high-severity finding(s) on task {task_id[:8]}...",
+                        severity="warning",
+                        metadata={"task_id": task_id, "count": len(high_findings)},
+                    )
 
             # ── Code review verdicts ──────────────────────────────────
             if agent.role == "code_review":
@@ -904,6 +920,12 @@ async def _complete_task(task_id: str, output: str, state: PipelineState) -> Non
         )
     await _audit(task_id, "task_complete", "info", {"flags": list(state.flags)})
     logger.info(f"Task {task_id} complete")
+    # Emit activity event for dashboard feed
+    try:
+        from ..activity import emit_activity
+        await emit_activity(pool, "task_completed", "pipeline", f"Task {task_id[:8]}... completed", metadata={"task_id": task_id, "flags": list(state.flags)})
+    except Exception:
+        pass
 
 
 async def _pause_for_human_review(

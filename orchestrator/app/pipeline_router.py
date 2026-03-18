@@ -999,6 +999,94 @@ async def delete_agent_endpoint_route(
         raise HTTPException(status_code=404, detail="Agent endpoint not found")
 
 
+# ── Pipeline Stats ─────────────────────────────────────────────────────────────
+
+@router.get("/api/v1/pipeline/stats")
+async def pipeline_stats(_admin: AdminDep) -> dict:
+    """Aggregate pipeline task stats for the dashboard overview."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        counts = await conn.fetchrow(
+            """
+            SELECT
+              COUNT(*) FILTER (WHERE status IN ('running','context_running','task_running',
+                                                'guardrail_running','review_running')) AS active_count,
+              COUNT(*) FILTER (WHERE status = 'queued') AS queued_count,
+              COUNT(*) FILTER (WHERE status = 'complete' AND completed_at >= CURRENT_DATE) AS completed_today,
+              COUNT(*) FILTER (WHERE status = 'complete' AND completed_at >= NOW() - INTERVAL '7 days') AS completed_this_week,
+              COUNT(*) FILTER (WHERE status = 'failed' AND completed_at >= CURRENT_DATE) AS failed_today
+            FROM tasks
+            """
+        )
+        rate_row = await conn.fetchrow(
+            """
+            SELECT CASE WHEN (c + f) > 0 THEN c::float / (c + f) ELSE 0 END AS rate
+            FROM (
+              SELECT COUNT(*) FILTER (WHERE status = 'complete') AS c,
+                     COUNT(*) FILTER (WHERE status = 'failed') AS f
+              FROM tasks WHERE completed_at >= NOW() - INTERVAL '7 days'
+            ) sub
+            """
+        )
+        dur_row = await conn.fetchrow(
+            """
+            SELECT COALESCE(AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000), 0)::int AS avg_ms
+            FROM tasks
+            WHERE status = 'complete'
+              AND completed_at >= NOW() - INTERVAL '7 days'
+              AND started_at IS NOT NULL
+            """
+        )
+    return {
+        "active_count": counts["active_count"],
+        "queued_count": counts["queued_count"],
+        "completed_today": counts["completed_today"],
+        "completed_this_week": counts["completed_this_week"],
+        "failed_today": counts["failed_today"],
+        "success_rate_7d": round(rate_row["rate"], 4),
+        "avg_duration_ms": dur_row["avg_ms"],
+    }
+
+
+@router.get("/api/v1/pipeline/stats/latency")
+async def pipeline_latency_stats(_admin: AdminDep) -> dict:
+    """Per-stage latency breakdown from the last 7 days of agent sessions."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        stage_rows = await conn.fetch(
+            """
+            SELECT role,
+              AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000)::int AS avg_ms
+            FROM agent_sessions
+            WHERE completed_at IS NOT NULL
+              AND started_at IS NOT NULL
+              AND completed_at >= NOW() - INTERVAL '7 days'
+            GROUP BY role
+            """
+        )
+        overall = await conn.fetchrow(
+            """
+            SELECT
+              COALESCE(AVG(dur), 0)::int AS avg_ms,
+              COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY dur), 0)::int AS p50_ms,
+              COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY dur), 0)::int AS p95_ms
+            FROM (
+              SELECT EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000 AS dur
+              FROM agent_sessions
+              WHERE completed_at IS NOT NULL
+                AND started_at IS NOT NULL
+                AND completed_at >= NOW() - INTERVAL '7 days'
+            ) sub
+            """
+        )
+    return {
+        "avg_total_ms": overall["avg_ms"],
+        "p50_ms": overall["p50_ms"],
+        "p95_ms": overall["p95_ms"],
+        "by_stage": [{"stage": r["role"], "avg_ms": r["avg_ms"]} for r in stage_rows],
+    }
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _task_dict(row) -> dict:
