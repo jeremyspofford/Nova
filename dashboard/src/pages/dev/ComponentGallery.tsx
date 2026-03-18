@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Mail, Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
+import { Search, Mail, Eye, EyeOff, Plus, Trash2, Activity } from 'lucide-react'
 import {
   Button,
   Input,
@@ -10,7 +10,17 @@ import {
   RadioGroup,
   Slider,
   Badge,
+  Avatar,
+  StatusDot,
+  Code,
+  CopyableId,
+  Metric,
+  ProgressBar,
+  PipelineStages,
+  Table,
+  DataList,
 } from '../../components/ui'
+import type { TableColumn } from '../../components/ui'
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="font-sans text-h2 text-content-primary mb-4">{children}</h2>
@@ -292,23 +302,326 @@ function SliderGallery() {
   )
 }
 
-// ── Badge Gallery (read-only) ──────────────────────────────────────────────────
+// ── Badge Gallery ──────────────────────────────────────────────────────────────
 
 function BadgeGallery() {
   return (
     <div>
       <SectionTitle>Badge</SectionTitle>
       <DemoCard>
-        <div className="flex flex-wrap gap-2">
-          <Badge>neutral</Badge>
-          <Badge color="accent">accent</Badge>
-          <Badge color="emerald">emerald</Badge>
-          <Badge color="amber">amber</Badge>
-          <Badge color="red">red</Badge>
-          <Badge color="sky">sky</Badge>
-          <Badge color="violet">violet</Badge>
-          <Badge color="blue">blue</Badge>
-          <Badge color="purple">purple</Badge>
+        <SubSection title="Colors">
+          <div className="flex flex-wrap gap-2">
+            <Badge color="neutral">neutral</Badge>
+            <Badge color="accent">accent</Badge>
+            <Badge color="success">success</Badge>
+            <Badge color="warning">warning</Badge>
+            <Badge color="danger">danger</Badge>
+            <Badge color="info">info</Badge>
+          </div>
+        </SubSection>
+        <SubSection title="Sizes">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge size="sm">small</Badge>
+            <Badge size="md">medium</Badge>
+          </div>
+        </SubSection>
+        <SubSection title="With Dot">
+          <div className="flex flex-wrap gap-2">
+            <Badge color="success" dot>online</Badge>
+            <Badge color="warning" dot>degraded</Badge>
+            <Badge color="danger" dot>offline</Badge>
+            <Badge color="info" dot>syncing</Badge>
+          </div>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Avatar Gallery ─────────────────────────────────────────────────────────────
+
+function AvatarGallery() {
+  return (
+    <div>
+      <SectionTitle>Avatar</SectionTitle>
+      <DemoCard>
+        <SubSection title="Sizes (Initials)">
+          <div className="flex items-center gap-3">
+            <Avatar name="Ada Lovelace" size="xs" />
+            <Avatar name="Ada Lovelace" size="sm" />
+            <Avatar name="Ada Lovelace" size="md" />
+            <Avatar name="Ada Lovelace" size="lg" />
+          </div>
+        </SubSection>
+        <SubSection title="With Status">
+          <div className="flex items-center gap-3">
+            <Avatar name="Online User" size="md" status="online" />
+            <Avatar name="Busy User" size="md" status="busy" />
+            <Avatar name="Offline User" size="md" status="offline" />
+          </div>
+        </SubSection>
+        <SubSection title="Single Name">
+          <div className="flex items-center gap-3">
+            <Avatar name="Nova" size="md" />
+            <Avatar name="X" size="md" />
+          </div>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── StatusDot Gallery ──────────────────────────────────────────────────────────
+
+function StatusDotGallery() {
+  return (
+    <div>
+      <SectionTitle>StatusDot</SectionTitle>
+      <DemoCard>
+        <SubSection title="Variants">
+          <div className="flex items-center gap-4">
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="success" /> Success
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="warning" /> Warning
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="danger" /> Danger
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="neutral" /> Neutral
+            </span>
+          </div>
+        </SubSection>
+        <SubSection title="Sizes">
+          <div className="flex items-center gap-4">
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="success" size="sm" /> Small
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="success" size="md" /> Medium
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="success" size="lg" /> Large
+            </span>
+          </div>
+        </SubSection>
+        <SubSection title="Pulsing">
+          <div className="flex items-center gap-4">
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="success" pulse /> Active
+            </span>
+            <span className="inline-flex items-center gap-1.5 text-compact text-content-secondary">
+              <StatusDot status="warning" pulse /> Processing
+            </span>
+          </div>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Code Gallery ───────────────────────────────────────────────────────────────
+
+function CodeGallery() {
+  return (
+    <div>
+      <SectionTitle>Code</SectionTitle>
+      <DemoCard>
+        <SubSection title="Inline">
+          <p className="text-body text-content-secondary">
+            Run <Code>npm install</Code> to get started, then <Code>npm run dev</Code> to launch.
+          </p>
+        </SubSection>
+        <SubSection title="Block">
+          <Code inline={false}>
+            {'docker compose up --build\ncurl http://localhost:8000/health/ready'}
+          </Code>
+        </SubSection>
+        <SubSection title="Block + Copyable">
+          <Code inline={false} copyable>
+            {'export NOVA_ADMIN_SECRET="your-secret-here"\ndocker compose up -d'}
+          </Code>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── CopyableId Gallery ─────────────────────────────────────────────────────────
+
+function CopyableIdGallery() {
+  return (
+    <div>
+      <SectionTitle>CopyableId</SectionTitle>
+      <DemoCard>
+        <SubSection title="Default (8 chars)">
+          <CopyableId id="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+        </SubSection>
+        <SubSection title="Custom truncation (12 chars)">
+          <CopyableId id="sk-nova-abc123def456ghi789" truncate={12} />
+        </SubSection>
+        <SubSection title="Short ID (no truncation)">
+          <CopyableId id="abc123" />
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Metric Gallery ─────────────────────────────────────────────────────────────
+
+function MetricGallery() {
+  return (
+    <div>
+      <SectionTitle>Metric</SectionTitle>
+      <DemoCard>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <Metric label="Total Tasks" value="1,284" change={{ value: '12%', direction: 'up' }} />
+          <Metric label="Error Rate" value="0.3%" change={{ value: '0.1%', direction: 'down' }} />
+          <Metric
+            label="Latency"
+            value="142ms"
+            icon={<Activity size={12} />}
+          />
+        </div>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── ProgressBar Gallery ────────────────────────────────────────────────────────
+
+function ProgressBarGallery() {
+  return (
+    <div>
+      <SectionTitle>ProgressBar</SectionTitle>
+      <DemoCard>
+        <SubSection title="Determinate">
+          <div className="space-y-3 max-w-md">
+            <ProgressBar value={25} />
+            <ProgressBar value={50} />
+            <ProgressBar value={75} />
+            <ProgressBar value={100} />
+          </div>
+        </SubSection>
+        <SubSection title="Sizes">
+          <div className="space-y-3 max-w-md">
+            <ProgressBar value={60} size="sm" />
+            <ProgressBar value={60} size="md" />
+          </div>
+        </SubSection>
+        <SubSection title="Indeterminate">
+          <div className="space-y-3 max-w-md">
+            <ProgressBar variant="indeterminate" />
+            <ProgressBar variant="indeterminate" size="sm" />
+          </div>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── PipelineStages Gallery ─────────────────────────────────────────────────────
+
+function PipelineStagesGallery() {
+  return (
+    <div>
+      <SectionTitle>PipelineStages</SectionTitle>
+      <DemoCard>
+        <SubSection title="Compact">
+          <div className="space-y-2">
+            <PipelineStages stages={['done', 'done', 'active', 'pending', 'pending']} compact />
+            <PipelineStages stages={['done', 'done', 'done', 'done', 'done']} compact />
+            <PipelineStages stages={['done', 'done', 'failed', 'pending', 'pending']} compact />
+          </div>
+        </SubSection>
+        <SubSection title="With Labels">
+          <div className="space-y-4">
+            <PipelineStages stages={['done', 'done', 'active', 'pending', 'pending']} />
+            <PipelineStages stages={['done', 'done', 'done', 'done', 'done']} />
+            <PipelineStages stages={['done', 'failed', 'pending', 'pending', 'pending']} />
+          </div>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Table Gallery ──────────────────────────────────────────────────────────────
+
+interface SampleRow {
+  id: string
+  name: string
+  status: string
+  latency: number
+  [key: string]: unknown
+}
+
+const sampleData: SampleRow[] = [
+  { id: 'task-001', name: 'Context Retrieval', status: 'completed', latency: 142 },
+  { id: 'task-002', name: 'Code Review', status: 'running', latency: 0 },
+  { id: 'task-003', name: 'Guardrail Check', status: 'failed', latency: 89 },
+]
+
+const sampleColumns: TableColumn<SampleRow>[] = [
+  { key: 'id', header: 'ID', width: '120px' },
+  { key: 'name', header: 'Task Name', sortable: true },
+  {
+    key: 'status',
+    header: 'Status',
+    sortable: true,
+    render: (row) => (
+      <Badge
+        color={row.status === 'completed' ? 'success' : row.status === 'running' ? 'accent' : 'danger'}
+        size="sm"
+      >
+        {row.status}
+      </Badge>
+    ),
+  },
+  {
+    key: 'latency',
+    header: 'Latency',
+    sortable: true,
+    render: (row) => <span className="font-mono text-mono-sm">{row.latency ? `${row.latency}ms` : '--'}</span>,
+  },
+]
+
+function TableGallery() {
+  return (
+    <div>
+      <SectionTitle>Table</SectionTitle>
+      <DemoCard>
+        <SubSection title="With Data">
+          <Table columns={sampleColumns} data={sampleData} onRowClick={() => {}} />
+        </SubSection>
+        <SubSection title="Empty State">
+          <Table columns={sampleColumns} data={[]} emptyMessage="No tasks found." />
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── DataList Gallery ───────────────────────────────────────────────────────────
+
+function DataListGallery() {
+  return (
+    <div>
+      <SectionTitle>DataList</SectionTitle>
+      <DemoCard>
+        <div className="max-w-md">
+          <DataList
+            items={[
+              { label: 'Task ID', value: 'task-a1b2c3d4', copyable: true },
+              { label: 'Status', value: <Badge color="success" size="sm">completed</Badge> },
+              { label: 'Duration', value: '142ms' },
+              { label: 'Model', value: 'claude-3-opus', copyable: true },
+              { label: 'Tokens Used', value: '1,284' },
+            ]}
+          />
         </div>
       </DemoCard>
     </div>
@@ -334,6 +647,15 @@ export default function ComponentGallery() {
         <RadioGallery />
         <SliderGallery />
         <BadgeGallery />
+        <AvatarGallery />
+        <StatusDotGallery />
+        <CodeGallery />
+        <CopyableIdGallery />
+        <MetricGallery />
+        <ProgressBarGallery />
+        <PipelineStagesGallery />
+        <TableGallery />
+        <DataListGallery />
       </section>
     </div>
   )

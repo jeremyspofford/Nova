@@ -312,7 +312,7 @@ function GraphTab() {
                     <div className="flex gap-2 items-center">
                       <TypeBadge type={selectedNode.type} />
                       {selectedNode.superseded && (
-                        <Badge className="bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs">
+                        <Badge color="danger" size="sm">
                           superseded
                         </Badge>
                       )}
@@ -511,7 +511,7 @@ function ConsolidationTab() {
             )}
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
-                <Badge className="bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 text-xs">
+                <Badge color="neutral" size="sm">
                   {entry.trigger}
                 </Badge>
                 <span className="text-xs text-neutral-400">
