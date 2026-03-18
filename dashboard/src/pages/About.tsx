@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Heart, ExternalLink, Server } from 'lucide-react'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { getServiceStatus, type ServiceStatus } from '../api-recovery'
+import { Card, StatusDot, DataList, Badge } from '../components/ui'
 
 const VERSION = '0.5.0'
 
@@ -16,28 +17,18 @@ const SERVICE_LABELS: Record<string, string> = {
   recovery:         'Recovery',
 }
 
-type HealthStatus = 'healthy' | 'unhealthy' | 'starting' | 'loading'
-
-function deriveStatus(svc: ServiceStatus): HealthStatus {
-  if (svc.status === 'running' && (svc.health === 'healthy' || svc.health === 'none')) return 'healthy'
-  if (svc.status === 'running') return 'starting'
-  return 'unhealthy'
+function deriveStatus(svc: ServiceStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (svc.status === 'running' && (svc.health === 'healthy' || svc.health === 'none')) return 'success'
+  if (svc.status === 'running') return 'warning'
+  if (svc.status === 'not_found') return 'neutral'
+  return 'danger'
 }
 
-function StatusDot({ status }: { status: HealthStatus }) {
-  const color =
-    status === 'healthy' ? 'bg-emerald-500' :
-    status === 'starting' ? 'bg-amber-500 animate-pulse' :
-    status === 'unhealthy' ? 'bg-red-500' :
-    'bg-neutral-400 animate-pulse'
-  return <span className={`block size-2.5 rounded-full ${color}`} />
-}
-
-function statusLabel(status: HealthStatus): string {
-  if (status === 'healthy') return 'Healthy'
-  if (status === 'starting') return 'Starting...'
-  if (status === 'unhealthy') return 'Down'
-  return 'Checking...'
+function statusLabel(status: 'success' | 'warning' | 'danger' | 'neutral'): string {
+  if (status === 'success') return 'Healthy'
+  if (status === 'warning') return 'Starting...'
+  if (status === 'danger') return 'Down'
+  return 'Unknown'
 }
 
 export function About() {
@@ -48,76 +39,107 @@ export function About() {
     refetchInterval: 15_000,
   })
 
+  const healthyCount = services?.filter(s => deriveStatus(s) === 'success').length ?? 0
+  const totalCount = services?.length ?? 0
+
   return (
-    <div className="p-6 sm:p-10 space-y-8 max-w-2xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{name}</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-          Version {VERSION}
-        </p>
-      </div>
+    <div className="flex justify-center py-8 px-4">
+      <Card className="w-full max-w-lg p-6 space-y-6">
+        {/* Header */}
+        <div className="text-center">
+          <div className="mx-auto w-14 h-14 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
+            <span className="text-2xl font-bold text-accent">N</span>
+          </div>
+          <h1 className="text-h1 text-content-primary">{name}</h1>
+          <p className="mt-1 text-compact text-content-secondary">
+            Version {VERSION}
+          </p>
+          <p className="mt-3 text-compact text-content-secondary max-w-sm mx-auto">
+            A self-directed autonomous AI platform. Define a goal, and Nova breaks it into subtasks,
+            executes them through a coordinated agent pipeline, and re-plans as needed.
+          </p>
+        </div>
 
-      {/* Service health */}
-      <section>
-        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-3">
-          <Server size={14} />
-          Service Health
-        </h2>
-        <div className="rounded-lg border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 divide-y divide-neutral-100 dark:divide-neutral-800">
-          {isLoading && (
-            <div className="px-4 py-3 text-sm text-neutral-400">Checking services...</div>
-          )}
-          {services?.map(svc => {
-            const status = deriveStatus(svc)
-            const label = SERVICE_LABELS[svc.service] ?? svc.service
-            return (
-              <div key={svc.service} className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-neutral-700 dark:text-neutral-300">{label}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-neutral-400 dark:text-neutral-500">
-                    {statusLabel(status)}
-                  </span>
-                  <StatusDot status={status} />
+        {/* System info */}
+        <DataList
+          items={[
+            {
+              label: 'Services',
+              value: isLoading ? 'Checking...' : `${healthyCount} / ${totalCount} healthy`,
+            },
+            {
+              label: 'Version',
+              value: VERSION,
+              copyable: true,
+            },
+          ]}
+        />
+
+        {/* Service health */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <Server size={14} className="text-content-tertiary" />
+            <h2 className="text-caption font-medium text-content-tertiary uppercase tracking-wider">
+              Service Health
+            </h2>
+          </div>
+          <div className="rounded-lg border border-border-subtle divide-y divide-border-subtle overflow-hidden">
+            {isLoading && (
+              <div className="px-4 py-3 text-compact text-content-tertiary">Checking services...</div>
+            )}
+            {services?.map(svc => {
+              const status = deriveStatus(svc)
+              const label = SERVICE_LABELS[svc.service] ?? svc.service
+              return (
+                <div key={svc.service} className="flex items-center justify-between px-4 py-2.5">
+                  <span className="text-compact text-content-primary">{label}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-caption text-content-tertiary">
+                      {statusLabel(status)}
+                    </span>
+                    <StatusDot status={status} pulse={status === 'warning'} />
+                  </div>
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </div>
-      </section>
 
-      {/* Links */}
-      <section>
-        <h2 className="flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400 mb-3">
-          <ExternalLink size={14} />
-          Links
-        </h2>
-        <div className="flex flex-wrap gap-3">
-          <a
-            href="https://arialabs.ai/nova/docs"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-          >
-            Documentation
-            <ExternalLink size={12} className="text-neutral-400" />
-          </a>
-          <a
-            href="https://github.com/aria-labs/nova"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-3 py-2 text-sm text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
-          >
-            GitHub
-            <ExternalLink size={12} className="text-neutral-400" />
-          </a>
+        {/* Links */}
+        <div>
+          <div className="flex items-center gap-2 mb-3">
+            <ExternalLink size={14} className="text-content-tertiary" />
+            <h2 className="text-caption font-medium text-content-tertiary uppercase tracking-wider">
+              Links
+            </h2>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href="https://arialabs.ai/nova/docs"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface-elevated px-3 py-2 text-compact text-content-primary hover:bg-surface-card-hover transition-colors"
+            >
+              Documentation
+              <ExternalLink size={12} className="text-content-tertiary" />
+            </a>
+            <a
+              href="https://github.com/aria-labs/nova"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-sm border border-border bg-surface-elevated px-3 py-2 text-compact text-content-primary hover:bg-surface-card-hover transition-colors"
+            >
+              GitHub
+              <ExternalLink size={12} className="text-content-tertiary" />
+            </a>
+          </div>
         </div>
-      </section>
 
-      {/* Footer */}
-      <p className="flex items-center gap-1 text-xs text-neutral-400 dark:text-neutral-500">
-        Built with <Heart size={10} className="text-red-400" /> by Aria Labs
-      </p>
+        {/* Footer */}
+        <p className="flex items-center justify-center gap-1 text-caption text-content-tertiary pt-2">
+          Built with <Heart size={10} className="text-danger" /> by Aria Labs
+        </p>
+      </Card>
     </div>
   )
 }
