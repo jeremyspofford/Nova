@@ -551,29 +551,19 @@ async def update_platform_config(
 
     pool = get_pool()
     async with pool.acquire() as conn:
-        update_desc = req.description is not None
-        if update_desc:
-            row = await conn.fetchrow(
-                """
-                UPDATE platform_config
-                SET value = $2::jsonb, description = $3, updated_at = NOW()
-                WHERE key = $1
-                RETURNING key, value, description, is_secret, updated_at
-                """,
-                key, req.value, req.description,
-            )
-        else:
-            row = await conn.fetchrow(
-                """
-                UPDATE platform_config
-                SET value = $2::jsonb, updated_at = NOW()
-                WHERE key = $1
-                RETURNING key, value, description, is_secret, updated_at
-                """,
-                key, req.value,
-            )
-    if not row:
-        raise HTTPException(status_code=404, detail=f"Config key '{key}' not found")
+        desc = req.description or ''
+        row = await conn.fetchrow(
+            """
+            INSERT INTO platform_config (key, value, description, updated_at)
+            VALUES ($1, $2::jsonb, $3, NOW())
+            ON CONFLICT (key) DO UPDATE
+            SET value = EXCLUDED.value,
+                description = CASE WHEN $3 = '' THEN platform_config.description ELSE EXCLUDED.description END,
+                updated_at = NOW()
+            RETURNING key, value, description, is_secret, updated_at
+            """,
+            key, req.value, desc,
+        )
 
     # Publish llm.* config changes to Redis db1 (llm-gateway's db) for runtime pickup
     if key.startswith("llm."):
