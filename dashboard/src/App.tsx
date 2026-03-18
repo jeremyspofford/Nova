@@ -2,7 +2,8 @@ import { useState, useCallback, useEffect } from 'react'
 import { getAuthHeaders } from './api'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { NavBar } from './components/NavBar'
+import { AppLayout } from './components/layout/AppLayout'
+import { CommandPalette } from './components/CommandPalette'
 import { StartupScreen } from './components/StartupScreen'
 import { ChatProvider } from './stores/chat-store'
 import { ThemeProvider } from './stores/theme-store'
@@ -21,17 +22,12 @@ import { AgentEndpoints } from './pages/AgentEndpoints'
 import { EngramExplorer } from './pages/EngramExplorer'
 import { Goals } from './pages/Goals'
 import { Recovery } from './pages/Recovery'
-import { RemoteAccess } from './pages/RemoteAccess'
 import { About } from './pages/About'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
 import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
 import ComponentGallery from './pages/dev/ComponentGallery'
-
-function PageShell({ children }: { children: React.ReactNode }) {
-  return <main className="mx-auto max-w-6xl w-full">{children}</main>
-}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -149,35 +145,32 @@ function AppShell() {
     <OnboardingGate>
     <ChatProvider>
     <BrowserRouter>
-      <div className="h-screen overflow-hidden flex flex-col bg-neutral-50 dark:bg-neutral-950">
-        <NavBar />
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-          <Routes>
-            {/* Chat gets full width for sidebar layout */}
-            <Route path="/"        element={<Chat />} />
-            <Route path="/chat"    element={<Chat />} />
-            {/* Other pages get constrained width with scroll */}
-            <Route path="/tasks"   element={<PageShell><Tasks /></PageShell>} />
-            <Route path="/pods"    element={<PageShell><Pods /></PageShell>} />
-            <Route path="/usage"   element={<PageShell><Usage /></PageShell>} />
-            <Route path="/keys"    element={<PageShell><Keys /></PageShell>} />
-            <Route path="/mcp"     element={<PageShell><MCP /></PageShell>} />
-            <Route path="/agents"  element={<PageShell><AgentEndpoints /></PageShell>} />
-            <Route path="/engrams" element={<PageShell><EngramExplorer /></PageShell>} />
-            <Route path="/goals" element={<PageShell><Goals /></PageShell>} />
-            <Route path="/models"   element={<PageShell><Models /></PageShell>} />
-            <Route path="/users"    element={<PageShell><Users /></PageShell>} />
-            <Route path="/settings" element={<PageShell><Settings /></PageShell>} />
-            <Route path="/recovery" element={<PageShell><Recovery /></PageShell>} />
-            <Route path="/remote-access" element={<PageShell><RemoteAccess /></PageShell>} />
-            <Route path="/about" element={<PageShell><About /></PageShell>} />
-            <Route path="/invite/:code" element={<Invite />} />
-            <Route path="/expired" element={<Expired />} />
-            <Route path="/onboarding" element={<OnboardingWizard />} />
-            <Route path="/dev/components" element={<ComponentGallery />} />
-          </Routes>
-        </div>
-      </div>
+      <CommandPalette />
+      <Routes>
+        {/* Routes WITHOUT sidebar */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/onboarding" element={<OnboardingWizard />} />
+        <Route path="/invite/:code" element={<Invite />} />
+        <Route path="/expired" element={<Expired />} />
+        <Route path="/dev/components" element={<ComponentGallery />} />
+
+        {/* Routes WITH sidebar */}
+        <Route path="/" element={<AppLayout fullWidth><Chat /></AppLayout>} />
+        <Route path="/chat" element={<AppLayout fullWidth><Chat /></AppLayout>} />
+        <Route path="/tasks" element={<AppLayout><Tasks /></AppLayout>} />
+        <Route path="/pods" element={<AppLayout><Pods /></AppLayout>} />
+        <Route path="/usage" element={<AppLayout><Usage /></AppLayout>} />
+        <Route path="/keys" element={<AppLayout><Keys /></AppLayout>} />
+        <Route path="/mcp" element={<AppLayout><MCP /></AppLayout>} />
+        <Route path="/agents" element={<AppLayout><AgentEndpoints /></AppLayout>} />
+        <Route path="/engrams" element={<AppLayout><EngramExplorer /></AppLayout>} />
+        <Route path="/goals" element={<AppLayout><Goals /></AppLayout>} />
+        <Route path="/models" element={<AppLayout><Models /></AppLayout>} />
+        <Route path="/users" element={<AppLayout><Users /></AppLayout>} />
+        <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
+        <Route path="/recovery" element={<AppLayout><Recovery /></AppLayout>} />
+        <Route path="/about" element={<AppLayout><About /></AppLayout>} />
+      </Routes>
     </BrowserRouter>
     </ChatProvider>
     </OnboardingGate>
