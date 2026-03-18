@@ -1,13 +1,26 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Copy, Check, Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Users as UsersIcon } from 'lucide-react'
 import { fetchUsers, updateUser, deactivateUser, createInvite, fetchInvites, revokeInvite, type InviteCreateRequest } from '../api/users'
-import { ROLE_HIERARCHY, ROLE_LABELS, ROLE_COLORS, canAssignRole, type Role } from '../lib/roles'
+import { ROLE_HIERARCHY, ROLE_LABELS, canAssignRole, type Role } from '../lib/roles'
+import type { SemanticColor } from '../lib/design-tokens'
 import { useAuth } from '../stores/auth-store'
-import Card from '../components/Card'
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Card, Button, Input, Select, Badge, Avatar, Tabs,
+  Modal, CopyableId, ConfirmDialog, EmptyState,
+} from '../components/ui'
 
 type Tab = 'users' | 'invitations'
+
+const ROLE_BADGE_COLORS: Record<Role, SemanticColor> = {
+  owner: 'warning',
+  admin: 'info',
+  member: 'success',
+  viewer: 'accent',
+  guest: 'neutral',
+}
 
 const INVITE_EXPIRY_OPTIONS = [
   { label: '24 hours', hours: 24 },
@@ -24,50 +37,26 @@ const ACCOUNT_EXPIRY_OPTIONS = [
   { label: 'Never', hours: 0 },
 ]
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-  return (
-    <button onClick={copy} className="ml-1 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300">
-      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-    </button>
-  )
-}
-
 export function Users() {
   const [tab, setTab] = useState<Tab>('users')
   const { user: currentUser } = useAuth()
   const currentRole = (currentUser?.role ?? 'viewer') as Role
 
   return (
-    <div className="px-4 py-6 sm:px-6 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Users</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400 max-w-2xl">
-          Manage users and invite new people to your Nova instance.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Users"
+        description="Manage users and invite new people to your Nova instance."
+      />
 
-      {/* Tabs */}
-      <div className="flex gap-6 border-b border-neutral-200 dark:border-neutral-800">
-        {(['users', 'invitations'] as const).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`pb-2 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              tab === t
-                ? 'border-teal-500 text-teal-600 dark:text-teal-400'
-                : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200'
-            }`}
-          >
-            {t === 'users' ? 'Users' : 'Invitations'}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { id: 'users', label: 'Users' },
+          { id: 'invitations', label: 'Invitations' },
+        ]}
+        activeTab={tab}
+        onChange={(id) => setTab(id as Tab)}
+      />
 
       {tab === 'users' ? (
         <UsersTab currentRole={currentRole} currentUserId={currentUser?.id} />
@@ -81,6 +70,7 @@ export function Users() {
 function UsersTab({ currentRole, currentUserId }: { currentRole: Role; currentUserId?: string }) {
   const qc = useQueryClient()
   const { data: users = [], isLoading, error } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
+  const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null)
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: { role?: string } }) => updateUser(id, data),
@@ -89,106 +79,120 @@ function UsersTab({ currentRole, currentUserId }: { currentRole: Role; currentUs
 
   const deactivateMutation = useMutation({
     mutationFn: deactivateUser,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => {
+      setDeactivateTarget(null)
+      qc.invalidateQueries({ queryKey: ['users'] })
+    },
   })
 
   const assignableRoles = ROLE_HIERARCHY.filter(r => canAssignRole(currentRole, r))
 
-  if (isLoading) return <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading...</p>
-  if (error) return <p className="text-sm text-red-400">{String(error)}</p>
+  if (isLoading) return <Card className="p-8"><p className="text-compact text-content-tertiary text-center">Loading...</p></Card>
+  if (error) return <Card className="p-4"><p className="text-compact text-danger">{String(error)}</p></Card>
+
+  if (users.length === 0) {
+    return (
+      <Card className="py-8">
+        <EmptyState
+          icon={UsersIcon}
+          title="No users found"
+          description="Users will appear here once they register or are invited."
+        />
+      </Card>
+    )
+  }
 
   return (
-    <Card className="overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400">
-              <th className="px-3 sm:px-4 py-3 text-left font-medium">Name</th>
-              <th className="px-3 sm:px-4 py-3 text-left font-medium">Role</th>
-              <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Status</th>
-              <th className="hidden md:table-cell px-4 py-3 text-left font-medium">Last Updated</th>
-              <th className="px-3 sm:px-4 py-3 text-left font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map(u => {
-              const role = u.role as Role
-              const isOwner = role === 'owner'
-              return (
-                <tr
-                  key={u.id}
-                  className={`border-b border-neutral-200/50 dark:border-neutral-800/50 hover:bg-neutral-100/30 dark:hover:bg-neutral-800/30 ${
-                    isOwner ? 'border-l-2 border-l-amber-400' : ''
-                  }`}
-                >
-                  <td className="px-3 sm:px-4 py-3">
-                    <div className="font-medium text-neutral-900 dark:text-neutral-100">
-                      {u.display_name || 'Unnamed'}
-                    </div>
-                    <div className="text-xs text-neutral-500 dark:text-neutral-400">{u.email}</div>
-                  </td>
-                  <td className="px-3 sm:px-4 py-3">
-                    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_COLORS[role] || ''}`}>
-                      {ROLE_LABELS[role] || role}
-                    </span>
-                  </td>
-                  <td className="hidden sm:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs capitalize">
-                    {u.status}
-                  </td>
-                  <td className="hidden md:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
-                    {formatDistanceToNow(new Date(u.updated_at), { addSuffix: true })}
-                  </td>
-                  <td className="px-3 sm:px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      {/* Role dropdown */}
-                      <select
-                        value={role}
-                        onChange={e => {
-                          const newRole = e.target.value
-                          if (newRole !== role) {
-                            updateMutation.mutate({ id: u.id, data: { role: newRole } })
-                          }
-                        }}
-                        disabled={isOwner || u.id === currentUserId}
-                        className="rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-xs px-2 py-1 text-neutral-700 dark:text-neutral-300 disabled:opacity-40"
-                      >
-                        {assignableRoles.map(r => (
-                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                        ))}
-                        {/* Show current role even if not assignable */}
-                        {!assignableRoles.includes(role) && (
-                          <option value={role}>{ROLE_LABELS[role] || role}</option>
-                        )}
-                      </select>
-
-                      {/* Deactivate button */}
-                      {!isOwner && u.id !== currentUserId && (
-                        <button
-                          onClick={() => {
-                            if (confirm(`Deactivate user "${u.display_name || u.email}"?`))
-                              deactivateMutation.mutate(u.id)
-                          }}
-                          className="text-red-400 hover:text-red-300 text-xs"
-                        >
-                          Deactivate
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-            {users.length === 0 && (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-                  No users found
-                </td>
+    <>
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-compact">
+            <thead>
+              <tr className="bg-surface-elevated">
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">User</th>
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Role</th>
+                <th className="hidden sm:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Status</th>
+                <th className="hidden md:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Last Updated</th>
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Actions</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+            </thead>
+            <tbody className="divide-y divide-border-subtle">
+              {users.map(u => {
+                const role = u.role as Role
+                const isOwner = role === 'owner'
+                return (
+                  <tr key={u.id} className="hover:bg-surface-card-hover transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <Avatar name={u.display_name || u.email} src={u.avatar_url ?? undefined} />
+                        <div>
+                          <p className="font-medium text-content-primary">{u.display_name || 'Unnamed'}</p>
+                          <p className="text-caption text-content-tertiary">{u.email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge color={ROLE_BADGE_COLORS[role] ?? 'neutral'}>
+                        {ROLE_LABELS[role] || role}
+                      </Badge>
+                    </td>
+                    <td className="hidden sm:table-cell px-4 py-3 text-content-secondary text-caption capitalize">
+                      {u.status}
+                    </td>
+                    <td className="hidden md:table-cell px-4 py-3 text-content-tertiary text-caption">
+                      {formatDistanceToNow(new Date(u.updated_at), { addSuffix: true })}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Select
+                          value={role}
+                          onChange={e => {
+                            const newRole = e.target.value
+                            if (newRole !== role) {
+                              updateMutation.mutate({ id: u.id, data: { role: newRole } })
+                            }
+                          }}
+                          disabled={isOwner || u.id === currentUserId}
+                          className="text-caption w-24"
+                        >
+                          {assignableRoles.map(r => (
+                            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                          ))}
+                          {!assignableRoles.includes(role) && (
+                            <option value={role}>{ROLE_LABELS[role] || role}</option>
+                          )}
+                        </Select>
+
+                        {!isOwner && u.id !== currentUserId && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-danger"
+                            onClick={() => setDeactivateTarget({ id: u.id, name: u.display_name || u.email })}
+                          >
+                            Deactivate
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <ConfirmDialog
+        open={!!deactivateTarget}
+        onClose={() => setDeactivateTarget(null)}
+        title="Deactivate User"
+        description={`Are you sure you want to deactivate "${deactivateTarget?.name}"? They will lose access to this Nova instance.`}
+        confirmLabel="Deactivate"
+        onConfirm={() => deactivateTarget && deactivateMutation.mutate(deactivateTarget.id)}
+        destructive
+      />
+    </>
   )
 }
 
@@ -202,6 +206,7 @@ function InvitationsTab({ currentRole }: { currentRole: Role }) {
   const [inviteExpiry, setInviteExpiry] = useState(72)
   const [accountExpiry, setAccountExpiry] = useState(168)
   const [newInviteLink, setNewInviteLink] = useState<string | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<{ id: string } | null>(null)
 
   const assignableRoles = ROLE_HIERARCHY.filter(r => canAssignRole(currentRole, r))
 
@@ -218,7 +223,10 @@ function InvitationsTab({ currentRole }: { currentRole: Role }) {
 
   const revokeMutation = useMutation({
     mutationFn: revokeInvite,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['invites'] }),
+    onSuccess: () => {
+      setRevokeTarget(null)
+      qc.invalidateQueries({ queryKey: ['invites'] })
+    },
   })
 
   const handleGenerate = () => {
@@ -235,162 +243,153 @@ function InvitationsTab({ currentRole }: { currentRole: Role }) {
     <div className="space-y-4">
       {/* New invite link revealed */}
       {newInviteLink && (
-        <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 p-4">
-          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1">
+        <Card className="border-success/30 bg-success-dim p-4">
+          <p className="text-compact font-medium text-content-primary mb-2">
             Invite created -- share this link
           </p>
-          <div className="flex items-center gap-2 font-mono text-sm text-emerald-800 dark:text-emerald-300 break-all">
-            {newInviteLink}
-            <CopyButton text={newInviteLink} />
-          </div>
-          <button onClick={() => setNewInviteLink(null)} className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300">
+          <CopyableId id={newInviteLink} truncate={999} />
+          <button
+            onClick={() => setNewInviteLink(null)}
+            className="mt-2 text-caption text-content-tertiary hover:text-content-secondary transition-colors"
+          >
             Dismiss
           </button>
-        </div>
-      )}
-
-      {/* Create invite button / form */}
-      {!showForm ? (
-        <button
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm px-3 py-1.5"
-        >
-          <Plus size={14} /> Create Invite
-        </button>
-      ) : (
-        <Card className="p-4 space-y-3">
-          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">New Invitation</p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-300 mb-1">Role</label>
-              <select
-                value={inviteRole}
-                onChange={e => setInviteRole(e.target.value as Role)}
-                className="w-full rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm px-3 py-1.5 text-neutral-700 dark:text-neutral-300"
-              >
-                {assignableRoles.map(r => (
-                  <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-300 mb-1">Email (optional)</label>
-              <input
-                type="email"
-                value={inviteEmail}
-                onChange={e => setInviteEmail(e.target.value)}
-                placeholder="user@example.com"
-                className="w-full rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm px-3 py-1.5 text-neutral-700 dark:text-neutral-300 placeholder:text-neutral-400"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-300 mb-1">Invite link expiry</label>
-              <select
-                value={inviteExpiry}
-                onChange={e => setInviteExpiry(Number(e.target.value))}
-                className="w-full rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm px-3 py-1.5 text-neutral-700 dark:text-neutral-300"
-              >
-                {INVITE_EXPIRY_OPTIONS.map(o => (
-                  <option key={o.hours} value={o.hours}>{o.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {inviteRole === 'guest' && (
-              <div>
-                <label className="block text-xs font-medium text-neutral-600 dark:text-neutral-300 mb-1">Account expiry</label>
-                <select
-                  value={accountExpiry}
-                  onChange={e => setAccountExpiry(Number(e.target.value))}
-                  className="w-full rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-sm px-3 py-1.5 text-neutral-700 dark:text-neutral-300"
-                >
-                  {ACCOUNT_EXPIRY_OPTIONS.map(o => (
-                    <option key={o.hours} value={o.hours}>{o.label}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={handleGenerate}
-              disabled={createMutation.isPending}
-              className="flex items-center gap-1.5 rounded-lg bg-teal-600 hover:bg-teal-700 text-white text-sm px-3 py-1.5 disabled:opacity-40"
-            >
-              Generate
-            </button>
-            <button
-              onClick={() => setShowForm(false)}
-              className="text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 px-3 py-1.5"
-            >
-              Cancel
-            </button>
-          </div>
-          {createMutation.isError && (
-            <p className="text-xs text-red-600 dark:text-red-400">{String(createMutation.error)}</p>
-          )}
         </Card>
       )}
 
+      <Button
+        icon={<Plus size={14} />}
+        onClick={() => setShowForm(true)}
+      >
+        Create Invite
+      </Button>
+
+      {/* Create invite modal */}
+      <Modal
+        open={showForm}
+        onClose={() => { setShowForm(false); createMutation.reset() }}
+        title="New Invitation"
+        size="md"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setShowForm(false)}>Cancel</Button>
+            <Button
+              onClick={handleGenerate}
+              disabled={createMutation.isPending}
+              loading={createMutation.isPending}
+            >
+              Generate
+            </Button>
+          </>
+        }
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-caption font-medium text-content-secondary mb-1">Role</label>
+            <Select
+              value={inviteRole}
+              onChange={e => setInviteRole(e.target.value as Role)}
+            >
+              {assignableRoles.map(r => (
+                <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+              ))}
+            </Select>
+          </div>
+
+          <div>
+            <label className="block text-caption font-medium text-content-secondary mb-1">Email (optional)</label>
+            <Input
+              type="email"
+              value={inviteEmail}
+              onChange={e => setInviteEmail(e.target.value)}
+              placeholder="user@example.com"
+            />
+          </div>
+
+          <div>
+            <label className="block text-caption font-medium text-content-secondary mb-1">Invite link expiry</label>
+            <Select
+              value={inviteExpiry}
+              onChange={e => setInviteExpiry(Number(e.target.value))}
+            >
+              {INVITE_EXPIRY_OPTIONS.map(o => (
+                <option key={o.hours} value={o.hours}>{o.label}</option>
+              ))}
+            </Select>
+          </div>
+
+          {inviteRole === 'guest' && (
+            <div>
+              <label className="block text-caption font-medium text-content-secondary mb-1">Account expiry</label>
+              <Select
+                value={accountExpiry}
+                onChange={e => setAccountExpiry(Number(e.target.value))}
+              >
+                {ACCOUNT_EXPIRY_OPTIONS.map(o => (
+                  <option key={o.hours} value={o.hours}>{o.label}</option>
+                ))}
+              </Select>
+            </div>
+          )}
+        </div>
+        {createMutation.isError && (
+          <p className="mt-3 text-caption text-danger">{String(createMutation.error)}</p>
+        )}
+      </Modal>
+
       {/* Invites table */}
-      {isLoading && <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading...</p>}
-      {error && <p className="text-sm text-red-400">{String(error)}</p>}
+      {isLoading && <Card className="p-8"><p className="text-compact text-content-tertiary text-center">Loading...</p></Card>}
+      {error && <Card className="p-4"><p className="text-compact text-danger">{String(error)}</p></Card>}
 
       {!isLoading && (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-compact">
               <thead>
-                <tr className="border-b border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400">
-                  <th className="px-3 sm:px-4 py-3 text-left font-medium">Role</th>
-                  <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Email</th>
-                  <th className="px-3 sm:px-4 py-3 text-left font-medium">Expires</th>
-                  <th className="hidden md:table-cell px-4 py-3 text-left font-medium">Created</th>
-                  <th className="px-3 sm:px-4 py-3 text-left font-medium">Actions</th>
+                <tr className="bg-surface-elevated">
+                  <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Role</th>
+                  <th className="hidden sm:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Email</th>
+                  <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Expires</th>
+                  <th className="hidden md:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Created</th>
+                  <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider"></th>
                 </tr>
               </thead>
-              <tbody>
+              <tbody className="divide-y divide-border-subtle">
                 {invites.map(inv => {
                   const role = inv.role as Role
                   return (
-                    <tr key={inv.id} className="border-b border-neutral-200/50 dark:border-neutral-800/50 hover:bg-neutral-100/30 dark:hover:bg-neutral-800/30">
-                      <td className="px-3 sm:px-4 py-3">
-                        <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${ROLE_COLORS[role] || ''}`}>
+                    <tr key={inv.id} className="hover:bg-surface-card-hover transition-colors">
+                      <td className="px-4 py-3">
+                        <Badge color={ROLE_BADGE_COLORS[role] ?? 'neutral'}>
                           {ROLE_LABELS[role] || role}
-                        </span>
+                        </Badge>
                       </td>
-                      <td className="hidden sm:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
+                      <td className="hidden sm:table-cell px-4 py-3 text-content-tertiary text-caption">
                         {inv.email || '--'}
                       </td>
-                      <td className="px-3 sm:px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
+                      <td className="px-4 py-3 text-content-secondary text-caption">
                         {inv.expires_at
                           ? formatDistanceToNow(new Date(inv.expires_at), { addSuffix: true })
                           : 'Never'}
                       </td>
-                      <td className="hidden md:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
+                      <td className="hidden md:table-cell px-4 py-3 text-content-tertiary text-caption">
                         {formatDistanceToNow(new Date(inv.created_at), { addSuffix: true })}
                       </td>
-                      <td className="px-3 sm:px-4 py-3">
-                        <button
-                          onClick={() => {
-                            if (confirm('Revoke this invite?'))
-                              revokeMutation.mutate(inv.id)
-                          }}
-                          className="text-red-400 hover:text-red-300 transition-colors"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                      <td className="px-4 py-3">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          icon={<Trash2 size={14} />}
+                          onClick={() => setRevokeTarget({ id: inv.id })}
+                          className="text-content-tertiary hover:text-danger"
+                        />
                       </td>
                     </tr>
                   )
                 })}
                 {invites.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
+                    <td colSpan={5} className="px-4 py-12 text-center text-content-tertiary text-compact">
                       No pending invitations
                     </td>
                   </tr>
@@ -400,6 +399,16 @@ function InvitationsTab({ currentRole }: { currentRole: Role }) {
           </div>
         </Card>
       )}
+
+      <ConfirmDialog
+        open={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        title="Revoke Invitation"
+        description="Are you sure you want to revoke this invitation? The invite link will stop working immediately."
+        confirmLabel="Revoke"
+        onConfirm={() => revokeTarget && revokeMutation.mutate(revokeTarget.id)}
+        destructive
+      />
     </div>
   )
 }
