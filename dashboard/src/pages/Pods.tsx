@@ -2,45 +2,49 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronDown, ChevronRight, RefreshCw, Layers,
-  CheckCircle2, XCircle, Loader2, AlertTriangle, Zap,
-  Thermometer, Hash, Clock, RotateCw, FileText, Cpu, Settings2, Shield, Wrench,
+  Loader2, Thermometer, Hash, Clock, RotateCw, FileText, Cpu, Settings2, Shield, Wrench,
+  Plus, Trash2,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { getPods, getPod, updatePod, updatePodAgent } from '../api'
+import { getPods, getPod, updatePod, updatePodAgent, createPod, deletePod } from '../api'
 import type { Pod, PodAgent } from '../types'
 import { ModelPicker } from '../components/ModelPicker'
-import { SaveCancelButtons } from '../components/SaveCancelButtons'
 import { ToolPicker } from '../components/ToolPicker'
-import Card from '../components/Card'
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Card, Badge, Toggle, StatusDot, PipelineStages, Metric,
+  Button, Input, Textarea, Select, RadioGroup, Modal, ConfirmDialog, EmptyState, Skeleton,
+} from '../components/ui'
 
-// ── Role badge ─────────────────────────────────────────────────────────────────
+// ── Role → badge color mapping ───────────────────────────────────────────────
 
-const ROLE_COLORS: Record<string, string> = {
-  context:     'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800',
-  task:        'bg-accent-50 dark:bg-accent-900/30 text-accent-700 dark:text-accent-400 border-accent-200 dark:border-accent-800',
-  guardrail:   'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800',
-  code_review: 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-800',
-  decision:    'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800',
+const ROLE_BADGE_COLOR: Record<string, 'info' | 'accent' | 'warning' | 'neutral' | 'success'> = {
+  context:     'info',
+  task:        'accent',
+  guardrail:   'warning',
+  code_review: 'neutral',
+  decision:    'success',
 }
 
-function RoleBadge({ role }: { role: string }) {
-  const cls = ROLE_COLORS[role] ?? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 border-neutral-200 dark:border-neutral-800'
-  return (
-    <span className={clsx('rounded-full border px-2 py-0.5 text-xs font-medium capitalize', cls)}>
-      {role.replace('_', ' ')}
-    </span>
-  )
+// ── Pipeline stage status from agents ────────────────────────────────────────
+
+function agentPipelineStatuses(agents: PodAgent[]): ('done' | 'pending')[] {
+  const roles = ['context', 'task', 'guardrail', 'code_review', 'decision']
+  return roles.map(role => {
+    const agent = agents.find(a => a.role === role)
+    return agent && agent.enabled ? 'done' : 'pending'
+  })
 }
 
-// ── On-failure badge ──────────────────────────────────────────────────────────
+// ── On-failure options ───────────────────────────────────────────────────────
 
-const FAILURE_ICON: Record<string, JSX.Element> = {
-  abort:    <XCircle size={11} />,
-  skip:     <AlertTriangle size={11} />,
-  escalate: <Zap size={11} />,
-}
+const ON_FAILURE_OPTIONS = [
+  { value: 'abort', label: 'Abort', description: 'Stop the pipeline immediately' },
+  { value: 'skip', label: 'Skip', description: 'Skip this agent and continue' },
+  { value: 'escalate', label: 'Escalate', description: 'Escalate to human review' },
+]
 
-// ── Agent row ──────────────────────────────────────────────────────────────────
+// ── Agent row ────────────────────────────────────────────────────────────────
 
 function AgentRow({
   agent, podId, podDefaultModel,
@@ -69,104 +73,63 @@ function AgentRow({
   })
 
   return (
-    <div className={clsx(
-      'rounded-lg border transition-all',
-      agent.enabled ? 'border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900' : 'border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 opacity-60',
-    )}>
-      {/* Summary row — click to expand, toggle stays separate */}
-      <div className="flex items-center gap-3 px-3 py-2.5">
-        {/* Expand button */}
+    <Card
+      variant={agent.enabled ? 'default' : 'outlined'}
+      className={clsx(!agent.enabled && 'opacity-60')}
+    >
+      {/* Summary row */}
+      <div className="flex items-center gap-3 px-4 py-3">
         <button
           onClick={() => setExpanded(e => !e)}
           className="flex shrink-0 items-center gap-2 min-w-0 flex-1 text-left"
         >
-          <span className="shrink-0 text-neutral-500 dark:text-neutral-400">
-            {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span className="shrink-0 text-content-tertiary">
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
-          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-neutral-100 dark:bg-neutral-800 text-[10px] font-bold text-neutral-500 dark:text-neutral-400">
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-elevated text-micro font-bold text-content-tertiary">
             {agent.position + 1}
           </span>
-          <RoleBadge role={agent.role} />
+          <Badge color={ROLE_BADGE_COLOR[agent.role] ?? 'neutral'} size="sm">
+            {agent.role.replace('_', ' ')}
+          </Badge>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-neutral-800 dark:text-neutral-200">{agent.name}</p>
+            <p className="truncate text-compact font-medium text-content-primary">{agent.name}</p>
             {agent.model && (
-              <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{agent.model}</p>
+              <p className="truncate text-caption text-content-tertiary font-mono">{agent.model}</p>
             )}
           </div>
         </button>
 
-        {/* Right-side metadata (non-clickable) */}
-        <span
-          title={`On failure: ${agent.on_failure}`}
-          className="hidden shrink-0 items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 sm:flex"
-        >
-          {FAILURE_ICON[agent.on_failure] ?? null}
+        {/* Right-side metadata */}
+        <Badge color="neutral" size="sm" className="hidden sm:inline-flex">
           {agent.on_failure}
-        </span>
-
-        <span className="hidden rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400 sm:inline">
+        </Badge>
+        <span className="hidden text-caption text-content-tertiary sm:inline">
           {agent.allowed_tools ? `${agent.allowed_tools.length} tools` : 'all tools'}
         </span>
 
-        {/* Enable/disable toggle */}
-        <button
-          onClick={e => { e.stopPropagation(); toggle.mutate() }}
+        <Toggle
+          checked={agent.enabled}
+          onChange={() => toggle.mutate()}
           disabled={toggle.isPending}
-          title={agent.enabled ? 'Disable agent' : 'Enable agent'}
-          className="relative shrink-0 ml-1"
-        >
-          {toggle.isPending ? (
-            <Loader2 size={14} className="animate-spin text-neutral-500 dark:text-neutral-400" />
-          ) : (
-            <div className={clsx(
-              'h-4 w-7 rounded-full transition-colors',
-              agent.enabled ? 'bg-accent-700' : 'bg-neutral-200 dark:bg-neutral-700',
-            )}>
-              <div className={clsx(
-                'absolute top-0.5 size-3 rounded-full bg-white shadow transition-all',
-                agent.enabled ? 'left-3.5' : 'left-0.5',
-              )} />
-            </div>
-          )}
-        </button>
+          size="sm"
+        />
       </div>
 
       {/* Expanded config detail */}
       {expanded && (
-        <div className="border-t border-neutral-100 dark:border-neutral-800 px-4 pb-4 pt-3 space-y-4">
-
-          {/* Settings: temp, tokens, timeout, retries, on_failure */}
+        <div className="border-t border-border-subtle px-5 pb-5 pt-4 space-y-5">
           <AgentAdvancedSettings agent={agent} podId={podId} />
-
-          {/* Tools */}
           <AgentToolSettings agent={agent} podId={podId} />
-
-          {/* Model + fallbacks */}
           <AgentModelPicker agent={agent} podId={podId} podDefaultModel={podDefaultModel} />
-
-          {/* System prompt */}
           <AgentSystemPrompt agent={agent} podId={podId} />
-
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
-// ── Small stat tile ────────────────────────────────────────────────────────────
-
-function ConfigStat({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <div className="rounded-md bg-neutral-50 dark:bg-neutral-800 border border-neutral-100 dark:border-neutral-800 px-3 py-2">
-      <p className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-0.5">
-        {icon} {label}
-      </p>
-      <p className="text-sm font-semibold text-neutral-700 dark:text-neutral-300">{value}</p>
-    </div>
-  )
-}
-
-// ── Inline system prompt editor ────────────────────────────────────────────────
+// ── Agent system prompt editor ───────────────────────────────────────────────
 
 function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string }) {
   const qc = useQueryClient()
@@ -199,57 +162,50 @@ function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string })
 
   return (
     <div>
-      {/* Header row */}
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          <FileText size={11} /> System Prompt
+        <p className="flex items-center gap-1.5 text-caption font-medium text-content-tertiary">
+          <FileText size={12} /> System Prompt
         </p>
         {!editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
             Edit
-          </button>
+          </Button>
         )}
       </div>
 
       {editing ? (
-        /* ── Edit mode ─────────────────────────────────────────────────── */
         <div className="space-y-2">
-          <textarea
+          <Textarea
             rows={8}
             value={draft}
             onChange={e => setDraft(e.target.value)}
-            placeholder="Describe this agent's role, persona, and constraints…"
-            className="w-full resize-y rounded-md border border-accent-400 dark:border-accent-600 bg-card dark:bg-neutral-900 px-3 py-2 font-mono text-xs text-neutral-800 dark:text-neutral-200 outline-none ring-2 ring-accent-200 dark:ring-accent-900 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:border-accent-600"
+            placeholder="Describe this agent's role, persona, and constraints..."
+            autoResize={false}
             autoFocus
           />
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[10px] text-neutral-500 dark:text-neutral-400">{draft.length} chars</span>
-            <SaveCancelButtons
-              onSave={() => save.mutate()}
-              onCancel={cancel}
-              isPending={save.isPending}
-            />
+            <span className="text-micro text-content-tertiary">{draft.length} chars</span>
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={cancel} disabled={save.isPending}>Cancel</Button>
+              <Button size="sm" onClick={() => save.mutate()} loading={save.isPending}>Save</Button>
+            </div>
           </div>
           {save.isError && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
+            <p className="text-caption text-danger">Save failed -- check console</p>
           )}
         </div>
       ) : (
-        /* ── View mode ─────────────────────────────────────────────────── */
         agent.system_prompt ? (
-          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-neutral-50 dark:bg-neutral-800 border border-neutral-100 dark:border-neutral-800 px-3 py-2 font-mono text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
+          <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-surface-elevated border border-border-subtle px-3 py-2 font-mono text-caption text-content-secondary leading-relaxed">
             {agent.system_prompt}
           </pre>
         ) : (
           <button
             onClick={() => setEditing(true)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-neutral-300 dark:border-neutral-600 py-3 text-xs text-neutral-500 dark:text-neutral-400 hover:border-accent-400 dark:hover:border-accent-600 hover:text-accent-600 dark:hover:text-accent-400 transition-colors"
+            className="flex w-full items-center justify-center gap-1.5 rounded-sm border border-dashed border-border py-3 text-caption text-content-tertiary hover:border-accent hover:text-accent transition-colors"
           >
             <FileText size={12} />
-            No system prompt — click to add one
+            No system prompt -- click to add one
           </button>
         )
       )}
@@ -257,18 +213,16 @@ function AgentSystemPrompt({ agent, podId }: { agent: PodAgent; podId: string })
   )
 }
 
-// ── Inline advanced settings editor ───────────────────────────────────────────
-
-const ON_FAILURE_OPTIONS = ['abort', 'skip', 'escalate'] as const
+// ── Agent advanced settings ──────────────────────────────────────────────────
 
 function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: string }) {
   const qc = useQueryClient()
-  const [editing, setEditing]           = useState(false)
-  const [onFailure, setOnFailure]       = useState(agent.on_failure)
-  const [temperature, setTemperature]   = useState(String(agent.temperature))
-  const [maxTokens, setMaxTokens]       = useState(String(agent.max_tokens))
-  const [timeout, setTimeout_]          = useState(String(agent.timeout_seconds))
-  const [maxRetries, setMaxRetries]     = useState(String(agent.max_retries))
+  const [editing, setEditing] = useState(false)
+  const [onFailure, setOnFailure] = useState(agent.on_failure)
+  const [temperature, setTemperature] = useState(String(agent.temperature))
+  const [maxTokens, setMaxTokens] = useState(String(agent.max_tokens))
+  const [timeout, setTimeout_] = useState(String(agent.timeout_seconds))
+  const [maxRetries, setMaxRetries] = useState(String(agent.max_retries))
 
   const cancel = () => {
     setOnFailure(agent.on_failure)
@@ -304,117 +258,105 @@ function AgentAdvancedSettings({ agent, podId }: { agent: PodAgent; podId: strin
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          <Settings2 size={11} /> Settings
+        <p className="flex items-center gap-1.5 text-caption font-medium text-content-tertiary">
+          <Settings2 size={12} /> Settings
         </p>
         {!editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
             Edit
-          </button>
+          </Button>
         )}
       </div>
 
       {editing ? (
-        <div className="space-y-3 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50/20 dark:bg-accent-900/10 p-3">
-
-          {/* On-failure + numeric fields */}
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            {/* On failure */}
-            <div className="col-span-2 sm:col-span-1">
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                On Failure
-              </label>
-              <select
-                value={onFailure}
-                onChange={e => setOnFailure(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
-              >
-                {ON_FAILURE_OPTIONS.map(o => (
-                  <option key={o} value={o}>{o}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Temperature */}
-            <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                Temperature
-              </label>
-              <input
-                type="number" step="0.05" min="0" max="2"
-                value={temperature}
-                onChange={e => setTemperature(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
-              />
-            </div>
-
-            {/* Max tokens */}
-            <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                Max Tokens
-              </label>
-              <input
-                type="number" min="1"
-                value={maxTokens}
-                onChange={e => setMaxTokens(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
-              />
-            </div>
-
-            {/* Timeout */}
-            <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                Timeout (s)
-              </label>
-              <input
-                type="number" min="1"
-                value={timeout}
-                onChange={e => setTimeout_(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
-              />
-            </div>
-
-            {/* Max retries */}
-            <div>
-              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                Max Retries
-              </label>
-              <input
-                type="number" min="0" max="10"
-                value={maxRetries}
-                onChange={e => setMaxRetries(e.target.value)}
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1.5 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
-              />
-            </div>
+        <div className="space-y-4 rounded-sm border border-border-subtle bg-surface-elevated p-4">
+          {/* On failure */}
+          <div>
+            <p className="text-caption font-medium text-content-secondary mb-2">On Failure</p>
+            <RadioGroup
+              name={`on-failure-${agent.id}`}
+              options={ON_FAILURE_OPTIONS}
+              value={onFailure}
+              onChange={setOnFailure}
+            />
           </div>
 
-          {/* Actions */}
-          <SaveCancelButtons
-            onSave={() => save.mutate()}
-            onCancel={cancel}
-            isPending={save.isPending}
-          />
+          {/* Numeric fields */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Input
+              label="Temperature"
+              type="number"
+              step="0.05"
+              min="0"
+              max="2"
+              value={temperature}
+              onChange={e => setTemperature(e.target.value)}
+            />
+            <Input
+              label="Max Tokens"
+              type="number"
+              min="1"
+              value={maxTokens}
+              onChange={e => setMaxTokens(e.target.value)}
+            />
+            <Input
+              label="Timeout (s)"
+              type="number"
+              min="1"
+              value={timeout}
+              onChange={e => setTimeout_(e.target.value)}
+            />
+            <Input
+              label="Max Retries"
+              type="number"
+              min="0"
+              max="10"
+              value={maxRetries}
+              onChange={e => setMaxRetries(e.target.value)}
+            />
+          </div>
+
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={cancel} disabled={save.isPending}>Cancel</Button>
+            <Button size="sm" onClick={() => save.mutate()} loading={save.isPending}>Save</Button>
+          </div>
           {save.isError && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
+            <p className="text-caption text-danger">Save failed -- check console</p>
           )}
         </div>
       ) : (
-        /* View mode — compact summary of settings */
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <ConfigStat icon={<Thermometer size={12} />} label="Temperature" value={String(agent.temperature)} />
-          <ConfigStat icon={<Hash size={12} />} label="Max Tokens" value={agent.max_tokens.toLocaleString()} />
-          <ConfigStat icon={<Clock size={12} />} label="Timeout" value={`${agent.timeout_seconds}s`} />
-          <ConfigStat icon={<RotateCw size={12} />} label="Max Retries" value={String(agent.max_retries)} />
+          <div className="rounded-sm bg-surface-elevated border border-border-subtle px-3 py-2">
+            <p className="flex items-center gap-1 text-micro font-medium uppercase tracking-wider text-content-tertiary mb-0.5">
+              <Thermometer size={10} /> Temperature
+            </p>
+            <p className="text-compact font-semibold text-content-primary">{String(agent.temperature)}</p>
+          </div>
+          <div className="rounded-sm bg-surface-elevated border border-border-subtle px-3 py-2">
+            <p className="flex items-center gap-1 text-micro font-medium uppercase tracking-wider text-content-tertiary mb-0.5">
+              <Hash size={10} /> Max Tokens
+            </p>
+            <p className="text-compact font-semibold text-content-primary">{agent.max_tokens.toLocaleString()}</p>
+          </div>
+          <div className="rounded-sm bg-surface-elevated border border-border-subtle px-3 py-2">
+            <p className="flex items-center gap-1 text-micro font-medium uppercase tracking-wider text-content-tertiary mb-0.5">
+              <Clock size={10} /> Timeout
+            </p>
+            <p className="text-compact font-semibold text-content-primary">{agent.timeout_seconds}s</p>
+          </div>
+          <div className="rounded-sm bg-surface-elevated border border-border-subtle px-3 py-2">
+            <p className="flex items-center gap-1 text-micro font-medium uppercase tracking-wider text-content-tertiary mb-0.5">
+              <RotateCw size={10} /> Max Retries
+            </p>
+            <p className="text-compact font-semibold text-content-primary">{String(agent.max_retries)}</p>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-// ── Inline tool picker ─────────────────────────────────────────────────────────
+// ── Agent tool settings ──────────────────────────────────────────────────────
 
 function AgentToolSettings({ agent, podId }: { agent: PodAgent; podId: string }) {
   const qc = useQueryClient()
@@ -448,33 +390,29 @@ function AgentToolSettings({ agent, podId }: { agent: PodAgent; podId: string })
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          <Wrench size={11} /> Tools
+        <p className="flex items-center gap-1.5 text-caption font-medium text-content-tertiary">
+          <Wrench size={12} /> Tools
         </p>
         {!editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
             Edit
-          </button>
+          </Button>
         )}
       </div>
 
       {editing ? (
-        <div className="space-y-3 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50/20 dark:bg-accent-900/10 p-3">
+        <div className="space-y-3 rounded-sm border border-border-subtle bg-surface-elevated p-4">
           <ToolPicker selectedTools={tools} onChange={setTools} />
-          <SaveCancelButtons
-            onSave={() => save.mutate()}
-            onCancel={cancel}
-            isPending={save.isPending}
-          />
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={cancel} disabled={save.isPending}>Cancel</Button>
+            <Button size="sm" onClick={() => save.mutate()} loading={save.isPending}>Save</Button>
+          </div>
           {save.isError && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
+            <p className="text-caption text-danger">Save failed -- check console</p>
           )}
         </div>
       ) : (
-        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="text-caption text-content-tertiary">
           {agent.allowed_tools
             ? <>{agent.allowed_tools.length} tool{agent.allowed_tools.length !== 1 ? 's' : ''} allowed</>
             : <span className="italic">All tools allowed (no restriction)</span>
@@ -485,7 +423,7 @@ function AgentToolSettings({ agent, podId }: { agent: PodAgent; podId: string })
   )
 }
 
-// ── Inline model + fallback editor ────────────────────────────────────────────
+// ── Agent model picker ───────────────────────────────────────────────────────
 
 function AgentModelPicker({
   agent, podId, podDefaultModel,
@@ -532,16 +470,13 @@ function AgentModelPicker({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
-        <p className="flex items-center gap-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">
-          <Cpu size={11} /> Model
+        <p className="flex items-center gap-1.5 text-caption font-medium text-content-tertiary">
+          <Cpu size={12} /> Model
         </p>
         {!editing && (
-          <button
-            onClick={() => setEditing(true)}
-            className="rounded px-2 py-0.5 text-[11px] font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-50 dark:hover:bg-accent-900/30 border border-transparent hover:border-accent-200 dark:hover:border-accent-800 transition-colors"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
             Edit
-          </button>
+          </Button>
         )}
       </div>
 
@@ -553,36 +488,33 @@ function AgentModelPicker({
             onChange={(p, f) => { setPrimary(p); setFallbacks(f) }}
             podDefaultModel={podDefaultModel}
           />
-          <SaveCancelButtons
-            onSave={() => save.mutate()}
-            onCancel={cancel}
-            isPending={save.isPending || !hasChanges}
-          />
+          <div className="flex items-center justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={cancel} disabled={save.isPending}>Cancel</Button>
+            <Button size="sm" onClick={() => save.mutate()} loading={save.isPending} disabled={!hasChanges}>Save</Button>
+          </div>
           {save.isError && (
-            <p className="text-[11px] text-red-600 dark:text-red-400">Save failed — check console</p>
+            <p className="text-caption text-danger">Save failed -- check console</p>
           )}
         </div>
       ) : (
         <div className="space-y-0.5">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-neutral-500 dark:text-neutral-400">Primary:</span>
+          <div className="flex items-center gap-2 text-caption">
+            <span className="text-content-tertiary">Primary:</span>
             {agent.model ? (
-              <span className="font-mono text-neutral-700 dark:text-neutral-300">{agent.model}</span>
+              <span className="font-mono text-content-primary">{agent.model}</span>
             ) : (
-              <span className="italic text-neutral-500 dark:text-neutral-400">
+              <span className="italic text-content-tertiary">
                 inherit{podDefaultModel ? ` (${podDefaultModel.split('/').pop()})` : ''}
               </span>
             )}
           </div>
           {(agent.fallback_models ?? []).length > 0 ? (
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="text-caption text-content-tertiary">
               Fallbacks:{' '}
-              <span className="font-mono text-neutral-500 dark:text-neutral-400">
-                {(agent.fallback_models ?? []).join(' → ')}
-              </span>
+              <span className="font-mono">{(agent.fallback_models ?? []).join(' \u2192 ')}</span>
             </p>
           ) : (
-            <p className="text-xs italic text-neutral-500 dark:text-neutral-400">No fallbacks configured</p>
+            <p className="text-caption italic text-content-tertiary">No fallbacks configured</p>
           )}
         </div>
       )}
@@ -590,9 +522,14 @@ function AgentModelPicker({
   )
 }
 
-// ── Pod sandbox selector ──────────────────────────────────────────────────────
+// ── Pod sandbox selector ─────────────────────────────────────────────────────
 
-const SANDBOX_TIERS = ['workspace', 'nova', 'host', 'isolated'] as const
+const SANDBOX_TIERS = [
+  { value: 'workspace', label: 'workspace' },
+  { value: 'nova', label: 'nova' },
+  { value: 'host', label: 'host' },
+  { value: 'isolated', label: 'isolated' },
+]
 
 const SANDBOX_DESCRIPTIONS: Record<string, string> = {
   workspace: 'Paths scoped to /workspace',
@@ -612,28 +549,25 @@ function PodSandbox({ pod }: { pod: Pod }) {
   })
 
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800/50 px-3 py-2">
-      <Shield size={14} className="shrink-0 text-neutral-500 dark:text-neutral-400" />
+    <div className="flex items-center gap-3 rounded-sm border border-border-subtle bg-surface-elevated px-4 py-3">
+      <Shield size={14} className="shrink-0 text-content-tertiary" />
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400 mb-0.5">Sandbox Tier</p>
-        <p className="text-[11px] text-neutral-500 dark:text-neutral-400">{SANDBOX_DESCRIPTIONS[pod.sandbox] ?? ''}</p>
+        <p className="text-micro font-medium uppercase tracking-wider text-content-tertiary mb-0.5">Sandbox Tier</p>
+        <p className="text-caption text-content-tertiary">{SANDBOX_DESCRIPTIONS[pod.sandbox] ?? ''}</p>
       </div>
-      <select
+      <Select
         value={pod.sandbox ?? 'workspace'}
         onChange={e => save.mutate(e.target.value)}
         disabled={save.isPending}
-        className="rounded-md border border-neutral-300 dark:border-neutral-600 bg-card dark:bg-neutral-900 px-2 py-1 text-xs text-neutral-800 dark:text-neutral-200 outline-none focus:border-accent-600"
-      >
-        {SANDBOX_TIERS.map(t => (
-          <option key={t} value={t}>{t}</option>
-        ))}
-      </select>
-      {save.isPending && <Loader2 size={12} className="animate-spin text-neutral-500" />}
+        items={SANDBOX_TIERS}
+        className="w-32"
+      />
+      {save.isPending && <Loader2 size={12} className="animate-spin text-content-tertiary" />}
     </div>
   )
 }
 
-// ── Pod detail (expanded) ──────────────────────────────────────────────────────
+// ── Pod detail (expanded) ────────────────────────────────────────────────────
 
 function PodDetail({ podId }: { podId: string }) {
   const { data, isLoading, isError } = useQuery({
@@ -643,32 +577,23 @@ function PodDetail({ podId }: { podId: string }) {
   })
 
   if (isLoading) return (
-    <div className="flex items-center gap-2 py-4 pl-6 text-xs text-neutral-500 dark:text-neutral-400">
-      <Loader2 size={12} className="animate-spin" /> Loading agents…
+    <div className="space-y-2 pl-4 pt-3">
+      <Skeleton lines={3} />
     </div>
   )
 
   if (isError || !data) return (
-    <p className="py-4 pl-6 text-xs text-red-600 dark:text-red-400">Failed to load agents</p>
+    <p className="py-4 pl-4 text-caption text-danger">Failed to load agents</p>
   )
 
   const agents = data.agents ?? []
 
   if (agents.length === 0) return (
-    <p className="py-4 pl-6 text-xs text-neutral-500 dark:text-neutral-400">No agents configured in this pod.</p>
+    <p className="py-4 pl-4 text-caption text-content-tertiary">No agents configured in this pod.</p>
   )
 
   return (
-    <div className="mt-2 space-y-1.5 pl-4 pt-1 border-t border-neutral-200 dark:border-neutral-800">
-      {/* Column headers — desktop only */}
-      <div className="hidden sm:flex gap-3 px-3 py-1 text-[10px] uppercase tracking-wider text-neutral-500 dark:text-neutral-400">
-        <span className="w-5 shrink-0">#</span>
-        <span className="w-24 shrink-0">Role</span>
-        <span className="flex-1">Name / Model</span>
-        <span className="w-16 text-right">On Fail</span>
-        <span className="w-14 text-right">Tools</span>
-        <span className="w-7" />
-      </div>
+    <div className="mt-3 space-y-2 pl-2 pt-2 border-t border-border-subtle">
       {agents
         .sort((a, b) => a.position - b.position)
         .map(agent => (
@@ -683,7 +608,7 @@ function PodDetail({ podId }: { podId: string }) {
   )
 }
 
-// ── Pod card ───────────────────────────────────────────────────────────────────
+// ── Pod card ─────────────────────────────────────────────────────────────────
 
 const REVIEW_LABELS: Record<string, string> = {
   always:         'Always',
@@ -691,107 +616,177 @@ const REVIEW_LABELS: Record<string, string> = {
   on_escalation:  'On Escalation',
 }
 
-const THRESHOLD_COLORS: Record<string, string> = {
-  low:      'text-emerald-700 dark:text-emerald-400',
-  medium:   'text-amber-600 dark:text-amber-400',
-  high:     'text-orange-600 dark:text-orange-400',
-  critical: 'text-red-600 dark:text-red-400',
-}
-
-function PodCard({ pod }: { pod: Pod }) {
+function PodCard({ pod, onDelete }: { pod: Pod; onDelete: (pod: Pod) => void }) {
   const [expanded, setExpanded] = useState(false)
+  const qc = useQueryClient()
+
+  const toggleEnabled = useMutation({
+    mutationFn: () => updatePod(pod.id, { ...pod, enabled: !pod.enabled }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pods'] })
+    },
+  })
+
+  // Get agent statuses for pipeline visualization
+  const { data: podDetail } = useQuery({
+    queryKey: ['pod', pod.id],
+    queryFn: () => getPod(pod.id),
+    staleTime: 30_000,
+  })
+
+  const agents = podDetail?.agents ?? []
+  const pipelineStatuses = agentPipelineStatuses(agents)
 
   return (
-    <div className={clsx(
-      'rounded-xl border transition-all',
-      pod.enabled ? 'border-neutral-200 dark:border-neutral-800 bg-card dark:bg-neutral-900' : 'border-neutral-200/50 dark:border-neutral-800/50 bg-white/40 dark:bg-neutral-900/40',
-    )}>
+    <Card variant="default" className={clsx(!pod.enabled && 'opacity-60')}>
       {/* Header */}
-      <button
-        onClick={() => setExpanded(e => !e)}
-        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
-      >
-        {/* Expand chevron */}
-        <span className="shrink-0 text-neutral-500 dark:text-neutral-400">
-          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </span>
+      <div className="flex items-center gap-3 px-5 py-4">
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="flex shrink-0 items-center gap-3 min-w-0 flex-1 text-left"
+        >
+          <span className="shrink-0 text-content-tertiary">
+            {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          </span>
 
-        {/* Pod status dot */}
-        <span className={clsx(
-          'size-2 shrink-0 rounded-full',
-          pod.enabled ? 'bg-emerald-500' : 'bg-neutral-400',
-        )} />
+          <StatusDot status={pod.enabled ? 'success' : 'neutral'} />
 
-        {/* Name */}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="font-medium text-neutral-900 dark:text-neutral-100">{pod.name}</span>
-            {!pod.enabled && (
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">disabled</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-baseline gap-2">
+              <span className="text-compact font-semibold text-content-primary">{pod.name}</span>
+              {!pod.enabled && (
+                <Badge color="neutral" size="sm">disabled</Badge>
+              )}
+            </div>
+            {pod.description && (
+              <p className="truncate text-caption text-content-secondary mt-0.5">{pod.description}</p>
             )}
           </div>
-          {pod.description && (
-            <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{pod.description}</p>
-          )}
-        </div>
+        </button>
+
+        {/* Pipeline stages indicator */}
+        <PipelineStages stages={pipelineStatuses} compact className="hidden sm:inline-flex" />
 
         {/* Agent count */}
-        <span className="flex shrink-0 items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400">
-          <Layers size={11} />
-          {pod.active_agent_count ?? 0} agents
-        </span>
+        <Badge color="neutral" size="sm">
+          <Layers size={10} className="mr-0.5" />
+          {pod.active_agent_count ?? 0}
+        </Badge>
 
         {/* Model */}
         {pod.default_model && (
-          <span className="hidden shrink-0 rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 dark:text-neutral-400 sm:inline">
+          <Badge color="accent" size="sm" className="hidden sm:inline-flex">
             {pod.default_model.split('/').pop()}
-          </span>
+          </Badge>
         )}
 
-        {/* Human review setting */}
-        <div className="hidden shrink-0 items-center gap-1 text-xs sm:flex">
-          <span className="text-neutral-500 dark:text-neutral-400">Review:</span>
-          <span className="text-neutral-500 dark:text-neutral-400">{REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}</span>
-        </div>
-
-        {/* Escalation threshold */}
-        <span className={clsx(
-          'hidden shrink-0 text-xs font-medium capitalize sm:inline',
-          THRESHOLD_COLORS[pod.escalation_threshold] ?? 'text-neutral-500 dark:text-neutral-400',
-        )}>
-          {pod.escalation_threshold}
+        {/* Review setting */}
+        <span className="hidden text-caption text-content-tertiary sm:inline">
+          Review: {REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}
         </span>
 
         {/* Routing keywords */}
         {(pod.routing_keywords?.length ?? 0) > 0 && (
           <div className="hidden shrink-0 gap-1 sm:flex">
             {(pod.routing_keywords ?? []).slice(0, 3).map(kw => (
-              <span key={kw} className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
-                {kw}
-              </span>
+              <Badge key={kw} color="neutral" size="sm">{kw}</Badge>
             ))}
             {(pod.routing_keywords?.length ?? 0) > 3 && (
-              <span className="text-[10px] text-neutral-500 dark:text-neutral-400">+{(pod.routing_keywords?.length ?? 0) - 3}</span>
+              <span className="text-micro text-content-tertiary">+{(pod.routing_keywords?.length ?? 0) - 3}</span>
             )}
           </div>
         )}
-      </button>
+
+        {/* Enable/disable toggle */}
+        <Toggle
+          checked={pod.enabled}
+          onChange={() => toggleEnabled.mutate()}
+          disabled={toggleEnabled.isPending}
+          size="sm"
+        />
+      </div>
 
       {/* Expanded pod settings + agent list */}
       {expanded && (
-        <div className="px-4 pb-4 space-y-3">
+        <div className="px-5 pb-5 space-y-3">
           <PodSandbox pod={pod} />
           <PodDetail podId={pod.id} />
+          <div className="flex justify-end pt-2">
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<Trash2 size={12} />}
+              onClick={() => onDelete(pod)}
+            >
+              Delete Pod
+            </Button>
+          </div>
         </div>
       )}
-    </div>
+    </Card>
   )
 }
 
-// ── Main page ──────────────────────────────────────────────────────────────────
+// ── Create pod modal ─────────────────────────────────────────────────────────
+
+function CreatePodModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+
+  const create = useMutation({
+    mutationFn: () => createPod({ name, description, enabled: true }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pods'] })
+      setName('')
+      setDescription('')
+      onClose()
+    },
+  })
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New Pod"
+      size="sm"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => create.mutate()} loading={create.isPending} disabled={!name.trim()}>
+            Create Pod
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Input
+          label="Pod Name"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          placeholder="e.g. Research Agent"
+          autoFocus
+        />
+        <Input
+          label="Description"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+          placeholder="What this pod does..."
+        />
+        {create.isError && (
+          <p className="text-caption text-danger">Failed to create pod</p>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
 
 export function Pods() {
   const qc = useQueryClient()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [deletingPod, setDeletingPod] = useState<Pod | null>(null)
 
   const { data: pods = [], isLoading, isFetching, isError } = useQuery({
     queryKey: ['pods'],
@@ -799,86 +794,102 @@ export function Pods() {
     staleTime: 15_000,
   })
 
+  const removePod = useMutation({
+    mutationFn: (podId: string) => deletePod(podId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pods'] })
+      setDeletingPod(null)
+    },
+  })
+
   const enabled  = pods.filter(p => p.enabled)
   const disabled = pods.filter(p => !p.enabled)
 
   return (
-    <div className="space-y-6 px-4 py-8 sm:px-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Pod Manager</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Inspect and configure agent pipeline pods</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => qc.invalidateQueries({ queryKey: ['pods'] })}
-            disabled={isFetching}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40"
-          >
-            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6 px-4 py-6 sm:px-6">
+      <PageHeader
+        title="Pods"
+        description="Inspect and configure agent pipeline pods"
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />}
+              onClick={() => qc.invalidateQueries({ queryKey: ['pods'] })}
+              disabled={isFetching}
+            />
+            <Button
+              icon={<Plus size={14} />}
+              onClick={() => setCreateOpen(true)}
+            >
+              New Pod
+            </Button>
+          </div>
+        }
+      />
 
       {/* Summary strip */}
-      <Card className="flex flex-wrap gap-x-6 gap-y-2 px-4 py-3 sm:px-5 text-sm">
-        <div>
-          <span className="text-neutral-500 dark:text-neutral-400">Total pods</span>
-          <span className="ml-2 font-semibold text-neutral-900 dark:text-neutral-100">{pods.length}</span>
-        </div>
-        <div>
-          <CheckCircle2 size={13} className="mr-1 inline text-emerald-700 dark:text-emerald-400" />
-          <span className="text-neutral-500 dark:text-neutral-400">Enabled</span>
-          <span className="ml-2 font-semibold text-emerald-700 dark:text-emerald-400">{enabled.length}</span>
-        </div>
-        <div>
-          <XCircle size={13} className="mr-1 inline text-neutral-500 dark:text-neutral-400" />
-          <span className="text-neutral-500 dark:text-neutral-400">Disabled</span>
-          <span className="ml-2 font-semibold text-neutral-500 dark:text-neutral-400">{disabled.length}</span>
-        </div>
-      </Card>
+      <div className="flex flex-wrap gap-6">
+        <Metric label="Total Pods" value={pods.length} icon={<Layers size={12} />} />
+        <Metric label="Enabled" value={enabled.length} />
+        <Metric label="Disabled" value={disabled.length} />
+      </div>
 
       {isLoading && (
-        <div className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400">
-          <Loader2 size={14} className="animate-spin" /> Loading pods…
+        <div className="space-y-3">
+          <Skeleton variant="rect" height="80px" />
+          <Skeleton variant="rect" height="80px" />
         </div>
       )}
 
       {isError && (
-        <div className="rounded-xl border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-900/30 p-4 text-sm text-red-600 dark:text-red-400">
-          Failed to load pods — check your admin secret and API connectivity.
-        </div>
+        <Card variant="outlined" className="p-4">
+          <p className="text-compact text-danger">
+            Failed to load pods -- check your admin secret and API connectivity.
+          </p>
+        </Card>
       )}
 
       {/* Enabled pods */}
       {enabled.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Active Pods</h2>
-          {enabled.map(pod => <PodCard key={pod.id} pod={pod} />)}
+          <h2 className="text-micro font-semibold uppercase tracking-wider text-content-tertiary">Active Pods</h2>
+          {enabled.map(pod => <PodCard key={pod.id} pod={pod} onDelete={setDeletingPod} />)}
         </div>
       )}
 
       {/* Disabled pods */}
       {disabled.length > 0 && (
         <div className="space-y-2">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 dark:text-neutral-400">Disabled Pods</h2>
-          {disabled.map(pod => <PodCard key={pod.id} pod={pod} />)}
+          <h2 className="text-micro font-semibold uppercase tracking-wider text-content-tertiary">Disabled Pods</h2>
+          {disabled.map(pod => <PodCard key={pod.id} pod={pod} onDelete={setDeletingPod} />)}
         </div>
       )}
 
       {!isLoading && pods.length === 0 && (
-        <div className="flex flex-col items-center gap-3 py-20 text-neutral-500 dark:text-neutral-400">
-          <Layers size={32} />
-          <p className="text-sm">No pods found</p>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
-            Pods are created via the orchestrator API or by running database migrations.
-          </p>
-        </div>
+        <EmptyState
+          icon={Layers}
+          title="No pods found"
+          description="Pods are created via the orchestrator API or by clicking New Pod above."
+          action={{ label: 'Create Pod', onClick: () => setCreateOpen(true) }}
+        />
       )}
 
-      <p className="text-xs text-neutral-500 dark:text-neutral-400">
-        To create or delete pods, use <code className="text-neutral-500 dark:text-neutral-400">POST /api/v1/pods</code> with your admin secret.
-      </p>
+      {/* Create modal */}
+      <CreatePodModal open={createOpen} onClose={() => setCreateOpen(false)} />
+
+      {/* Delete confirm */}
+      <ConfirmDialog
+        open={!!deletingPod}
+        onClose={() => setDeletingPod(null)}
+        title="Delete Pod"
+        description={`Are you sure you want to delete "${deletingPod?.name}"? This action cannot be undone.`}
+        confirmLabel="Delete"
+        onConfirm={() => deletingPod && removePod.mutate(deletingPod.id)}
+        destructive
+        confirmText={deletingPod?.name}
+      />
     </div>
   )
 }
