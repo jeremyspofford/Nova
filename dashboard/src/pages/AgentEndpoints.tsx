@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, ExternalLink } from 'lucide-react'
+import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, ExternalLink, Globe } from 'lucide-react'
 import {
   getAgentEndpoints,
   createAgentEndpoint,
@@ -9,8 +9,11 @@ import {
   type AgentEndpoint,
   type AgentEndpointWrite,
 } from '../api'
-import Card from '../components/Card'
-import { Input, Textarea, Label, Select } from '../components/ui'
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Card, Button, Input, Textarea, Label, Select, Badge, StatusDot,
+  Toggle, ConfirmDialog, EmptyState,
+} from '../components/ui'
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 
@@ -28,6 +31,14 @@ const EMPTY_FORM: Omit<AgentEndpointWrite, 'input_schema' | 'output_schema' | 'm
   input_schema: '',
   output_schema: '',
   enabled: true,
+}
+
+type ProtocolBadgeColor = 'info' | 'accent' | 'neutral'
+
+const PROTOCOL_COLORS: Record<string, ProtocolBadgeColor> = {
+  a2a: 'info',
+  acp: 'accent',
+  generic: 'neutral',
 }
 
 function EndpointForm({
@@ -87,11 +98,10 @@ function EndpointForm({
 
   return (
     <Card className="p-5 space-y-4">
-      <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+      <p className="text-caption font-medium text-content-tertiary uppercase tracking-wider">
         {title}
       </p>
 
-      {/* Name + protocol */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>Name *</Label>
@@ -114,7 +124,6 @@ function EndpointForm({
         </div>
       </div>
 
-      {/* URL */}
       <div>
         <Label>Base URL *</Label>
         <Input
@@ -124,7 +133,6 @@ function EndpointForm({
         />
       </div>
 
-      {/* Description */}
       <div>
         <Label>Description</Label>
         <Input
@@ -134,85 +142,71 @@ function EndpointForm({
         />
       </div>
 
-      {/* Auth token */}
       <div>
         <Label>
-          Auth Token{' '}
-          <span className="text-neutral-300 dark:text-neutral-600">(sent as Bearer — leave blank to clear)</span>
+          Auth Token <span className="text-content-tertiary">(sent as Bearer -- leave blank to clear)</span>
         </Label>
         <Input
           type="password"
           value={form.auth_token ?? ''}
           onChange={e => set('auth_token', e.target.value)}
-          placeholder="sk-…"
+          placeholder="sk-..."
         />
       </div>
 
-      {/* Schemas (optional) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>
-            Input Schema <span className="text-neutral-300 dark:text-neutral-600">(JSON, optional)</span>
+            Input Schema <span className="text-content-tertiary">(JSON, optional)</span>
           </Label>
           <Textarea
             value={form.input_schema}
             onChange={e => set('input_schema', e.target.value)}
             rows={3}
             placeholder='{"type":"object","properties":{"task":{"type":"string"}}}'
-            className="text-xs font-mono"
+            className="text-mono-sm font-mono"
           />
         </div>
         <div>
           <Label>
-            Output Schema <span className="text-neutral-300 dark:text-neutral-600">(JSON, optional)</span>
+            Output Schema <span className="text-content-tertiary">(JSON, optional)</span>
           </Label>
           <Textarea
             value={form.output_schema}
             onChange={e => set('output_schema', e.target.value)}
             rows={3}
             placeholder='{"type":"object","properties":{"result":{"type":"string"}}}'
-            className="text-xs font-mono"
+            className="text-mono-sm font-mono"
           />
         </div>
       </div>
 
       {schemaError && (
-        <p className="text-xs text-red-600 dark:text-red-400">{schemaError}</p>
+        <p className="text-caption text-danger">{schemaError}</p>
       )}
 
-      {/* Footer */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-neutral-100 dark:border-neutral-800 pt-3">
-        <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={form.enabled}
-            onChange={e => set('enabled', e.target.checked)}
-            className="rounded"
-          />
-          Enable endpoint
-        </label>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-border-subtle pt-3">
+        <Toggle
+          checked={form.enabled}
+          onChange={(checked) => set('enabled', checked)}
+          label="Enable endpoint"
+          size="sm"
+        />
         <div className="flex gap-2">
-          <button
-            onClick={onDone}
-            className="rounded-md px-3 py-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
-          >
-            Cancel
-          </button>
-          <button
+          <Button variant="ghost" onClick={onDone}>Cancel</Button>
+          <Button
+            icon={<Plus size={13} />}
             onClick={handleSubmit}
-            disabled={!isValid || mutation.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-1.5 text-sm text-white hover:bg-accent-500 disabled:opacity-40"
+            disabled={!isValid}
+            loading={mutation.isPending}
           >
-            <Plus size={13} />
-            {mutation.isPending
-              ? (endpointId ? 'Saving…' : 'Adding…')
-              : (endpointId ? 'Save Changes' : 'Add Endpoint')}
-          </button>
+            {endpointId ? 'Save Changes' : 'Add Endpoint'}
+          </Button>
         </div>
       </div>
 
       {mutation.isError && (
-        <p className="text-xs text-red-600 dark:text-red-400">{String(mutation.error)}</p>
+        <p className="text-caption text-danger">{String(mutation.error)}</p>
       )}
     </Card>
   )
@@ -251,71 +245,58 @@ function EndpointCard({
     qc.invalidateQueries({ queryKey: ['agent-endpoints'] })
   }
 
-  const protocolColor: Record<string, string> = {
-    a2a: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30',
-    acp: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30',
-    generic: 'text-neutral-500 dark:text-neutral-400 bg-neutral-100 dark:bg-neutral-800',
-  }
-
   return (
     <Card className="overflow-hidden">
-      {/* Header row */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-card-hover transition-colors"
         onClick={() => !editing && setExpanded(v => !v)}
       >
-        {/* Status dot */}
-        <div className={`w-2 h-2 rounded-full shrink-0 ${endpoint.enabled ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-600'}`} />
+        <StatusDot status={endpoint.enabled ? 'success' : 'neutral'} />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            <span className="text-compact font-medium text-content-primary">
               {endpoint.name}
             </span>
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${protocolColor[endpoint.protocol] ?? protocolColor.generic}`}>
+            <Badge color={PROTOCOL_COLORS[endpoint.protocol] ?? 'neutral'}>
               {endpoint.protocol.toUpperCase()}
-            </span>
+            </Badge>
             {!endpoint.enabled && (
-              <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                disabled
-              </span>
+              <Badge color="neutral" size="sm">disabled</Badge>
             )}
           </div>
           {endpoint.description && (
-            <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400 truncate">
+            <p className="mt-0.5 text-caption text-content-tertiary truncate">
               {endpoint.description}
             </p>
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 ml-2" onClick={e => e.stopPropagation()}>
-          <button
+        <div className="flex items-center gap-1.5 ml-2" onClick={e => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Pencil size={13} />}
             onClick={() => { setEditing(v => !v); setExpanded(false) }}
-            title="Edit endpoint"
-            className="text-neutral-500 dark:text-neutral-400 hover:text-accent-700 dark:hover:text-accent-400 transition-colors"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Trash2 size={13} />}
             onClick={onDelete}
-            title="Remove endpoint"
-            className="text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-          >
-            <Trash2 size={13} />
-          </button>
+            className="text-content-tertiary hover:text-danger"
+          />
         </div>
 
         {!editing && (
-          <div className="text-neutral-300 dark:text-neutral-600">
+          <div className="text-content-tertiary">
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </div>
         )}
       </div>
 
-      {/* Edit form */}
       {editing && (
-        <div className="border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50/20 dark:bg-neutral-900/10 p-4">
+        <div className="border-t border-border-subtle bg-surface-elevated/50 p-4">
           <EndpointForm
             initial={initial}
             endpointId={endpoint.id}
@@ -325,41 +306,40 @@ function EndpointCard({
         </div>
       )}
 
-      {/* Detail panel */}
       {expanded && !editing && (
-        <div className="border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 px-4 py-3 space-y-2">
-          <div className="text-xs flex items-center gap-1">
-            <span className="text-neutral-500 dark:text-neutral-400">URL:</span>
-            <code className="text-neutral-700 dark:text-neutral-300 flex-1 truncate">{endpoint.url}</code>
+        <div className="border-t border-border-subtle bg-surface-elevated px-4 py-3 space-y-2">
+          <div className="text-caption flex items-center gap-1">
+            <span className="text-content-tertiary">URL:</span>
+            <code className="text-content-secondary font-mono text-mono-sm flex-1 truncate">{endpoint.url}</code>
             <a
               href={endpoint.url}
               target="_blank"
               rel="noopener noreferrer"
               onClick={e => e.stopPropagation()}
-              className="shrink-0 text-neutral-400 hover:text-accent-600 dark:hover:text-accent-400"
+              className="shrink-0 text-content-tertiary hover:text-accent"
               title="Open URL"
             >
               <ExternalLink size={11} />
             </a>
           </div>
-          <div className="text-xs">
-            <span className="text-neutral-500 dark:text-neutral-400 mr-1">Added:</span>
-            <span className="text-neutral-700 dark:text-neutral-300">
+          <div className="text-caption">
+            <span className="text-content-tertiary mr-1">Added:</span>
+            <span className="text-content-secondary">
               {new Date(endpoint.created_at).toLocaleString()}
             </span>
           </div>
           {Object.keys(endpoint.input_schema).length > 0 && (
-            <div className="text-xs">
-              <span className="text-neutral-500 dark:text-neutral-400 mr-1">Input schema:</span>
-              <code className="text-neutral-700 dark:text-neutral-300">
+            <div className="text-caption">
+              <span className="text-content-tertiary mr-1">Input schema:</span>
+              <code className="text-content-secondary font-mono text-mono-sm">
                 {JSON.stringify(endpoint.input_schema)}
               </code>
             </div>
           )}
           {Object.keys(endpoint.output_schema).length > 0 && (
-            <div className="text-xs">
-              <span className="text-neutral-500 dark:text-neutral-400 mr-1">Output schema:</span>
-              <code className="text-neutral-700 dark:text-neutral-300">
+            <div className="text-caption">
+              <span className="text-content-tertiary mr-1">Output schema:</span>
+              <code className="text-content-secondary font-mono text-mono-sm">
                 {JSON.stringify(endpoint.output_schema)}
               </code>
             </div>
@@ -376,6 +356,7 @@ export function AgentEndpoints() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [formKey, setFormKey] = useState(0)
+  const [deleteTarget, setDeleteTarget] = useState<AgentEndpoint | null>(null)
 
   const { data: endpoints = [], isLoading, error } = useQuery({
     queryKey: ['agent-endpoints'],
@@ -385,7 +366,10 @@ export function AgentEndpoints() {
 
   const deleteMutation = useMutation({
     mutationFn: deleteAgentEndpoint,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['agent-endpoints'] }),
+    onSuccess: () => {
+      setDeleteTarget(null)
+      qc.invalidateQueries({ queryKey: ['agent-endpoints'] })
+    },
   })
 
   const handleFormDone = () => {
@@ -394,65 +378,60 @@ export function AgentEndpoints() {
   }
 
   return (
-    <div className="px-4 py-6 sm:px-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Agent Endpoints</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400 max-w-2xl">
-          Connect Nova to external agent systems using{' '}
-          <strong className="text-neutral-700 dark:text-neutral-300">A2A</strong>{' '}
-          (Google Agent-to-Agent) or{' '}
-          <strong className="text-neutral-700 dark:text-neutral-300">ACP</strong>{' '}
-          (BeeAI Agent Communication Protocol). Nova delegates tasks to these
-          endpoints as if they were tool calls, then streams the result back.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Agent Endpoints"
+        description="Connect Nova to external agent systems using A2A (Google Agent-to-Agent) or ACP (BeeAI Agent Communication Protocol)."
+        actions={
+          <Button
+            icon={<Plus size={14} />}
+            onClick={() => {
+              setFormKey(k => k + 1)
+              setShowForm(v => !v)
+            }}
+          >
+            {showForm ? 'Cancel' : 'Add Endpoint'}
+          </Button>
+        }
+      />
 
-      {/* Add button */}
-      <button
-        onClick={() => {
-          setFormKey(k => k + 1)
-          setShowForm(v => !v)
-        }}
-        className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-2 text-sm text-white hover:bg-accent-500 transition-colors"
-      >
-        <Plus size={14} />
-        {showForm ? 'Cancel' : 'Add Endpoint'}
-      </button>
-
-      {/* Add form */}
       {showForm && (
         <EndpointForm key={formKey} onDone={handleFormDone} />
       )}
 
-      {/* List */}
-      {isLoading && <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{String(error)}</p>}
+      {isLoading && <Card className="p-8"><p className="text-compact text-content-tertiary text-center">Loading...</p></Card>}
+      {error && <Card className="p-4"><p className="text-compact text-danger">{String(error)}</p></Card>}
 
       <div className="space-y-3">
         {endpoints.map(ep => (
           <EndpointCard
             key={ep.id}
             endpoint={ep}
-            onDelete={() => {
-              if (confirm(`Remove agent endpoint "${ep.name}"?`)) {
-                deleteMutation.mutate(ep.id)
-              }
-            }}
+            onDelete={() => setDeleteTarget(ep)}
           />
         ))}
 
         {endpoints.length === 0 && !isLoading && (
-          <Card className="p-10 text-center">
-            <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
-              No agent endpoints registered yet
-            </p>
-            <p className="mt-1 text-xs text-neutral-300 dark:text-neutral-600">
-              Add an A2A or ACP endpoint to delegate tasks to external agent systems.
-            </p>
+          <Card className="py-8">
+            <EmptyState
+              icon={Globe}
+              title="No agent endpoints registered"
+              description="Add an A2A or ACP endpoint to delegate tasks to external agent systems."
+              action={{ label: 'Add Endpoint', onClick: () => { setFormKey(k => k + 1); setShowForm(true) } }}
+            />
           </Card>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Remove Agent Endpoint"
+        description={`Remove "${deleteTarget?.name}"? Nova will no longer be able to delegate tasks to this endpoint.`}
+        confirmLabel="Remove"
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        destructive
+      />
     </div>
   )
 }
