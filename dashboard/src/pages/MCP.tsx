@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Trash2, RefreshCw, Circle, CheckCircle2, XCircle,
-  ChevronDown, ChevronRight, Pencil, ExternalLink, Search,
+  Plus, Trash2, RefreshCw, CheckCircle2, XCircle,
+  ChevronDown, ChevronRight, Pencil, ExternalLink, Search, Puzzle,
 } from 'lucide-react'
 import {
   getMCPServers,
@@ -13,8 +13,11 @@ import {
   type MCPServer,
 } from '../api'
 import { MCP_CATALOG, ALL_TAGS, type CatalogEntry } from '../lib/mcp-catalog'
-import Card from '../components/Card'
-import { Input, Label, Select } from '../components/ui'
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Card, Button, Input, Label, Select, Badge, StatusDot,
+  ConfirmDialog, EmptyState, SearchInput,
+} from '../components/ui'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,14 +50,6 @@ const DEFAULT_FORM: PrefillValues = {
   url: '',
   enabled: true,
   envPairs: [],
-}
-
-// ── Status icon ───────────────────────────────────────────────────────────────
-
-function StatusIcon({ server }: { server: MCPServer }) {
-  if (!server.enabled)  return <Circle size={13} className="text-neutral-300 dark:text-neutral-600" />
-  if (server.connected) return <CheckCircle2 size={13} className="text-emerald-500" />
-  return <XCircle size={13} className="text-red-400" />
 }
 
 // ── Server form (add or edit) ─────────────────────────────────────────────────
@@ -113,35 +108,31 @@ function ServerForm({
   const set = (key: string, value: unknown) =>
     setForm(f => ({ ...f, [key]: value }))
 
-  // Check if required env vars are missing
   const missingRequired = envPairs
     .filter(p => p.required && !p.value.trim())
     .map(p => p.key)
 
   return (
     <Card className="p-5 space-y-4">
-      <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+      <p className="text-caption font-medium text-content-tertiary uppercase tracking-wider">
         {title}
       </p>
 
-      {/* Note / warning box from catalog */}
       {vals.note && (
-        <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-          <p className="text-xs text-amber-700 dark:text-amber-400">{vals.note}</p>
+        <div className="rounded-lg border border-warning/20 bg-warning-dim px-3 py-2">
+          <p className="text-caption text-amber-700 dark:text-amber-400">{vals.note}</p>
         </div>
       )}
 
-      {/* Required env warning */}
       {missingRequired.length > 0 && (
-        <div className="rounded-lg border border-amber-200 dark:border-amber-800/50 bg-amber-50 dark:bg-amber-900/20 px-3 py-2">
-          <p className="text-xs text-amber-700 dark:text-amber-400">
+        <div className="rounded-lg border border-warning/20 bg-warning-dim px-3 py-2">
+          <p className="text-caption text-amber-700 dark:text-amber-400">
             Fill in required variables before adding:{' '}
             <span className="font-mono font-medium">{missingRequired.join(', ')}</span>
           </p>
         </div>
       )}
 
-      {/* Name + transport */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label>Name *</Label>
@@ -163,7 +154,6 @@ function ServerForm({
         </div>
       </div>
 
-      {/* Command / URL */}
       {form.transport === 'stdio' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
@@ -176,7 +166,7 @@ function ServerForm({
           </div>
           <div>
             <Label>
-              Args <span className="text-neutral-300 dark:text-neutral-600">(space-separated)</span>
+              Args <span className="text-content-tertiary">(space-separated)</span>
             </Label>
             <Input
               value={form.args}
@@ -196,73 +186,70 @@ function ServerForm({
         </div>
       )}
 
-      {/* Description */}
       <div>
         <Label>Description</Label>
         <Input
           value={form.description}
           onChange={e => set('description', e.target.value)}
-          placeholder="Optional — shown in the server card"
+          placeholder="Optional -- shown in the server card"
         />
       </div>
 
       {/* Env vars */}
       <div>
         <div className="mb-2 flex items-center justify-between">
-          <label className="text-xs text-neutral-500 dark:text-neutral-400">Environment Variables</label>
+          <label className="text-caption text-content-tertiary">Environment Variables</label>
           <button
             onClick={() => setEnvPairs(p => [...p, { key: '', value: '' }])}
-            className="text-xs text-accent-700 dark:text-accent-400 hover:text-accent-500 dark:hover:text-accent-300"
+            className="text-caption text-accent hover:text-accent-hover transition-colors"
           >
             + Add variable
           </button>
         </div>
         {envPairs.map((pair, i) => (
-          <div key={i} className={`mb-2 rounded-md ${pair.required ? 'border-l-2 border-amber-400 pl-2' : ''}`}>
+          <div key={i} className={`mb-2 rounded-sm ${pair.required ? 'border-l-2 border-warning pl-2' : ''}`}>
             {pair.label && (
               <div className="mb-1 flex items-center gap-1">
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">{pair.label}</span>
-                {pair.required && <span className="text-xs text-red-500">*</span>}
+                <span className="text-caption text-content-tertiary">{pair.label}</span>
+                {pair.required && <span className="text-caption text-danger">*</span>}
               </div>
             )}
             <div className="flex gap-2">
-              <input
+              <Input
                 value={pair.key}
                 onChange={e =>
                   setEnvPairs(p => p.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)))
                 }
                 placeholder="KEY"
-                className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
+                className="flex-1 text-caption font-mono"
               />
-              <input
+              <Input
                 value={pair.value}
                 onChange={e =>
                   setEnvPairs(p => p.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))
                 }
                 placeholder={pair.required && !pair.value ? 'Required' : 'value'}
-                className={`flex-1 rounded-md border px-3 py-1.5 text-xs outline-none focus:border-accent-600
-                  ${pair.required && !pair.value.trim()
-                    ? 'border-amber-400 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 text-neutral-900 dark:text-neutral-100'
-                    : 'border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
-                  }`}
+                className={`flex-1 text-caption font-mono ${pair.required && !pair.value.trim() ? 'border-warning' : ''}`}
               />
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setEnvPairs(p => p.filter((_, j) => j !== i))}
-                className="shrink-0 text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 px-1"
+                className="text-content-tertiary hover:text-danger shrink-0"
               >
-                ×
-              </button>
+                x
+              </Button>
             </div>
             {pair.hint && (
-              <p className="mt-0.5 text-xs text-neutral-400 dark:text-neutral-500">{pair.hint}</p>
+              <p className="mt-0.5 text-caption text-content-tertiary">{pair.hint}</p>
             )}
           </div>
         ))}
       </div>
 
       {/* Footer */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-neutral-100 dark:border-neutral-800 pt-3">
-        <label className="flex items-center gap-2 text-xs text-neutral-600 dark:text-neutral-400 cursor-pointer">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-t border-border-subtle pt-3">
+        <label className="flex items-center gap-2 text-caption text-content-secondary cursor-pointer">
           <input
             type="checkbox"
             checked={form.enabled}
@@ -272,27 +259,20 @@ function ServerForm({
           Connect immediately after adding
         </label>
         <div className="flex gap-2">
-          <button
-            onClick={onDone}
-            className="rounded-md px-3 py-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
-          >
-            Cancel
-          </button>
-          <button
+          <Button variant="ghost" onClick={onDone}>Cancel</Button>
+          <Button
+            icon={<Plus size={13} />}
             onClick={handleSubmit}
-            disabled={!isValid || mutation.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-1.5 text-sm text-white hover:bg-accent-500 disabled:opacity-40"
+            disabled={!isValid}
+            loading={mutation.isPending}
           >
-            <Plus size={13} />
-            {mutation.isPending
-              ? (serverId ? 'Saving…' : 'Adding…')
-              : (serverId ? 'Save Changes' : 'Add Server')}
-          </button>
+            {serverId ? 'Save Changes' : 'Add Server'}
+          </Button>
         </div>
       </div>
 
       {mutation.isError && (
-        <p className="text-xs text-red-600 dark:text-red-400">{String(mutation.error)}</p>
+        <p className="text-caption text-danger">{String(mutation.error)}</p>
       )}
     </Card>
   )
@@ -336,74 +316,68 @@ function ServerCard({
     qc.invalidateQueries({ queryKey: ['mcp-servers'] })
   }
 
+  const statusDot = !server.enabled ? 'neutral' as const
+    : server.connected ? 'success' as const
+    : 'danger' as const
+
   return (
     <Card className="overflow-hidden">
-      {/* Header row */}
       <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-surface-card-hover transition-colors"
         onClick={() => !editing && setExpanded(v => !v)}
       >
-        <StatusIcon server={server} />
+        <StatusDot status={statusDot} />
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{server.name}</span>
-            <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-              {server.transport}
-            </span>
+            <span className="text-compact font-medium text-content-primary">{server.name}</span>
+            <Badge color="neutral" size="sm">{server.transport}</Badge>
             {server.connected && (
-              <span className="rounded-full bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 text-xs text-emerald-700 dark:text-emerald-400">
+              <Badge color="success" size="sm">
                 {server.tool_count} tool{server.tool_count !== 1 ? 's' : ''}
-              </span>
+              </Badge>
             )}
             {!server.enabled && (
-              <span className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                disabled
-              </span>
+              <Badge color="neutral" size="sm">disabled</Badge>
             )}
           </div>
           {server.description && (
-            <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400 truncate">{server.description}</p>
+            <p className="mt-0.5 text-caption text-content-tertiary truncate">{server.description}</p>
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2 ml-2" onClick={e => e.stopPropagation()}>
-          <button
+        <div className="flex items-center gap-1.5 ml-2" onClick={e => e.stopPropagation()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Pencil size={13} />}
             onClick={() => { setEditing(v => !v); setExpanded(false) }}
-            title="Edit server"
-            className="text-neutral-500 dark:text-neutral-400 hover:text-accent-700 dark:hover:text-accent-400 transition-colors"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw size={13} className={reloading ? 'animate-spin' : ''} />}
             onClick={onReload}
             disabled={reloading}
-            title="Reload / reconnect"
-            className="text-neutral-500 dark:text-neutral-400 hover:text-accent-700 dark:hover:text-accent-400 transition-colors disabled:opacity-40"
-          >
-            <RefreshCw size={13} className={reloading ? 'animate-spin' : ''} />
-          </button>
-          <button
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Trash2 size={13} />}
             onClick={onDelete}
-            title="Remove server"
-            className="text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors"
-          >
-            <Trash2 size={13} />
-          </button>
+            className="text-content-tertiary hover:text-danger"
+          />
         </div>
 
-        {/* Expand chevron — hide in edit mode */}
         {!editing && (
-          <div className="text-neutral-300 dark:text-neutral-600">
+          <div className="text-content-tertiary">
             {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </div>
         )}
       </div>
 
-      {/* Edit form */}
       {editing && (
-        <div className="border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50/20 dark:bg-neutral-900/10 p-4">
+        <div className="border-t border-border-subtle bg-surface-elevated/50 p-4">
           <ServerForm
             initialValues={initialValues}
             serverId={server.id}
@@ -413,50 +387,44 @@ function ServerCard({
         </div>
       )}
 
-      {/* Expanded detail panel */}
       {expanded && !editing && (
-        <div className="border-t border-neutral-100 dark:border-neutral-800 bg-neutral-50 dark:bg-neutral-800 px-4 py-3 space-y-2">
+        <div className="border-t border-border-subtle bg-surface-elevated px-4 py-3 space-y-2">
           {server.command && (
-            <div className="text-xs">
-              <span className="text-neutral-500 dark:text-neutral-400 mr-1">Command:</span>
-              <code className="text-neutral-700 dark:text-neutral-300">
+            <div className="text-caption">
+              <span className="text-content-tertiary mr-1">Command:</span>
+              <code className="text-content-secondary font-mono text-mono-sm">
                 {server.command}
                 {server.args && server.args.length > 0 ? ' ' + server.args.join(' ') : ''}
               </code>
             </div>
           )}
           {server.url && (
-            <div className="text-xs">
-              <span className="text-neutral-500 dark:text-neutral-400 mr-1">URL:</span>
-              <code className="text-neutral-700 dark:text-neutral-300">{server.url}</code>
+            <div className="text-caption">
+              <span className="text-content-tertiary mr-1">URL:</span>
+              <code className="text-content-secondary font-mono text-mono-sm">{server.url}</code>
             </div>
           )}
           {Object.keys(server.env || {}).length > 0 && (
-            <div className="text-xs">
-              <span className="text-neutral-500 dark:text-neutral-400 mr-1">Env vars:</span>
-              <code className="text-neutral-700 dark:text-neutral-300">{Object.keys(server.env).join(', ')}</code>
+            <div className="text-caption">
+              <span className="text-content-tertiary mr-1">Env vars:</span>
+              <code className="text-content-secondary font-mono text-mono-sm">{Object.keys(server.env).join(', ')}</code>
             </div>
           )}
 
           {server.active_tools && server.active_tools.length > 0 && (
             <div className="pt-1">
-              <p className="mb-1.5 text-xs text-neutral-500 dark:text-neutral-400">Available tools:</p>
+              <p className="mb-1.5 text-caption text-content-tertiary">Available tools:</p>
               <div className="flex flex-wrap gap-1.5">
                 {server.active_tools.map(t => (
-                  <span
-                    key={t}
-                    className="rounded bg-accent-50 dark:bg-accent-900/30 px-2 py-0.5 text-xs font-mono text-accent-700 dark:text-accent-400"
-                  >
-                    {t}
-                  </span>
+                  <Badge key={t} color="accent" size="sm" className="font-mono">{t}</Badge>
                 ))}
               </div>
             </div>
           )}
 
           {server.connected === false && server.enabled && (
-            <p className="text-xs text-red-500 dark:text-red-400">
-              Not connected — click Reload to retry, or check the orchestrator logs.
+            <p className="text-caption text-danger">
+              Not connected -- click Reload to retry, or check the orchestrator logs.
             </p>
           )}
         </div>
@@ -475,41 +443,33 @@ function CatalogCard({
   onInstall: (entry: CatalogEntry) => void
 }) {
   return (
-    <Card className="p-4 flex flex-col gap-3">
+    <Card variant="hoverable" className="p-4 flex flex-col gap-3">
       <div className="flex-1">
         <div className="flex items-start justify-between gap-2">
-          <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{entry.displayName}</span>
+          <span className="text-compact font-medium text-content-primary">{entry.displayName}</span>
           {entry.docs && (
             <a
               href={entry.docs}
               target="_blank"
               rel="noopener noreferrer"
               onClick={e => e.stopPropagation()}
-              className="shrink-0 text-neutral-400 dark:text-neutral-500 hover:text-accent-600 dark:hover:text-accent-400 transition-colors"
+              className="shrink-0 text-content-tertiary hover:text-accent transition-colors"
               title="Documentation"
             >
               <ExternalLink size={12} />
             </a>
           )}
         </div>
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400 leading-relaxed">{entry.description}</p>
+        <p className="mt-1 text-caption text-content-secondary leading-relaxed">{entry.description}</p>
         <div className="mt-2 flex flex-wrap gap-1">
           {entry.tags.map(tag => (
-            <span
-              key={tag}
-              className="rounded-full bg-neutral-100 dark:bg-neutral-800 px-2 py-0.5 text-xs text-neutral-500 dark:text-neutral-400"
-            >
-              {tag}
-            </span>
+            <Badge key={tag} color="neutral" size="sm">{tag}</Badge>
           ))}
         </div>
       </div>
-      <button
-        onClick={() => onInstall(entry)}
-        className="w-full rounded-md bg-accent-700 px-3 py-1.5 text-xs text-white hover:bg-accent-500 transition-colors"
-      >
+      <Button size="sm" className="w-full" onClick={() => onInstall(entry)}>
         Install
-      </button>
+      </Button>
     </Card>
   )
 }
@@ -524,6 +484,7 @@ export function MCP() {
   const [catalogOpen, setCatalogOpen] = useState(false)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<MCPServer | null>(null)
   const formRef = useRef<HTMLDivElement>(null)
 
   const { data: servers = [], isLoading, error } = useQuery({
@@ -534,7 +495,10 @@ export function MCP() {
 
   const deleteMutation = useMutation({
     mutationFn: deleteMCPServer,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mcp-servers'] }),
+    onSuccess: () => {
+      setDeleteTarget(null)
+      qc.invalidateQueries({ queryKey: ['mcp-servers'] })
+    },
   })
 
   const reloadMutation = useMutation({
@@ -573,10 +537,8 @@ export function MCP() {
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
 
-  // Auto-open catalog when no servers
   const effectiveCatalogOpen = catalogOpen || (servers.length === 0 && !isLoading)
 
-  // Hide catalog entries that are already installed (match by name)
   const installedNames = new Set(servers.map(s => s.name.toLowerCase()))
 
   const filteredCatalog = MCP_CATALOG.filter(entry => {
@@ -591,42 +553,23 @@ export function MCP() {
   })
 
   return (
-    <div className="px-4 py-6 sm:px-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">MCP Servers</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400 max-w-2xl">
-          Model Context Protocol servers extend what Nova can do by exposing additional tools.
-          Any server that implements the{' '}
-          <a
-            href="https://modelcontextprotocol.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-accent-700 dark:text-accent-400 underline underline-offset-2"
+    <div className="space-y-6">
+      <PageHeader
+        title="Integrations"
+        description="Connect MCP servers to extend Nova with additional tools. Any server implementing the MCP spec can be added here."
+        actions={
+          <Button
+            icon={<Plus size={14} />}
+            onClick={() => {
+              setPrefill(null)
+              setFormKey(k => k + 1)
+              setShowForm(v => !v)
+            }}
           >
-            MCP spec
-          </a>{' '}
-          — Anthropic's open standard — can be connected here. Nova namespaces each
-          server's tools as{' '}
-          <code className="rounded bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">
-            mcp__server__tool
-          </code>{' '}
-          so they're available alongside Nova's built-in file, shell, and git tools.
-        </p>
-      </div>
-
-      {/* Add server button */}
-      <button
-        onClick={() => {
-          setPrefill(null)
-          setFormKey(k => k + 1)
-          setShowForm(v => !v)
-        }}
-        className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-2 text-sm text-white hover:bg-accent-500 transition-colors"
-      >
-        <Plus size={14} />
-        {showForm ? 'Cancel' : 'Add Server'}
-      </button>
+            {showForm ? 'Cancel' : 'Add Server'}
+          </Button>
+        }
+      />
 
       {/* Add / edit server form */}
       {showForm && (
@@ -641,67 +584,60 @@ export function MCP() {
       )}
 
       {/* Server list */}
-      {isLoading && <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{String(error)}</p>}
+      {isLoading && <Card className="p-8"><p className="text-compact text-content-tertiary text-center">Loading...</p></Card>}
+      {error && <Card className="p-4"><p className="text-compact text-danger">{String(error)}</p></Card>}
 
       <div className="space-y-3">
         {servers.map(server => (
           <ServerCard
             key={server.id}
             server={server}
-            onDelete={() => {
-              if (confirm(`Remove MCP server "${server.name}"? This will disconnect it immediately.`)) {
-                deleteMutation.mutate(server.id)
-              }
-            }}
+            onDelete={() => setDeleteTarget(server)}
             onReload={() => reloadMutation.mutate(server.id)}
             reloading={reloadMutation.isPending}
           />
         ))}
 
         {servers.length === 0 && !isLoading && (
-          <Card className="p-10 text-center">
-            <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">No MCP servers registered yet</p>
-            <p className="mt-1 text-xs text-neutral-300 dark:text-neutral-600">
-              Browse the catalog below or add a server manually.
-            </p>
+          <Card className="py-8">
+            <EmptyState
+              icon={Puzzle}
+              title="No MCP servers registered"
+              description="Browse the catalog below or add a server manually to extend Nova's capabilities."
+            />
           </Card>
         )}
       </div>
 
       {/* MCP Catalog */}
       <Card className="overflow-hidden">
-        {/* Catalog header */}
         <button
-          className="w-full flex items-center justify-between px-4 py-3 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors"
+          className="w-full flex items-center justify-between px-5 py-3 hover:bg-surface-card-hover transition-colors"
           onClick={() => setCatalogOpen(v => !v)}
         >
-          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
+          <p className="text-caption font-medium text-content-tertiary uppercase tracking-wider">
             Browse MCP Catalog
           </p>
-          {effectiveCatalogOpen ? <ChevronDown size={14} className="text-neutral-400" /> : <ChevronRight size={14} className="text-neutral-400" />}
+          {effectiveCatalogOpen ? <ChevronDown size={14} className="text-content-tertiary" /> : <ChevronRight size={14} className="text-content-tertiary" />}
         </button>
 
         {effectiveCatalogOpen && (
-          <div className="border-t border-neutral-100 dark:border-neutral-800 p-4 space-y-4">
-            {/* Search + tag filters */}
+          <div className="border-t border-border-subtle p-4 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3">
-              <div className="relative flex-1">
-                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                <input
+              <div className="flex-1">
+                <SearchInput
                   value={search}
-                  onChange={e => setSearch(e.target.value)}
-                  placeholder="Search servers…"
-                  className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 pl-8 pr-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
+                  onChange={setSearch}
+                  placeholder="Search servers..."
                 />
               </div>
               <div className="flex flex-wrap gap-1.5">
                 <button
                   onClick={() => setTagFilter(null)}
-                  className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+                  className={`rounded-full px-2.5 py-0.5 text-caption transition-colors ${
                     tagFilter === null
-                      ? 'bg-accent-700 text-white'
-                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                      ? 'bg-accent text-neutral-950'
+                      : 'bg-surface-elevated text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
                   all
@@ -710,10 +646,10 @@ export function MCP() {
                   <button
                     key={tag}
                     onClick={() => setTagFilter(t => (t === tag ? null : tag))}
-                    className={`rounded-full px-2.5 py-0.5 text-xs transition-colors ${
+                    className={`rounded-full px-2.5 py-0.5 text-caption transition-colors ${
                       tagFilter === tag
-                        ? 'bg-accent-700 text-white'
-                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                        ? 'bg-accent text-neutral-950'
+                        : 'bg-surface-elevated text-content-tertiary hover:text-content-secondary'
                     }`}
                   >
                     {tag}
@@ -722,9 +658,8 @@ export function MCP() {
               </div>
             </div>
 
-            {/* Grid */}
             {filteredCatalog.length === 0 ? (
-              <p className="text-sm text-neutral-400 dark:text-neutral-500 text-center py-4">No matching servers.</p>
+              <p className="text-compact text-content-tertiary text-center py-4">No matching servers.</p>
             ) : (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredCatalog.map(entry => (
@@ -739,6 +674,17 @@ export function MCP() {
           </div>
         )}
       </Card>
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Remove MCP Server"
+        description={`Remove "${deleteTarget?.name}"? This will disconnect it immediately.`}
+        confirmLabel="Remove"
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        destructive
+      />
     </div>
   )
 }
