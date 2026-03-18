@@ -7,6 +7,7 @@ import { StartupScreen } from './components/StartupScreen'
 import { ChatProvider } from './stores/chat-store'
 import { ThemeProvider } from './stores/theme-store'
 import { AuthProvider, useAuth } from './stores/auth-store'
+import { ToastProvider } from './components/ToastProvider'
 import { Login } from './pages/Login'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
@@ -189,7 +190,9 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <AppShell />
+          <ToastProvider>
+            <AppShell />
+          </ToastProvider>
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>

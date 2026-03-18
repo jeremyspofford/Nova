@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Mail, Eye, EyeOff, Plus, Trash2, Activity } from 'lucide-react'
+import { Search, Mail, Eye, EyeOff, Plus, Trash2, Activity, Settings, Inbox, HelpCircle, Home, Layers, Zap } from 'lucide-react'
 import {
   Button,
   Input,
@@ -19,7 +19,22 @@ import {
   PipelineStages,
   Table,
   DataList,
+  Card,
+  Section,
+  Modal,
+  Sheet,
+  Tabs,
+  Accordion,
+  EmptyState,
+  Skeleton,
+  Tooltip,
+  Popover,
+  ConfirmDialog,
+  SearchInput,
+  ModelPicker,
+  Breadcrumb,
 } from '../../components/ui'
+import { useToast } from '../../components/ToastProvider'
 import type { TableColumn } from '../../components/ui'
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -628,6 +643,396 @@ function DataListGallery() {
   )
 }
 
+// ── Card Gallery ──────────────────────────────────────────────────────────────
+
+function CardGallery() {
+  return (
+    <div>
+      <SectionTitle>Card</SectionTitle>
+      <DemoCard>
+        <SubSection title="Variants">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card>
+              <div className="p-4">
+                <p className="text-compact text-content-primary">Default card</p>
+                <p className="text-caption text-content-secondary mt-1">Subtle border, standard background.</p>
+              </div>
+            </Card>
+            <Card variant="hoverable">
+              <div className="p-4">
+                <p className="text-compact text-content-primary">Hoverable card</p>
+                <p className="text-caption text-content-secondary mt-1">Hover to see border + bg change.</p>
+              </div>
+            </Card>
+            <Card variant="outlined">
+              <div className="p-4">
+                <p className="text-compact text-content-primary">Outlined card</p>
+                <p className="text-caption text-content-secondary mt-1">Stronger border variant.</p>
+              </div>
+            </Card>
+          </div>
+        </SubSection>
+        <SubSection title="With Header + Footer">
+          <Card
+            header={{ title: 'Pipeline Run #42', action: <span>View Details</span> }}
+            footer={
+              <>
+                <Button variant="ghost" size="sm">Cancel</Button>
+                <Button size="sm">Approve</Button>
+              </>
+            }
+          >
+            <div className="px-5 py-4">
+              <p className="text-compact text-content-secondary">Card content goes here. Header and footer have built-in padding.</p>
+            </div>
+          </Card>
+        </SubSection>
+        <SubSection title="With Glow">
+          <Card glow>
+            <div className="p-4">
+              <p className="text-compact text-content-primary">Glow card (hover me)</p>
+              <p className="text-caption text-content-secondary mt-1">Uses the card-glow effect with accent top highlight.</p>
+            </div>
+          </Card>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Section Gallery ──────────────────────────────────────────────────────────
+
+function SectionGallery() {
+  return (
+    <div>
+      <SectionTitle>Section</SectionTitle>
+      <DemoCard>
+        <SubSection title="Default">
+          <Section icon={Settings} title="General Settings" description="Core configuration for the platform.">
+            <p className="text-compact text-content-secondary">Section content goes here.</p>
+          </Section>
+        </SubSection>
+        <SubSection title="Collapsible">
+          <Section icon={Layers} title="Advanced Options" description="Click to expand/collapse." collapsible defaultOpen={false}>
+            <p className="text-compact text-content-secondary">This content is hidden by default. Click the header to reveal it.</p>
+          </Section>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Modal & Sheet Gallery ────────────────────────────────────────────────────
+
+function ModalSheetGallery() {
+  const [modalOpen, setModalOpen] = useState(false)
+  const [sheetOpen, setSheetOpen] = useState(false)
+  const [confirmOpen, setConfirmOpen] = useState(false)
+
+  return (
+    <div>
+      <SectionTitle>Modal, Sheet, ConfirmDialog</SectionTitle>
+      <DemoCard>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" onClick={() => setModalOpen(true)}>Open Modal</Button>
+          <Button variant="secondary" onClick={() => setSheetOpen(true)}>Open Sheet</Button>
+          <Button variant="danger" onClick={() => setConfirmOpen(true)}>Confirm Delete</Button>
+        </div>
+
+        <Modal
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          title="Example Modal"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setModalOpen(false)}>Cancel</Button>
+              <Button onClick={() => setModalOpen(false)}>Save Changes</Button>
+            </>
+          }
+        >
+          <p className="text-compact text-content-secondary">
+            This is a modal dialog. Press Escape or click outside to close.
+          </p>
+        </Modal>
+
+        <Sheet open={sheetOpen} onClose={() => setSheetOpen(false)} title="Sheet Panel">
+          <div className="p-5">
+            <p className="text-compact text-content-secondary">
+              A slide-in panel from the right. Great for detail views and forms.
+            </p>
+          </div>
+        </Sheet>
+
+        <ConfirmDialog
+          open={confirmOpen}
+          onClose={() => setConfirmOpen(false)}
+          title="Delete Resource"
+          description="This action cannot be undone. All associated data will be permanently removed."
+          confirmLabel="Delete"
+          onConfirm={() => setConfirmOpen(false)}
+          destructive
+          confirmText="delete"
+        />
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Tabs Gallery ─────────────────────────────────────────────────────────────
+
+function TabsGallery() {
+  const [tab, setTab] = useState('general')
+
+  return (
+    <div>
+      <SectionTitle>Tabs</SectionTitle>
+      <DemoCard>
+        <Tabs
+          tabs={[
+            { id: 'general', label: 'General', icon: Settings },
+            { id: 'models', label: 'AI & Models', icon: Zap },
+            { id: 'connections', label: 'Connections' },
+            { id: 'system', label: 'System' },
+          ]}
+          activeTab={tab}
+          onChange={setTab}
+        />
+        <div className="mt-4 text-compact text-content-secondary">
+          Active tab: <span className="font-semibold text-content-primary">{tab}</span>
+        </div>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Accordion Gallery ────────────────────────────────────────────────────────
+
+function AccordionGallery() {
+  return (
+    <div>
+      <SectionTitle>Accordion</SectionTitle>
+      <DemoCard>
+        <SubSection title="Single mode">
+          <Card variant="outlined">
+            <Accordion
+              items={[
+                { id: '1', title: 'What is Nova?', content: 'Nova is a self-directed autonomous AI platform.' },
+                { id: '2', title: 'How do I deploy?', content: 'Run docker compose up to start all services.' },
+                { id: '3', title: 'Is GPU required?', content: 'No, GPU is optional for local inference.' },
+              ]}
+              defaultOpen={['1']}
+            />
+          </Card>
+        </SubSection>
+        <SubSection title="Multiple mode">
+          <Card variant="outlined">
+            <Accordion
+              items={[
+                { id: 'a', title: 'First item', content: 'Content for item A.' },
+                { id: 'b', title: 'Second item', content: 'Content for item B.' },
+                { id: 'c', title: 'Third item', content: 'Content for item C.' },
+              ]}
+              multiple
+              defaultOpen={['a', 'b']}
+            />
+          </Card>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── EmptyState Gallery ───────────────────────────────────────────────────────
+
+function EmptyStateGallery() {
+  return (
+    <div>
+      <SectionTitle>EmptyState</SectionTitle>
+      <DemoCard>
+        <EmptyState
+          icon={Inbox}
+          title="No tasks yet"
+          description="Create your first task to get started with Nova's agent pipeline."
+          action={{ label: 'Create Task', onClick: () => {} }}
+        />
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Skeleton Gallery ─────────────────────────────────────────────────────────
+
+function SkeletonGallery() {
+  return (
+    <div>
+      <SectionTitle>Skeleton</SectionTitle>
+      <DemoCard>
+        <SubSection title="Text lines">
+          <div className="max-w-sm">
+            <Skeleton variant="text" lines={3} />
+          </div>
+        </SubSection>
+        <SubSection title="Rect + Circle">
+          <div className="flex items-start gap-4">
+            <Skeleton variant="circle" width="48px" />
+            <div className="flex-1 space-y-2">
+              <Skeleton variant="text" width="60%" />
+              <Skeleton variant="rect" height="64px" />
+            </div>
+          </div>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Tooltip & Popover Gallery ────────────────────────────────────────────────
+
+function TooltipPopoverGallery() {
+  return (
+    <div>
+      <SectionTitle>Tooltip &amp; Popover</SectionTitle>
+      <DemoCard>
+        <SubSection title="Tooltip positions">
+          <div className="flex flex-wrap items-center gap-6 py-4">
+            <Tooltip content="Tooltip on top" side="top">
+              <Button variant="outline" size="sm">Top</Button>
+            </Tooltip>
+            <Tooltip content="Tooltip on bottom" side="bottom">
+              <Button variant="outline" size="sm">Bottom</Button>
+            </Tooltip>
+            <Tooltip content="Tooltip on left" side="left">
+              <Button variant="outline" size="sm">Left</Button>
+            </Tooltip>
+            <Tooltip content="Tooltip on right" side="right">
+              <Button variant="outline" size="sm">Right</Button>
+            </Tooltip>
+          </div>
+        </SubSection>
+        <SubSection title="Popover">
+          <Popover
+            trigger={<Button variant="secondary" size="sm">Click for popover</Button>}
+            align="start"
+          >
+            <div className="w-48 p-2">
+              <p className="text-compact text-content-primary font-medium mb-1">Popover content</p>
+              <p className="text-caption text-content-secondary">Click outside to close.</p>
+            </div>
+          </Popover>
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Toast Gallery ────────────────────────────────────────────────────────────
+
+function ToastGallery() {
+  const { addToast } = useToast()
+
+  return (
+    <div>
+      <SectionTitle>Toast</SectionTitle>
+      <DemoCard>
+        <div className="flex flex-wrap gap-3">
+          <Button variant="secondary" size="sm" onClick={() => addToast({ variant: 'success', message: 'Settings saved successfully.' })}>
+            Success toast
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => addToast({ variant: 'error', message: 'Failed to connect to database.' })}>
+            Error toast
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => addToast({ variant: 'warning', message: 'Rate limit approaching threshold.' })}>
+            Warning toast
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => addToast({ variant: 'info', message: 'New model available for download.', action: { label: 'View', onClick: () => {} } })}>
+            Info toast (with action)
+          </Button>
+        </div>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── SearchInput Gallery ──────────────────────────────────────────────────────
+
+function SearchInputGallery() {
+  const [search, setSearch] = useState('')
+
+  return (
+    <div>
+      <SectionTitle>SearchInput</SectionTitle>
+      <DemoCard>
+        <div className="max-w-sm space-y-4">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search tasks..."
+            shortcutHint="/"
+          />
+          <p className="text-caption text-content-tertiary">
+            Current value: {search ? `"${search}"` : '(empty)'}
+          </p>
+        </div>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── ModelPicker Gallery ──────────────────────────────────────────────────────
+
+function ModelPickerGallery() {
+  const [model, setModel] = useState('auto')
+
+  return (
+    <div>
+      <SectionTitle>ModelPicker</SectionTitle>
+      <DemoCard>
+        <div className="max-w-sm">
+          <ModelPicker
+            value={model}
+            onChange={setModel}
+            showAuto
+            models={[
+              { id: 'claude-3-opus', provider: 'Anthropic' },
+              { id: 'claude-3-sonnet', provider: 'Anthropic' },
+              { id: 'gpt-4o', provider: 'OpenAI' },
+              { id: 'llama-3.1-70b', provider: 'Ollama' },
+            ]}
+          />
+          <p className="text-caption text-content-tertiary mt-2">
+            Selected: {model}
+          </p>
+        </div>
+      </DemoCard>
+    </div>
+  )
+}
+
+// ── Breadcrumb Gallery ───────────────────────────────────────────────────────
+
+function BreadcrumbGallery() {
+  return (
+    <div>
+      <SectionTitle>Breadcrumb</SectionTitle>
+      <DemoCard>
+        <SubSection title="Standard">
+          <Breadcrumb items={[
+            { label: 'Home', to: '/' },
+            { label: 'Settings', to: '/settings' },
+            { label: 'LLM Routing' },
+          ]} />
+        </SubSection>
+        <SubSection title="Short">
+          <Breadcrumb items={[
+            { label: 'Dashboard', to: '/' },
+            { label: 'Tasks' },
+          ]} />
+        </SubSection>
+      </DemoCard>
+    </div>
+  )
+}
+
 // ── Main Gallery ───────────────────────────────────────────────────────────────
 
 export default function ComponentGallery() {
@@ -646,6 +1051,8 @@ export default function ComponentGallery() {
         <ToggleGallery />
         <RadioGallery />
         <SliderGallery />
+        <SearchInputGallery />
+        <ModelPickerGallery />
         <BadgeGallery />
         <AvatarGallery />
         <StatusDotGallery />
@@ -656,6 +1063,16 @@ export default function ComponentGallery() {
         <PipelineStagesGallery />
         <TableGallery />
         <DataListGallery />
+        <CardGallery />
+        <SectionGallery />
+        <TabsGallery />
+        <AccordionGallery />
+        <ModalSheetGallery />
+        <TooltipPopoverGallery />
+        <ToastGallery />
+        <EmptyStateGallery />
+        <SkeletonGallery />
+        <BreadcrumbGallery />
       </section>
     </div>
   )
