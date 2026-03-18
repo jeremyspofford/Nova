@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     task_heartbeat_ttl_seconds: int = 120
     # Default pod name used when no routing match is found
     default_pod_name: str = "Quartet"
+
+    # Phase 4b: Memory context pre-warming for active chat sessions
+    memory_prewarm_enabled: bool = True
+    memory_prewarm_ttl_seconds: int = 60
     # Maximum number of pipeline executions that can run concurrently
     pipeline_max_concurrent: int = 5
 

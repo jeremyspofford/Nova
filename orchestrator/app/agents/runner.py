@@ -27,6 +27,7 @@ from nova_contracts import (
 from app.clients import get_llm_client, get_memory_client
 from app.config import settings
 from app.stimulus import emit_stimulus
+from app.store import get_redis
 from app.tools import ALL_TOOLS, execute_tool, get_all_tools
 
 log = logging.getLogger(__name__)
@@ -311,6 +312,10 @@ async def run_agent_turn_streaming(
         metadata=_usage_meta,
     )
 
+    # Phase 4b: Pre-warm memory cache for the next message in this session
+    if settings.memory_prewarm_enabled and not guest_mode and query:
+        asyncio.create_task(_prewarm_memory(session_id, query))
+
 
 async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str], str | None]:
     """Fetch engram-powered memory context for prompt assembly.
@@ -321,6 +326,26 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
     """
     if not query:
         return "", 0, [], None
+
+    # Check pre-warmed cache first (Phase 4b optimization)
+    if settings.memory_prewarm_enabled and session_id:
+        try:
+            redis = get_redis()
+            cache_key = f"nova:memory_cache:{session_id}"
+            cached = await redis.get(cache_key)
+            if cached:
+                await redis.delete(cache_key)  # One-shot: consume after use
+                data = json.loads(cached)
+                context = data.get("context", "")
+                if context:
+                    sections = data.get("sections", {})
+                    section_count = sum(1 for v in sections.values() if v)
+                    engram_ids = data.get("engram_ids", [])
+                    retrieval_log_id = data.get("retrieval_log_id")
+                    log.debug("Memory cache hit for session %s", session_id)
+                    return context, section_count, engram_ids, retrieval_log_id
+        except Exception as e:
+            log.debug("Memory cache lookup failed (falling through): %s", e)
 
     memory_client = get_memory_client()
     try:
@@ -342,6 +367,35 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
     except Exception as e:
         log.warning("Engram memory retrieval failed: %s", e)
         return "", 0, [], None
+
+
+async def _prewarm_memory(session_id: str, query: str) -> None:
+    """Pre-fetch memory context for likely follow-up queries in this session.
+
+    Called as a fire-and-forget task after a chat response is fully streamed.
+    The result is cached in Redis so the next _get_memory_context() call for
+    the same session gets a near-instant cache hit instead of waiting for the
+    memory-service round-trip.
+    """
+    try:
+        redis = get_redis()
+        cache_key = f"nova:memory_cache:{session_id}"
+
+        # Fetch fresh context from memory-service
+        memory_client = get_memory_client()
+        resp = await memory_client.post(
+            "/api/v1/engrams/context",
+            json={"query": query, "session_id": session_id},
+        )
+        if resp.status_code == 200:
+            await redis.setex(
+                cache_key,
+                settings.memory_prewarm_ttl_seconds,
+                json.dumps(resp.json()),
+            )
+            log.debug("Pre-warmed memory cache for session %s", session_id)
+    except Exception as e:
+        log.debug("Memory pre-warm failed (non-critical): %s", e)
 
 
 async def _get_platform_identity() -> tuple[str, str]:

@@ -1,7 +1,10 @@
 """
-Pipeline complexity classifier — categorises task input as simple/moderate/complex.
+Pipeline complexity classifier — categorises task input as trivial/simple/moderate/complex.
 
-Used by the pipeline executor to auto-select model tiers per stage.
+Used by the pipeline executor to:
+  1. Auto-select model tiers per stage (Phase 3)
+  2. Adaptively skip unnecessary stages (Phase 4b)
+
 Feature-gated by pipeline.complexity_routing_enabled.
 
 Follows the same pattern as model_classifier.py:
@@ -17,13 +20,14 @@ import time
 
 log = logging.getLogger(__name__)
 
-COMPLEXITY_LEVELS = {"simple", "moderate", "complex"}
+COMPLEXITY_LEVELS = {"trivial", "simple", "moderate", "complex"}
 
 CLASSIFIER_SYSTEM_PROMPT = (
     "Classify the complexity of this task into exactly one category.\n"
     "Reply with ONLY the category name, nothing else.\n\n"
     "Categories:\n"
-    "- simple: trivial tasks, lookups, one-line changes, formatting, simple questions\n"
+    "- trivial: simple questions, greetings, lookups, translations, formatting, summarisation — no codebase interaction needed\n"
+    "- simple: one-line changes, single-file edits, straightforward coding tasks with clear scope\n"
     "- moderate: multi-file changes, feature additions, refactoring with clear scope\n"
     "- complex: architectural changes, multi-system integration, ambiguous requirements, security-sensitive"
 )
@@ -54,7 +58,7 @@ async def _get_config(key: str, default: str) -> str:
 
 async def classify_complexity(task_input: str) -> str | None:
     """
-    Classify task complexity as simple/moderate/complex.
+    Classify task complexity as trivial/simple/moderate/complex.
 
     Returns None if:
       - Feature is disabled

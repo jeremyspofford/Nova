@@ -164,11 +164,22 @@ async def _run_pipeline(task_id: str) -> None:
 
     # Restore pipeline state from checkpoint (for retry resume)
     checkpoint = await load_checkpoint(task_id)
-    state = PipelineState(task_input=task.user_input)
+    state = PipelineState(task_input=task.user_input, complexity=complexity)
 
     # Reload completed stage outputs into state
     for role, output in checkpoint.items():
         state.completed[role] = output
+
+    # ── Adaptive stage skipping (Phase 4b) ────────────────────────────────
+    # Use complexity classification to skip stages that add no value for
+    # simple tasks.  We inject synthetic checkpoint entries so the existing
+    # skip-if-checkpointed logic handles them transparently.
+    if complexity:
+        skipped = _apply_adaptive_skips(complexity, task.user_input, state, checkpoint, task_id)
+        if skipped:
+            # Persist the synthetic checkpoints to the DB so retries also skip
+            for role in skipped:
+                await save_checkpoint(task_id, role, state.completed[role])
 
     # Determine resume point
     stage_roles  = [a.role for a in agents if a.enabled]
@@ -546,10 +557,38 @@ async def _run_agent(
     if _tier_override:
         _tier = _tier_override
 
+    # ── Stage merging: expand Task Agent for simple tasks (Phase 4b Step 9) ──
+    # When the Context Agent was skipped (merged), give the Task Agent access
+    # to read-only context tools so it can gather context itself.
+    _allowed_tools = agent.allowed_tools
+    _system_prompt = agent.system_prompt
+    _context_merged = (
+        agent.role == "task"
+        and state.completed.get("context", {}).get("_merged")
+    )
+    if _context_merged:
+        CONTEXT_READ_TOOLS = {"list_dir", "read_file", "search_codebase", "git_status", "git_log"}
+        if _allowed_tools is not None:
+            # Agent has an explicit tool allowlist — expand it with context tools
+            _allowed_tools = list(set(_allowed_tools) | CONTEXT_READ_TOOLS)
+        # else: allowed_tools=None means all tools — context tools already included
+
+        _merge_note = (
+            "NOTE: No separate Context Agent ran for this task. Before making "
+            "changes, briefly explore the relevant parts of the codebase using "
+            "the read-only tools (list_dir, read_file, search_codebase) to "
+            "understand the current implementation and conventions.\n\n"
+        )
+        # Prepend the merge note to whichever system prompt will be used.
+        # If _system_prompt is None, the class DEFAULT_SYSTEM would be used,
+        # so we resolve it here to ensure the merge note is included.
+        base_prompt = _system_prompt or agent_cls.DEFAULT_SYSTEM
+        _system_prompt = _merge_note + base_prompt
+
     instance = agent_cls(
         model=model,
-        system_prompt=agent.system_prompt,
-        allowed_tools=agent.allowed_tools,
+        system_prompt=_system_prompt,
+        allowed_tools=_allowed_tools,
         temperature=agent.temperature,
         max_tokens=agent.max_tokens,
         fallback_models=agent.fallback_models,
@@ -969,6 +1008,81 @@ async def _fail_session(session_id: str, error: str, elapsed_ms: int) -> None:
             """,
             session_id, error, elapsed_ms,
         )
+
+
+# ── Adaptive stage skipping (Phase 4b) ─────────────────────────────────────────
+
+# Keywords indicating the task involves code — used to decide whether
+# code_review can be skipped for simple tasks.
+_CODE_KEYWORDS = frozenset({
+    "code", "function", "class", "file", "git", "commit", "test", "bug",
+    "fix", "implement", "refactor", "write", "create", "build", "deploy",
+})
+
+
+def _is_code_task(user_input: str) -> bool:
+    """Return True if the user input contains any code-related keyword."""
+    words = set(user_input.lower().split())
+    return bool(words & _CODE_KEYWORDS)
+
+
+def _apply_adaptive_skips(
+    complexity: str,
+    user_input: str,
+    state: PipelineState,
+    checkpoint: dict,
+    task_id: str,
+) -> list[str]:
+    """
+    Inject synthetic checkpoint entries for stages that can be skipped
+    based on task complexity.
+
+    Rules:
+      - simple   → skip context  (stage merged into Task Agent, which gets
+                    read-only tools and a self-gather prompt — Phase 4b Step 9)
+      - simple + non-code task → skip code_review  (no code to review)
+
+    Decision Agent is already conditional (only runs when guardrail AND
+    code_review both fail) so it doesn't need special handling here.
+
+    Returns list of stage roles that were newly skipped.
+    """
+    skipped: list[str] = []
+
+    # simple tasks: merge Context into Task Agent (Phase 4b Step 9)
+    # Instead of running a separate Context Agent, the Task Agent gets the
+    # Context Agent's read-only tools and gathers context itself. This saves
+    # an entire LLM round-trip for straightforward requests.
+    if complexity == "simple" and "context" not in checkpoint:
+        state.completed["context"] = {
+            "skipped": True,
+            "reason": "stage_merged_simple",
+            "_merged": True,
+            "curated_context": "",
+            "relevant_files": [],
+            "key_patterns": [],
+            "recommendations": "",
+        }
+        checkpoint["context"] = state.completed["context"]
+        skipped.append("context")
+        logger.info(
+            f"Task {task_id}: Stage merging — skipping Context Agent "
+            f"(complexity={complexity}), Task Agent will self-gather context"
+        )
+
+    # simple + non-code tasks: skip Code Review — no code to review
+    if complexity == "simple" and "code_review" not in checkpoint:
+        if not _is_code_task(user_input):
+            state.completed["code_review"] = {
+                "skipped": True,
+                "reason": "simple_non_code_task",
+                "verdict": "pass",
+            }
+            checkpoint["code_review"] = state.completed["code_review"]
+            skipped.append("code_review")
+            logger.info(f"Task {task_id}: Skipping code_review (complexity={complexity}, non-code task)")
+
+    return skipped
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

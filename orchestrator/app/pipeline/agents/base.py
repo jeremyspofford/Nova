@@ -36,6 +36,7 @@ class PipelineState:
     completed: dict[str, Any] = field(default_factory=dict)   # role → output dict
     flags: set[str]            = field(default_factory=set)    # "guardrail_blocked", etc.
     task_tags: list[str]       = field(default_factory=list)   # ["code", "config", …]
+    complexity: str | None     = None                          # "simple", "moderate", "complex"
 
 
 # ── Run condition evaluator ────────────────────────────────────────────────────

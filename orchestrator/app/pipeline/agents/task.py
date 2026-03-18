@@ -69,9 +69,11 @@ After completing your work, return ONLY valid JSON matching this exact schema:
 
         context = state.completed.get("context", {})
 
-        # Build the prompt, injecting context package and any refactor feedback
+        # Build the prompt, injecting context package and any refactor feedback.
+        # Skip when context was merged/skipped (Phase 4b Step 9) — the Task
+        # Agent's system prompt already tells it to self-gather context.
         context_block = ""
-        if context:
+        if context and not context.get("_merged"):
             context_block = (
                 f"\n\n## Context Package (from Context Agent)\n\n"
                 f"**Architecture & conventions:**\n{context.get('curated_context', '')}\n\n"

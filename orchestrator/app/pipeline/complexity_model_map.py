@@ -14,6 +14,13 @@ log = logging.getLogger(__name__)
 # Default model assignments per complexity level and role.
 # None = use the next layer in the resolution chain (stage default / pod default / auto).
 DEFAULT_MAP: dict[str, dict[str, str | None]] = {
+    "trivial": {
+        "context":     "groq/llama-3.1-8b-instant",  # usually skipped by adaptive stage skip
+        "task":        "groq/llama-3.1-8b-instant",
+        "guardrail":   "groq/llama-3.1-8b-instant",
+        "code_review": "groq/llama-3.1-8b-instant",  # usually skipped by adaptive stage skip
+        "decision":    "groq/llama-3.1-8b-instant",
+    },
     "simple": {
         "context":     "groq/llama-3.1-8b-instant",
         "task":        "groq/llama-3.3-70b-versatile",
