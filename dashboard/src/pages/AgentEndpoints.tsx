@@ -10,7 +10,7 @@ import {
   type AgentEndpointWrite,
 } from '../api'
 import Card from '../components/Card'
-import { Input, Label, Select } from '../components/ui'
+import { Input, Textarea, Label, Select } from '../components/ui'
 
 // ── Form ──────────────────────────────────────────────────────────────────────
 
@@ -154,8 +154,7 @@ function EndpointForm({
           <Label>
             Input Schema <span className="text-neutral-300 dark:text-neutral-600">(JSON, optional)</span>
           </Label>
-          <Input
-            multiline
+          <Textarea
             value={form.input_schema}
             onChange={e => set('input_schema', e.target.value)}
             rows={3}
@@ -167,8 +166,7 @@ function EndpointForm({
           <Label>
             Output Schema <span className="text-neutral-300 dark:text-neutral-600">(JSON, optional)</span>
           </Label>
-          <Input
-            multiline
+          <Textarea
             value={form.output_schema}
             onChange={e => set('output_schema', e.target.value)}
             rows={3}

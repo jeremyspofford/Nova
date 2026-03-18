@@ -3,6 +3,13 @@
     "docker": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-docker"]
+    },
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+      }
     }
   }
 }

@@ -18,7 +18,7 @@ import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } fr
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import { useChatStore } from '../stores/chat-store'
 import Card from '../components/Card'
-import { Input } from '../components/ui'
+import { Textarea } from '../components/ui'
 
 // ── Copyable task ID ──────────────────────────────────────────────────────────
 
@@ -565,13 +565,11 @@ function SubmitForm() {
     <Card className="p-4">
       <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Submit Task</h2>
       <div className="space-y-2">
-        <Input
-          multiline
+        <Textarea
           rows={3}
           placeholder="Describe what you want the agent pipeline to do…"
           value={input}
           onChange={e => setInput(e.target.value)}
-          className="resize-none"
           onKeyDown={e => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && input.trim()) submit.mutate()
           }}

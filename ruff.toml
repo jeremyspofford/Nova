@@ -1,0 +1,16 @@
+# Ruff linter config — all Python services share this
+[lint]
+select = ["E", "F", "W", "I"]  # pycodestyle errors/warnings, pyflakes, isort
+ignore = [
+    "E501",   # line too long — let developers decide
+    "E731",   # lambda assignment — used in FastAPI deps
+    "F841",   # local var assigned but unused — common in try/except patterns
+]
+
+[lint.per-file-ignores]
+"*/migrations/*.sql" = ["ALL"]
+"**/test_*.py" = ["F811"]  # redefined-unused-name (pytest fixtures)
+
+[format]
+quote-style = "double"
+indent-style = "space"

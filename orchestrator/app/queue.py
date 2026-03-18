@@ -24,6 +24,9 @@ from .store import get_redis
 
 logger = logging.getLogger(__name__)
 
+# ── Concurrency control ───────────────────────────────────────────────────────
+_pipeline_semaphore: asyncio.Semaphore = asyncio.Semaphore(settings.pipeline_max_concurrent)
+
 # ── Redis key constants ────────────────────────────────────────────────────────
 TASK_QUEUE_KEY       = "nova:queue:tasks"
 TASK_QUEUE_SET_KEY   = "nova:queue:tasks:set"
@@ -152,11 +155,21 @@ async def queue_worker() -> None:
 
 async def _run_with_error_guard(task_id: str, execute_fn) -> None:
     """
-    Wraps pipeline execution so an unhandled exception marks the task failed
-    rather than silently dying as a background task.
+    Wraps pipeline execution with concurrency control so an unhandled exception
+    marks the task failed rather than silently dying as a background task.
+
+    Acquires ``_pipeline_semaphore`` before running the pipeline, so at most
+    ``settings.pipeline_max_concurrent`` pipelines execute simultaneously.
     """
+    # Check if we'll have to wait (semaphore already fully acquired)
+    if _pipeline_semaphore._value == 0:  # noqa: SLF001
+        logger.info(
+            "Task %s waiting for pipeline concurrency slot (max_concurrent=%d)",
+            task_id, settings.pipeline_max_concurrent,
+        )
     try:
-        await execute_fn(task_id)
+        async with _pipeline_semaphore:
+            await execute_fn(task_id)
     except Exception:
         logger.exception("Unhandled exception executing pipeline for task %s", task_id)
         # Best-effort: mark task failed in DB so it doesn't stay stuck in queued

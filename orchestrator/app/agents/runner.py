@@ -80,7 +80,7 @@ async def run_agent_turn(
             model = classified_model
 
         # 2. Build prompt
-        prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
+        prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages, model=model)
 
         # 3. LLM call with tool loop — returns 4-tuple now
         assistant_content, input_tokens, output_tokens, cost_usd = await _run_tool_loop(
@@ -231,7 +231,7 @@ async def run_agent_turn_streaming(
         # Emit model selection status
         yield json.dumps({"status": {"step": "model", "state": "done", "detail": model}})
 
-    prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages)
+    prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages, model=model)
 
     if guest_mode:
         # Guest mode: no tools at all
@@ -603,6 +603,7 @@ def _build_prompt(
     nova_context: str,
     memory_context: str,
     messages: list[dict],
+    model: str = "",
 ) -> list[Message]:
     """
     Assemble the full message list with context injected.
@@ -611,13 +612,29 @@ def _build_prompt(
       1. Base system_prompt  — stable across all turns of a session
       2. Nova context block  — stable per session (model + agent/session IDs)
       3. Memory context      — dynamic, changes as memories accumulate
-    """
-    sections = [system_prompt, nova_context]
-    if memory_context:
-        sections.append(memory_context)
-    full_system = "\n\n".join(sections)
 
-    result = [Message(role="system", content=full_system)]
+    For Anthropic models, uses content blocks with cache_control on the static
+    prefix (system_prompt + nova_context) so subsequent calls in the same session
+    reuse the cached prefix — saving ~50-90% on those tokens.
+    """
+    is_anthropic = model.startswith(("claude", "claude-max/"))
+
+    if is_anthropic:
+        # Anthropic prompt caching: split into cacheable static prefix + dynamic suffix
+        static_prefix = f"{system_prompt}\n\n{nova_context}"
+        content_blocks = [
+            {"type": "text", "text": static_prefix, "cache_control": {"type": "ephemeral"}},
+        ]
+        if memory_context:
+            content_blocks.append({"type": "text", "text": memory_context})
+        result = [Message(role="system", content=content_blocks)]
+    else:
+        sections = [system_prompt, nova_context]
+        if memory_context:
+            sections.append(memory_context)
+        full_system = "\n\n".join(sections)
+        result = [Message(role="system", content=full_system)]
+
     for m in messages:
         result.append(Message(role=m["role"], content=m["content"]))
 

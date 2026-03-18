@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     task_heartbeat_ttl_seconds: int = 120
     # Default pod name used when no routing match is found
     default_pod_name: str = "Quartet"
+    # Maximum number of pipeline executions that can run concurrently
+    pipeline_max_concurrent: int = 5
 
     # Trusted networks — comma-separated CIDRs that bypass auth (treated as admin)
     # Default includes RFC1918 private ranges, Tailscale CGNAT, and localhost

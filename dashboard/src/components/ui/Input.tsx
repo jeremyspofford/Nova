@@ -1,26 +1,72 @@
 import { forwardRef } from 'react'
 import clsx from 'clsx'
 
-const BASE =
-  'w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500 focus:border-accent-600'
-
-type InputProps = React.InputHTMLAttributes<HTMLInputElement> & {
-  multiline?: false
+type InputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'prefix'> & {
+  label?: string
+  description?: string
+  error?: string
+  prefix?: React.ReactNode
+  suffix?: React.ReactNode
 }
 
-type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & {
-  multiline: true
-}
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+  ({ label, description, error, prefix, suffix, className, id, ...rest }, ref) => {
+    const inputId = id || (label ? `input-${label.toLowerCase().replace(/\s+/g, '-')}` : undefined)
 
-type Props = InputProps | TextareaProps
-
-export const Input = forwardRef<HTMLInputElement | HTMLTextAreaElement, Props>(
-  ({ className, multiline, ...rest }, ref) => {
-    const cls = clsx(BASE, multiline && 'resize-y', className)
-    if (multiline) {
-      return <textarea ref={ref as React.Ref<HTMLTextAreaElement>} className={cls} {...(rest as React.TextareaHTMLAttributes<HTMLTextAreaElement>)} />
-    }
-    return <input ref={ref as React.Ref<HTMLInputElement>} className={cls} {...(rest as React.InputHTMLAttributes<HTMLInputElement>)} />
-  }
+    return (
+      <div className="w-full">
+        {label && (
+          <label
+            htmlFor={inputId}
+            className="mb-1.5 block text-caption font-medium text-content-secondary"
+          >
+            {label}
+          </label>
+        )}
+        <div className="relative">
+          {prefix && (
+            <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-2.5 text-content-tertiary">
+              {prefix}
+            </span>
+          )}
+          <input
+            ref={ref}
+            id={inputId}
+            className={clsx(
+              'h-9 w-full rounded-sm border bg-surface-input px-3 text-compact text-content-primary',
+              'placeholder:text-content-tertiary',
+              'outline-none transition-colors duration-fast',
+              error
+                ? 'border-danger ring-2 ring-danger/40'
+                : 'border-border focus:border-border-focus focus:ring-2 focus:ring-accent-500/40',
+              'disabled:opacity-50 disabled:cursor-not-allowed',
+              prefix && 'pl-8',
+              suffix && 'pr-8',
+              className,
+            )}
+            aria-invalid={error ? true : undefined}
+            aria-describedby={
+              error ? `${inputId}-error` : description ? `${inputId}-desc` : undefined
+            }
+            {...rest}
+          />
+          {suffix && (
+            <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2.5 text-content-tertiary">
+              {suffix}
+            </span>
+          )}
+        </div>
+        {error ? (
+          <p id={`${inputId}-error`} className="mt-1 text-caption text-danger">
+            {error}
+          </p>
+        ) : description ? (
+          <p id={`${inputId}-desc`} className="mt-1 text-caption text-content-tertiary">
+            {description}
+          </p>
+        ) : null}
+      </div>
+    )
+  },
 )
 Input.displayName = 'Input'

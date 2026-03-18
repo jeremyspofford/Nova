@@ -26,6 +26,7 @@ import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
 import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
+import ComponentGallery from './pages/dev/ComponentGallery'
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return <main className="mx-auto max-w-6xl w-full">{children}</main>
@@ -172,6 +173,7 @@ function AppShell() {
             <Route path="/invite/:code" element={<Invite />} />
             <Route path="/expired" element={<Expired />} />
             <Route path="/onboarding" element={<OnboardingWizard />} />
+            <Route path="/dev/components" element={<ComponentGallery />} />
           </Routes>
         </div>
       </div>
