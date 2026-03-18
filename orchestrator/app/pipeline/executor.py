@@ -210,7 +210,65 @@ async def _run_pipeline(task_id: str) -> None:
                     await mark_task_failed(task_id, f"Parallel group '{group_name}' had a fatal agent failure")
                     return
 
-                # Post-group compaction + checkpoint
+                # ── Post-group flag processing ──────────────────────────
+                # _run_parallel_group merges results into state.completed and
+                # saves checkpoints, but flag-setting, refactor loops, and
+                # human-review pauses must be handled here.
+
+                # Guardrail flags
+                guardrail_result = state.completed.get("guardrail")
+                if guardrail_result and guardrail_result.get("blocked"):
+                    state.flags.add("guardrail_blocked")
+                    logger.warning(f"Task {task_id}: Guardrail blocked output")
+                    if _should_pause_for_review(state, pod, guardrail_result, "guardrail"):
+                        escalation_msg = guardrail_result.get(
+                            "escalation_message", "Task requires human review."
+                        )
+                        await _pause_for_human_review(task_id, escalation_msg, state)
+                        return
+
+                # Code Review flags + refactor loop
+                code_review_result = state.completed.get("code_review")
+                if code_review_result:
+                    cr_agent = next(
+                        (a for a in group_agents if a.role == "code_review"), None
+                    )
+                    verdict = code_review_result.get("verdict", "pass")
+                    if verdict == "pass":
+                        state.flags.add("code_review_passed")
+                        state.flags.discard("code_review_rejected")
+                    elif verdict == "needs_refactor":
+                        code_review_iterations += 1
+                        max_refactor = cr_agent.max_retries if cr_agent else 1
+                        if code_review_iterations < max_refactor and task_agent_idx is not None:
+                            logger.info(
+                                f"Task {task_id}: Code Review needs_refactor "
+                                f"(iteration {code_review_iterations}/{max_refactor}) "
+                                f"— looping to Task Agent"
+                            )
+                            issues_text = "\n".join(
+                                f"- [{iss['severity'].upper()}] {iss['description']}"
+                                + (f" ({iss.get('file', '')}:{iss.get('line', '')})"
+                                   if iss.get("file") else "")
+                                for iss in code_review_result.get("issues", [])
+                            )
+                            state.completed["_refactor_feedback"] = issues_text
+                            # Clear checkpoints so Task, Guardrail, and Code Review re-run
+                            for clear_role in ("task", "guardrail", "code_review"):
+                                checkpoint.pop(clear_role, None)
+                                state.completed.pop(clear_role, None)
+                            i = task_agent_idx
+                            continue
+                        else:
+                            state.flags.add("code_review_rejected")
+                            logger.warning(
+                                f"Task {task_id}: Code Review rejected after "
+                                f"{code_review_iterations} iterations"
+                            )
+                    elif verdict == "reject":
+                        state.flags.add("code_review_rejected")
+
+                # Post-group compaction
                 await _maybe_compact_state(state, task_id)
                 i = j
                 continue
@@ -433,15 +491,34 @@ async def _run_agent(
     from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox
 
     # Resolve model: per-task override → agent → complexity → stage default → pod → auto
+    # A "tier:<name>" value (e.g. "tier:cheap") delegates to the gateway's tier
+    # resolver instead of specifying a concrete model — see Phase 4b step 3.
     from ..model_resolver import resolve_default_model
     from .stage_model_resolver import resolve_stage_model
     from .complexity_model_map import resolve_complexity_model
-    model = (model_override
-             or agent.model
-             or await resolve_complexity_model(complexity, agent.role)
-             or await resolve_stage_model(agent.role)
-             or pod.default_model
-             or await resolve_default_model())
+
+    _tier_override: str | None = None  # set when a "tier:*" value is found
+
+    # Check for "tier:<name>" prefix in the highest-priority source.
+    # When found, model is left as None so the gateway's tier resolver
+    # picks the best available model at that tier.
+    for _src in [model_override, agent.model]:
+        if _src and _src.startswith("tier:"):
+            _tier_override = _src[5:]  # e.g. "cheap", "mid", "best"
+            break
+        if _src:
+            break  # concrete model found — stop checking
+
+    if _tier_override:
+        # Delegate entirely to the gateway tier resolver — no concrete model
+        model = None
+    else:
+        model = (model_override
+                 or agent.model
+                 or await resolve_complexity_model(complexity, agent.role)
+                 or await resolve_stage_model(agent.role)
+                 or pod.default_model
+                 or await resolve_default_model())
 
     AGENT_CLASSES = {
         "context":     ContextAgent,
@@ -457,6 +534,7 @@ async def _run_agent(
         return {}
 
     # Map pipeline stage → routing tier + task_type for adaptive model routing
+    # If a tier: prefix was found in model resolution, it overrides the default.
     _STAGE_TIER_MAP: dict[str, tuple[str, str]] = {
         "context": ("cheap", "context_retrieval"),
         "task": ("best", "task_execution"),
@@ -465,6 +543,8 @@ async def _run_agent(
         "decision": ("cheap", "decision"),
     }
     _tier, _task_type = _STAGE_TIER_MAP.get(agent.role, ("mid", "task_execution"))
+    if _tier_override:
+        _tier = _tier_override
 
     instance = agent_cls(
         model=model,
