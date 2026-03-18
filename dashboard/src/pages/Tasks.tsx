@@ -2,9 +2,10 @@ import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Send, RefreshCw, X, CheckCircle, AlertCircle, Clock,
-  ChevronDown, ChevronUp, ThumbsUp, ThumbsDown, Loader2, Trash2,
-  ShieldAlert, FileSearch, AlertTriangle, Copy, Check, MessageSquare,
+  Send, RefreshCw, X, Clock, ChevronDown, ChevronUp,
+  ThumbsUp, ThumbsDown, Loader2, Trash2, ShieldAlert,
+  FileSearch, AlertTriangle, MessageSquare, Zap, CheckCircle2,
+  ListTodo, DollarSign, Timer,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
@@ -13,52 +14,24 @@ import {
   reviewPipelineTask, getQueueStats, getPods, discoverModels,
   deletePipelineTask, bulkDeletePipelineTasks,
   getTaskFindings, getTaskReviews,
+  getPipelineStats, getPipelineLatency,
 } from '../api'
 import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import { useChatStore } from '../stores/chat-store'
-import Card from '../components/Card'
-import { Textarea } from '../components/ui'
-
-// ── Copyable task ID ──────────────────────────────────────────────────────────
-
-function CopyableId({ id }: { id: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation()
-    navigator.clipboard.writeText(id)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
-  }, [id])
-
-  return (
-    <button
-      onClick={handleCopy}
-      title={copied ? 'Copied!' : `Copy task ID: ${id}`}
-      className={clsx(
-        'inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-mono transition-all',
-        copied
-          ? 'border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-          : 'border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 hover:border-accent-400 dark:hover:border-accent-600 hover:text-accent-600 dark:hover:text-accent-400',
-      )}
-    >
-      <span className="text-[10px] font-sans font-medium uppercase tracking-wider opacity-60">ID</span>
-      {id.slice(0, 8)}
-      {copied
-        ? <Check size={10} className="text-emerald-500 dark:text-emerald-400" />
-        : <Copy size={10} className="opacity-40 group-hover:opacity-70" />
-      }
-    </button>
-  )
-}
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Badge, Button, Card, CopyableId, ConfirmDialog, EmptyState,
+  Metric, PipelineStages, SearchInput, Select, Sheet, Skeleton,
+  Tabs, Textarea, StatusDot, DataList,
+} from '../components/ui'
+import type { SemanticColor } from '../lib/design-tokens'
 
 // ── Task context builder for chat ─────────────────────────────────────────────
 
 function inferReviewPrompt(task: PipelineTask): string {
   const escalation = (task.metadata?.escalation_message as string | undefined) ?? ''
 
-  // Agent failure (on_failure=escalate pattern: "Agent 'role' failed: ...")
   if (escalation.match(/^Agent '.+' failed:/)) {
     return (
       'This task was escalated because an agent failed during execution. ' +
@@ -67,7 +40,6 @@ function inferReviewPrompt(task: PipelineTask): string {
     )
   }
 
-  // Guardrail block (findings with severity >= threshold)
   if (escalation.toLowerCase().includes('guardrail') || escalation.toLowerCase().includes('finding')) {
     return (
       'The guardrail agent flagged this task with security or safety findings. ' +
@@ -76,7 +48,6 @@ function inferReviewPrompt(task: PipelineTask): string {
     )
   }
 
-  // Decision agent escalation (most common path)
   if (escalation.toLowerCase().includes('escalat') || escalation.toLowerCase().includes('review')) {
     return (
       'The pipeline escalated this task for human review after the decision agent evaluated it. ' +
@@ -85,7 +56,6 @@ function inferReviewPrompt(task: PipelineTask): string {
     )
   }
 
-  // Completed or failed tasks opened via "Discuss" (not in review)
   if (task.status === 'complete') {
     return 'This task completed successfully. Review the output and let me know if it achieved the intended goal.'
   }
@@ -93,7 +63,6 @@ function inferReviewPrompt(task: PipelineTask): string {
     return 'This task failed. Analyze the error and suggest how to fix or retry it.'
   }
 
-  // Generic fallback
   return (
     'Explain the current state of this task — what has been completed, ' +
     'what issues were found, and what you would recommend as next steps.'
@@ -107,7 +76,7 @@ function buildTaskContext(task: PipelineTask): string {
     `**Status:** ${task.status}`,
     `**Input:** ${task.user_input}`,
   ]
-  if (task.output) parts.push(`**Output:** ${task.output.slice(0, 500)}${task.output.length > 500 ? '…' : ''}`)
+  if (task.output) parts.push(`**Output:** ${task.output.slice(0, 500)}${task.output.length > 500 ? '...' : ''}`)
   if (task.error) parts.push(`**Error:** ${task.error}`)
   const escalation = task.metadata?.escalation_message as string | undefined
   if (escalation) parts.push(`**Escalation reason:** ${escalation}`)
@@ -116,109 +85,91 @@ function buildTaskContext(task: PipelineTask): string {
   return parts.join('\n')
 }
 
-// ── Stage pipeline definition ──────────────────────────────────────────────────
+// ── Stage helpers ───────────────────────────────────────────────────────────────
 
 const STAGES = ['context', 'task', 'guardrail', 'code_review', 'decision'] as const
 type Stage = typeof STAGES[number]
 
-const STAGE_LABELS: Record<Stage, string> = {
-  context:     'Context',
-  task:        'Task',
-  guardrail:   'Guardrail',
-  code_review: 'Code Review',
-  decision:    'Decision',
-}
+type StageStatus = 'done' | 'active' | 'pending' | 'failed'
 
-/**
- * Returns { completedUpTo, activeIndex } based on task status + current_stage.
- * completedUpTo: all stages with index < this value are done (green)
- * activeIndex: the stage currently running (-1 = none)
- */
-function resolveStageState(task: PipelineTask): { completedUpTo: number; activeIndex: number } {
-  if (task.status === 'complete') return { completedUpTo: STAGES.length, activeIndex: -1 }
-  if (task.status === 'failed' || task.status === 'cancelled') return { completedUpTo: 0, activeIndex: -1 }
+function resolveStageStatuses(task: PipelineTask): StageStatus[] {
+  if (task.status === 'complete') return STAGES.map(() => 'done' as StageStatus)
+  if (task.status === 'failed' || task.status === 'cancelled') {
+    const stageName = task.current_stage as Stage | null
+    const idx = stageName ? STAGES.indexOf(stageName) : -1
+    return STAGES.map((_, i) => {
+      if (i < idx) return 'done' as StageStatus
+      if (i === idx) return 'failed' as StageStatus
+      return 'pending' as StageStatus
+    })
+  }
 
   const stageName = task.current_stage as Stage | null
-  if (!stageName) return { completedUpTo: 0, activeIndex: -1 }
+  if (!stageName) return STAGES.map(() => 'pending' as StageStatus)
 
   const idx = STAGES.indexOf(stageName)
-  if (idx === -1) return { completedUpTo: 0, activeIndex: -1 }
-  return { completedUpTo: idx, activeIndex: idx }
+  if (idx === -1) return STAGES.map(() => 'pending' as StageStatus)
+  return STAGES.map((_, i) => {
+    if (i < idx) return 'done' as StageStatus
+    if (i === idx) return 'active' as StageStatus
+    return 'pending' as StageStatus
+  })
 }
 
-// ── Task status badge (distinct from agent StatusBadge in components/) ────────
+// ── Status helpers ──────────────────────────────────────────────────────────────
 
-function TaskStatusBadge({ status }: { status: TaskStatus }) {
-  const cfg = TASK_STATUS_CONFIG[status] ?? { label: status, className: 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300' }
-  return (
-    <span className={clsx('inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium', cfg.className)}>
-      {cfg.pulse && <span className="size-1.5 animate-pulse rounded-full bg-current" />}
-      {cfg.label}
-    </span>
-  )
+function statusToBadgeColor(status: TaskStatus): SemanticColor {
+  if (status === 'complete') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'cancelled') return 'neutral'
+  if (status === 'pending_human_review') return 'info'
+  if (ACTIVE_TASK_STATUSES.has(status)) return 'warning'
+  return 'neutral'
 }
 
-// ── Stage progress bar ─────────────────────────────────────────────────────────
+function statusToStatusDot(status: TaskStatus): 'success' | 'warning' | 'danger' | 'neutral' {
+  if (status === 'complete') return 'success'
+  if (status === 'failed') return 'danger'
+  if (status === 'cancelled') return 'neutral'
+  if (status === 'pending_human_review') return 'warning'
+  if (ACTIVE_TASK_STATUSES.has(status)) return 'warning'
+  return 'neutral'
+}
 
-function StageProgress({ task }: { task: PipelineTask }) {
-  const { completedUpTo, activeIndex } = resolveStageState(task)
+function statusLabel(status: TaskStatus): string {
+  return TASK_STATUS_CONFIG[status]?.label ?? status
+}
 
-  return (
-    <div className="flex items-center gap-0">
-      {STAGES.map((stage, i) => {
-        const done    = i < completedUpTo
-        const active  = i === activeIndex
-        const failed  = task.status === 'failed' && i === activeIndex
+// ── Filter type ─────────────────────────────────────────────────────────────────
 
-        return (
-          <div key={stage} className="flex items-center">
-            {i > 0 && (
-              <div className={clsx('h-px w-3 sm:w-5', done ? 'bg-emerald-500' : 'bg-neutral-200 dark:bg-neutral-700')} />
-            )}
-            <div className="flex flex-col items-center gap-0.5" title={STAGE_LABELS[stage]}>
-              <div
-                className={clsx(
-                  'flex size-5 sm:size-6 items-center justify-center rounded-full text-[10px] font-bold border transition-all',
-                  done   && 'bg-emerald-100 dark:bg-emerald-900/30 border-emerald-600 text-emerald-700 dark:text-emerald-400',
-                  active && !failed && 'border-amber-400 text-amber-700 dark:text-amber-400 animate-pulse bg-amber-50 dark:bg-amber-900/30',
-                  failed && 'border-red-500 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30',
-                  !done && !active && 'border-neutral-300 dark:border-neutral-600 text-neutral-500 dark:text-neutral-400 bg-card dark:bg-neutral-900',
-                )}
-              >
-                {done ? '✓' : i + 1}
-              </div>
-              <span className={clsx(
-                'text-[9px] leading-none font-medium hidden sm:block',
-                done   && 'text-emerald-600 dark:text-emerald-400',
-                active && !failed && 'text-amber-600 dark:text-amber-400',
-                failed && 'text-red-500 dark:text-red-400',
-                !done && !active && 'text-neutral-400 dark:text-neutral-500',
-              )}>
-                {STAGE_LABELS[stage]}
-              </span>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
+type StatusFilter = 'all' | 'running' | 'queued' | 'review' | 'complete' | 'failed'
+
+const STATUS_FILTERS: { id: StatusFilter; label: string; color: SemanticColor }[] = [
+  { id: 'all', label: 'All', color: 'neutral' },
+  { id: 'running', label: 'Running', color: 'warning' },
+  { id: 'queued', label: 'Queued', color: 'neutral' },
+  { id: 'review', label: 'Review', color: 'info' },
+  { id: 'complete', label: 'Complete', color: 'success' },
+  { id: 'failed', label: 'Failed', color: 'danger' },
+]
+
+function matchesFilter(task: PipelineTask, filter: StatusFilter): boolean {
+  if (filter === 'all') return true
+  if (filter === 'running') return ACTIVE_TASK_STATUSES.has(task.status) && task.status !== 'queued'
+  if (filter === 'queued') return task.status === 'queued'
+  if (filter === 'review') return task.status === 'pending_human_review'
+  if (filter === 'complete') return task.status === 'complete'
+  if (filter === 'failed') return task.status === 'failed' || task.status === 'cancelled'
+  return true
 }
 
 // ── Severity badge ────────────────────────────────────────────────────────────
 
-const SEVERITY_STYLES: Record<string, string> = {
-  critical: 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',
-  high:     'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-400',
-  medium:   'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',
-  low:      'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400',
-}
-
-function SeverityBadge({ severity }: { severity: string }) {
-  return (
-    <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase', SEVERITY_STYLES[severity] ?? SEVERITY_STYLES.low)}>
-      {severity}
-    </span>
-  )
+const SEVERITY_TO_COLOR: Record<string, SemanticColor> = {
+  critical: 'danger',
+  high: 'danger',
+  medium: 'warning',
+  low: 'neutral',
 }
 
 // ── Findings section ──────────────────────────────────────────────────────────
@@ -227,18 +178,22 @@ function FindingsSection({ findings }: { findings: GuardrailFinding[] }) {
   if (findings.length === 0) return null
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-orange-700 dark:text-orange-400">
+      <div className="flex items-center gap-1.5 text-caption font-medium text-warning">
         <ShieldAlert size={13} /> Guardrail Findings ({findings.length})
       </div>
       {findings.map(f => (
-        <div key={f.id} className="rounded-md border border-orange-200 dark:border-orange-800/50 bg-orange-50 dark:bg-orange-900/20 p-2.5 text-xs space-y-1">
+        <div key={f.id} className="rounded-sm border border-border-subtle bg-surface-elevated p-3 space-y-1.5">
           <div className="flex items-center gap-2">
-            <SeverityBadge severity={f.severity} />
-            <span className="font-medium text-neutral-700 dark:text-neutral-300 capitalize">{f.finding_type.replace(/_/g, ' ')}</span>
+            <Badge color={SEVERITY_TO_COLOR[f.severity] ?? 'neutral'} size="sm">
+              {f.severity}
+            </Badge>
+            <span className="text-compact font-medium text-content-primary capitalize">
+              {f.finding_type.replace(/_/g, ' ')}
+            </span>
           </div>
-          <p className="text-neutral-600 dark:text-neutral-400">{f.description}</p>
+          <p className="text-caption text-content-secondary">{f.description}</p>
           {f.evidence && (
-            <pre className="mt-1 rounded bg-orange-100 dark:bg-orange-900/30 px-2 py-1 text-[11px] text-orange-800 dark:text-orange-300 whitespace-pre-wrap break-words">
+            <pre className="mt-1 rounded-xs bg-surface-card p-2 text-mono-sm text-content-secondary whitespace-pre-wrap break-words">
               {f.evidence}
             </pre>
           )}
@@ -254,30 +209,32 @@ function CodeReviewSection({ reviews }: { reviews: CodeReviewVerdict[] }) {
   if (reviews.length === 0) return null
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-blue-700 dark:text-blue-400">
+      <div className="flex items-center gap-1.5 text-caption font-medium text-info">
         <FileSearch size={13} /> Code Review ({reviews.length} {reviews.length === 1 ? 'iteration' : 'iterations'})
       </div>
       {reviews.map(r => (
-        <div key={r.id} className="rounded-md border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-900/20 p-2.5 text-xs space-y-1.5">
+        <div key={r.id} className="rounded-sm border border-border-subtle bg-surface-elevated p-3 space-y-2">
           <div className="flex items-center gap-2">
-            <span className={clsx(
-              'rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase',
-              r.verdict === 'pass' && 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400',
-              r.verdict === 'needs_refactor' && 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-400',
-              r.verdict === 'reject' && 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400',
-            )}>
+            <Badge
+              color={r.verdict === 'pass' ? 'success' : r.verdict === 'needs_refactor' ? 'warning' : 'danger'}
+              size="sm"
+            >
               {r.verdict.replace(/_/g, ' ')}
-            </span>
-            <span className="text-neutral-500 dark:text-neutral-400">Iteration {r.iteration}</span>
+            </Badge>
+            <span className="text-caption text-content-tertiary">Iteration {r.iteration}</span>
           </div>
-          {r.summary && <p className="text-neutral-600 dark:text-neutral-400">{r.summary}</p>}
+          {r.summary && <p className="text-caption text-content-secondary">{r.summary}</p>}
           {r.issues?.length > 0 && (
-            <ul className="space-y-1 pl-2 border-l-2 border-blue-200 dark:border-blue-800">
+            <ul className="space-y-1 pl-2 border-l-2 border-border-subtle">
               {r.issues.map((iss, j) => (
-                <li key={j} className="text-neutral-600 dark:text-neutral-400">
-                  <SeverityBadge severity={iss.severity} />{' '}
+                <li key={j} className="text-caption text-content-secondary">
+                  <Badge color={SEVERITY_TO_COLOR[iss.severity] ?? 'neutral'} size="sm">
+                    {iss.severity}
+                  </Badge>{' '}
                   {iss.description}
-                  {iss.file && <span className="text-neutral-400 dark:text-neutral-500"> ({iss.file}{iss.line ? `:${iss.line}` : ''})</span>}
+                  {iss.file && (
+                    <span className="text-content-tertiary"> ({iss.file}{iss.line ? `:${iss.line}` : ''})</span>
+                  )}
                 </li>
               ))}
             </ul>
@@ -319,22 +276,22 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
   const isLoading = findingsLoading || reviewsLoading
 
   return (
-    <div className="mt-3 rounded-lg border border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-900/20 p-4 space-y-4">
+    <div className="space-y-4">
       {/* Escalation reason */}
       <div>
-        <div className="flex items-center gap-1.5 mb-1.5 text-xs font-semibold text-purple-700 dark:text-purple-400">
+        <div className="flex items-center gap-1.5 mb-1.5 text-caption font-semibold text-warning">
           <AlertTriangle size={13} /> Why This Needs Review
         </div>
-        <p className="text-sm text-neutral-700 dark:text-neutral-300">
+        <p className="text-compact text-content-secondary">
           {escalationMsg || 'This task was escalated for human review.'}
         </p>
       </div>
 
-      {/* Task output (what the pipeline produced) */}
+      {/* Task output */}
       {task.output && (
         <div>
-          <p className="mb-1 text-xs font-medium text-neutral-600 dark:text-neutral-400">Pipeline Output</p>
-          <pre className="max-h-48 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 p-3 text-xs text-neutral-700 dark:text-neutral-300">
+          <p className="mb-1 text-caption font-medium text-content-tertiary">Pipeline Output</p>
+          <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-surface-elevated border border-border-subtle p-3 text-mono-sm text-content-secondary">
             {task.output}
           </pre>
         </div>
@@ -342,8 +299,8 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
 
       {/* Guardrail findings & code reviews */}
       {isLoading ? (
-        <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
-          <Loader2 size={12} className="animate-spin" /> Loading review context…
+        <div className="flex items-center gap-2 text-caption text-content-tertiary">
+          <Loader2 size={12} className="animate-spin" /> Loading review context...
         </div>
       ) : (
         <>
@@ -353,200 +310,235 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
       )}
 
       {/* Decision area */}
-      <div className="border-t border-purple-200 dark:border-purple-700 pt-3 space-y-2">
-        <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Your Decision</p>
-        <textarea
+      <div className="border-t border-border-subtle pt-3 space-y-2">
+        <p className="text-caption font-medium text-content-tertiary">Your Decision</p>
+        <Textarea
           rows={2}
-          placeholder="Optional comment…"
+          placeholder="Optional comment..."
           value={comment}
           onChange={e => setComment(e.target.value)}
-          className="w-full resize-none rounded-md border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 px-2.5 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-purple-500"
+          autoResize={false}
         />
         <div className="flex gap-2">
-          <button
+          <Button
+            variant="primary"
+            size="sm"
+            icon={<ThumbsUp size={12} />}
             onClick={() => review.mutate({ decision: 'approve' })}
-            disabled={review.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            loading={review.isPending}
           >
-            <ThumbsUp size={12} /> Approve
-          </button>
-          <button
+            Approve
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={<ThumbsDown size={12} />}
             onClick={() => review.mutate({ decision: 'reject' })}
-            disabled={review.isPending}
-            className="flex items-center gap-1.5 rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+            loading={review.isPending}
           >
-            <ThumbsDown size={12} /> Reject
-          </button>
-          {review.isPending && <Loader2 size={14} className="animate-spin self-center text-neutral-500 dark:text-neutral-400" />}
-          {review.isError && <span className="self-center text-xs text-red-600 dark:text-red-400">Failed — try again</span>}
+            Reject
+          </Button>
+          {review.isError && <span className="self-center text-caption text-danger">Failed -- try again</span>}
         </div>
       </div>
     </div>
   )
 }
 
-// ── Task card ──────────────────────────────────────────────────────────────────
+// ── Task detail sheet ─────────────────────────────────────────────────────────
 
-function TaskCard({ task }: { task: PipelineTask }) {
-  const needsReview = task.status === 'pending_human_review'
-  const [expanded, setExpanded] = useState(needsReview)
-  const [reviewing, setReviewing] = useState(needsReview)
+function TaskDetailSheet({
+  task,
+  open,
+  onClose,
+}: {
+  task: PipelineTask | null
+  open: boolean
+  onClose: () => void
+}) {
+  const [detailTab, setDetailTab] = useState('output')
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { setPrefillInput } = useChatStore()
 
-  const handleDiscuss = useCallback(() => {
-    setPrefillInput(buildTaskContext(task))
-    navigate('/chat')
-  }, [task, setPrefillInput, navigate])
-
   const cancelMutation = useMutation({
-    mutationFn: () => cancelPipelineTask(task.id),
+    mutationFn: () => cancelPipelineTask(task!.id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => deletePipelineTask(task.id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
+    mutationFn: () => deletePipelineTask(task!.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+      onClose()
+    },
   })
 
-  const isActive    = ACTIVE_TASK_STATUSES.has(task.status)
-  const isTerminal  = ['complete','failed','cancelled'].includes(task.status)
+  if (!task) return null
 
-  const relativeTime = task.queued_at
-    ? formatDistanceToNow(new Date(task.queued_at), { addSuffix: true })
-    : '—'
+  const isActive = ACTIVE_TASK_STATUSES.has(task.status)
+  const isTerminal = ['complete', 'failed', 'cancelled'].includes(task.status)
+  const needsReview = task.status === 'pending_human_review'
+
+  const handleDiscuss = () => {
+    setPrefillInput(buildTaskContext(task))
+    navigate('/chat')
+  }
+
+  const detailTabs = [
+    { id: 'output', label: 'Output' },
+    { id: 'findings', label: 'Findings' },
+    { id: 'reviews', label: 'Reviews' },
+    ...(needsReview ? [{ id: 'review', label: 'Review' }] : []),
+  ]
 
   return (
-    <div className={clsx(
-      'rounded-xl border bg-card dark:bg-neutral-900 p-4 transition-all',
-      needsReview ? 'border-purple-200 dark:border-purple-800' : 'border-neutral-200 dark:border-neutral-800',
-    )}>
-      {/* Header row */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
-            <TaskStatusBadge status={task.status} />
-            <CopyableId id={task.id} />
-            {task.pod_name && (
-              <span className="rounded-full bg-accent-50 dark:bg-accent-900/30 px-2 py-0.5 text-xs text-accent-700 dark:text-accent-400">
-                {task.pod_name}
-              </span>
-            )}
-            <span className="text-xs text-neutral-500 dark:text-neutral-400">{relativeTime}</span>
-          </div>
-          <p className="truncate text-sm text-neutral-700 dark:text-neutral-300">{task.user_input}</p>
+    <Sheet open={open} onClose={onClose} width="wide" title={task.user_input.slice(0, 60) + (task.user_input.length > 60 ? '...' : '')}>
+      <div className="p-5 space-y-5">
+        {/* Status + ID header */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge color={statusToBadgeColor(task.status)} dot>
+            {statusLabel(task.status)}
+          </Badge>
+          <CopyableId id={task.id} />
+          {task.pod_name && (
+            <Badge color="accent" size="sm">{task.pod_name}</Badge>
+          )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-1">
+        {/* Timestamps / metadata */}
+        <DataList
+          items={[
+            { label: 'Input', value: task.user_input },
+            { label: 'Queued', value: task.queued_at ? formatDistanceToNow(new Date(task.queued_at), { addSuffix: true }) : '--' },
+            ...(task.started_at ? [{ label: 'Started', value: formatDistanceToNow(new Date(task.started_at), { addSuffix: true }) }] : []),
+            ...(task.completed_at ? [{ label: 'Completed', value: formatDistanceToNow(new Date(task.completed_at), { addSuffix: true }) }] : []),
+            { label: 'Retries', value: `${task.retry_count}/${task.max_retries}` },
+            ...(task.current_stage ? [{ label: 'Current Stage', value: task.current_stage }] : []),
+          ]}
+        />
+
+        {/* Pipeline stages */}
+        <div>
+          <p className="text-caption font-medium text-content-tertiary mb-2">Pipeline Progress</p>
+          <PipelineStages stages={resolveStageStatuses(task)} />
+        </div>
+
+        {/* Tabs */}
+        <Tabs tabs={detailTabs} activeTab={detailTab} onChange={setDetailTab} />
+
+        {/* Tab content */}
+        <div className="min-h-[120px]">
+          {detailTab === 'output' && (
+            <div className="space-y-3">
+              {task.output ? (
+                <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-surface-elevated p-3 text-mono-sm text-content-secondary">
+                  {task.output}
+                </pre>
+              ) : (
+                <p className="text-compact text-content-tertiary">No output yet.</p>
+              )}
+              {task.error && (
+                <div>
+                  <p className="mb-1 text-caption font-medium text-danger">Error</p>
+                  <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-danger-dim p-3 text-mono-sm text-danger">
+                    {task.error}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+          {detailTab === 'findings' && <TaskFindingsTab taskId={task.id} />}
+          {detailTab === 'reviews' && <TaskReviewsTab taskId={task.id} />}
+          {detailTab === 'review' && needsReview && (
+            <ReviewPanel task={task} onDone={onClose} />
+          )}
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-2 border-t border-border-subtle pt-4">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<MessageSquare size={14} />}
+            onClick={handleDiscuss}
+          >
+            Discuss
+          </Button>
           {isActive && !needsReview && (
-            <button
+            <Button
+              variant="danger"
+              size="sm"
+              icon={<X size={14} />}
               onClick={() => cancelMutation.mutate()}
-              disabled={cancelMutation.isPending}
-              title="Cancel task"
-              className="rounded-md p-1 text-neutral-500 dark:text-neutral-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
+              loading={cancelMutation.isPending}
             >
-              <X size={14} />
-            </button>
+              Cancel
+            </Button>
+          )}
+          {needsReview && (
+            <>
+              <Button
+                variant="primary"
+                size="sm"
+                icon={<ThumbsUp size={14} />}
+                onClick={() => setDetailTab('review')}
+              >
+                Review
+              </Button>
+            </>
           )}
           {isTerminal && (
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<Trash2 size={14} />}
               onClick={() => deleteMutation.mutate()}
-              disabled={deleteMutation.isPending}
-              title="Delete task"
-              className="rounded-md p-1 text-neutral-400 dark:text-neutral-500 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40"
+              loading={deleteMutation.isPending}
             >
-              <Trash2 size={14} />
-            </button>
-          )}
-          <button
-            onClick={handleDiscuss}
-            title="Discuss this task with Nova"
-            className="flex items-center gap-1 rounded-md border border-accent-200 dark:border-accent-800 bg-accent-50 dark:bg-accent-900/30 px-2 py-1 text-xs font-medium text-accent-700 dark:text-accent-400 hover:bg-accent-100 dark:hover:bg-accent-900/50 hover:border-accent-300 dark:hover:border-accent-700 transition-colors"
-          >
-            <MessageSquare size={12} />
-            <span className="hidden sm:inline">Discuss</span>
-          </button>
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="rounded-md p-1 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
-          >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-        </div>
-      </div>
-
-      {/* Stage progress — always visible */}
-      <div className="mt-3">
-        <StageProgress task={task} />
-      </div>
-
-      {/* Human review trigger */}
-      {needsReview && !reviewing && (
-        <button
-          onClick={() => { setExpanded(true); setReviewing(true) }}
-          className="mt-2 text-xs text-purple-400 dark:text-purple-300 hover:text-purple-700 dark:hover:text-purple-200 underline"
-        >
-          Open review panel →
-        </button>
-      )}
-
-      {/* Expanded detail */}
-      {expanded && (
-        <div className="mt-3 space-y-2 border-t border-neutral-200 dark:border-neutral-800 pt-3">
-          {/* Retry + timing info */}
-          <div className="flex flex-wrap gap-x-4 text-xs text-neutral-500 dark:text-neutral-400">
-            <span>Retries: {task.retry_count}/{task.max_retries}</span>
-            {task.started_at && <span>Started: {formatDistanceToNow(new Date(task.started_at), { addSuffix: true })}</span>}
-            {task.completed_at && <span>Completed: {formatDistanceToNow(new Date(task.completed_at), { addSuffix: true })}</span>}
-          </div>
-
-          {/* Full user input */}
-          <div>
-            <p className="mb-1 text-xs font-medium text-neutral-500 dark:text-neutral-400">Input</p>
-            <p className="text-sm text-neutral-500 dark:text-neutral-400 whitespace-pre-wrap break-words">{task.user_input}</p>
-          </div>
-
-          {/* Output */}
-          {task.output && (
-            <div>
-              <p className="mb-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">Output</p>
-              <pre className="max-h-64 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-words rounded-md bg-neutral-50 dark:bg-neutral-800 p-3 text-xs text-neutral-700 dark:text-neutral-300">
-                {task.output}
-              </pre>
-            </div>
-          )}
-
-          {/* Error */}
-          {task.error && (
-            <div>
-              <p className="mb-1 text-xs font-medium text-red-600 dark:text-red-400">Error</p>
-              <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-red-50 dark:bg-red-900/30 p-3 text-xs text-red-600 dark:text-red-400">
-                {task.error}
-              </pre>
-            </div>
-          )}
-
-          {/* Review panel */}
-          {reviewing && needsReview && (
-            <ReviewPanel task={task} onDone={() => { setReviewing(false); setExpanded(false) }} />
+              Delete
+            </Button>
           )}
         </div>
-      )}
-    </div>
+      </div>
+    </Sheet>
   )
+}
+
+function TaskFindingsTab({ taskId }: { taskId: string }) {
+  const { data: findings = [], isLoading } = useQuery({
+    queryKey: ['task-findings', taskId],
+    queryFn: () => getTaskFindings(taskId),
+    staleTime: 10_000,
+  })
+
+  if (isLoading) return <Skeleton lines={3} />
+  if (findings.length === 0) return <p className="text-compact text-content-tertiary">No findings for this task.</p>
+  return <FindingsSection findings={findings} />
+}
+
+function TaskReviewsTab({ taskId }: { taskId: string }) {
+  const { data: reviews = [], isLoading } = useQuery({
+    queryKey: ['task-reviews', taskId],
+    queryFn: () => getTaskReviews(taskId),
+    staleTime: 10_000,
+  })
+
+  if (isLoading) return <Skeleton lines={3} />
+  if (reviews.length === 0) return <p className="text-compact text-content-tertiary">No code reviews for this task.</p>
+  return <CodeReviewSection reviews={reviews} />
 }
 
 // ── Submit form ────────────────────────────────────────────────────────────────
 
 function SubmitForm() {
-  const [input, setInput]       = useState('')
-  const [podName, setPodName]   = useState('')
-  const [modelId, setModelId]   = useState('')
+  const [input, setInput] = useState('')
+  const [podName, setPodName] = useState('')
+  const [modelId, setModelId] = useState('')
   const qc = useQueryClient()
 
-  const { data: pods }        = useQuery({ queryKey: ['pods'],   queryFn: getPods,      staleTime: 30_000 })
-  const { data: providers }   = useQuery({ queryKey: ['model-catalog'], queryFn: () => discoverModels(), staleTime: 60_000 })
+  const { data: pods } = useQuery({ queryKey: ['pods'], queryFn: getPods, staleTime: 30_000 })
+  const { data: providers } = useQuery({ queryKey: ['model-catalog'], queryFn: () => discoverModels(), staleTime: 60_000 })
   const models = (providers ?? []).filter(p => p.available).flatMap(p => p.models.filter(m => m.registered).map(m => ({ id: m.id })))
 
   const submit = useMutation({
@@ -558,16 +550,27 @@ function SubmitForm() {
     onSuccess: () => {
       setInput('')
       qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+      qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
     },
   })
 
+  const podItems = [
+    { value: '', label: 'Default pod' },
+    ...(pods ?? []).map(p => ({ value: p.name, label: p.name })),
+  ]
+
+  const modelItems = [
+    { value: '', label: 'Default model' },
+    ...models.map(m => ({ value: m.id, label: m.id })),
+  ]
+
   return (
     <Card className="p-4">
-      <h2 className="mb-3 text-sm font-semibold text-neutral-900 dark:text-neutral-100">Submit Task</h2>
+      <h2 className="mb-3 text-compact font-semibold text-content-primary">Submit Task</h2>
       <div className="space-y-2">
         <Textarea
           rows={3}
-          placeholder="Describe what you want the agent pipeline to do…"
+          placeholder="Describe what you want the agent pipeline to do..."
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => {
@@ -575,85 +578,242 @@ function SubmitForm() {
           }}
         />
         <div className="flex flex-wrap gap-2">
-          {/* Pod selector */}
-          <select
-            value={podName}
-            onChange={e => setPodName(e.target.value)}
-            className="max-w-[160px] rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
-          >
-            <option value="">Default pod</option>
-            {pods?.map(p => (
-              <option key={p.id} value={p.name}>{p.name}</option>
-            ))}
-          </select>
-
-          {/* Model override selector */}
-          <select
-            value={modelId}
-            onChange={e => setModelId(e.target.value)}
-            className="max-w-[160px] rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-100 dark:bg-neutral-800 px-2 py-1.5 text-sm text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600"
-            title="Override the model for this task (leaves agent defaults intact)"
-          >
-            <option value="">Default model</option>
-            {models.map(m => (
-              <option key={m.id} value={m.id}>{m.id}</option>
-            ))}
-          </select>
-
-          <button
+          <div className="w-40">
+            <Select
+              value={podName}
+              onChange={e => setPodName(e.target.value)}
+              items={podItems}
+            />
+          </div>
+          <div className="w-40">
+            <Select
+              value={modelId}
+              onChange={e => setModelId(e.target.value)}
+              items={modelItems}
+            />
+          </div>
+          <Button
+            className="ml-auto"
+            icon={<Send size={14} />}
             onClick={() => submit.mutate()}
-            disabled={!input.trim() || submit.isPending}
-            className="ml-auto flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-1.5 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-40"
+            disabled={!input.trim()}
+            loading={submit.isPending}
           >
-            {submit.isPending
-              ? <><Loader2 size={14} className="animate-spin" /> Submitting…</>
-              : <><Send size={14} /> Submit<span className="hidden sm:inline"> (⌘↵)</span></>
-            }
-          </button>
+            Submit<span className="hidden sm:inline"> (Cmd+Enter)</span>
+          </Button>
         </div>
         {submit.isError && (
-          <p className="text-xs text-red-600 dark:text-red-400">Failed to submit: {String(submit.error)}</p>
+          <p className="text-caption text-danger">Failed to submit: {String(submit.error)}</p>
         )}
       </div>
     </Card>
   )
 }
 
-// ── Queue stats banner ─────────────────────────────────────────────────────────
+// ── Task row ────────────────────────────────────────────────────────────────────
 
-function QueueStats() {
-  const { data } = useQuery({
-    queryKey: ['queue-stats'],
-    queryFn: getQueueStats,
-    refetchInterval: 5_000,
+function TaskRow({
+  task,
+  onSelect,
+}: {
+  task: PipelineTask
+  onSelect: (task: PipelineTask) => void
+}) {
+  const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { setPrefillInput } = useChatStore()
+
+  const needsReview = task.status === 'pending_human_review'
+  const isActive = ACTIVE_TASK_STATUSES.has(task.status)
+  const isTerminal = ['complete', 'failed', 'cancelled'].includes(task.status)
+
+  const cancelMutation = useMutation({
+    mutationFn: () => cancelPipelineTask(task.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
   })
 
-  if (!data) return null
+  const deleteMutation = useMutation({
+    mutationFn: () => deletePipelineTask(task.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] }),
+  })
+
+  const handleDiscuss = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setPrefillInput(buildTaskContext(task))
+    navigate('/chat')
+  }, [task, setPrefillInput, navigate])
+
+  const relativeTime = task.queued_at
+    ? formatDistanceToNow(new Date(task.queued_at), { addSuffix: true })
+    : '--'
+
+  const modelOverride = task.metadata?.model_override as string | undefined
+  const costUsd = task.metadata?.cost_usd as number | undefined
 
   return (
-    <div className="hidden sm:flex gap-4 text-xs text-neutral-500 dark:text-neutral-400">
-      <span>Queue depth: <strong className="text-neutral-700 dark:text-neutral-300">{data.queue_depth}</strong></span>
-      <span>Dead-letter: <strong className={data.dead_letter_depth > 0 ? 'text-red-600 dark:text-red-400' : 'text-neutral-700 dark:text-neutral-300'}>{data.dead_letter_depth}</strong></span>
+    <div
+      onClick={() => onSelect(task)}
+      className={clsx(
+        'flex items-center gap-3 px-4 py-3 border-b border-border-subtle cursor-pointer transition-colors',
+        'hover:bg-surface-card-hover',
+        needsReview && 'bg-info-dim/30',
+      )}
+    >
+      {/* Status dot */}
+      <StatusDot
+        status={statusToStatusDot(task.status)}
+        pulse={ACTIVE_TASK_STATUSES.has(task.status)}
+        size="md"
+      />
+
+      {/* Task info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-compact text-content-primary truncate max-w-xs">
+            {task.user_input.slice(0, 80)}{task.user_input.length > 80 ? '...' : ''}
+          </span>
+          <CopyableId id={task.id} />
+        </div>
+        <div className="flex items-center gap-3 mt-1">
+          {modelOverride && (
+            <span className="text-mono-sm text-content-tertiary">{modelOverride}</span>
+          )}
+          {costUsd != null && (
+            <span className="text-mono-sm text-content-tertiary">${costUsd.toFixed(4)}</span>
+          )}
+          <span className="text-caption text-content-tertiary">{relativeTime}</span>
+        </div>
+      </div>
+
+      {/* Pipeline stages (compact) */}
+      <div className="hidden md:block">
+        <PipelineStages stages={resolveStageStatuses(task)} compact />
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+        {isActive && !needsReview && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<X size={12} />}
+            onClick={() => cancelMutation.mutate()}
+            loading={cancelMutation.isPending}
+            title="Cancel task"
+          />
+        )}
+        {isTerminal && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Trash2 size={12} />}
+            onClick={() => deleteMutation.mutate()}
+            loading={deleteMutation.isPending}
+            title="Delete task"
+          />
+        )}
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<MessageSquare size={12} />}
+          onClick={handleDiscuss}
+          title="Discuss this task with Nova"
+        >
+          <span className="hidden sm:inline">Discuss</span>
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ── Stats row ───────────────────────────────────────────────────────────────────
+
+function StatsRow() {
+  const { data: stats, isLoading: statsLoading } = useQuery({
+    queryKey: ['pipeline-stats'],
+    queryFn: getPipelineStats,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  })
+
+  const { data: latency, isLoading: latencyLoading } = useQuery({
+    queryKey: ['pipeline-latency'],
+    queryFn: getPipelineLatency,
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  })
+
+  const isLoading = statsLoading || latencyLoading
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Card key={i} className="p-4">
+            <Skeleton lines={2} />
+          </Card>
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <Card className="p-4">
+        <Metric
+          label="Active Tasks"
+          value={stats?.active_count ?? 0}
+          icon={<Zap size={12} />}
+        />
+      </Card>
+      <Card className="p-4">
+        <Metric
+          label="Completed Today"
+          value={stats?.completed_today ?? 0}
+          icon={<CheckCircle2 size={12} />}
+        />
+      </Card>
+      <Card className="p-4">
+        <Metric
+          label="Failed Today"
+          value={stats?.failed_today ?? 0}
+          icon={<AlertTriangle size={12} />}
+        />
+      </Card>
+      <Card className="p-4">
+        <Metric
+          label="Avg Latency"
+          value={latency ? `${(latency.avg_total_ms / 1000).toFixed(1)}s` : '--'}
+          icon={<Timer size={12} />}
+        />
+      </Card>
     </div>
   )
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
-type Tab = 'active' | 'review' | 'history'
-
 export function Tasks() {
-  const [tab, setTab] = useState<Tab>('active')
-  const qc = useQueryClient()
-
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [search, setSearch] = useState('')
+  const [podFilter, setPodFilter] = useState('')
+  const [selectedTask, setSelectedTask] = useState<PipelineTask | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const qc = useQueryClient()
 
   const { data: tasks = [], isFetching } = useQuery({
     queryKey: ['pipeline-tasks'],
     queryFn: () => getPipelineTasks({ limit: 100 }),
-    // Poll aggressively when on active/review tabs; slow down for history
-    refetchInterval: tab === 'history' ? 30_000 : 3_000,
+    refetchInterval: statusFilter === 'complete' || statusFilter === 'failed' ? 30_000 : 3_000,
   })
+
+  const { data: queueStats } = useQuery({
+    queryKey: ['queue-stats'],
+    queryFn: getQueueStats,
+    refetchInterval: 5_000,
+  })
+
+  const { data: pods } = useQuery({ queryKey: ['pods'], queryFn: getPods, staleTime: 30_000 })
 
   const bulkDelete = useMutation({
     mutationFn: () => bulkDeletePipelineTasks(),
@@ -663,112 +823,154 @@ export function Tasks() {
     },
   })
 
-  // Partition into tabs
-  const activeTasks  = tasks.filter(t => ACTIVE_TASK_STATUSES.has(t.status))
-  const reviewTasks  = tasks.filter(t => t.status === 'pending_human_review')
-  const historyTasks = tasks.filter(t => ['complete','failed','cancelled'].includes(t.status))
+  // Filter tasks
+  const filteredTasks = tasks
+    .filter(t => matchesFilter(t, statusFilter))
+    .filter(t => !search || t.user_input.toLowerCase().includes(search.toLowerCase()) || t.id.includes(search))
+    .filter(t => !podFilter || t.pod_name === podFilter)
 
-  const tabTasks: Record<Tab, PipelineTask[]> = {
-    active: activeTasks,
-    review: reviewTasks,
-    history: historyTasks,
-  }
+  // Count review tasks for alert badge
+  const reviewCount = tasks.filter(t => t.status === 'pending_human_review').length
+  const hasHistory = tasks.some(t => ['complete', 'failed', 'cancelled'].includes(t.status))
 
-  const tabDef: { key: Tab; label: string; count?: number; alert?: boolean }[] = [
-    { key: 'active',  label: 'Active',        count: activeTasks.length },
-    { key: 'review',  label: 'Review Queue',  count: reviewTasks.length, alert: reviewTasks.length > 0 },
-    { key: 'history', label: 'History',       count: historyTasks.length },
-  ]
+  const uniquePods = [...new Set(tasks.map(t => t.pod_name).filter(Boolean) as string[])]
 
   return (
-    <div className="space-y-6 px-4 py-8 sm:px-6">
-      <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Pipeline Tasks</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400 truncate">Submit and monitor async agent tasks</p>
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <QueueStats />
-          <button
-            onClick={() => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })}
-            disabled={isFetching}
-            className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 hover:text-neutral-900 dark:hover:text-neutral-100 disabled:opacity-40"
-          >
-            <RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />
-          </button>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Pipeline Tasks"
+        description="Submit and monitor async agent tasks"
+        actions={
+          <div className="flex items-center gap-3">
+            {queueStats && (
+              <div className="hidden sm:flex gap-3 text-caption text-content-tertiary">
+                <span>Queue: <strong className="text-content-primary">{queueStats.queue_depth}</strong></span>
+                <span>Dead letter: <strong className={queueStats.dead_letter_depth > 0 ? 'text-danger' : 'text-content-primary'}>{queueStats.dead_letter_depth}</strong></span>
+              </div>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={<RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />}
+              onClick={() => qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })}
+              disabled={isFetching}
+            />
+          </div>
+        }
+      />
 
+      {/* Stats row */}
+      <StatsRow />
+
+      {/* Submit form */}
       <SubmitForm />
 
-      {/* Tab bar */}
-      <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 overflow-x-auto">
-        {tabDef.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={clsx(
-              'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors -mb-px',
-              tab === t.key
-                ? 'border-accent-600 text-accent-700 dark:text-accent-400'
-                : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300',
-            )}
+      {/* Filter bar */}
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Status pills */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {STATUS_FILTERS.map(f => (
+            <button
+              key={f.id}
+              onClick={() => setStatusFilter(f.id)}
+              className={clsx(
+                'transition-colors',
+              )}
+            >
+              <Badge
+                color={statusFilter === f.id ? f.color : 'neutral'}
+                size="md"
+                dot={f.id === 'review' && reviewCount > 0}
+                className={clsx(
+                  'cursor-pointer transition-opacity',
+                  statusFilter !== f.id && 'opacity-60 hover:opacity-100',
+                )}
+              >
+                {f.label}
+                {f.id === 'review' && reviewCount > 0 && (
+                  <span className="ml-1 font-bold">{reviewCount}</span>
+                )}
+              </Badge>
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search tasks..."
+          className="w-56"
+        />
+
+        {/* Pod filter */}
+        {uniquePods.length > 0 && (
+          <div className="w-36">
+            <Select
+              value={podFilter}
+              onChange={e => setPodFilter(e.target.value)}
+              items={[
+                { value: '', label: 'All pods' },
+                ...uniquePods.map(p => ({ value: p, label: p })),
+              ]}
+            />
+          </div>
+        )}
+
+        {/* Clear history */}
+        {hasHistory && (
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Trash2 size={12} />}
+            className="ml-auto"
+            onClick={() => setConfirmClear(true)}
           >
-            {t.label}
-            {t.count !== undefined && t.count > 0 && (
-              <span className={clsx(
-                'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
-                t.alert ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400' : 'bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400',
-              )}>
-                {t.count}
-              </span>
-            )}
-          </button>
-        ))}
+            Clear History
+          </Button>
+        )}
       </div>
 
       {/* Task list */}
-      <div className="space-y-3">
-        {tab === 'history' && historyTasks.length > 0 && (
-          <div className="flex justify-end">
-            {confirmClear ? (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-neutral-500 dark:text-neutral-400">Delete all history?</span>
-                <button
-                  onClick={() => bulkDelete.mutate()}
-                  disabled={bulkDelete.isPending}
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50"
-                >
-                  {bulkDelete.isPending ? 'Deleting...' : 'Confirm'}
-                </button>
-                <button
-                  onClick={() => setConfirmClear(false)}
-                  className="rounded-md px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setConfirmClear(true)}
-                className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400"
-              >
-                <Trash2 size={12} /> Clear All History
-              </button>
-            )}
-          </div>
-        )}
+      {filteredTasks.length === 0 ? (
+        <EmptyState
+          icon={ListTodo}
+          title={statusFilter === 'all' && !search ? 'No tasks yet' : 'No matching tasks'}
+          description={
+            statusFilter === 'all' && !search
+              ? 'Submit your first pipeline task above to get started.'
+              : 'Try adjusting your filters or search query.'
+          }
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          {filteredTasks.map(task => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              onSelect={setSelectedTask}
+            />
+          ))}
+        </Card>
+      )}
 
-        {tabTasks[tab].length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-16 text-neutral-500 dark:text-neutral-400">
-            {tab === 'active'  && <><Clock size={24} /><p className="text-sm">No active tasks</p></>}
-            {tab === 'review'  && <><CheckCircle size={24} /><p className="text-sm">No tasks awaiting review</p></>}
-            {tab === 'history' && <><AlertCircle size={24} /><p className="text-sm">No completed tasks yet</p></>}
-          </div>
-        ) : (
-          tabTasks[tab].map(task => <TaskCard key={task.id} task={task} />)
-        )}
-      </div>
+      {/* Task detail sheet */}
+      <TaskDetailSheet
+        task={selectedTask}
+        open={!!selectedTask}
+        onClose={() => setSelectedTask(null)}
+      />
+
+      {/* Confirm clear dialog */}
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        title="Clear Task History"
+        description="This will permanently delete all completed, failed, and cancelled tasks. Active tasks will not be affected."
+        confirmLabel={bulkDelete.isPending ? 'Deleting...' : 'Delete All'}
+        onConfirm={() => bulkDelete.mutate()}
+        destructive
+      />
     </div>
   )
 }
