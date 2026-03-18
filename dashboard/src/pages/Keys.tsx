@@ -1,127 +1,212 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { Plus, Trash2, Copy, Check } from 'lucide-react'
+import { Plus, Key, Trash2 } from 'lucide-react'
 import { getKeys, createKey, revokeKey } from '../api'
-import Card from '../components/Card'
-import { Input, Label } from '../components/ui'
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  const copy = () => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) }
-  return (
-    <button onClick={copy} className="ml-1 text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300">
-      {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
-    </button>
-  )
-}
+import { PageHeader } from '../components/layout/PageHeader'
+import {
+  Button, Input, Label, Badge, CopyableId, Card,
+  Modal, Table, ConfirmDialog, EmptyState,
+} from '../components/ui'
+import type { TableColumn } from '../components/ui'
+import type { ApiKey } from '../types'
 
 export function Keys() {
   const qc = useQueryClient()
-  const { data: keys = [], isLoading, error } = useQuery({ queryKey: ['keys'], queryFn: getKeys })
+  const { data: keys = [], isLoading } = useQuery({ queryKey: ['keys'], queryFn: getKeys })
+
+  const [createOpen, setCreateOpen] = useState(false)
   const [name, setName] = useState('')
   const [rpm, setRpm] = useState(60)
   const [newKey, setNewKey] = useState<string | null>(null)
 
+  const [revokeTarget, setRevokeTarget] = useState<ApiKey | null>(null)
+
   const createMutation = useMutation({
     mutationFn: () => createKey(name.trim(), rpm),
-    onSuccess: data => { setNewKey(data.raw_key); setName(''); qc.invalidateQueries({ queryKey: ['keys'] }) },
+    onSuccess: data => {
+      setNewKey(data.raw_key)
+      setName('')
+      setRpm(60)
+      setCreateOpen(false)
+      qc.invalidateQueries({ queryKey: ['keys'] })
+    },
   })
 
   const revokeMutation = useMutation({
     mutationFn: revokeKey,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['keys'] }),
+    onSuccess: () => {
+      setRevokeTarget(null)
+      qc.invalidateQueries({ queryKey: ['keys'] })
+    },
   })
 
-  return (
-    <div className="px-4 py-6 sm:px-6 space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">API Keys</h1>
-        <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400 max-w-2xl">
-          These keys let external clients call Nova's LLM-compatible API at{' '}
-          <code className="rounded bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 text-xs text-neutral-600 dark:text-neutral-400">/v1/chat/completions</code>.
-          Any tool that speaks the OpenAI API format — IDE plugins, n8n, other AI apps — can send requests
-          through Nova using one of these keys. Each key has its own rate limit and usage tracking.
-        </p>
-      </div>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const columns: TableColumn<any>[] = [
+    {
+      key: 'name',
+      header: 'Name',
+      render: (row) => (
+        <span className="font-medium text-content-primary">{row.name}</span>
+      ),
+    },
+    {
+      key: 'key_prefix',
+      header: 'Prefix',
+      render: (row) => <CopyableId id={row.key_prefix + '...'} truncate={20} />,
+    },
+    {
+      key: 'rate_limit_rpm',
+      header: 'Rate Limit',
+      render: (row) => <Badge color="neutral">{row.rate_limit_rpm}/min</Badge>,
+    },
+    {
+      key: 'created_at',
+      header: 'Created',
+      render: (row) => (
+        <span className="text-caption text-content-secondary">
+          {formatDistanceToNow(new Date(row.created_at), { addSuffix: true })}
+        </span>
+      ),
+    },
+    {
+      key: 'last_used_at',
+      header: 'Last Used',
+      render: (row) => (
+        <span className="text-caption text-content-secondary">
+          {row.last_used_at
+            ? formatDistanceToNow(new Date(row.last_used_at), { addSuffix: true })
+            : 'Never'}
+        </span>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: '48px',
+      render: (row) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<Trash2 size={14} />}
+          onClick={(e) => {
+            e.stopPropagation()
+            setRevokeTarget(row)
+          }}
+          className="text-content-tertiary hover:text-danger"
+        />
+      ),
+    },
+  ]
 
-      {/* New key revealed once */}
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="API Keys"
+        description="Keys let external clients call Nova's OpenAI-compatible API. Each key has its own rate limit and usage tracking."
+        actions={
+          <Button icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>
+            Create Key
+          </Button>
+        }
+      />
+
+      {/* New key banner */}
       {newKey && (
-        <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/30 p-4">
-          <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 mb-1">Key created — save it now, it won't be shown again</p>
-          <div className="flex items-center gap-2 font-mono text-sm text-emerald-800 dark:text-emerald-300 break-all">
-            {newKey}
-            <CopyButton text={newKey} />
+        <Card className="border-success/30 bg-success-dim p-4">
+          <p className="text-compact font-medium text-content-primary mb-2">
+            Key created -- copy it now, it will not be shown again
+          </p>
+          <div className="flex items-center gap-2">
+            <CopyableId id={newKey} truncate={999} />
           </div>
-          <button onClick={() => setNewKey(null)} className="mt-2 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300">Dismiss</button>
-        </div>
+          <button
+            onClick={() => setNewKey(null)}
+            className="mt-2 text-caption text-content-tertiary hover:text-content-secondary transition-colors"
+          >
+            Dismiss
+          </button>
+        </Card>
       )}
 
-      {/* Create form */}
-      <Card className="p-4">
-        <p className="mb-3 text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Create Key</p>
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
-          <div className="flex-1">
-            <Label>Name</Label>
-            <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. continue-dev" />
-          </div>
-          <div className="flex gap-3 items-end">
-            <div className="w-28">
-              <Label>RPM limit</Label>
-              <Input type="number" value={rpm} onChange={e => setRpm(Number(e.target.value))} min={1} max={9999} />
-            </div>
-            <button onClick={() => createMutation.mutate()} disabled={!name.trim() || createMutation.isPending}
-              className="flex items-center gap-1.5 rounded-md bg-accent-700 px-4 py-2 text-sm text-white hover:bg-accent-500 disabled:opacity-40 shrink-0">
-              <Plus size={14} /> Create
-            </button>
-          </div>
-        </div>
-        {createMutation.isError && <p className="mt-2 text-xs text-red-600 dark:text-red-400">{String(createMutation.error)}</p>}
-      </Card>
-
       {/* Keys table */}
-      <Card className="overflow-hidden">
-        {isLoading && <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
-        {error && <p className="p-4 text-sm text-red-600 dark:text-red-400">{String(error)}</p>}
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400">
-                <th className="px-3 sm:px-4 py-3 text-left font-medium">Name</th>
-                <th className="hidden sm:table-cell px-4 py-3 text-left font-medium">Prefix</th>
-                <th className="px-3 sm:px-4 py-3 text-left font-medium">RPM</th>
-                <th className="hidden md:table-cell px-4 py-3 text-left font-medium">Created</th>
-                <th className="hidden lg:table-cell px-4 py-3 text-left font-medium">Last used</th>
-                <th className="px-3 sm:px-4 py-3 text-left font-medium"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {keys.map(k => (
-                <tr key={k.id} className="border-b border-neutral-200/50 dark:border-neutral-800/50 hover:bg-neutral-100/30 dark:hover:bg-neutral-800/30">
-                  <td className="px-3 sm:px-4 py-3 font-medium text-neutral-900 dark:text-neutral-100">{k.name}</td>
-                  <td className="hidden sm:table-cell px-4 py-3 font-mono text-xs text-neutral-500 dark:text-neutral-400">{k.key_prefix}…</td>
-                  <td className="px-3 sm:px-4 py-3 text-neutral-500 dark:text-neutral-400">{k.rate_limit_rpm}/min</td>
-                  <td className="hidden md:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
-                    {formatDistanceToNow(new Date(k.created_at), { addSuffix: true })}
-                  </td>
-                  <td className="hidden lg:table-cell px-4 py-3 text-neutral-500 dark:text-neutral-400 text-xs">
-                    {k.last_used_at ? formatDistanceToNow(new Date(k.last_used_at), { addSuffix: true }) : 'never'}
-                  </td>
-                  <td className="px-3 sm:px-4 py-3">
-                    <button onClick={() => { if (confirm(`Revoke "${k.name}"?`)) revokeMutation.mutate(k.id) }}
-                      className="text-neutral-500 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400 transition-colors">
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {keys.length === 0 && !isLoading && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">No API keys yet</td></tr>
-              )}
-            </tbody>
-          </table>
+      {isLoading ? (
+        <Card className="p-8">
+          <p className="text-compact text-content-tertiary text-center">Loading...</p>
+        </Card>
+      ) : keys.length === 0 ? (
+        <Card className="py-8">
+          <EmptyState
+            icon={Key}
+            title="No API keys yet"
+            description="Create an API key to let external tools and IDE plugins connect to Nova."
+            action={{ label: 'Create Key', onClick: () => setCreateOpen(true) }}
+          />
+        </Card>
+      ) : (
+        <Table
+          columns={columns as TableColumn<Record<string, unknown>>[]}
+          data={keys as unknown as Record<string, unknown>[]}
+          emptyMessage="No API keys"
+        />
+      )}
+
+      {/* Create key modal */}
+      <Modal
+        open={createOpen}
+        onClose={() => { setCreateOpen(false); createMutation.reset() }}
+        title="Create API Key"
+        size="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setCreateOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => createMutation.mutate()}
+              disabled={!name.trim()}
+              loading={createMutation.isPending}
+            >
+              Create
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <Label>Name</Label>
+            <Input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. continue-dev"
+            />
+          </div>
+          <div>
+            <Label>Rate limit (requests/min)</Label>
+            <Input
+              type="number"
+              value={rpm}
+              onChange={e => setRpm(Number(e.target.value))}
+              min={1}
+              max={9999}
+            />
+          </div>
+          {createMutation.isError && (
+            <p className="text-caption text-danger">{String(createMutation.error)}</p>
+          )}
         </div>
-      </Card>
+      </Modal>
+
+      {/* Revoke confirmation */}
+      <ConfirmDialog
+        open={!!revokeTarget}
+        onClose={() => setRevokeTarget(null)}
+        title="Revoke API Key"
+        description={`Are you sure you want to revoke "${revokeTarget?.name}"? Any clients using this key will immediately lose access.`}
+        confirmLabel="Revoke"
+        onConfirm={() => revokeTarget && revokeMutation.mutate(revokeTarget.id)}
+        destructive
+      />
     </div>
   )
 }
