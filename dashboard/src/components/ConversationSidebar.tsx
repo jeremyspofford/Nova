@@ -1,9 +1,13 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, MessageSquare, Archive, Trash2, Pencil, Check, X, PanelLeftClose, PanelLeft, Search } from 'lucide-react'
+import { Plus, MessageSquare, Archive, Trash2, Pencil, Check, X, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
+import clsx from 'clsx'
 import { useAuth } from '../stores/auth-store'
 import { apiFetch } from '../api'
+import { Button } from './ui/Button'
+import { SearchInput } from './ui/SearchInput'
+import { Tooltip } from './ui/Tooltip'
 
 export interface Conversation {
   id: string
@@ -67,8 +71,8 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
   }
   if (today.length) groups.push({ label: 'Today', items: today })
   if (yesterday.length) groups.push({ label: 'Yesterday', items: yesterday })
-  if (week.length) groups.push({ label: 'Previous 7 days', items: week })
-  if (month.length) groups.push({ label: 'Previous 30 days', items: month })
+  if (week.length) groups.push({ label: 'This Week', items: week })
+  if (month.length) groups.push({ label: 'This Month', items: month })
   if (older.length) groups.push({ label: 'Older', items: older })
 
   const handleRename = async (id: string) => {
@@ -102,45 +106,49 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
 
   if (collapsed) {
     return (
-      <div className="flex flex-col items-center py-3 px-1 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900 w-12 shrink-0">
-        <button onClick={onToggle} className="p-1.5 rounded-md hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500">
-          <PanelLeft className="w-4 h-4" />
-        </button>
-        <button onClick={onNew} className="mt-2 p-1.5 rounded-md hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500">
-          <Plus className="w-4 h-4" />
-        </button>
+      <div className="flex flex-col items-center py-3 px-1 border-r border-border-subtle bg-surface w-12 shrink-0">
+        <Tooltip content="Expand sidebar" side="right">
+          <button onClick={onToggle} className="p-1.5 rounded-sm hover:bg-surface-elevated text-content-tertiary hover:text-content-primary transition-colors duration-fast">
+            <PanelLeft className="w-4 h-4" />
+          </button>
+        </Tooltip>
+        <Tooltip content="New chat" side="right">
+          <button onClick={onNew} className="mt-2 p-1.5 rounded-sm hover:bg-surface-elevated text-content-tertiary hover:text-content-primary transition-colors duration-fast">
+            <Plus className="w-4 h-4" />
+          </button>
+        </Tooltip>
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col w-64 shrink-0 border-r border-neutral-200 dark:border-neutral-800 bg-neutral-100 dark:bg-neutral-900 h-full overflow-hidden">
+    <div className="flex flex-col w-[280px] shrink-0 border-r border-border-subtle bg-surface h-full overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-neutral-200 dark:border-neutral-800">
-        <button
+      <div className="flex items-center justify-between px-3 py-3 border-b border-border-subtle">
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Plus size={12} />}
           onClick={onNew}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium transition-colors"
         >
-          <Plus className="w-3.5 h-3.5" /> New chat
-        </button>
-        <button onClick={onToggle} className="p-1.5 rounded-md hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500">
-          <PanelLeftClose className="w-4 h-4" />
-        </button>
+          New Chat
+        </Button>
+        <Tooltip content="Collapse sidebar">
+          <button onClick={onToggle} className="p-1.5 rounded-sm hover:bg-surface-elevated text-content-tertiary hover:text-content-primary transition-colors duration-fast">
+            <PanelLeftClose className="w-4 h-4" />
+          </button>
+        </Tooltip>
       </div>
 
       {/* Search */}
       {conversations.length > 5 && (
         <div className="px-3 py-2">
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-neutral-400" />
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search conversations..."
-              className="w-full pl-7 pr-2 py-1.5 text-xs rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 focus:outline-none focus:ring-1 focus:ring-teal-500/40"
-            />
-          </div>
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search conversations..."
+            debounceMs={150}
+          />
         </div>
       )}
 
@@ -148,17 +156,18 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
       <div className="flex-1 overflow-y-auto custom-scrollbar">
         {groups.map(group => (
           <div key={group.label}>
-            <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+            <div className="px-3 py-1.5 text-micro font-semibold uppercase tracking-wider text-content-tertiary">
               {group.label}
             </div>
             {group.items.map(conv => (
               <div
                 key={conv.id}
-                className={`group relative flex items-center px-3 py-2 cursor-pointer transition-colors ${
+                className={clsx(
+                  'group relative flex items-center px-3 py-2 cursor-pointer transition-colors duration-fast',
                   conv.id === currentId
-                    ? 'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300'
-                    : 'hover:bg-neutral-200/50 dark:hover:bg-neutral-800/50 text-neutral-700 dark:text-neutral-300'
-                }`}
+                    ? 'bg-accent-dim text-accent'
+                    : 'hover:bg-surface-elevated text-content-primary',
+                )}
                 onClick={() => { if (editingId !== conv.id) onSelect(conv.id) }}
               >
                 <MessageSquare className="w-3.5 h-3.5 shrink-0 mr-2 opacity-50" />
@@ -172,40 +181,48 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
                         if (e.key === 'Enter') handleRename(conv.id)
                         if (e.key === 'Escape') setEditingId(null)
                       }}
-                      className="flex-1 text-xs px-1 py-0.5 rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 focus:outline-none"
+                      className="flex-1 text-caption px-1.5 py-0.5 rounded-xs border border-border bg-surface-input text-content-primary focus:outline-none focus:border-border-focus"
                       onClick={e => e.stopPropagation()}
                     />
-                    <button onClick={e => { e.stopPropagation(); handleRename(conv.id) }} className="p-0.5 text-teal-600"><Check className="w-3 h-3" /></button>
-                    <button onClick={e => { e.stopPropagation(); setEditingId(null) }} className="p-0.5 text-neutral-400"><X className="w-3 h-3" /></button>
+                    <button onClick={e => { e.stopPropagation(); handleRename(conv.id) }} className="p-0.5 text-accent"><Check className="w-3 h-3" /></button>
+                    <button onClick={e => { e.stopPropagation(); setEditingId(null) }} className="p-0.5 text-content-tertiary"><X className="w-3 h-3" /></button>
                   </div>
                 ) : (
                   <>
-                    <span className="flex-1 text-xs truncate">
-                      {conv.title || 'New conversation'}
-                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-caption truncate">
+                        {conv.title || 'New conversation'}
+                      </span>
+                      <span className="block font-mono text-mono-sm text-content-tertiary">
+                        {formatDistanceToNow(new Date(conv.last_message_at ?? conv.created_at), { addSuffix: true })}
+                      </span>
+                    </div>
                     {/* Action buttons on hover */}
                     <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
-                      <button
-                        onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title ?? '') }}
-                        className="p-1 rounded hover:bg-neutral-300/50 dark:hover:bg-neutral-700/50"
-                        title="Rename"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); handleArchive(conv.id) }}
-                        className="p-1 rounded hover:bg-neutral-300/50 dark:hover:bg-neutral-700/50"
-                        title="Archive"
-                      >
-                        <Archive className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); handleDelete(conv.id) }}
-                        className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
+                      <Tooltip content="Rename">
+                        <button
+                          onClick={e => { e.stopPropagation(); setEditingId(conv.id); setEditTitle(conv.title ?? '') }}
+                          className="p-1 rounded-xs hover:bg-surface-card-hover transition-colors duration-fast"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Archive">
+                        <button
+                          onClick={e => { e.stopPropagation(); handleArchive(conv.id) }}
+                          className="p-1 rounded-xs hover:bg-surface-card-hover transition-colors duration-fast"
+                        >
+                          <Archive className="w-3 h-3" />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Delete">
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDelete(conv.id) }}
+                          className="p-1 rounded-xs hover:bg-danger-dim text-danger transition-colors duration-fast"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </Tooltip>
                     </div>
                   </>
                 )}
@@ -215,7 +232,7 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
         ))}
 
         {filtered.length === 0 && (
-          <div className="px-3 py-8 text-center text-xs text-neutral-400">
+          <div className="px-3 py-8 text-center text-caption text-content-tertiary">
             {search ? 'No matching conversations' : 'No conversations yet'}
           </div>
         )}

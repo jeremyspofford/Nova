@@ -316,7 +316,7 @@ export function Chat() {
   }, [startNewConversation]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className="flex h-full overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+    <div className="flex h-full overflow-hidden bg-surface-root">
       {isAuthenticated && (
         <ConversationSidebar
           currentId={conversationId}
@@ -326,71 +326,71 @@ export function Chat() {
           onToggle={() => setSidebarCollapsed(c => !c)}
         />
       )}
-    <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
-      {messages.length === 0 ? (
-        /* Empty state: greeting bubble + input */
-        <div className="flex-1 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <div className="max-w-3xl mx-auto px-4 py-6">
-              {greeting && (
-                <MessageBubble message={{
-                  id: 'greeting',
-                  role: 'assistant',
-                  content: greeting,
-                  timestamp: new Date(),
-                }} />
-              )}
+      <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
+        {messages.length === 0 ? (
+          /* Empty state: greeting bubble + input */
+          <div className="flex-1 flex flex-col">
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <div className="max-w-3xl mx-auto px-4 py-6">
+                {greeting && (
+                  <MessageBubble message={{
+                    id: 'greeting',
+                    role: 'assistant',
+                    content: greeting,
+                    timestamp: new Date(),
+                  }} />
+                )}
+              </div>
+            </div>
+            <div className="shrink-0 w-full">
+              <div className="max-w-3xl mx-auto">
+                <ChatInput {...chatInputProps} />
+              </div>
             </div>
           </div>
-          <div className="shrink-0 w-full pb-4 pt-2 px-4">
-            <div className="max-w-3xl mx-auto">
-              <ChatInput {...chatInputProps} />
+        ) : (
+          /* Active chat: scrollable messages + bottom-pinned input */
+          <>
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+                {greeting && (
+                  <MessageBubble message={{
+                    id: 'greeting',
+                    role: 'assistant',
+                    content: greeting,
+                    timestamp: new Date(),
+                  }} />
+                )}
+                {messages.map(msg => (
+                  <MessageBubble key={msg.id} message={msg} />
+                ))}
+
+                {error && (
+                  <div className="rounded-sm border border-danger/30 bg-danger-dim px-4 py-3 text-compact text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <div ref={bottomRef} />
+              </div>
             </div>
-          </div>
-        </div>
-      ) : (
-        /* Active chat: scrollable messages + bottom-pinned input */
-        <>
-          <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-              {greeting && (
-                <MessageBubble message={{
-                  id: 'greeting',
-                  role: 'assistant',
-                  content: greeting,
-                  timestamp: new Date(),
-                }} />
-              )}
-              {messages.map(msg => (
-                <MessageBubble key={msg.id} message={msg} />
-              ))}
 
-              {error && (
-                <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950 px-4 py-3 text-sm text-red-700 dark:text-red-400">
-                  {error}
-                </div>
-              )}
+            {(streamingStatus || messageQueue.length > 0) && (
+              <p className="text-caption text-content-tertiary text-center py-1">
+                {streamingStatus && <>{aiName} is {streamingStatus}</>}
+                {streamingStatus && messageQueue.length > 0 && ' \u00b7 '}
+                {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
+              </p>
+            )}
 
-              <div ref={bottomRef} />
+            <div className="shrink-0 w-full">
+              <div className="max-w-3xl mx-auto">
+                <ChatInput {...chatInputProps} />
+              </div>
             </div>
-          </div>
-
-          {(streamingStatus || messageQueue.length > 0) && (
-            <p className="text-xs text-neutral-400 text-center py-1">
-              {streamingStatus && <>{aiName} is {streamingStatus}</>}
-              {streamingStatus && messageQueue.length > 0 && ' · '}
-              {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
-            </p>
-          )}
-
-          <div className="shrink-0 w-full pb-4 pt-2 px-4">
-            <div className="max-w-3xl mx-auto">
-              <ChatInput {...chatInputProps} />
-            </div>
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

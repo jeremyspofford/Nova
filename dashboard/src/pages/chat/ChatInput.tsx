@@ -1,9 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Send, Plus, RefreshCw } from 'lucide-react'
+import clsx from 'clsx'
 import { useChatStore } from '../../stores/chat-store'
 import { useFileAttach } from '../../hooks/useFileAttach'
 import { InputDrawer } from './InputDrawer'
 import { FilePreviewBar } from './FilePreviewBar'
+import { Button } from '../../components/ui/Button'
+import { Tooltip } from '../../components/ui/Tooltip'
+import { ModelPicker } from '../../components/ui/ModelPicker'
 
 interface Props {
   onSubmit: (text: string) => void
@@ -120,37 +124,36 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     if (!isStreaming) textareaRef.current?.focus()
   }, [isStreaming])
 
+  // Build model picker items — prepend the resolved/default option
+  const modelPickerItems = models.map(m => ({ id: m.id, provider: m.provider }))
+
   return (
     <div
       ref={dropZoneRef}
-      className={`relative rounded-2xl border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-lg dark:shadow-neutral-950/50 p-3 safe-area-pb transition-colors ${
-        isDragging ? 'bg-accent-50 dark:bg-accent-950/20 border-accent-400 dark:border-accent-700' : ''
-      }`}
+      className={clsx(
+        'relative bg-surface border-t border-border-subtle p-3 safe-area-pb transition-colors duration-fast',
+        isDragging && 'bg-accent-dim border-accent',
+      )}
     >
       {/* Model selector + New chat row */}
-      <div className="flex items-center justify-between mb-2 px-1">
-        <select
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <ModelPicker
           value={modelId}
-          onChange={e => onModelChange(e.target.value)}
-          disabled={isStreaming}
-          title={`Override ${aiName}'s default model for this conversation`}
-          className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-2 py-1 text-[16px] sm:text-xs text-neutral-700 dark:text-neutral-300 outline-none focus:border-accent-600 disabled:opacity-40"
-        >
-          <option value="">{resolvedModel ? resolvedModel : 'Default'}</option>
-          {models.map(m => (
-            <option key={m.id} value={m.id}>{m.id} ({m.provider})</option>
-          ))}
-        </select>
+          onChange={onModelChange}
+          models={modelPickerItems}
+          showAuto
+          className="w-56"
+        />
 
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<RefreshCw size={12} />}
           onClick={onNewChat}
           disabled={isStreaming || !hasMessages}
-          title="Start a new conversation"
-          className="flex items-center gap-1 rounded-lg px-2 py-1 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 disabled:opacity-40 transition-colors"
         >
-          <RefreshCw size={14} />
-          <span className="text-xs">New chat</span>
-        </button>
+          New chat
+        </Button>
       </div>
 
       <InputDrawer
@@ -163,24 +166,30 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
       <div className="flex items-end gap-2">
         {/* Drawer toggle */}
-        <button
-          type="button"
-          onClick={() => setDrawerOpen(o => !o)}
-          title={drawerOpen ? 'Close controls' : 'Open controls'}
-          className="relative flex items-center justify-center rounded-full border border-neutral-300 dark:border-neutral-600 p-2 text-neutral-500 dark:text-neutral-400 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-all shrink-0"
-          style={{ height: '42px', width: '42px' }}
-        >
-          <Plus
-            size={18}
-            className="transition-transform duration-200"
-            style={{ transform: drawerOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
-          />
-          {!drawerOpen && pendingFiles.length > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent-700 px-1 text-[10px] font-medium text-white">
-              {pendingFiles.length}
-            </span>
-          )}
-        </button>
+        <Tooltip content={drawerOpen ? 'Close controls' : 'Open controls'}>
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(o => !o)}
+            className={clsx(
+              'relative flex items-center justify-center rounded-full border p-2 transition-all duration-fast shrink-0',
+              drawerOpen
+                ? 'border-accent text-accent bg-accent-dim'
+                : 'border-border text-content-tertiary hover:bg-surface-elevated hover:text-content-primary',
+            )}
+            style={{ height: '40px', width: '40px' }}
+          >
+            <Plus
+              size={18}
+              className="transition-transform duration-normal"
+              style={{ transform: drawerOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
+            />
+            {!drawerOpen && pendingFiles.length > 0 && (
+              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-micro font-medium text-neutral-950">
+                {pendingFiles.length}
+              </span>
+            )}
+          </button>
+        </Tooltip>
 
         <textarea
           ref={textareaRef}
@@ -189,23 +198,25 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           onKeyDown={handleKeyDown}
           placeholder={`Message ${aiName}...`}
           rows={1}
-          className="flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-4 py-2.5 text-base text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors"
-          style={{ minHeight: '42px', maxHeight: '400px', fontSize: '16px' }}
+          className="flex-1 resize-none overflow-y-auto rounded-sm border border-border bg-surface-input px-4 py-2.5 text-compact text-content-primary placeholder:text-content-tertiary outline-none transition-colors duration-fast focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 disabled:opacity-50"
+          style={{ minHeight: '40px', maxHeight: '400px', fontSize: '16px' }}
         />
 
-        <button
-          onClick={handleSubmit}
-          disabled={!input.trim()}
-          className="flex items-center justify-center rounded-full bg-accent-700 p-2.5 text-white hover:bg-accent-500 disabled:opacity-40 transition-colors shrink-0"
-          style={{ height: '42px', width: '42px' }}
-        >
-          <Send size={16} />
-        </button>
+        <Tooltip content="Send message">
+          <button
+            onClick={handleSubmit}
+            disabled={!input.trim()}
+            className="flex items-center justify-center rounded-full bg-accent p-2.5 text-neutral-950 hover:bg-accent-hover disabled:opacity-40 transition-colors duration-fast shrink-0"
+            style={{ height: '40px', width: '40px' }}
+          >
+            <Send size={16} />
+          </button>
+        </Tooltip>
       </div>
 
       {isDragging && (
-        <div className="absolute inset-0 flex items-center justify-center bg-accent-700/10 dark:bg-accent-700/5 rounded-2xl pointer-events-none">
-          <p className="text-sm font-medium text-accent-700 dark:text-accent-400">Drop files here</p>
+        <div className="absolute inset-0 flex items-center justify-center bg-accent-dim pointer-events-none">
+          <p className="text-compact font-medium text-accent">Drop files here</p>
         </div>
       )}
     </div>

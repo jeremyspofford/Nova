@@ -31,20 +31,20 @@ function StepRow({ step }: { step: ActivityStep }) {
   return (
     <div className="flex items-center gap-1.5 py-0.5">
       {isDone ? (
-        <Check size={12} className="text-emerald-500 shrink-0" />
+        <Check size={12} className="text-success shrink-0" />
       ) : (
-        <Loader2 size={12} className="text-neutral-400 animate-spin shrink-0" />
+        <Loader2 size={12} className="text-content-tertiary animate-spin shrink-0" />
       )}
-      <span className="text-neutral-500 dark:text-neutral-400">
+      <span className="text-content-secondary">
         {label}{step.detail ? `: ${step.detail}` : ''}
       </span>
       {isDone && step.elapsed_ms != null && (
-        <span className="text-neutral-400 dark:text-neutral-600 ml-auto tabular-nums">
+        <span className="text-content-tertiary ml-auto font-mono text-mono-sm tabular-nums">
           {(step.elapsed_ms / 1000).toFixed(1)}s
         </span>
       )}
       {!isDone && step.startedAt && (
-        <span className="text-neutral-400 dark:text-neutral-600 ml-auto tabular-nums">
+        <span className="text-content-tertiary ml-auto font-mono text-mono-sm tabular-nums">
           <ElapsedTimer startedAt={step.startedAt} />
         </span>
       )}
@@ -67,10 +67,10 @@ export function ActivityFeed({ steps, collapsed, isStreaming }: Props) {
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300 transition-colors mb-1.5"
+        className="flex items-center gap-1 text-caption text-content-tertiary hover:text-content-secondary transition-colors duration-fast mb-1.5"
       >
         <ChevronRight size={11} className="shrink-0" />
-        <span className="tabular-nums">
+        <span className="font-mono text-mono-sm tabular-nums">
           {[
             model,
             memStep?.detail,
@@ -83,7 +83,7 @@ export function ActivityFeed({ steps, collapsed, isStreaming }: Props) {
 
   return (
     <div
-      className="text-xs mb-1.5 cursor-pointer"
+      className="text-caption mb-1.5 cursor-pointer"
       onClick={collapsed ? () => setExpanded(false) : undefined}
     >
       {steps.map(s => (
