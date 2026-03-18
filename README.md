@@ -65,3 +65,6 @@ See [.env.example](.env.example) for all configurable values.
 Nova exposes an OpenAI-compatible endpoint at `http://localhost:8000/v1`. Compatible with Cursor, Continue.dev, Aider, and any OpenAI-API client.
 
 See [docs/ide-integration.md](docs/ide-integration.md) for setup instructions.
+
+## License                       
+PolyForm Noncommercial 1.0.0 — see [LICENSE](./LICENSE). Commercial licensing available — contact jeremy.spofford@arialabs.ai
