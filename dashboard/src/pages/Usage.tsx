@@ -15,7 +15,8 @@ import {
 } from '../lib/aggregations'
 import clsx from 'clsx'
 import { useTheme } from '../stores/theme-store'
-import Card from '../components/Card'
+import { PageHeader } from '../components/layout/PageHeader'
+import { Card, Tabs, Metric } from '../components/ui'
 
 /** Read a CSS variable as an rgb() string for use in inline chart styles */
 function cssVar(name: string): string {
@@ -23,12 +24,19 @@ function cssVar(name: string): string {
   return val ? `rgb(${val})` : ''
 }
 
-const VIEWS: { id: UsageView; label: string; description: string }[] = [
-  { id: 'alltime', label: 'All Time',  description: 'Monthly cost (all time)'          },
-  { id: 'weekly',  label: 'Weekly',    description: 'Daily cost (last 7 days)'          },
-  { id: 'daily',   label: 'Daily',     description: 'Hourly cost (last 24 hours)'       },
-  { id: 'model',   label: 'By Model',  description: 'Total cost per model (all time)'   },
+const VIEW_TABS = [
+  { id: 'alltime', label: 'All Time' },
+  { id: 'weekly',  label: 'Weekly' },
+  { id: 'daily',   label: 'Daily' },
+  { id: 'model',   label: 'By Model' },
 ]
+
+const VIEW_DESCRIPTIONS: Record<UsageView, string> = {
+  alltime: 'Monthly cost (all time)',
+  weekly:  'Daily cost (last 7 days)',
+  daily:   'Hourly cost (last 24 hours)',
+  model:   'Total cost per model (all time)',
+}
 
 function getChartData(
   view: UsageView,
@@ -48,7 +56,6 @@ export function Usage() {
   const [sortBy, setSortBy] = useState<'cost' | 'alpha'>('cost')
   const { activePreset, mode } = useTheme()
 
-  // Re-read CSS vars whenever the active preset or mode changes so charts update
   const chartColors = useMemo(() => ({
     bar:      cssVar('--accent-700') || '#0f766e',
     grid:     cssVar('--neutral-200') || '#e7e5e0',
@@ -80,91 +87,76 @@ export function Usage() {
   const shownCount  = Math.min(totalCalls, 50)
 
   const chartData   = getChartData(view, events, sortBy)
-  const activeView  = VIEWS.find(v => v.id === view)!
 
   return (
-    <div className="px-4 py-6 sm:px-6 space-y-6">
-      <h1 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100">Usage & Cost</h1>
+    <div className="space-y-6">
+      <PageHeader title="Usage" description="Track LLM costs and usage across all providers and models." />
 
-      {/* ── Cost breakdown cards ──────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+      {/* Period cost cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Today',      value: costInPeriod(dayAgo)   },
-          { label: 'This week',  value: costInPeriod(weekAgo)  },
-          { label: 'This month', value: costInPeriod(monthAgo) },
-          { label: 'This year',  value: costInPeriod(yearAgo)  },
+          { label: 'Today',      value: `$${costInPeriod(dayAgo).toFixed(4)}`   },
+          { label: 'This Week',  value: `$${costInPeriod(weekAgo).toFixed(4)}`  },
+          { label: 'This Month', value: `$${costInPeriod(monthAgo).toFixed(4)}` },
+          { label: 'This Year',  value: `$${costInPeriod(yearAgo).toFixed(4)}`  },
         ].map(({ label, value }) => (
           <Card key={label} className="p-4">
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p>
-            <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">${value.toFixed(4)}</p>
+            <Metric label={label} value={value} />
           </Card>
         ))}
       </div>
 
-      {/* ── All-time summary ───────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+      {/* All-time summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
-          { label: 'Total cost (all time)',   value: `$${totalCost.toFixed(4)}`   },
-          { label: 'Total tokens (all time)', value: totalTokens.toLocaleString() },
-          { label: 'Total calls (all time)',  value: totalCalls.toLocaleString()  },
+          { label: 'Total Cost',   value: `$${totalCost.toFixed(4)}`   },
+          { label: 'Total Tokens', value: totalTokens.toLocaleString() },
+          { label: 'Total Calls',  value: totalCalls.toLocaleString()  },
         ].map(({ label, value }) => (
           <Card key={label} className="p-4">
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p>
-            <p className="mt-1 text-xl font-semibold text-neutral-900 dark:text-neutral-100">{value}</p>
+            <Metric label={label} value={value} />
           </Card>
         ))}
       </div>
 
-      {/* ── Drill-down chart ─────────────────────────────────────────────── */}
+      {/* Chart section */}
       <Card className="overflow-hidden">
-
-        {/* Tab bar */}
-        <div className="flex items-center gap-1 border-b border-neutral-200 dark:border-neutral-800 px-4 pt-3 pb-0">
-          {VIEWS.map(v => (
-            <button
-              key={v.id}
-              onClick={() => setView(v.id)}
-              className={clsx(
-                'px-3 py-2 text-xs font-medium border-b-2 -mb-px transition-colors',
-                view === v.id
-                  ? 'border-accent-600 text-accent-700 dark:text-accent-400'
-                  : 'border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300',
-              )}
-            >
-              {v.label}
-            </button>
-          ))}
-
-          {/* Sort toggle — only visible in By Model view */}
-          {view === 'model' && (
-            <div className="ml-auto mb-1 flex items-center gap-0.5 rounded-lg border border-neutral-300 dark:border-neutral-600 p-0.5">
-              {(['cost', 'alpha'] as const).map(s => (
-                <button
-                  key={s}
-                  onClick={() => setSortBy(s)}
-                  className={clsx(
-                    'rounded px-2 py-1 text-xs font-medium transition-colors',
-                    sortBy === s
-                      ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100'
-                      : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300',
-                  )}
-                >
-                  {s === 'cost' ? 'By Cost' : 'A → Z'}
-                </button>
-              ))}
-            </div>
-          )}
+        <div className="px-4 pt-3">
+          <div className="flex items-center justify-between gap-4">
+            <Tabs
+              tabs={VIEW_TABS}
+              activeTab={view}
+              onChange={(id) => setView(id as UsageView)}
+            />
+            {view === 'model' && (
+              <div className="flex items-center gap-0.5 rounded-sm border border-border p-0.5 shrink-0">
+                {(['cost', 'alpha'] as const).map(s => (
+                  <button
+                    key={s}
+                    onClick={() => setSortBy(s)}
+                    className={clsx(
+                      'rounded-xs px-2 py-1 text-caption font-medium transition-colors',
+                      sortBy === s
+                        ? 'bg-surface-elevated text-content-primary'
+                        : 'text-content-tertiary hover:text-content-secondary',
+                    )}
+                  >
+                    {s === 'cost' ? 'By Cost' : 'A-Z'}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="p-4">
-          <p className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">{activeView.description}</p>
+          <p className="mb-4 text-caption text-content-tertiary">{VIEW_DESCRIPTIONS[view]}</p>
 
           {chartData.length === 0 ? (
-            <p className="py-8 text-center text-sm text-neutral-500 dark:text-neutral-400">
-              {isLoading ? 'Loading…' : 'No data for this period'}
+            <p className="py-8 text-center text-compact text-content-tertiary">
+              {isLoading ? 'Loading...' : 'No data for this period'}
             </p>
           ) : view === 'model' ? (
-            /* ── Horizontal bar chart for long model names ─────────────── */
             <ResponsiveContainer width="100%" height={Math.max(180, chartData.length * 36)}>
               <BarChart
                 layout="vertical"
@@ -202,7 +194,6 @@ export function Usage() {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            /* ── Vertical bar chart for time-based views ───────────────── */
             <ResponsiveContainer width="100%" height={200}>
               <BarChart
                 data={chartData}
@@ -239,59 +230,59 @@ export function Usage() {
 
           {/* Per-view summary row */}
           {chartData.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-neutral-200 dark:border-neutral-800 pt-3">
+            <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 border-t border-border-subtle pt-3">
               {[
                 { label: 'Cost',   value: `$${chartData.reduce((s, d) => s + d.cost, 0).toFixed(4)}` },
                 { label: 'Tokens', value: chartData.reduce((s, d) => s + d.tokens, 0).toLocaleString() },
                 { label: 'Calls',  value: chartData.reduce((s, d) => s + d.calls, 0).toLocaleString()  },
               ].map(({ label, value }) => (
                 <div key={label}>
-                  <span className="text-xs text-neutral-500 dark:text-neutral-400">{label}: </span>
-                  <span className="text-xs font-medium text-neutral-700 dark:text-neutral-300">{value}</span>
+                  <span className="text-caption text-content-tertiary">{label}: </span>
+                  <span className="text-caption font-medium text-content-secondary">{value}</span>
                 </div>
               ))}
-              <span className="ml-auto hidden sm:inline text-xs text-neutral-500 dark:text-neutral-400">{activeView.description}</span>
+              <span className="ml-auto hidden sm:inline text-caption text-content-tertiary">{VIEW_DESCRIPTIONS[view]}</span>
             </div>
           )}
         </div>
       </Card>
 
-      {/* ── Recent events table ──────────────────────────────────────────── */}
+      {/* Recent events table */}
       <Card className="overflow-hidden">
-        <div className="border-b border-neutral-200 dark:border-neutral-800 px-4 py-3 flex items-center justify-between">
-          <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Recent Events</p>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">showing last {shownCount} of {totalCalls}</p>
+        <div className="border-b border-border-subtle px-4 py-3 flex items-center justify-between">
+          <p className="text-caption font-medium text-content-tertiary uppercase tracking-wider">Recent Events</p>
+          <p className="text-caption text-content-tertiary">last {shownCount} of {totalCalls}</p>
         </div>
-        {isLoading && <p className="p-4 text-sm text-neutral-500 dark:text-neutral-400">Loading…</p>}
-        {error     && <p className="p-4 text-sm text-red-600 dark:text-red-400">Failed to load usage: {String(error)}</p>}
+        {isLoading && <p className="p-4 text-compact text-content-tertiary">Loading...</p>}
+        {error     && <p className="p-4 text-compact text-danger">Failed to load usage: {String(error)}</p>}
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-compact">
             <thead>
-              <tr className="border-b border-neutral-200 dark:border-neutral-800 text-xs text-neutral-500 dark:text-neutral-400">
-                <th className="px-3 sm:px-4 py-2 text-left font-medium">Time</th>
-                <th className="px-3 sm:px-4 py-2 text-left font-medium">Model</th>
-                <th className="hidden sm:table-cell px-4 py-2 text-left font-medium">Key</th>
-                <th className="hidden lg:table-cell px-4 py-2 text-left font-medium">In</th>
-                <th className="hidden lg:table-cell px-4 py-2 text-left font-medium">Out</th>
-                <th className="px-3 sm:px-4 py-2 text-left font-medium">Cost</th>
-                <th className="hidden md:table-cell px-4 py-2 text-left font-medium">Duration</th>
+              <tr className="bg-surface-elevated">
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Time</th>
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Model</th>
+                <th className="hidden sm:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Key</th>
+                <th className="hidden lg:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">In</th>
+                <th className="hidden lg:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Out</th>
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Cost</th>
+                <th className="hidden md:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Duration</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-border-subtle">
               {events.slice(0, 50).map(e => (
-                <tr key={e.id} className="border-b border-neutral-200/50 dark:border-neutral-800/50 hover:bg-neutral-100/30 dark:hover:bg-neutral-800/30 transition-colors">
-                  <td className="px-3 sm:px-4 py-2 text-neutral-500 dark:text-neutral-400 whitespace-nowrap text-xs">
+                <tr key={e.id} className="hover:bg-surface-card-hover transition-colors">
+                  <td className="px-4 py-3 text-content-secondary whitespace-nowrap text-caption">
                     {formatDistanceToNow(new Date(e.created_at), { addSuffix: true })}
                   </td>
-                  <td className="px-3 sm:px-4 py-2 font-mono text-xs text-neutral-700 dark:text-neutral-300 max-w-32 sm:max-w-48 truncate">{e.model}</td>
-                  <td className="hidden sm:table-cell px-4 py-2 text-neutral-500 dark:text-neutral-400 text-xs">{e.key_name ?? 'dev'}</td>
-                  <td className="hidden lg:table-cell px-4 py-2 text-neutral-500 dark:text-neutral-400 text-xs">{e.input_tokens.toLocaleString()}</td>
-                  <td className="hidden lg:table-cell px-4 py-2 text-neutral-500 dark:text-neutral-400 text-xs">{e.output_tokens.toLocaleString()}</td>
-                  <td className="px-3 sm:px-4 py-2 text-emerald-700 dark:text-emerald-400 text-xs">
-                    {e.cost_usd != null ? `$${e.cost_usd.toFixed(4)}` : '—'}
+                  <td className="px-4 py-3 font-mono text-mono-sm text-content-primary max-w-32 sm:max-w-48 truncate">{e.model}</td>
+                  <td className="hidden sm:table-cell px-4 py-3 text-content-tertiary text-caption">{e.key_name ?? 'dev'}</td>
+                  <td className="hidden lg:table-cell px-4 py-3 text-content-tertiary text-caption">{e.input_tokens.toLocaleString()}</td>
+                  <td className="hidden lg:table-cell px-4 py-3 text-content-tertiary text-caption">{e.output_tokens.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-success text-caption">
+                    {e.cost_usd != null ? `$${e.cost_usd.toFixed(4)}` : '\u2014'}
                   </td>
-                  <td className="hidden md:table-cell px-4 py-2 text-neutral-500 dark:text-neutral-400 text-xs">
-                    {e.duration_ms != null ? `${e.duration_ms}ms` : '—'}
+                  <td className="hidden md:table-cell px-4 py-3 text-content-tertiary text-caption">
+                    {e.duration_ms != null ? `${e.duration_ms}ms` : '\u2014'}
                   </td>
                 </tr>
               ))}
