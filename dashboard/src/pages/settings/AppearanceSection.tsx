@@ -2,24 +2,22 @@ import React from 'react'
 import { Palette, Moon, Sun, Monitor } from 'lucide-react'
 import { useTheme } from '../../stores/theme-store'
 import { themePresets } from '../../lib/color-palettes'
-import { Section } from './shared'
-
-// ── Appearance section ────────────────────────────────────────────────────────
+import { Section, Button } from '../../components/ui'
 
 /** Preview swatch: accent-700 color for each preset (used for the color dot) */
 const PRESET_ACCENT_PREVIEW: Record<string, string> = {
-  default:          'rgb(15 118 110)',  // teal-700
-  ocean:            'rgb(29 78 216)',   // blue-700
-  forest:           'rgb(4 120 87)',    // emerald-700
-  sunset:           'rgb(190 18 60)',   // rose-700
-  nord:             'rgb(94 129 172)',  // nord frost
-  'ctp-mocha':      'rgb(137 180 250)',// catppuccin blue
-  'ctp-latte':      'rgb(30 102 245)', // catppuccin latte blue
-  dracula:          'rgb(189 147 249)',// dracula purple
-  'tokyo-night':    'rgb(122 162 247)',// tokyo blue
-  gruvbox:          'rgb(254 128 25)', // gruvbox orange
-  'solarized-dark': 'rgb(42 161 152)', // solarized cyan
-  'one-dark':       'rgb(97 175 239)', // one blue
+  default:          'rgb(15 118 110)',
+  ocean:            'rgb(29 78 216)',
+  forest:           'rgb(4 120 87)',
+  sunset:           'rgb(190 18 60)',
+  nord:             'rgb(94 129 172)',
+  'ctp-mocha':      'rgb(137 180 250)',
+  'ctp-latte':      'rgb(30 102 245)',
+  dracula:          'rgb(189 147 249)',
+  'tokyo-night':    'rgb(122 162 247)',
+  gruvbox:          'rgb(254 128 25)',
+  'solarized-dark': 'rgb(42 161 152)',
+  'one-dark':       'rgb(97 175 239)',
   custom:           'rgb(120 113 108)',
 }
 
@@ -58,13 +56,12 @@ function PresetCard({ id, label, active, onClick }: {
   const bg = PRESET_BG_PREVIEW[id]
   return (
     <button onClick={onClick} className={
-      'group flex flex-col items-center gap-1.5 rounded-lg border p-2 text-[11px] font-medium transition-all ' +
+      'group flex flex-col items-center gap-1.5 rounded-sm border p-2 text-micro font-medium transition-all ' +
       (active
-        ? 'border-accent-600 ring-2 ring-accent-600/30 text-accent-700 dark:text-accent-400'
-        : 'border-neutral-200 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 hover:border-neutral-400 dark:hover:border-neutral-500')
+        ? 'border-accent ring-2 ring-accent/30 text-accent'
+        : 'border-border text-content-secondary hover:border-border-focus')
     }>
-      {/* Mini swatch: dark bg + accent stripe */}
-      <span className="relative flex h-6 w-full overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700">
+      <span className="relative flex h-6 w-full overflow-hidden rounded-xs border border-border-subtle">
         <span className="flex-1" style={{ background: bg }} />
         <span className="w-2" style={{ background: accent }} />
       </span>
@@ -79,7 +76,7 @@ function AccentPicker({ activeAccent, onSelect }: {
 }) {
   return (
     <div className="mt-2">
-      <label className="mb-1.5 block text-xs text-neutral-500 dark:text-neutral-400">Accent Color</label>
+      <label className="mb-1.5 block text-caption text-content-tertiary">Accent Color</label>
       <div className="flex flex-wrap gap-2">
         {Object.entries(ACCENT_SWATCHES).map(([name, color]) => (
           <button
@@ -89,8 +86,8 @@ function AccentPicker({ activeAccent, onSelect }: {
             className={
               'size-8 rounded-full border-2 transition-transform hover:scale-110 ' +
               (activeAccent === name
-                ? 'border-accent-600 ring-2 ring-accent-200 dark:ring-accent-800 scale-110'
-                : 'border-neutral-300 dark:border-neutral-600')
+                ? 'border-accent ring-2 ring-accent/30 scale-110'
+                : 'border-border')
             }
             style={{ background: color }}
           />
@@ -125,17 +122,17 @@ export function AppearanceSection() {
     >
       {/* Mode Preference */}
       <div>
-        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Mode</label>
-        <div className="inline-flex rounded-lg border border-neutral-200 dark:border-neutral-700 p-0.5">
+        <label className="mb-2 block text-caption font-medium text-content-secondary">Mode</label>
+        <div className="inline-flex rounded-sm border border-border p-0.5">
           {MODE_OPTIONS.map(({ value, label, icon: Icon }) => (
             <button
               key={value}
               onClick={() => setModePreference(value)}
               className={
-                'flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors ' +
+                'flex items-center gap-1.5 rounded-xs px-3 py-1.5 text-caption font-medium transition-colors ' +
                 (modePreference === value
-                  ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
-                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300')
+                  ? 'bg-surface-elevated text-accent'
+                  : 'text-content-tertiary hover:text-content-secondary')
               }
             >
               <Icon size={13} />
@@ -147,7 +144,7 @@ export function AppearanceSection() {
 
       {/* Light Theme */}
       <div>
-        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Light Theme</label>
+        <label className="mb-2 block text-caption font-medium text-content-secondary">Light Theme</label>
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
           {allPresets.map(([key, p]) => (
             <PresetCard key={key} id={key} label={p.label} active={lightPreset === key} onClick={() => setLightPreset(key)} />
@@ -160,7 +157,7 @@ export function AppearanceSection() {
 
       {/* Dark Theme */}
       <div>
-        <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Dark Theme</label>
+        <label className="mb-2 block text-caption font-medium text-content-secondary">Dark Theme</label>
         <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
           {allPresets.map(([key, p]) => (
             <PresetCard key={key} id={key} label={p.label} active={darkPreset === key} onClick={() => setDarkPreset(key)} />

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Radio } from 'lucide-react'
-import { Section } from './shared'
+import { Section, Toggle } from '../../components/ui'
 
 export function NotificationsSection() {
   const [enabled, setEnabled] = useState(() => localStorage.getItem('nova-notifications-enabled') === 'true')
@@ -8,9 +8,9 @@ export function NotificationsSection() {
     'Notification' in window ? Notification.permission : 'unsupported'
   )
 
-  const toggle = async () => {
-    if (!enabled) {
-      // Enabling — request permission first
+  const toggle = async (checked: boolean) => {
+    if (checked) {
+      // Enabling -- request permission first
       if ('Notification' in window && Notification.permission !== 'granted') {
         const result = await Notification.requestPermission()
         setPermission(result)
@@ -32,24 +32,18 @@ export function NotificationsSection() {
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-medium text-stone-700 dark:text-stone-300">Enable notifications</p>
-          <p className="text-xs text-stone-500 dark:text-stone-400">
+          <p className="text-compact font-medium text-content-primary">Enable notifications</p>
+          <p className="text-caption text-content-tertiary">
             {permission === 'unsupported' ? 'Not supported in this browser' :
-             permission === 'denied' ? 'Blocked by browser — check site permissions' :
+             permission === 'denied' ? 'Blocked by browser -- check site permissions' :
              'Push notifications will be available when async tasks are implemented'}
           </p>
         </div>
-        <button
-          onClick={toggle}
+        <Toggle
+          checked={enabled}
+          onChange={toggle}
           disabled={permission === 'unsupported' || permission === 'denied'}
-          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-            enabled ? 'bg-accent-600' : 'bg-stone-300 dark:bg-stone-600'
-          } ${(permission === 'unsupported' || permission === 'denied') ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
-        >
-          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-            enabled ? 'translate-x-6' : 'translate-x-1'
-          }`} />
-        </button>
+        />
       </div>
     </Section>
   )

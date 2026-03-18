@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Save, RotateCcw, Radio, Wifi, WifiOff, Power } from 'lucide-react'
 import { getOllamaStatus, discoverModels, resolveModel, testProvider, type PlatformConfigEntry } from '../../api'
-import { Section, ConfigField, useConfigValue } from './shared'
+import { Section, Button, Input, Select, Toggle, StatusDot, Card, Slider, Badge } from '../../components/ui'
+import { ConfigField, useConfigValue } from './shared'
 
 // ── LLM Routing section ──────────────────────────────────────────────────────
 
@@ -27,7 +28,6 @@ function CloudFallbackModelPicker({
     queryFn: () => discoverModels(),
     staleTime: 60_000,
   })
-  // Filter to cloud models only from available providers
   const cloudModels = (providers ?? [])
     .filter(p => p.available && p.type !== 'local')
     .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
@@ -50,23 +50,12 @@ function CloudFallbackModelPicker({
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Cloud Fallback Model</label>
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="text-caption font-medium text-content-secondary">Cloud Fallback Model</label>
         {dirty && (
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
-            >
-              <RotateCcw size={10} /> Reset
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
-            >
-              <Save size={10} /> {saving ? 'Saving\u2026' : 'Save'}
-            </button>
+            <Button variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw size={10} />}>Reset</Button>
+            <Button size="sm" onClick={handleSave} loading={saving} icon={<Save size={10} />}>Save</Button>
           </div>
         )}
       </div>
@@ -74,9 +63,8 @@ function CloudFallbackModelPicker({
       <select
         value={draft}
         onChange={e => handleChange(e.target.value)}
-        className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+        className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors appearance-none"
       >
-        {/* If current value isn't in the list, still show it */}
         {draft && !cloudModels.includes(draft) && (
           <option value={draft}>{draft}</option>
         )}
@@ -88,7 +76,7 @@ function CloudFallbackModelPicker({
         )}
       </select>
 
-      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+      <p className="mt-1 text-caption text-content-tertiary">
         Cloud model used when Ollama is unavailable (local-first/cloud-first strategies).
       </p>
     </div>
@@ -137,24 +125,13 @@ function DefaultModelPicker({
   const handleReset = () => { setDraft(configured); setDirty(false) }
 
   return (
-    <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
-      <div className="mb-1 flex items-center justify-between">
-        <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Default Chat Model</label>
+    <div className="border-t border-border-subtle pt-4">
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="text-caption font-medium text-content-secondary">Default Chat Model</label>
         {dirty && (
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleReset}
-              className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
-            >
-              <RotateCcw size={10} /> Reset
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={saving}
-              className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
-            >
-              <Save size={10} /> {saving ? 'Saving\u2026' : 'Save'}
-            </button>
+            <Button variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw size={10} />}>Reset</Button>
+            <Button size="sm" onClick={handleSave} loading={saving} icon={<Save size={10} />}>Save</Button>
           </div>
         )}
       </div>
@@ -162,7 +139,7 @@ function DefaultModelPicker({
       <select
         value={draft}
         onChange={e => handleChange(e.target.value)}
-        className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+        className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors appearance-none"
       >
         <option value="auto">
           Auto (best available){resolved?.source === 'auto' ? ` \u2014 ${resolved.model}` : ''}
@@ -170,14 +147,13 @@ function DefaultModelPicker({
         {allModels.map(id => (
           <option key={id} value={id}>{id}</option>
         ))}
-        {/* If current explicit value isn't in the list, still show it */}
         {draft !== 'auto' && !allModels.includes(draft) && (
           <option value={draft}>{draft}</option>
         )}
       </select>
 
-      <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-        Model used for chat and pipeline when no override is set. &quot;Auto&quot; picks the best available cloud provider, or the largest local model if no cloud keys are configured. Select a specific model for consistent results.
+      <p className="mt-1 text-caption text-content-tertiary">
+        Model used for chat and pipeline when no override is set. &quot;Auto&quot; picks the best available cloud provider, or the largest local model if no cloud keys are configured.
       </p>
     </div>
   )
@@ -209,24 +185,20 @@ function IntelligentRoutingSection({
 
   const [expanded, setExpanded] = useState(false)
 
-  // Parse routing map
   let routingMap: Record<string, string[] | null> = {}
   try {
     const parsed = typeof routingMapRaw === 'string' ? JSON.parse(routingMapRaw) : routingMapRaw
     if (typeof parsed === 'object' && parsed !== null) routingMap = parsed
   } catch { /* use empty */ }
 
-  // Classifier model draft
   const [classifierDraft, setClassifierDraft] = useState(classifierModel)
   const [classifierDirty, setClassifierDirty] = useState(false)
   useEffect(() => { setClassifierDraft(classifierModel); setClassifierDirty(false) }, [classifierModel])
 
-  // Timeout draft
-  const [timeoutDraft, setTimeoutDraft] = useState(timeoutMs)
+  const [timeoutDraft, setTimeoutDraft] = useState(Number(timeoutMs))
   const [timeoutDirty, setTimeoutDirty] = useState(false)
-  useEffect(() => { setTimeoutDraft(timeoutMs); setTimeoutDirty(false) }, [timeoutMs])
+  useEffect(() => { setTimeoutDraft(Number(timeoutMs)); setTimeoutDirty(false) }, [timeoutMs])
 
-  // Routing map draft (per-category comma-separated strings)
   const [mapDraft, setMapDraft] = useState<Record<string, string>>({})
   const [mapDirty, setMapDirty] = useState(false)
   useEffect(() => {
@@ -248,7 +220,7 @@ function IntelligentRoutingSection({
   }
 
   const handleSaveTimeout = () => {
-    onSave('llm.classifier_timeout_ms', JSON.stringify(timeoutDraft))
+    onSave('llm.classifier_timeout_ms', JSON.stringify(String(timeoutDraft)))
     setTimeoutDirty(false)
   }
 
@@ -273,120 +245,89 @@ function IntelligentRoutingSection({
     .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
 
   return (
-    <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+    <div className="border-t border-border-subtle pt-4">
       {/* Toggle */}
       <div className="flex items-center justify-between">
         <div>
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Intelligent Model Routing</label>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+          <label className="text-caption font-medium text-content-secondary">Intelligent Model Routing</label>
+          <p className="text-caption text-content-tertiary mt-0.5">
             Classifier picks the optimal model per message based on task type.
           </p>
         </div>
-        <button
-          onClick={handleToggle}
-          disabled={saving}
-          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-            enabled ? 'bg-accent-700' : 'bg-neutral-300 dark:bg-neutral-600'
-          } disabled:opacity-40`}
-        >
-          <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-            enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
-          }`} />
-        </button>
+        <Toggle checked={enabled} onChange={handleToggle} disabled={saving} />
       </div>
 
-      {/* Expanded settings when enabled */}
       {enabled && (
         <div className="mt-3 space-y-3 pl-0">
           {/* Classifier model */}
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Classifier Model</label>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-caption font-medium text-content-secondary">Classifier Model</label>
               {classifierDirty && (
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setClassifierDraft(classifierModel); setClassifierDirty(false) }}
-                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
-                    <RotateCcw size={10} /> Reset
-                  </button>
-                  <button onClick={handleSaveClassifier} disabled={saving}
-                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
-                    <Save size={10} /> Save
-                  </button>
+                  <Button variant="ghost" size="sm" onClick={() => { setClassifierDraft(classifierModel); setClassifierDirty(false) }} icon={<RotateCcw size={10} />}>Reset</Button>
+                  <Button size="sm" onClick={handleSaveClassifier} loading={saving} icon={<Save size={10} />}>Save</Button>
                 </div>
               )}
             </div>
             <select
               value={classifierDraft}
               onChange={e => { setClassifierDraft(e.target.value); setClassifierDirty(e.target.value !== classifierModel) }}
-              className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+              className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors appearance-none"
             >
               <option value="auto">Auto (local-first cascade)</option>
               {allModels.map(id => <option key={id} value={id}>{id}</option>)}
             </select>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="mt-1 text-caption text-content-tertiary">
               Small fast model used to classify messages. &quot;Auto&quot; tries local Ollama first, then Groq, then Cerebras.
             </p>
           </div>
 
           {/* Timeout */}
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-caption font-medium text-content-secondary">
                 Classifier Timeout: {timeoutDraft}ms
               </label>
               {timeoutDirty && (
                 <div className="flex items-center gap-2">
-                  <button onClick={() => { setTimeoutDraft(timeoutMs); setTimeoutDirty(false) }}
-                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
-                    <RotateCcw size={10} /> Reset
-                  </button>
-                  <button onClick={handleSaveTimeout} disabled={saving}
-                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
-                    <Save size={10} /> Save
-                  </button>
+                  <Button variant="ghost" size="sm" onClick={() => { setTimeoutDraft(Number(timeoutMs)); setTimeoutDirty(false) }} icon={<RotateCcw size={10} />}>Reset</Button>
+                  <Button size="sm" onClick={handleSaveTimeout} loading={saving} icon={<Save size={10} />}>Save</Button>
                 </div>
               )}
             </div>
-            <input
-              type="range"
+            <Slider
               min={100}
               max={1000}
               step={50}
               value={timeoutDraft}
-              onChange={e => { setTimeoutDraft(e.target.value); setTimeoutDirty(e.target.value !== timeoutMs) }}
-              className="w-full accent-accent-700"
+              onChange={val => { setTimeoutDraft(val); setTimeoutDirty(val !== Number(timeoutMs)) }}
             />
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="mt-1 text-caption text-content-tertiary">
               Max time to wait for classification. Falls back to default model if exceeded.
             </p>
           </div>
 
           {/* Category routing map */}
           <div>
-            <div className="mb-1 flex items-center justify-between">
-              <button
+            <div className="mb-1.5 flex items-center justify-between">
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setExpanded(!expanded)}
-                className="text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-accent-700 dark:hover:text-accent-400 flex items-center gap-1"
               >
-                Category Model Mapping
-                <span className="text-[10px]">{expanded ? '\u25BC' : '\u25B6'}</span>
-              </button>
+                Category Model Mapping {expanded ? '\u25BC' : '\u25B6'}
+              </Button>
               {mapDirty && (
                 <div className="flex items-center gap-2">
-                  <button onClick={() => {
+                  <Button variant="ghost" size="sm" onClick={() => {
                     const draft: Record<string, string> = {}
                     for (const [cat, models] of Object.entries(routingMap)) {
                       draft[cat] = models ? models.join(', ') : ''
                     }
                     setMapDraft(draft); setMapDirty(false)
-                  }}
-                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
-                    <RotateCcw size={10} /> Reset
-                  </button>
-                  <button onClick={handleSaveMap} disabled={saving}
-                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
-                    <Save size={10} /> Save
-                  </button>
+                  }} icon={<RotateCcw size={10} />}>Reset</Button>
+                  <Button size="sm" onClick={handleSaveMap} loading={saving} icon={<Save size={10} />}>Save</Button>
                 </div>
               )}
             </div>
@@ -395,20 +336,19 @@ function IntelligentRoutingSection({
               <div className="space-y-2 mt-2">
                 {Object.keys(CATEGORY_LABELS).map(cat => (
                   <div key={cat}>
-                    <label className="text-xs text-neutral-500 dark:text-neutral-400">{CATEGORY_LABELS[cat]}</label>
-                    <input
-                      type="text"
+                    <label className="text-caption text-content-tertiary">{CATEGORY_LABELS[cat]}</label>
+                    <Input
                       value={mapDraft[cat] ?? ''}
                       onChange={e => {
                         setMapDraft(prev => ({ ...prev, [cat]: e.target.value }))
                         setMapDirty(true)
                       }}
                       placeholder={cat === 'general' ? '(uses default model)' : 'model-1, model-2, ...'}
-                      className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 transition-colors font-mono"
+                      className="font-mono"
                     />
                   </div>
                 ))}
-                <p className="text-xs text-neutral-500 dark:text-neutral-400">
+                <p className="text-caption text-content-tertiary">
                   Comma-separated model preference list per category. First available model wins. Leave empty to use default.
                 </p>
               </div>
@@ -479,56 +419,51 @@ export function LLMRoutingSection({
       {/* Strategy selector */}
       <div>
         <div className="mb-2 flex items-center gap-2">
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Routing Strategy</label>
+          <label className="text-caption font-medium text-content-secondary">Routing Strategy</label>
           {strategySaved && (
-            <span className="text-xs text-emerald-600 dark:text-emerald-400 animate-pulse">Saved</span>
+            <Badge color="success" size="sm">Saved</Badge>
           )}
         </div>
-        <div className="inline-flex flex-wrap rounded-lg border border-neutral-200 dark:border-neutral-700 p-0.5">
+        <div className="inline-flex flex-wrap rounded-sm border border-border p-0.5">
           {ROUTING_STRATEGIES.map(({ value, label }) => (
             <button
               key={value}
               onClick={() => handleStrategyChange(value)}
               disabled={saving}
               className={
-                'rounded-md px-3 py-1.5 text-xs font-medium transition-colors ' +
+                'rounded-xs px-3 py-1.5 text-caption font-medium transition-colors ' +
                 (strategy === value
-                  ? 'bg-accent-700/10 text-accent-700 dark:bg-accent-400/10 dark:text-accent-400'
-                  : 'text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300')
+                  ? 'bg-surface-elevated text-accent'
+                  : 'text-content-tertiary hover:text-content-secondary')
               }
             >
               {label}
             </button>
           ))}
         </div>
-        <p className="mt-1.5 text-xs text-neutral-500 dark:text-neutral-400">
+        <p className="mt-1.5 text-caption text-content-tertiary">
           {ROUTING_STRATEGIES.find(s => s.value === strategy)?.desc}
         </p>
       </div>
 
-      {/* Ollama settings — hidden when cloud-only */}
+      {/* Ollama settings */}
       {usesOllama && (
         <>
-          {/* Ollama status indicator */}
-          <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2">
+          <Card variant="default" className="p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                {ollamaStatus?.healthy ? (
-                  <Wifi size={14} className="text-emerald-500" />
-                ) : (
-                  <WifiOff size={14} className="text-red-500" />
-                )}
-                <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                <StatusDot status={ollamaStatus?.healthy ? 'success' : 'danger'} />
+                <span className="text-compact font-medium text-content-primary">
                   Ollama {ollamaStatus?.healthy ? 'Online' : 'Offline'}
                 </span>
               </div>
-              <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">
+              <span className="text-caption font-mono text-content-tertiary">
                 {ollamaStatus?.base_url ?? '...'}
               </span>
             </div>
 
             {ollamaStatus?.wol_configured && (
-              <div className="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+              <div className="flex items-center gap-2 text-caption text-content-tertiary">
                 <Power size={12} />
                 <span>
                   WoL {ollamaStatus.wol_last_sent_seconds_ago != null
@@ -539,35 +474,30 @@ export function LLMRoutingSection({
             )}
 
             <div className="flex items-center justify-between">
-              <button
-                onClick={handleTest}
-                disabled={testing}
-                className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline disabled:opacity-40"
-              >
-                {testing ? 'Testing\u2026' : 'Test Connection'}
-              </button>
+              <Button variant="ghost" size="sm" onClick={handleTest} loading={testing}>
+                Test Connection
+              </Button>
               {testResult && (
-                <span className={`text-xs ${testResult.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                <span className={`text-caption ${testResult.ok ? 'text-success' : 'text-danger'}`}>
                   {testResult.ok ? `${testResult.latency_ms}ms` : testResult.error ?? 'Failed'}
                 </span>
               )}
             </div>
-          </div>
+          </Card>
 
-          {/* Remote Ollama config */}
           <ConfigField
             label="Ollama URL"
             configKey="llm.ollama_url"
             value={ollamaUrl}
             placeholder="http://192.168.1.50:11434"
-            description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var. Takes effect within ~5 seconds."
+            description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var."
             onSave={onSave}
             saving={saving}
           />
 
           {/* Wake-on-LAN config */}
-          <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
-            <label className="mb-2 block text-xs font-medium text-neutral-600 dark:text-neutral-400">Wake-on-LAN</label>
+          <div className="border-t border-border-subtle pt-4">
+            <label className="mb-2 block text-caption font-medium text-content-secondary">Wake-on-LAN</label>
             <div className="grid gap-3 sm:grid-cols-2">
               <ConfigField
                 label="MAC Address"
@@ -592,7 +522,7 @@ export function LLMRoutingSection({
         </>
       )}
 
-      {/* Cloud fallback model — hidden when local-only */}
+      {/* Cloud fallback model */}
       {usesCloud && (
         <CloudFallbackModelPicker
           value={cloudFallback}
@@ -601,7 +531,7 @@ export function LLMRoutingSection({
         />
       )}
 
-      {/* Default chat model — auto or explicit */}
+      {/* Default chat model */}
       <DefaultModelPicker onSave={onSave} saving={saving} entries={entries} />
 
       {/* Intelligent routing */}

@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Layers, Save, RotateCcw, Download, ChevronDown, ChevronRight } from 'lucide-react'
 import { discoverModels, type PlatformConfigEntry } from '../../api'
-import { Section, useConfigValue } from './shared'
+import { Section, Button, Toggle, Select, Badge } from '../../components/ui'
+import { useConfigValue } from './shared'
 import { apiFetch } from '../../api'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -41,35 +42,9 @@ const DEFAULT_COMPLEXITY_MAP: Record<string, Record<string, string>> = {
   },
 }
 
-// ── Toggle component ─────────────────────────────────────────────────────────
-
-function Toggle({
-  enabled,
-  onToggle,
-  disabled,
-}: {
-  enabled: boolean
-  onToggle: () => void
-  disabled?: boolean
-}) {
-  return (
-    <button
-      onClick={onToggle}
-      disabled={disabled}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-        enabled ? 'bg-accent-700' : 'bg-neutral-300 dark:bg-neutral-600'
-      } disabled:opacity-40`}
-    >
-      <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
-        enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'
-      }`} />
-    </button>
-  )
-}
-
 // ── Model picker (reusable) ──────────────────────────────────────────────────
 
-function ModelPicker({
+function StagePicker({
   value,
   onChange,
   models,
@@ -84,7 +59,7 @@ function ModelPicker({
     <select
       value={value}
       onChange={e => onChange(e.target.value)}
-      className="w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+      className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors appearance-none"
     >
       <option value="">{placeholder}</option>
       {models.map(id => (
@@ -112,7 +87,6 @@ function StageDefaultsSubsection({
 }) {
   const enabled = useConfigValue(entries, 'pipeline.stage_defaults_enabled', 'false') === 'true'
 
-  // Stage model drafts
   const stageValues: Record<string, string> = {}
   for (const { role } of STAGES) {
     stageValues[role] = useConfigValue(entries, `pipeline.stage_model.${role}`, '')
@@ -152,38 +126,32 @@ function StageDefaultsSubsection({
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Per-Stage Model Defaults</label>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+          <label className="text-caption font-medium text-content-secondary">Per-Stage Model Defaults</label>
+          <p className="text-caption text-content-tertiary mt-0.5">
             Assign different models to each pipeline stage. Only Task Agent needs a frontier model.
           </p>
         </div>
-        <Toggle enabled={enabled} onToggle={handleToggle} disabled={saving} />
+        <Toggle checked={enabled} onChange={handleToggle} disabled={saving} />
       </div>
 
       {enabled && (
         <div className="mt-3 space-y-3">
           {dirty && (
             <div className="flex items-center justify-end gap-2">
-              <button onClick={handleReset}
-                className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
-                <RotateCcw size={10} /> Reset
-              </button>
-              <button onClick={handleSaveAll} disabled={saving}
-                className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
-                <Save size={10} /> Save All
-              </button>
+              <Button variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw size={10} />}>Reset</Button>
+              <Button size="sm" onClick={handleSaveAll} loading={saving} icon={<Save size={10} />}>Save All</Button>
             </div>
           )}
 
           {STAGES.map(({ role, label, hint }) => (
             <div key={role}>
-              <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{label}</label>
-              <ModelPicker
+              <label className="text-caption font-medium text-content-secondary">{label}</label>
+              <StagePicker
                 value={drafts[role] ?? ''}
                 onChange={v => handleDraftChange(role, v)}
                 models={models}
               />
-              <p className="mt-0.5 text-[11px] text-neutral-400 dark:text-neutral-500">{hint}</p>
+              <p className="mt-0.5 text-micro text-content-tertiary">{hint}</p>
             </div>
           ))}
         </div>
@@ -209,14 +177,12 @@ function ComplexityRoutingSubsection({
   const mapRaw = useConfigValue(entries, 'pipeline.complexity_model_map', '{}')
   const [expanded, setExpanded] = useState(false)
 
-  // Parse user map
   let userMap: Record<string, Record<string, string>> = {}
   try {
     const parsed = typeof mapRaw === 'string' ? JSON.parse(mapRaw) : mapRaw
     if (typeof parsed === 'object' && parsed !== null) userMap = parsed
   } catch { /* use empty */ }
 
-  // Merge defaults with user overrides for display
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({})
   const [dirty, setDirty] = useState(false)
 
@@ -245,7 +211,6 @@ function ComplexityRoutingSubsection({
   }
 
   const handleSaveMap = () => {
-    // Only include non-default values
     const result: Record<string, Record<string, string | null>> = {}
     for (const level of COMPLEXITY_LEVELS) {
       result[level] = {}
@@ -267,54 +232,49 @@ function ComplexityRoutingSubsection({
       }
     }
     setDrafts(merged)
-    setDirty(true) // dirty because we're resetting to defaults, not saved values
+    setDirty(true)
   }
 
   return (
-    <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+    <div className="border-t border-border-subtle pt-4">
       <div className="flex items-center justify-between">
         <div>
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Complexity Routing</label>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+          <label className="text-caption font-medium text-content-secondary">Complexity Routing</label>
+          <p className="text-caption text-content-tertiary mt-0.5">
             Auto-classify task complexity and route to appropriate model tiers.
           </p>
         </div>
-        <Toggle enabled={enabled} onToggle={handleToggle} disabled={saving} />
+        <Toggle checked={enabled} onChange={handleToggle} disabled={saving} />
       </div>
 
       {enabled && (
         <div className="mt-3">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setExpanded(!expanded)}
-            className="text-xs font-medium text-neutral-600 dark:text-neutral-400 hover:text-accent-700 dark:hover:text-accent-400 flex items-center gap-1"
+            icon={expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
           >
-            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            Model Map ({COMPLEXITY_LEVELS.length} levels × {STAGES.length} stages)
-          </button>
+            Model Map ({COMPLEXITY_LEVELS.length} levels x {STAGES.length} stages)
+          </Button>
 
           {expanded && (
             <div className="mt-2 space-y-4">
               {dirty && (
                 <div className="flex items-center justify-end gap-2">
-                  <button onClick={handleReset}
-                    className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-300">
-                    <RotateCcw size={10} /> Defaults
-                  </button>
-                  <button onClick={handleSaveMap} disabled={saving}
-                    className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40">
-                    <Save size={10} /> Save
-                  </button>
+                  <Button variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw size={10} />}>Defaults</Button>
+                  <Button size="sm" onClick={handleSaveMap} loading={saving} icon={<Save size={10} />}>Save</Button>
                 </div>
               )}
 
               {COMPLEXITY_LEVELS.map(level => (
                 <div key={level}>
-                  <label className="text-xs font-semibold text-neutral-700 dark:text-neutral-300 capitalize">{level}</label>
+                  <label className="text-caption font-semibold text-content-primary capitalize">{level}</label>
                   <div className="mt-1 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                     {STAGES.map(({ role, label }) => (
                       <div key={role}>
-                        <label className="text-[11px] text-neutral-500 dark:text-neutral-400">{label}</label>
-                        <ModelPicker
+                        <label className="text-micro text-content-tertiary">{label}</label>
+                        <StagePicker
                           value={drafts[level]?.[role] ?? ''}
                           onChange={v => handleChange(level, role, v)}
                           models={models}
@@ -325,7 +285,7 @@ function ComplexityRoutingSubsection({
                 </div>
               ))}
 
-              <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              <p className="text-caption text-content-tertiary">
                 Empty = use stage default or pod default. Simple tasks use cheap models everywhere; complex tasks reserve frontier for Task + Code Review.
               </p>
             </div>
@@ -364,32 +324,30 @@ function TrainingDataSubsection({
   const handleExport = () => {
     const params = new URLSearchParams({ format: 'jsonl' })
     if (exportRole) params.set('role', exportRole)
-    // Open in new tab — admin headers are handled by the browser via cookie/session
-    // For API key auth, we need to use fetch + blob
     const url = `/api/v1/training-data/export?${params}`
     window.open(url, '_blank')
   }
 
   return (
-    <div className="border-t border-neutral-100 dark:border-neutral-800 pt-4">
+    <div className="border-t border-border-subtle pt-4">
       <div className="flex items-center justify-between">
         <div>
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Training Data Collection</label>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+          <label className="text-caption font-medium text-content-secondary">Training Data Collection</label>
+          <p className="text-caption text-content-tertiary mt-0.5">
             Log full prompt/response pairs for future SLM fine-tuning.
           </p>
         </div>
-        <Toggle enabled={enabled} onToggle={handleToggle} disabled={saving} />
+        <Toggle checked={enabled} onChange={handleToggle} disabled={saving} />
       </div>
 
       {enabled && (
         <div className="mt-3 space-y-3">
           {countData && (
-            <div className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 px-3 py-2">
-              <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+            <div className="rounded-sm border border-border-subtle bg-surface-elevated px-3 py-2">
+              <span className="text-compact font-medium text-content-primary">
                 {countData.count.toLocaleString()}
               </span>
-              <span className="text-xs text-neutral-500 dark:text-neutral-400 ml-1.5">
+              <span className="text-caption text-content-tertiary ml-1.5">
                 training entries logged
               </span>
             </div>
@@ -399,22 +357,19 @@ function TrainingDataSubsection({
             <select
               value={exportRole}
               onChange={e => setExportRole(e.target.value)}
-              className="rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-2 py-1.5 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600 transition-colors"
+              className="h-9 rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors appearance-none"
             >
               <option value="">All roles</option>
               {STAGES.map(({ role, label }) => (
                 <option key={role} value={role}>{label}</option>
               ))}
             </select>
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-1 rounded-md bg-accent-700 px-3 py-1.5 text-xs text-white hover:bg-accent-500"
-            >
-              <Download size={12} /> Export JSONL
-            </button>
+            <Button size="sm" onClick={handleExport} icon={<Download size={12} />}>
+              Export JSONL
+            </Button>
           </div>
 
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          <p className="text-caption text-content-tertiary">
             Exports in OpenAI fine-tuning format (JSONL). Each line contains the full messages array and model response.
           </p>
         </div>
@@ -447,7 +402,7 @@ export function PipelineModelsSection({
     <Section
       icon={Layers}
       title="Pipeline Stage Models"
-      description="Configure which models each pipeline stage uses. Cheap models suffice for most stages — reserve frontier models for the Task Agent."
+      description="Configure which models each pipeline stage uses. Cheap models suffice for most stages -- reserve frontier models for the Task Agent."
     >
       <StageDefaultsSubsection entries={entries} onSave={onSave} saving={saving} models={allModels} />
       <ComplexityRoutingSubsection entries={entries} onSave={onSave} saving={saving} models={allModels} />

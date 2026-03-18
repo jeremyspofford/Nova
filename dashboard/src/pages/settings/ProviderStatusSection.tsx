@@ -3,16 +3,23 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Eye, EyeOff, Save, AlertTriangle } from 'lucide-react'
 import { getProviderStatus, testProvider } from '../../api'
 import { getEnvVars, patchEnv } from '../../api-recovery'
-import { Section } from './shared'
+import { Section, Badge, Button, StatusDot, Card } from '../../components/ui'
 
-const TYPE_BADGE: Record<string, { label: string; className: string }> = {
-  subscription: { label: 'Subscription', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' },
-  free:         { label: 'Free',         className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
-  paid:         { label: 'Paid',         className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
-  local:        { label: 'Local',        className: 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400' },
+const TYPE_BADGE_COLOR: Record<string, 'accent' | 'success' | 'warning' | 'info'> = {
+  subscription: 'accent',
+  free:         'success',
+  paid:         'warning',
+  local:        'info',
 }
 
-/** Maps provider slug → .env key for its API credential */
+const TYPE_BADGE_LABEL: Record<string, string> = {
+  subscription: 'Subscription',
+  free:         'Free',
+  paid:         'Paid',
+  local:        'Local',
+}
+
+/** Maps provider slug to .env key for its API credential */
 const PROVIDER_ENV_KEY: Record<string, string> = {
   anthropic:    'ANTHROPIC_API_KEY',
   openai:       'OPENAI_API_KEY',
@@ -86,18 +93,19 @@ export function ProviderStatusSection() {
       description="LLM providers configured for this instance. Manage API keys and test connectivity."
     >
       {restartHint && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+        <div className="flex items-start gap-2 rounded-sm border border-amber-200 dark:border-amber-800 bg-warning-dim px-3 py-2 text-compact text-amber-700 dark:text-amber-400">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-          <span>API key changes require a service restart to take effect. Restart services from the Recovery section or via <code className="text-xs bg-amber-100 dark:bg-amber-900/50 px-1 rounded">make restart</code>.</span>
+          <span>API key changes require a service restart to take effect. Restart services from the Recovery section or via <code className="text-caption bg-surface-elevated px-1 rounded-xs">make restart</code>.</span>
         </div>
       )}
 
       {isLoading ? (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">Loading providers…</p>
+        <p className="text-compact text-content-tertiary">Loading providers...</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {(providers ?? []).map(p => {
-            const badge = TYPE_BADGE[p.type] ?? TYPE_BADGE.free
+            const badgeColor = TYPE_BADGE_COLOR[p.type] ?? 'neutral'
+            const badgeLabel = TYPE_BADGE_LABEL[p.type] ?? p.type
             const result = testResults[p.slug]
             const envKey = PROVIDER_ENV_KEY[p.slug]
             const currentMasked = envKey && envVars ? envVars[envKey] ?? '' : ''
@@ -106,43 +114,28 @@ export function ProviderStatusSection() {
             const isLocal = p.type === 'local'
 
             return (
-              <div
-                key={p.slug}
-                className="rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-800 p-3 space-y-2"
-              >
+              <Card key={p.slug} variant="default" className="p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span
-                      className={
-                        'inline-block size-2 rounded-full ' +
-                        (p.available ? 'bg-emerald-500' : 'bg-red-500')
-                      }
-                      title={p.available ? 'Configured' : 'Not configured'}
-                    />
-                    <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">{p.name}</span>
+                    <StatusDot status={p.available ? 'success' : 'danger'} size="sm" />
+                    <span className="text-compact font-medium text-content-primary">{p.name}</span>
                   </div>
                   <div className="flex items-center gap-1.5">
                     {!isLocal && envKey && (
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        hasKey
-                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                          : 'bg-neutral-200 text-neutral-500 dark:bg-neutral-700 dark:text-neutral-400'
-                      }`}>
+                      <Badge color={hasKey ? 'success' : 'neutral'} size="sm">
                         {hasKey ? 'Connected' : 'Not configured'}
-                      </span>
+                      </Badge>
                     )}
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.className}`}>
-                      {badge.label}
-                    </span>
+                    <Badge color={badgeColor as any} size="sm">{badgeLabel}</Badge>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
+                <div className="flex items-center justify-between text-caption text-content-tertiary">
                   <span>{p.model_count} model{p.model_count !== 1 ? 's' : ''}</span>
                   <span className="font-mono truncate max-w-[140px]" title={p.default_model}>{p.default_model}</span>
                 </div>
 
-                {/* API key input (non-local providers only) */}
+                {/* API key input */}
                 {envKey && !isLocal && (
                   <div className="space-y-1.5">
                     {isEditing ? (
@@ -153,61 +146,62 @@ export function ProviderStatusSection() {
                             value={drafts[p.slug] ?? ''}
                             onChange={e => setDrafts(prev => ({ ...prev, [p.slug]: e.target.value }))}
                             placeholder={`Paste ${envKey}`}
-                            className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-900 px-2 py-1 pr-7 text-xs text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
+                            className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 pr-7 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
                           />
                           <button
                             onClick={() => setShowKey(prev => ({ ...prev, [p.slug]: !prev[p.slug] }))}
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                            className="absolute right-1.5 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-primary transition-colors"
                           >
                             {showKey[p.slug] ? <EyeOff size={12} /> : <Eye size={12} />}
                           </button>
                         </div>
-                        <button
+                        <Button
+                          size="sm"
                           onClick={() => handleSaveKey(p.slug)}
-                          disabled={saving === p.slug || !drafts[p.slug]?.trim()}
-                          className="flex items-center gap-1 rounded-md bg-accent-700 px-2 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
+                          disabled={!drafts[p.slug]?.trim()}
+                          loading={saving === p.slug}
+                          icon={<Save size={10} />}
                         >
-                          <Save size={10} />
-                          {saving === p.slug ? '…' : 'Save'}
-                        </button>
-                        <button
+                          Save
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => { setEditing(null); setDrafts(prev => { const n = { ...prev }; delete n[p.slug]; return n }) }}
-                          className="text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300"
                         >
                           Cancel
-                        </button>
+                        </Button>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between">
                         {hasKey && (
-                          <span className="text-xs font-mono text-neutral-500 dark:text-neutral-400">{currentMasked}</span>
+                          <span className="text-caption font-mono text-content-tertiary">{currentMasked}</span>
                         )}
-                        <button
-                          onClick={() => setEditing(p.slug)}
-                          className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline ml-auto"
-                        >
+                        <Button variant="ghost" size="sm" onClick={() => setEditing(p.slug)} className="ml-auto">
                           {hasKey ? 'Change key' : 'Add key'}
-                        </button>
+                        </Button>
                       </div>
                     )}
                   </div>
                 )}
 
                 <div className="flex items-center justify-between">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     onClick={() => handleTest(p.slug)}
-                    disabled={!p.available || testing === p.slug}
-                    className="text-xs font-medium text-accent-700 dark:text-accent-400 hover:underline disabled:opacity-40 disabled:no-underline"
+                    disabled={!p.available}
+                    loading={testing === p.slug}
                   >
-                    {testing === p.slug ? 'Testing…' : 'Test'}
-                  </button>
+                    Test
+                  </Button>
                   {result && (
-                    <span className={`text-xs ${result.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    <span className={`text-caption ${result.ok ? 'text-success' : 'text-danger'}`}>
                       {result.ok ? `${result.latency_ms}ms` : result.error ?? 'Failed'}
                     </span>
                   )}
                 </div>
-              </div>
+              </Card>
             )
           })}
         </div>

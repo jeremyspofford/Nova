@@ -1,36 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Save, RotateCcw } from 'lucide-react'
-import Card from '../../components/Card'
+import { Button, Input, Textarea } from '../../components/ui'
 import type { PlatformConfigEntry } from '../../api'
 
-// ── Section wrapper ───────────────────────────────────────────────────────────
-
-export function Section({
-  icon: Icon,
-  title,
-  description,
-  children,
-  id,
-}: {
-  icon: React.ElementType
-  title: string
-  description: React.ReactNode
-  children: React.ReactNode
-  id?: string
-}) {
-  return (
-    <Card className="overflow-hidden" id={id}>
-      <div className="border-b border-neutral-100 dark:border-neutral-800 px-4 py-4 sm:px-5">
-        <div className="flex items-center gap-2">
-          <Icon size={15} className="text-accent-700 dark:text-accent-400" />
-          <h2 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">{title}</h2>
-        </div>
-        <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">{description}</p>
-      </div>
-      <div className="px-4 py-4 sm:px-5 space-y-4">{children}</div>
-    </Card>
-  )
-}
+// Re-export the new design system Section so existing section files can migrate gradually
+export { Section } from '../../components/ui'
 
 // ── Config entry helper ──────────────────────────────────────────────────────
 
@@ -44,7 +18,7 @@ export function useConfigValue(
   return String(entry.value)
 }
 
-// ── Inline editable field ─────────────────────────────────────────────────────
+// ── Inline editable field ────────────────────────────────────────────────────
 
 export function ConfigField({
   label,
@@ -82,59 +56,55 @@ export function ConfigField({
   const handleSave = () => onSave(configKey, JSON.stringify(draft))
   const handleReset = () => { setDraft(value); setDirty(false) }
 
-  const inputClass =
-    'w-full rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 ' +
-    'placeholder:text-neutral-400 dark:placeholder:text-neutral-500 outline-none focus:border-accent-600 disabled:opacity-50 transition-colors'
-
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">{label}</label>
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="text-caption font-medium text-content-secondary">{label}</label>
         {dirty && (
           <div className="flex items-center gap-2">
-            <button
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleReset}
-              className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
+              icon={<RotateCcw size={10} />}
             >
-              <RotateCcw size={10} /> Reset
-            </button>
-            <button
+              Reset
+            </Button>
+            <Button
+              size="sm"
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
+              loading={saving}
+              icon={<Save size={10} />}
             >
-              <Save size={10} /> {saving ? 'Saving…' : 'Save'}
-            </button>
+              Save
+            </Button>
           </div>
         )}
       </div>
 
       {multiline ? (
-        <textarea
+        <Textarea
           value={draft}
           onChange={e => handleChange(e.target.value)}
           placeholder={placeholder}
           rows={6}
-          className={`${inputClass} resize-y`}
+          autoResize={false}
+          description={description}
         />
       ) : (
-        <input
-          type="text"
+        <Input
           value={draft}
           onChange={e => handleChange(e.target.value)}
           placeholder={placeholder}
-          className={inputClass}
+          description={description}
         />
-      )}
-
-      {description && (
-        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{description}</p>
       )}
     </div>
   )
 }
 
-// ── Common types for section props ────────────────────────────────────────────
+// ── Common types for section props ───────────────────────────────────────────
 
 export interface ConfigSectionProps {
   entries: PlatformConfigEntry[]

@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Shield, CheckCircle, XCircle, Eye, EyeOff, Save } from 'lucide-react'
-import { Section, ConfigField, type ConfigSectionProps } from './shared'
+import { Section, Button, Input, Select, Toggle } from '../../components/ui'
+import { ConfigField, type ConfigSectionProps } from './shared'
 import { getEnvVars, patchEnv } from '../../api-recovery'
 
 interface NetworkStatus {
@@ -38,7 +39,7 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
   const requireAuthValue = requireAuth?.value != null ? String(requireAuth.value) : 'true'
   const regModeValue = registrationMode?.value != null ? String(registrationMode.value) : 'invite'
 
-  // Google OAuth — stored in .env via recovery service
+  // Google OAuth
   const googleClientId = envVars?.GOOGLE_CLIENT_ID ?? ''
   const googleClientSecret = envVars?.GOOGLE_CLIENT_SECRET ?? ''
   const [oauthDrafts, setOauthDrafts] = useState<{ id?: string; secret?: string }>({})
@@ -73,18 +74,15 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
         description="Control who can access this Nova instance without logging in."
       >
         {status && (
-          <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${
+          <div className={`flex items-center gap-2 rounded-sm border px-3 py-2 text-compact ${
             status.trusted
-              ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400'
-              : 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400'
+              ? 'border-emerald-200 dark:border-emerald-800 bg-success-dim text-emerald-700 dark:text-emerald-400'
+              : 'border-amber-200 dark:border-amber-800 bg-warning-dim text-amber-700 dark:text-amber-400'
           }`}>
-            {status.trusted
-              ? <CheckCircle size={14} />
-              : <XCircle size={14} />
-            }
+            {status.trusted ? <CheckCircle size={14} /> : <XCircle size={14} />}
             <span>
-              You are connecting from <code className="font-mono text-xs px-1 py-0.5 rounded bg-neutral-200/50 dark:bg-neutral-700/50">{status.client_ip}</code>
-              {' — '}
+              You are connecting from <code className="font-mono text-caption px-1 py-0.5 rounded-xs bg-surface-elevated">{status.client_ip}</code>
+              {' -- '}
               <strong>{status.trusted ? 'trusted' : 'untrusted'}</strong> network
             </span>
           </div>
@@ -93,77 +91,62 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
         {/* Enforce Authentication toggle */}
         <div className="flex items-center justify-between">
           <div>
-            <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Enforce Authentication</label>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+            <label className="text-caption font-medium text-content-secondary">Enforce Authentication</label>
+            <p className="text-caption text-content-tertiary mt-0.5">
               When enabled, requests from untrusted networks require login. Trusted networks always bypass auth.
             </p>
           </div>
-          <button
-            onClick={() => onSave('auth.require_auth', JSON.stringify(requireAuthValue !== 'true'))}
+          <Toggle
+            checked={requireAuthValue === 'true'}
+            onChange={(checked) => onSave('auth.require_auth', JSON.stringify(checked))}
             disabled={saving}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
-              requireAuthValue === 'true'
-                ? 'bg-accent-600'
-                : 'bg-neutral-300 dark:bg-neutral-600'
-            }`}
-          >
-            <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform duration-200 ${
-              requireAuthValue === 'true' ? 'translate-x-5' : 'translate-x-0'
-            }`} />
-          </button>
+          />
         </div>
 
         {/* Registration Mode */}
-        <div>
-          <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Registration Mode</label>
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5 mb-1.5">
-            Controls how new users can create accounts.
-          </p>
-          <select
-            value={regModeValue}
-            onChange={e => onSave('auth.registration_mode', JSON.stringify(e.target.value))}
-            disabled={saving}
-            className="w-full max-w-xs rounded-lg border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-2 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
-          >
-            <option value="invite">Invite only</option>
-            <option value="open">Open registration</option>
-            <option value="admin">Admin creates accounts</option>
-          </select>
-        </div>
+        <Select
+          label="Registration Mode"
+          description="Controls how new users can create accounts."
+          value={regModeValue}
+          onChange={e => onSave('auth.registration_mode', JSON.stringify(e.target.value))}
+          disabled={saving}
+          items={[
+            { value: 'invite', label: 'Invite only' },
+            { value: 'open', label: 'Open registration' },
+            { value: 'admin', label: 'Admin creates accounts' },
+          ]}
+          className="max-w-xs"
+        />
 
         {/* Google OAuth */}
-        <div className="space-y-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
+        <div className="space-y-2 pt-2 border-t border-border-subtle">
           <div>
-            <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">Google OAuth</label>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
+            <label className="text-caption font-medium text-content-secondary">Google OAuth</label>
+            <p className="text-caption text-content-tertiary mt-0.5">
               Enable "Sign in with Google". Requires a Google Cloud OAuth 2.0 Client ID. Changes require a service restart.
             </p>
           </div>
 
-          <div>
-            <label className="text-[11px] text-neutral-500 dark:text-neutral-400">Client ID</label>
-            <input
-              type="text"
-              value={oauthDrafts.id ?? googleClientId}
-              onChange={e => setOauthDrafts(prev => ({ ...prev, id: e.target.value }))}
-              placeholder="123456789.apps.googleusercontent.com"
-              className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
-            />
-          </div>
+          <Input
+            label="Client ID"
+            value={oauthDrafts.id ?? googleClientId}
+            onChange={e => setOauthDrafts(prev => ({ ...prev, id: e.target.value }))}
+            placeholder="123456789.apps.googleusercontent.com"
+          />
 
           <div>
-            <label className="text-[11px] text-neutral-500 dark:text-neutral-400">Client Secret</label>
+            <label className="mb-1.5 block text-caption font-medium text-content-secondary">Client Secret</label>
             <div className="relative">
               <input
                 type={showSecret ? 'text' : 'password'}
                 value={oauthDrafts.secret ?? googleClientSecret}
                 onChange={e => setOauthDrafts(prev => ({ ...prev, secret: e.target.value }))}
                 placeholder="GOCSPX-..."
-                className="w-full rounded-md border border-neutral-300 dark:border-neutral-600 bg-neutral-50 dark:bg-neutral-800 px-3 py-1.5 pr-8 text-sm text-neutral-900 dark:text-neutral-100 outline-none focus:border-accent-600"
+                className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 pr-8 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors"
               />
               <button
                 onClick={() => setShowSecret(!showSecret)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-primary transition-colors"
               >
                 {showSecret ? <EyeOff size={14} /> : <Eye size={14} />}
               </button>
@@ -171,14 +154,14 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
           </div>
 
           {oauthDirty && (
-            <button
+            <Button
+              size="sm"
               onClick={handleOauthSave}
-              disabled={oauthSaving}
-              className="flex items-center gap-1 rounded-md bg-accent-700 px-3 py-1.5 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
+              loading={oauthSaving}
+              icon={<Save size={12} />}
             >
-              <Save size={12} />
-              {oauthSaving ? 'Saving…' : 'Save OAuth Config'}
-            </button>
+              Save OAuth Config
+            </Button>
           )}
         </div>
       </Section>
@@ -187,7 +170,7 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
       <Section
         icon={Shield}
         title="Trusted Networks"
-        description="IP ranges that bypass authentication. Requests from these networks are treated as admin — no login required."
+        description="IP ranges that bypass authentication. Requests from these networks are treated as admin -- no login required."
       >
         <ConfigField
           label="Trusted CIDRs"
@@ -195,7 +178,7 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
           value={cidrsValue}
           multiline
           placeholder="127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,::1/128"
-          description="Comma-separated CIDR ranges. Default includes RFC1918 private networks, Tailscale CGNAT (100.64.0.0/10), and localhost. Set to empty to disable (all requests require normal auth)."
+          description="Comma-separated CIDR ranges. Default includes RFC1918 private networks, Tailscale CGNAT (100.64.0.0/10), and localhost."
           onSave={onSave}
           saving={saving}
         />
@@ -205,7 +188,7 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
           configKey="trusted_proxy_header"
           value={headerValue}
           placeholder="e.g. CF-Connecting-IP, X-Real-IP"
-          description="HTTP header containing the real client IP when behind a reverse proxy. Only set this if you have a trusted proxy (Cloudflare, nginx) in front of Nova. Without one, clients could spoof this header."
+          description="HTTP header containing the real client IP when behind a reverse proxy."
           onSave={onSave}
           saving={saving}
         />

@@ -3,10 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Globe, ExternalLink } from 'lucide-react'
 import { getRemoteAccessStatus } from '../../api-recovery'
 import { CloudflareWizard, TailscaleWizard, StatusBadge as RemoteStatusBadge } from '../RemoteAccess'
-import { Section } from './shared'
+import { Section, Tabs } from '../../components/ui'
 
 export function RemoteAccessSection() {
-  const [tab, setTab] = useState<'cloudflare' | 'tailscale'>('cloudflare')
+  const [tab, setTab] = useState('cloudflare')
   const queryClient = useQueryClient()
 
   const { data: status } = useQuery({
@@ -26,34 +26,26 @@ export function RemoteAccessSection() {
     <Section
       icon={Globe}
       title="Remote Access"
-      description={<>Expose Nova securely to the internet via Cloudflare Tunnel, or access from your devices via Tailscale. <a href="https://arialabs.ai/nova/docs/remote-access/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-teal-600 dark:text-teal-400 hover:underline">Setup guide <ExternalLink size={12} /></a></>}
+      description={<>Expose Nova securely to the internet via Cloudflare Tunnel, or access from your devices via Tailscale. <a href="https://arialabs.ai/nova/docs/remote-access/" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-accent hover:underline">Setup guide <ExternalLink size={12} /></a></>}
     >
-      <div className="flex gap-4 text-sm mb-3">
-        <span className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">
+      <div className="flex gap-4 text-compact mb-3">
+        <span className="flex items-center gap-1.5 text-content-tertiary">
           Cloudflare: <RemoteStatusBadge configured={cfStatus.configured} running={cfStatus.container.running} />
         </span>
-        <span className="flex items-center gap-1.5 text-neutral-500 dark:text-neutral-400">
+        <span className="flex items-center gap-1.5 text-content-tertiary">
           Tailscale: <RemoteStatusBadge configured={tsStatus.configured} running={tsStatus.container.running} />
         </span>
       </div>
 
-      <div className="border-b border-neutral-200 dark:border-neutral-800 mb-4">
-        <div className="flex gap-4">
-          {([
-            { key: 'cloudflare' as const, label: 'Cloudflare Tunnel' },
-            { key: 'tailscale' as const, label: 'Tailscale' },
-          ]).map(({ key, label }) => (
-            <button key={key} onClick={() => setTab(key)}
-              className={`pb-2 px-1 text-sm font-medium border-b-2 transition-colors ${
-                tab === key
-                  ? 'border-teal-600 dark:border-teal-400 text-teal-600 dark:text-teal-400'
-                  : 'border-transparent text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300'
-              }`}>
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <Tabs
+        tabs={[
+          { id: 'cloudflare', label: 'Cloudflare Tunnel' },
+          { id: 'tailscale', label: 'Tailscale' },
+        ]}
+        activeTab={tab}
+        onChange={setTab}
+        className="mb-4"
+      />
 
       <div className="max-w-xl">
         {tab === 'cloudflare' && <CloudflareWizard status={cfStatus} onDone={refresh} />}

@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle, Lightbulb } from "lucide-react";
-import { Section, ConfigField, useConfigValue, type ConfigSectionProps } from "./shared";
+import { Section, Button, Toggle, Badge, StatusDot, Card } from "../../components/ui";
+import { ConfigField, useConfigValue, type ConfigSectionProps } from "./shared";
 import { recoveryFetch } from "../../api-recovery";
 import { getRecommendation, type InferenceRecommendation } from "../../api-recovery";
 
@@ -29,12 +30,12 @@ const BACKENDS = [
   { value: "none", label: "None", description: "Cloud providers only" },
 ] as const;
 
-const STATE_LABELS: Record<string, { label: string; color: string }> = {
-  ready: { label: "Running", color: "text-emerald-400" },
-  stopped: { label: "Stopped", color: "text-neutral-500 dark:text-neutral-500" },
-  starting: { label: "Starting...", color: "text-amber-400" },
-  draining: { label: "Draining...", color: "text-amber-400" },
-  error: { label: "Error", color: "text-red-400" },
+const STATE_LABELS: Record<string, { label: string; status: 'success' | 'neutral' | 'warning' | 'danger' }> = {
+  ready:    { label: "Running",      status: "success" },
+  stopped:  { label: "Stopped",      status: "neutral" },
+  starting: { label: "Starting...",  status: "warning" },
+  draining: { label: "Draining...",  status: "warning" },
+  error:    { label: "Error",        status: "danger" },
 };
 
 export function LocalInferenceSection({ entries, onSave, saving }: ConfigSectionProps) {
@@ -42,7 +43,6 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
   const [selectedBackend, setSelectedBackend] = useState<string>("");
   const [showRemote, setShowRemote] = useState(false);
 
-  // All hooks at top level (Rules of Hooks)
   const configBackend = useConfigValue(entries, "inference.backend", "ollama");
   const remoteUrl = useConfigValue(entries, "inference.url", "");
   const wolMac = useConfigValue(entries, "llm.wol_mac", "");
@@ -80,7 +80,6 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
     mutationFn: (backend: string) =>
       recoveryFetch(`/api/v1/recovery/inference/backend/${backend}/start`, { method: "POST" }),
     onMutate: (backend) => {
-      // Optimistic update: immediately show "Starting..." so user gets instant feedback
       queryClient.setQueryData<BackendStatus>(["inference-backend-status"], (old) =>
         old ? { ...old, backend, state: "starting" } : { backend, state: "starting", container_status: null },
       );
@@ -103,7 +102,7 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
     },
   });
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally only sync on first load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (configBackend && !selectedBackend) {
       setSelectedBackend(configBackend);
@@ -120,14 +119,14 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
     <Section id="local-inference" icon={Cpu} title="Local Inference" description="Manage your local AI inference backend">
       {/* Recommendation Banner */}
       {recommendation && status && recommendation.backend !== status.backend && status.backend !== "none" && (
-        <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg text-sm flex items-start gap-2">
+        <div className="mb-4 p-3 bg-warning-dim border border-amber-200 dark:border-amber-800 rounded-sm text-compact flex items-start gap-2">
           <Lightbulb className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
           <div>
             <span className="font-medium text-amber-800 dark:text-amber-300">Recommendation:</span>{" "}
             <span className="text-amber-700 dark:text-amber-400">{recommendation.reason}</span>
             <span className="text-amber-600 dark:text-amber-500 ml-1">
               Consider switching to <strong>{recommendation.backend}</strong>
-              {recommendation.model && <> with <code className="text-xs">{recommendation.model}</code></>}.
+              {recommendation.model && <> with <code className="text-caption">{recommendation.model}</code></>}.
             </span>
           </div>
         </div>
@@ -135,91 +134,86 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
 
       {/* Hardware Info */}
       {hardware && (
-        <div className="mb-4 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg text-sm">
+        <Card variant="default" className="p-3 mb-4">
           {hasGpu ? (
-            <div className="flex items-center gap-2">
-              <span className="text-emerald-600 dark:text-emerald-400">GPU Detected:</span>
-              <span className="text-neutral-700 dark:text-neutral-300">
+            <div className="flex items-center gap-2 text-compact">
+              <Badge color="success" size="sm">GPU Detected</Badge>
+              <span className="text-content-secondary">
                 {primaryGpu?.model} ({primaryGpu?.vram_gb}GB VRAM)
                 {hardware.gpus.length > 1 && ` + ${hardware.gpus.length - 1} more`}
               </span>
             </div>
           ) : (
-            <div className="flex items-center gap-2 text-neutral-500 dark:text-neutral-400">
+            <div className="flex items-center gap-2 text-compact text-content-tertiary">
               <AlertCircle className="w-4 h-4" />
               <span>No GPU detected. Ollama (CPU) or cloud providers recommended.</span>
             </div>
           )}
           {hardware.recommended_backend && (
-            <div className="mt-1 text-neutral-500">
-              Recommended: <span className="text-accent-600 dark:text-accent-400">{hardware.recommended_backend}</span>
+            <div className="mt-1 text-caption text-content-tertiary">
+              Recommended: <span className="text-accent">{hardware.recommended_backend}</span>
             </div>
           )}
-        </div>
+        </Card>
       )}
 
       {/* Backend Selector */}
       <div className="space-y-3">
-        <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300">Backend</label>
-        <div className="flex gap-2">
+        <label className="block text-compact font-medium text-content-secondary">Backend</label>
+        <div className="flex flex-wrap gap-2">
           {BACKENDS.map((b) => (
-            <button
+            <Button
               key={b.value}
+              variant={(status?.backend || configBackend) === b.value ? 'primary' : 'secondary'}
+              size="sm"
               onClick={() => {
                 setSelectedBackend(b.value);
                 onSave("inference.backend", b.value);
               }}
               disabled={isTransitioning}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
-                (status?.backend || configBackend) === b.value
-                  ? "bg-accent-600 text-white"
-                  : "bg-neutral-100 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-600"
-              } ${isTransitioning ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {b.label}
-            </button>
+            </Button>
           ))}
         </div>
       </div>
 
       {/* Status */}
       {status && status.backend !== "none" && (
-        <div className="mt-4 p-3 bg-neutral-50 dark:bg-neutral-800/50 rounded-lg">
+        <Card variant="default" className="mt-4 p-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className={`text-sm font-medium ${stateInfo.color}`}>{stateInfo.label}</span>
-              <span className="text-xs text-neutral-500">{status.backend}</span>
+              <StatusDot status={stateInfo.status} pulse={isTransitioning} />
+              <span className="text-compact font-medium text-content-primary">{stateInfo.label}</span>
+              <Badge color="neutral" size="sm">{status.backend}</Badge>
             </div>
             <div className="flex gap-2">
               {currentState === "ready" ? (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => stopBackend.mutate()}
-                  disabled={stopBackend.isPending}
-                  className="p-1.5 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400"
-                  title="Stop backend"
-                >
-                  <Square className="w-4 h-4" />
-                </button>
+                  loading={stopBackend.isPending}
+                  icon={<Square size={14} />}
+                />
               ) : currentState === "stopped" || currentState === "error" ? (
-                <button
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => startBackend.mutate(status.backend)}
-                  disabled={startBackend.isPending}
-                  className="p-1.5 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400"
-                  title="Start backend"
-                >
-                  <Play className="w-4 h-4" />
-                </button>
+                  loading={startBackend.isPending}
+                  icon={<Play size={14} />}
+                />
               ) : null}
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => refetchStatus()}
-                className="p-1.5 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-500 dark:text-neutral-400"
-                title="Refresh status"
-              >
-                <RefreshCw className="w-4 h-4" />
-              </button>
+                icon={<RefreshCw size={14} />}
+              />
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* Custom Backend Config */}
@@ -243,7 +237,8 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
             placeholder="Bearer sk-..."
             description="Optional Authorization header value"
           />
-          <button
+          <Button
+            size="sm"
             onClick={async () => {
               if (!customUrl) return;
               setTestingConnection(true);
@@ -264,13 +259,13 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
                 setTestingConnection(false);
               }
             }}
-            disabled={!customUrl || testingConnection}
-            className="px-3 py-1.5 text-sm rounded-lg bg-accent-600 text-white hover:bg-accent-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!customUrl}
+            loading={testingConnection}
           >
-            {testingConnection ? "Testing..." : "Test Connection"}
-          </button>
+            Test Connection
+          </Button>
           {testResult && (
-            <p className={`text-sm ${testResult.ok ? "text-emerald-500" : "text-red-400"}`}>
+            <p className={`text-compact ${testResult.ok ? "text-success" : "text-danger"}`}>
               {testResult.message}
             </p>
           )}
@@ -278,17 +273,16 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
       )}
 
       {/* Remote Backend Toggle */}
-      <div className="mt-4 pt-4 border-t border-neutral-200 dark:border-neutral-700/50">
-        <label className="flex items-center gap-2 text-sm text-neutral-500 dark:text-neutral-400 cursor-pointer">
-          <input
-            type="checkbox"
+      <div className="mt-4 pt-4 border-t border-border-subtle">
+        <div className="flex items-center gap-2 text-compact text-content-tertiary">
+          <Toggle
             checked={showRemote}
-            onChange={(e) => setShowRemote(e.target.checked)}
-            className="rounded bg-neutral-100 dark:bg-neutral-700 border-neutral-300 dark:border-neutral-600"
+            onChange={setShowRemote}
+            size="sm"
           />
           <Wifi className="w-4 h-4" />
-          Use remote inference server
-        </label>
+          <span>Use remote inference server</span>
+        </div>
 
         {showRemote && (
           <div className="mt-3 space-y-3">
@@ -316,7 +310,7 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
 
       {/* No GPU + No Remote guidance */}
       {!hasGpu && !showRemote && status?.backend !== "ollama" && (
-        <div className="mt-3 p-3 bg-neutral-50 dark:bg-neutral-800/30 rounded text-sm text-neutral-500">
+        <div className="mt-3 p-3 bg-surface-elevated rounded-sm text-compact text-content-tertiary">
           No GPU detected and no remote server configured. Consider using Ollama (CPU) or configure cloud providers below.
         </div>
       )}

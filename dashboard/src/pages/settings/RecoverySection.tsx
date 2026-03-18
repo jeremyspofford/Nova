@@ -1,6 +1,6 @@
 import { Shield } from 'lucide-react'
 import { BackupSection as RecoveryBackupSection, FactoryResetSection as RecoveryFactoryReset } from '../Recovery'
-import { Section } from './shared'
+import { Section } from '../../components/ui'
 
 export function RecoverySection() {
   return (

@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Shield, Save, RotateCcw } from 'lucide-react'
-import { Section, useConfigValue, type ConfigSectionProps } from './shared'
+import { Section, Button, Checkbox, Badge } from '../../components/ui'
+import { useConfigValue, type ConfigSectionProps } from './shared'
 import { discoverModels } from '../../api'
 
 export function GuestAccessSection({ entries, onSave, saving }: ConfigSectionProps) {
   const raw = useConfigValue(entries, 'guest_allowed_models')
   const allowedModels: string[] = raw ? JSON.parse(raw) : []
 
-  // Fetch available models from all providers
   const { data: providers } = useQuery({
     queryKey: ['model-catalog'],
     queryFn: () => discoverModels(),
@@ -50,57 +50,47 @@ export function GuestAccessSection({ entries, onSave, saving }: ConfigSectionPro
       description="Configure which models are available to guest users. Guests can only chat with models in this list."
     >
       {allModels.length === 0 ? (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-compact text-content-tertiary">
           No models available. Configure providers first.
         </p>
       ) : (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-neutral-600 dark:text-neutral-400">
+            <label className="text-caption font-medium text-content-secondary">
               Allowed Models
             </label>
             {hasChanges && (
               <div className="flex items-center gap-2">
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-300"
-                >
-                  <RotateCcw size={10} /> Reset
-                </button>
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="flex items-center gap-1 rounded-md bg-accent-700 px-2.5 py-1 text-xs text-white hover:bg-accent-500 disabled:opacity-40"
-                >
-                  <Save size={10} /> {saving ? 'Saving\u2026' : 'Save'}
-                </button>
+                <Button variant="ghost" size="sm" onClick={handleReset} icon={<RotateCcw size={10} />}>
+                  Reset
+                </Button>
+                <Button size="sm" onClick={handleSave} loading={saving} icon={<Save size={10} />}>
+                  Save
+                </Button>
               </div>
             )}
           </div>
 
           <div className="grid gap-2 max-h-64 overflow-y-auto">
             {allModels.map(id => (
-              <label key={id} className="flex items-center gap-2 text-sm cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(id)}
-                  onChange={() => toggle(id)}
-                  className="rounded border-neutral-300 dark:border-neutral-600"
-                />
-                <span className="text-neutral-700 dark:text-neutral-300 font-mono text-xs">{id}</span>
-              </label>
+              <Checkbox
+                key={id}
+                label={id}
+                checked={selected.includes(id)}
+                onChange={() => toggle(id)}
+              />
             ))}
           </div>
 
           {selected.length > 0 && (
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="text-caption text-content-tertiary">
               {selected.length} model{selected.length !== 1 ? 's' : ''} selected
             </p>
           )}
 
           {selected.length === 0 && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
-              No models selected — guests will not be able to use any models.
+            <p className="text-caption text-warning">
+              No models selected -- guests will not be able to use any models.
             </p>
           )}
         </div>
