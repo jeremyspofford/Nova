@@ -188,7 +188,7 @@ def get_mcp_tool_definitions() -> list[ToolDefinition]:
             tools.append(ToolDefinition(
                 name=f"mcp__{tool.server_name}__{tool.name}",
                 description=f"[{tool.server_name}] {tool.description}",
-                input_schema=tool.input_schema,
+                parameters=tool.input_schema,
             ))
     return tools
 
