@@ -37,27 +37,27 @@ log = logging.getLogger(__name__)
 
 litellm.drop_params = True
 
-# Map our namespaced model IDs → Anthropic API model names.
+# Map our namespaced model IDs → Anthropic API model names for LiteLLM.
 #
-# Subscription OAuth (sk-ant-oat01-...) via the public /v1/messages API has
-# limitations: 4.6 model aliases ("claude-sonnet-4-6") return a vague
-# "invalid_request_error: Error" and no dated version has been found that works.
-# Only claude-haiku-4-5-20251001 is confirmed working as of 2026-03.
+# Subscription OAuth (sk-ant-oat01-...) via the public /v1/messages API:
+# - claude-haiku-4-5-20251001: WORKS
+# - claude-sonnet-4-6 / claude-opus-4-6: returns "invalid_request_error: Error"
+#   Tested with fresh token, all API versions, all beta headers. The dated
+#   versions (e.g. claude-opus-4-6-20260205) return "not_found_error".
+#   Claude Code uses a different internal API path for 4.6 models.
 #
-# Claude Code itself works with 4.6 models because it uses a different internal
-# API path, not the public messages endpoint. Until Anthropic publishes dated 4.6
-# model names or fixes alias support for OAuth, we fall back to Haiku 4.5.
-#
-# TODO: Re-test when Anthropic updates their API. Track in TODOS.md.
+# Sonnet/Opus 4.6 requests fall back to Haiku 4.5 until Anthropic enables
+# subscription OAuth for 4.6 on the public messages API.
+# TODO: Re-test periodically — track in TODOS.md.
 _MODEL_MAP: dict[str, str] = {
-    # Namespaced (claude-max/) → API name
+    # Working via subscription OAuth
     "claude-max/claude-haiku-4-5":      "claude-haiku-4-5-20251001",
-    "claude-max/claude-sonnet-4-6":     "claude-haiku-4-5-20251001",  # fallback
-    "claude-max/claude-opus-4-6":       "claude-haiku-4-5-20251001",  # fallback
-    # Short aliases → dated
     "claude-haiku-4-5-20251001":        "claude-haiku-4-5-20251001",
-    "claude-sonnet-4-6":                "claude-haiku-4-5-20251001",  # fallback
-    "claude-opus-4-6":                  "claude-haiku-4-5-20251001",  # fallback
+    # Fallbacks (4.6 not available via subscription OAuth)
+    "claude-max/claude-sonnet-4-6":     "claude-haiku-4-5-20251001",
+    "claude-max/claude-opus-4-6":       "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-6":                "claude-haiku-4-5-20251001",
+    "claude-opus-4-6":                  "claude-haiku-4-5-20251001",
 }
 _DEFAULT_API_MODEL = "claude-haiku-4-5-20251001"
 
