@@ -67,8 +67,10 @@ async def _reap_stale_running_tasks() -> None:
     from .db import get_pool
 
     ACTIVE_STATES = (
-        "context_running", "task_running", "guardrail_running",
-        "code_review_running", "decision_running", "completing",
+        "context_running", "task_running",
+        "critique_direction_running", "guardrail_running",
+        "code_review_running", "critique_acceptance_running",
+        "decision_running", "completing",
     )
 
     pool = get_pool()

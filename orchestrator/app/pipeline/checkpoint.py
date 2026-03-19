@@ -27,8 +27,10 @@ logger = logging.getLogger(__name__)
 PIPELINE_STAGE_ORDER = [
     "context",
     "task",
+    "critique_direction",
     "guardrail",
     "code_review",
+    "critique_acceptance",
     "decision",
 ]
 

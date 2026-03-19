@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+from pathlib import Path
+
 import httpx
 import pytest
+
+# Add orchestrator to path so unit tests can import directly from app.*
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "orchestrator"))
 
 
 class TestPipelineSubmission:
@@ -163,7 +169,31 @@ class TestQueueBehavior:
         assert task["user_input"] == "nova-test-queue: hello"
         assert "status" in task
         assert task["status"] in (
-            "queued", "context_running", "task_running", "guardrail_running",
-            "code_review_running", "decision_running", "complete", "completed",
+            "queued", "context_running", "task_running",
+            "critique_direction_running", "guardrail_running",
+            "code_review_running", "critique_acceptance_running",
+            "decision_running", "complete", "completed",
             "failed", "cancelled",
         )
+
+
+class TestRunConditions:
+    """Test should_agent_run() — pure function, no services needed."""
+
+    def test_not_flag_returns_false_when_flag_set(self):
+        from app.pipeline.agents.base import should_agent_run, PipelineState
+        state = PipelineState(task_input="test", flags={"critique_approved"})
+        condition = {"type": "not_flag", "flag": "critique_approved"}
+        assert should_agent_run(condition, state) is False
+
+    def test_not_flag_returns_true_when_flag_absent(self):
+        from app.pipeline.agents.base import should_agent_run, PipelineState
+        state = PipelineState(task_input="test", flags=set())
+        condition = {"type": "not_flag", "flag": "critique_approved"}
+        assert should_agent_run(condition, state) is True
+
+    def test_on_flag_still_works(self):
+        from app.pipeline.agents.base import should_agent_run, PipelineState
+        state = PipelineState(task_input="test", flags={"guardrail_blocked"})
+        assert should_agent_run({"type": "on_flag", "flag": "guardrail_blocked"}, state) is True
+        assert should_agent_run({"type": "on_flag", "flag": "other"}, state) is False

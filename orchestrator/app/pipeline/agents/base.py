@@ -67,6 +67,8 @@ def should_agent_run(condition: dict | None, state: PipelineState) -> bool:
         return False
     if ctype == "on_flag":
         return condition.get("flag", "") in state.flags
+    if ctype == "not_flag":
+        return condition.get("flag", "") not in state.flags
     if ctype == "has_tag":
         return condition.get("tag", "") in state.task_tags
     if ctype == "on_pass":
