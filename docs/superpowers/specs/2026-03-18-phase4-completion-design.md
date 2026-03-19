@@ -34,7 +34,7 @@ Post-pipeline (parallel, best-effort, on_failure=skip):
 | 4 | Guardrail | Security scan: prompt injection, PII, credentials, spec drift | cheap (Tier 1), mid (Tier 2) | always |
 | 5 | Code Review | Code quality: pass / needs_refactor / reject | mid | always |
 | 6 | Critique-Acceptance | "Does this completely fulfill the original request?" | mid | always |
-| 7 | Decision | ADR + human escalation (only on hard blocks) | best | `guardrail_blocked AND (code_review_rejected OR critique_rejected)` |
+| 7 | Decision | ADR + human escalation (only on hard blocks) | best | `guardrail_blocked AND code_review_rejected` |
 
 ### Critique Agent — Two-Phase Design
 
@@ -225,7 +225,7 @@ None. Uses existing columns:
 
 ### Timeout Enforcement
 
-The reaper gains a new check: scan for tasks in `clarification_needed` status where `metadata->>'clarification_requested_at'` is older than `clarification_timeout_hours`. These tasks are auto-cancelled with error "Timed out waiting for clarification." The `/clarify` endpoint sets `clarification_requested_at` in metadata when pausing; the reaper checks it on each cycle.
+The reaper gains a new check: scan for tasks in `clarification_needed` status where `metadata->>'clarification_requested_at'` is older than `clarification_timeout_hours`. These tasks are auto-cancelled with error "Timed out waiting for clarification." The executor sets `clarification_requested_at` in task metadata when Critique-Direction triggers the pause; the reaper checks it on each cycle.
 
 ### Dashboard UI
 
@@ -340,7 +340,7 @@ TDD throughout. Tests written first, then implementation to make them pass.
 
 1. **E2E Pipeline Testing** — Tier 1 mechanics tests + Tier 2 behavior tests against existing pipeline. Find and fix latent bugs.
 2. **Subscription Provider Routing** — Wire up preference layer, test routing cascade.
-3. **Clarification Loop** — Context Agent detection, `/clarify` endpoint, dashboard UI, notifications.
+3. **Clarification Loop** — Critique-Direction detection, `/clarify` endpoint, dashboard UI, notifications.
 4. **Critique Agent** — Direction + Acceptance agents, flag system, revision loops.
 5. **Post-Pipeline Agents** — Documentation, Diagramming, Security Review, Memory Extraction.
 6. **Notification System** — SSE channel, browser notifications, badge counter.
