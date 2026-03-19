@@ -84,10 +84,10 @@ class GeminiADCProvider(ModelProvider):
         # Build Gemini message format from OpenAI-style messages
         system_content, history, last_user = _convert_messages(request.messages)
 
-        model = genai.GenerativeModel(
-            model_name=_strip_prefix(request.model),
-            system_instruction=system_content,
-        )
+        model_kwargs: dict = {"model_name": _strip_prefix(request.model)}
+        if system_content:
+            model_kwargs["system_instruction"] = system_content
+        model = genai.GenerativeModel(**model_kwargs)
 
         chat = model.start_chat(history=history)
 
@@ -118,10 +118,10 @@ class GeminiADCProvider(ModelProvider):
         genai = self._get_client()
 
         system_content, history, last_user = _convert_messages(request.messages)
-        model = genai.GenerativeModel(
-            model_name=_strip_prefix(request.model),
-            system_instruction=system_content,
-        )
+        model_kwargs: dict = {"model_name": _strip_prefix(request.model)}
+        if system_content:
+            model_kwargs["system_instruction"] = system_content
+        model = genai.GenerativeModel(**model_kwargs)
         chat = model.start_chat(history=history)
 
         # Gemini streaming is synchronous — wrap in thread and queue chunks
@@ -152,18 +152,22 @@ class GeminiADCProvider(ModelProvider):
         import asyncio
         genai = self._get_client()
 
+        # Gemini SDK expects "models/<name>" format
+        model_id = request.model
+        sdk_model = model_id if model_id.startswith("models/") else f"models/{model_id}"
+
         embeddings = []
         for text in request.texts:
             result = await asyncio.to_thread(
                 genai.embed_content,
-                model="models/text-embedding-004",
+                model=sdk_model,
                 content=text,
             )
             embeddings.append(result["embedding"])
 
         return EmbedResponse(
             embeddings=embeddings,
-            model="text-embedding-004",
+            model=model_id,
             input_tokens=0,
         )
 

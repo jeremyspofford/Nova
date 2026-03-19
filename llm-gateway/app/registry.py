@@ -268,12 +268,22 @@ async def _get_redis_config(key: str, default: str) -> str:
             try:
                 parsed = json.loads(val)
                 if isinstance(parsed, str) and parsed:
+                    # JSON-encoded string — unwrap it
                     _config_cache[key] = (parsed, now)
                     return parsed
+                if isinstance(parsed, bool):
+                    # JSON boolean (true/false) — convert to lowercase string
+                    str_val = str(parsed).lower()
+                    _config_cache[key] = (str_val, now)
+                    return str_val
+                # Non-string JSON (dict, list, int) — return the raw value string
+                # so callers can re-parse it themselves (e.g. tier_preferences dict)
             except (json.JSONDecodeError, TypeError):
-                if val and val != "null":
-                    _config_cache[key] = (val, now)
-                    return val
+                pass
+            # Return raw Redis string for non-string JSON or parse failures
+            if val and val != "null":
+                _config_cache[key] = (val, now)
+                return val
     except Exception as e:
         log.debug("Failed to read %s from Redis: %s", key, e)
 
