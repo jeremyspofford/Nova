@@ -22,6 +22,8 @@ Endpoints:
   DELETE /api/v1/pods/{pod_id}/agents/{agent_id} Remove agent from pod (admin)
 
   GET    /api/v1/pipeline/dead-letter            Inspect dead-letter queue (admin)
+
+  GET    /api/v1/pipeline/notifications/stream  SSE stream for pipeline notifications
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.auth import AdminDep, ApiKeyDep
@@ -1146,6 +1149,39 @@ async def pipeline_latency_stats(_admin: AdminDep) -> dict:
         "p95_ms": overall["p95_ms"],
         "by_stage": [{"stage": r["role"], "avg_ms": r["avg_ms"]} for r in stage_rows],
     }
+
+
+# ── SSE Notifications ──────────────────────────────────────────────────────────
+
+@router.get("/api/v1/pipeline/notifications/stream", tags=["pipeline-notifications"])
+async def notification_stream(request: Request):
+    """SSE stream for pipeline notifications. No auth required — regular users need this."""
+    from app.store import get_redis
+    import asyncio as _asyncio
+
+    async def event_generator():
+        redis = get_redis()
+        pubsub = redis.pubsub()
+        await pubsub.subscribe("nova:notifications")
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if message and message["type"] == "message":
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode()
+                    yield f"data: {data}\n\n"
+                else:
+                    # SSE heartbeat to keep connection alive
+                    yield ": heartbeat\n\n"
+                    await _asyncio.sleep(5)
+        finally:
+            await pubsub.unsubscribe("nova:notifications")
+            await pubsub.close()
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

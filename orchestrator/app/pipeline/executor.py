@@ -37,6 +37,28 @@ from .checkpoint import (
 
 logger = logging.getLogger(__name__)
 
+
+# ── Notification helper ────────────────────────────────────────────────────────
+
+async def _publish_notification(notification_type: str, task_id: str, title: str, body: str = "") -> None:
+    """Publish a notification to Redis pub/sub for SSE clients. Fire-and-forget — never blocks pipeline."""
+    try:
+        from ..store import get_redis
+        import json as _json
+        from datetime import datetime, timezone
+        redis = get_redis()
+        payload = _json.dumps({
+            "type": notification_type,
+            "task_id": str(task_id),
+            "title": title,
+            "body": body,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+        await redis.publish("nova:notifications", payload)
+    except Exception as e:
+        logger.warning(f"Notification publish failed (non-fatal): {e}")
+
+
 # ── Data classes for DB rows ───────────────────────────────────────────────────
 
 @dataclass
@@ -134,6 +156,7 @@ async def mark_task_failed(task_id: str, error: str) -> None:
         await emit_activity(pool, "task_failed", "pipeline", f"Task {task_id[:8]}... failed: {error[:120]}", severity="error", metadata={"task_id": task_id, "error": error[:500]})
     except Exception:
         pass
+    await _publish_notification("task_failed", task_id, "Task failed", error[:120])
 
 
 # ── Core pipeline logic ────────────────────────────────────────────────────────
@@ -980,6 +1003,7 @@ async def _complete_task(task_id: str, output: str, state: PipelineState) -> Non
         await emit_activity(pool, "task_completed", "pipeline", f"Task {task_id[:8]}... completed", metadata={"task_id": task_id, "flags": list(state.flags)})
     except Exception:
         pass
+    await _publish_notification("task_complete", task_id, "Task completed")
 
 
 async def _pause_for_human_review(
@@ -1021,6 +1045,7 @@ async def _pause_for_human_review(
         )
     await _audit(task_id, "task_escalated", "warning", {"message": escalation_message})
     logger.warning(f"Task {task_id} paused for human review: {escalation_message}")
+    await _publish_notification("pending_human_review", task_id, "Task needs review", escalation_message)
 
 
 async def _pause_for_clarification(task_id: str, questions: list[str]) -> None:
@@ -1047,6 +1072,7 @@ async def _pause_for_clarification(task_id: str, questions: list[str]) -> None:
             datetime.now(timezone.utc).isoformat(),
         )
     logger.info(f"Task {task_id}: paused for clarification ({len(questions)} questions)")
+    await _publish_notification("clarification_needed", task_id, "Task needs clarification")
 
 
 async def _create_session(task_id: str, agent: AgentRow, resolved_model: str | None = None) -> str:

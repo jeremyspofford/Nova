@@ -249,3 +249,20 @@ class TestClarificationLoop:
         )
         # Should return 400 for empty answers or 404 for missing task — either is valid
         assert resp.status_code in (400, 404)
+
+
+class TestNotifications:
+    async def test_notification_stream_endpoint_exists(self, orchestrator: httpx.AsyncClient, admin_headers: dict):
+        """SSE endpoint should be reachable (may timeout since it's a stream — that's OK)."""
+        try:
+            resp = await orchestrator.get(
+                "/api/v1/pipeline/notifications/stream",
+                headers=admin_headers,
+                timeout=2.0,
+            )
+            # If we get a response, check it's SSE
+            assert resp.status_code == 200
+            assert "text/event-stream" in resp.headers.get("content-type", "")
+        except httpx.ReadTimeout:
+            # SSE endpoint stays open — timeout is expected behavior
+            pass
