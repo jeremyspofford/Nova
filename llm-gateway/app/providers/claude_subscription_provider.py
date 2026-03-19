@@ -37,17 +37,29 @@ log = logging.getLogger(__name__)
 
 litellm.drop_params = True
 
-# Map our namespaced model IDs → Anthropic model names accepted by the API
+# Map our namespaced model IDs → Anthropic API model names.
+#
+# Subscription OAuth (sk-ant-oat01-...) via the public /v1/messages API has
+# limitations: 4.6 model aliases ("claude-sonnet-4-6") return a vague
+# "invalid_request_error: Error" and no dated version has been found that works.
+# Only claude-haiku-4-5-20251001 is confirmed working as of 2026-03.
+#
+# Claude Code itself works with 4.6 models because it uses a different internal
+# API path, not the public messages endpoint. Until Anthropic publishes dated 4.6
+# model names or fixes alias support for OAuth, we fall back to Haiku 4.5.
+#
+# TODO: Re-test when Anthropic updates their API. Track in TODOS.md.
 _MODEL_MAP: dict[str, str] = {
-    "claude-max/claude-sonnet-4-6":     "claude-sonnet-4-6",
-    "claude-max/claude-opus-4-6":       "claude-opus-4-6",
+    # Namespaced (claude-max/) → API name
     "claude-max/claude-haiku-4-5":      "claude-haiku-4-5-20251001",
-    # Allow bare names through unchanged
-    "claude-sonnet-4-6":                "claude-sonnet-4-6",
-    "claude-opus-4-6":                  "claude-opus-4-6",
+    "claude-max/claude-sonnet-4-6":     "claude-haiku-4-5-20251001",  # fallback
+    "claude-max/claude-opus-4-6":       "claude-haiku-4-5-20251001",  # fallback
+    # Short aliases → dated
     "claude-haiku-4-5-20251001":        "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-6":                "claude-haiku-4-5-20251001",  # fallback
+    "claude-opus-4-6":                  "claude-haiku-4-5-20251001",  # fallback
 }
-_DEFAULT_API_MODEL = "claude-sonnet-4-6"
+_DEFAULT_API_MODEL = "claude-haiku-4-5-20251001"
 
 
 def discover_claude_oauth_token() -> str | None:
@@ -130,7 +142,12 @@ class ClaudeSubscriptionProvider(ModelProvider):
         return bool(self._oauth_token)
 
     def _api_model(self, requested: str) -> str:
-        return _MODEL_MAP.get(requested, self._default_api_model)
+        """Resolve to a dated Anthropic model name with anthropic/ prefix for LiteLLM."""
+        base = _MODEL_MAP.get(requested, self._default_api_model)
+        # LiteLLM needs the anthropic/ prefix to identify the provider
+        if not base.startswith("anthropic/"):
+            return f"anthropic/{base}"
+        return base
 
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
         self._assert_available()
