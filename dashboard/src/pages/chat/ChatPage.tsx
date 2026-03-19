@@ -328,24 +328,20 @@ export function Chat() {
       )}
       <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
         {messages.length === 0 ? (
-          /* Empty state: greeting bubble + input */
-          <div className="flex-1 flex flex-col">
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-3xl mx-auto px-4 py-6">
-                {greeting && (
-                  <MessageBubble message={{
-                    id: 'greeting',
-                    role: 'assistant',
-                    content: greeting,
-                    timestamp: new Date(),
-                  }} />
-                )}
+          /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
+          <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
+            {greeting && (
+              <div className="max-w-3xl w-full mb-8">
+                <MessageBubble message={{
+                  id: 'greeting',
+                  role: 'assistant',
+                  content: greeting,
+                  timestamp: new Date(),
+                }} />
               </div>
-            </div>
-            <div className="shrink-0 w-full">
-              <div className="max-w-3xl mx-auto">
-                <ChatInput {...chatInputProps} />
-              </div>
+            )}
+            <div className="w-full max-w-3xl">
+              <ChatInput {...chatInputProps} />
             </div>
           </div>
         ) : (
@@ -383,7 +379,7 @@ export function Chat() {
               </p>
             )}
 
-            <div className="shrink-0 w-full">
+            <div className="shrink-0 w-full px-4 pb-4">
               <div className="max-w-3xl mx-auto">
                 <ChatInput {...chatInputProps} />
               </div>

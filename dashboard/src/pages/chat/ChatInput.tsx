@@ -131,7 +131,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     <div
       ref={dropZoneRef}
       className={clsx(
-        'relative bg-surface border-t border-border-subtle p-3 safe-area-pb transition-colors duration-fast',
+        'relative bg-surface rounded-2xl border border-border-subtle p-3 safe-area-pb shadow-sm transition-colors duration-fast',
         isDragging && 'bg-accent-dim border-accent',
       )}
     >
