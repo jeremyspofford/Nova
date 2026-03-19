@@ -551,7 +551,8 @@ async def get_provider(model: str) -> ModelProvider:
     await _local.refresh_config()
 
     # Subscription preference — try zero-cost subscription providers first
-    if await get_prefer_subscription():
+    # Only for non-local models: explicit local model requests (llama3.2, etc.) bypass this
+    if not _is_local_model(model) and await get_prefer_subscription():
         if _claude_subscription.is_available:
             return _claude_subscription
         if _chatgpt_subscription.is_available:
