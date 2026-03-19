@@ -23,6 +23,7 @@ export function ModelPicker({
   className,
 }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
+  const [flipUp, setFlipUp] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
@@ -44,6 +45,15 @@ export function ModelPicker({
       ? 'Auto'
       : models.find((m) => m.id === value)?.id || value || 'Select model...'
 
+  const toggleOpen = () => {
+    if (!open && ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      setFlipUp(spaceBelow < 260)
+    }
+    setOpen((v) => !v)
+  }
+
   const handleSelect = (id: string) => {
     onChange(id)
     setOpen(false)
@@ -53,7 +63,7 @@ export function ModelPicker({
     <div ref={ref} className={clsx('relative', className)}>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={toggleOpen}
         className={clsx(
           'flex items-center justify-between gap-2 w-full h-9 rounded-sm border border-border bg-surface-input px-3',
           'text-compact text-content-primary',
@@ -72,7 +82,10 @@ export function ModelPicker({
       </button>
 
       {open && (
-        <div className="absolute top-full mt-1 left-0 right-0 z-40 bg-surface-card border border-border rounded-lg shadow-lg py-1 max-h-60 overflow-y-auto animate-fade-in">
+        <div className={clsx(
+          'absolute left-0 right-0 z-40 bg-surface-card border border-border rounded-lg shadow-lg py-1 max-h-60 overflow-y-auto animate-fade-in',
+          flipUp ? 'bottom-full mb-1' : 'top-full mt-1',
+        )}>
           {showAuto && (
             <button
               type="button"

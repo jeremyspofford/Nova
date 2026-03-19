@@ -22,12 +22,11 @@ interface Props {
 }
 
 export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onModelChange, resolvedModel, onNewChat, hasMessages }: Props) {
-  const [input, setInput] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const { drawerOpen, setDrawerOpen, prefillInput, setPrefillInput } = useChatStore()
+  const { draftInput: input, setDraftInput: setInput, drawerOpen, setDrawerOpen, prefillInput, setPrefillInput } = useChatStore()
   const { pendingFiles, addFiles, removeFile, openFilePicker } = useFileAttach()
 
   // Consume prefilled input (e.g. from "Discuss" on Tasks page)
@@ -119,9 +118,12 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     }
   }, [addFiles])
 
-  // Focus textarea on mount and after streaming
+  // Focus textarea on mount and after streaming; resize if draft exists
   useEffect(() => {
-    if (!isStreaming) textareaRef.current?.focus()
+    if (!isStreaming) {
+      textareaRef.current?.focus()
+      resizeTextarea()
+    }
   }, [isStreaming])
 
   // Build model picker items — prepend the resolved/default option

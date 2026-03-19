@@ -46,6 +46,10 @@ interface ChatStore {
   loadConversation: (id: string) => Promise<void>
   newConversation: () => Promise<void>
 
+  // Draft input text (survives navigation)
+  draftInput: string
+  setDraftInput: React.Dispatch<React.SetStateAction<string>>
+
   // Pre-fill input from external pages (e.g. "Discuss" on Tasks page)
   prefillInput: string | null
   setPrefillInput: React.Dispatch<React.SetStateAction<string | null>>
@@ -121,6 +125,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   useEffect(() => { messagesRef.current = messages }, [messages])
   useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
 
+  const [draftInput, setDraftInput] = useState('')
   const [prefillInput, setPrefillInput] = useState<string | null>(null)
   const [pendingFiles, setPendingFiles] = useState<AttachedFile[]>([])
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -189,6 +194,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setSessionId(undefined)
     setError(null)
     setPendingFiles([])
+    setDraftInput('')
   }, [])
 
   return (
@@ -201,6 +207,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       resetConversation,
       loadConversation,
       newConversation,
+      draftInput, setDraftInput,
       prefillInput, setPrefillInput,
       pendingFiles, setPendingFiles,
       drawerOpen, setDrawerOpen,
