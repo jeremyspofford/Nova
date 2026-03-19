@@ -604,6 +604,7 @@ async def list_available_tools(_admin: AdminDep):
     from app.tools.code_tools import CODE_TOOLS
     from app.tools.git_tools import GIT_TOOLS
     from app.tools.platform_tools import PLATFORM_TOOLS
+    from app.tools.web_tools import WEB_TOOLS
     from app.pipeline.tools.registry import get_tools_by_server
 
     def _to_list(defs):
@@ -613,6 +614,7 @@ async def list_available_tools(_admin: AdminDep):
         {"category": "Code Tools", "source": "builtin", "tools": _to_list(CODE_TOOLS)},
         {"category": "Git Tools", "source": "builtin", "tools": _to_list(GIT_TOOLS)},
         {"category": "Platform Tools", "source": "builtin", "tools": _to_list(PLATFORM_TOOLS)},
+        {"category": "Web Tools", "source": "builtin", "tools": _to_list(WEB_TOOLS)},
     ]
     categories.extend(get_tools_by_server())
     return categories

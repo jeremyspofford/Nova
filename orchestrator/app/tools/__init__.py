@@ -21,15 +21,18 @@ from app.tools.code_tools import CODE_TOOLS
 from app.tools.code_tools import execute_tool as _exec_code
 from app.tools.git_tools import GIT_TOOLS
 from app.tools.git_tools import execute_tool as _exec_git
+from app.tools.web_tools import WEB_TOOLS
+from app.tools.web_tools import execute_tool as _exec_web
 
 # Static built-in tools — always available, no external dependencies.
 # Passed to CompleteRequest.tools for standard agent turns.
-ALL_TOOLS: list[ToolDefinition] = PLATFORM_TOOLS + CODE_TOOLS + GIT_TOOLS
+ALL_TOOLS: list[ToolDefinition] = PLATFORM_TOOLS + CODE_TOOLS + GIT_TOOLS + WEB_TOOLS
 
 # Fast name → module lookup built once at import time
 _PLATFORM_NAMES = {t.name for t in PLATFORM_TOOLS}
 _CODE_NAMES     = {t.name for t in CODE_TOOLS}
 _GIT_NAMES      = {t.name for t in GIT_TOOLS}
+_WEB_NAMES      = {t.name for t in WEB_TOOLS}
 
 
 def get_all_tools() -> list[ToolDefinition]:
@@ -64,6 +67,8 @@ async def execute_tool(name: str, arguments: dict) -> str:
         return await _exec_code(name, arguments)
     if name in _GIT_NAMES:
         return await _exec_git(name, arguments)
+    if name in _WEB_NAMES:
+        return await _exec_web(name, arguments)
 
     all_names = [t.name for t in ALL_TOOLS]
     return f"Unknown tool '{name}'. Available: {all_names}"
