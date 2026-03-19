@@ -296,6 +296,12 @@ async def get_wol_broadcast() -> str:
     return await _get_redis_config("llm.wol_broadcast", settings.wol_broadcast_ip)
 
 
+async def get_prefer_subscription() -> bool:
+    """Check if subscription providers should be tried first (runtime-configurable)."""
+    val = await _get_redis_config("llm.prefer_subscription", str(settings.prefer_subscription).lower())
+    return val.lower() in ("true", "1", "yes")
+
+
 # ── Ollama model names (models that route to Ollama by default) ──────────────
 
 _OLLAMA_MODELS = {
@@ -519,6 +525,23 @@ def get_provider_catalog() -> list[dict]:
     return result
 
 
+async def get_embed_provider(model: str) -> ModelProvider:
+    """
+    Resolve provider for embedding requests — bypasses chat routing strategy.
+
+    Embeddings are infrastructure (memory depends on them) and must work regardless
+    of local-only/cloud-only routing. Direct MODEL_REGISTRY lookup ensures the
+    registered provider is used (e.g. Ollama for nomic-embed-text, Gemini for
+    text-embedding-004). If that provider is down, the caller (memory-service)
+    handles model-level fallback.
+    """
+    provider = MODEL_REGISTRY.get(model)
+    if provider is not None:
+        return provider
+    log.warning("Unknown embedding model '%s', using default fallback provider", model)
+    return MODEL_REGISTRY[DEFAULT_MODEL_KEY]
+
+
 async def get_provider(model: str) -> ModelProvider:
     """
     Look up the provider for a model ID, applying the routing strategy for local models.
@@ -526,6 +549,13 @@ async def get_provider(model: str) -> ModelProvider:
     """
     # Refresh local backend config (cached 5s, no-op most calls)
     await _local.refresh_config()
+
+    # Subscription preference — try zero-cost subscription providers first
+    if await get_prefer_subscription():
+        if _claude_subscription.is_available:
+            return _claude_subscription
+        if _chatgpt_subscription.is_available:
+            return _chatgpt_subscription
 
     # Non-local models — direct lookup, no strategy applied
     if not _is_local_model(model):

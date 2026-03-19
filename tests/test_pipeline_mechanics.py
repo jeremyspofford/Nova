@@ -197,3 +197,15 @@ class TestRunConditions:
         state = PipelineState(task_input="test", flags={"guardrail_blocked"})
         assert should_agent_run({"type": "on_flag", "flag": "guardrail_blocked"}, state) is True
         assert should_agent_run({"type": "on_flag", "flag": "other"}, state) is False
+
+
+class TestSubscriptionRouting:
+    async def test_gateway_health_ready(self, llm_gateway: httpx.AsyncClient):
+        """Gateway health/ready endpoint confirms service is up."""
+        resp = await llm_gateway.get("/health/ready")
+        assert resp.status_code == 200
+
+    async def test_providers_endpoint(self, llm_gateway: httpx.AsyncClient):
+        """Provider status endpoint should list available providers."""
+        resp = await llm_gateway.get("/health/providers")
+        assert resp.status_code == 200
