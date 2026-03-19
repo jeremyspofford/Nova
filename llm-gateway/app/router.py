@@ -24,7 +24,7 @@ from nova_contracts import (
 )
 
 from app.rate_limiter import check_rate_limit
-from app.registry import get_provider
+from app.registry import get_embed_provider, get_provider
 from app.response_cache import get_cached, set_cached
 from app.tier_resolver import BudgetExhaustedError, resolve_model
 
@@ -166,7 +166,10 @@ async def embed(request: EmbedRequest):
     if cached:
         return EmbedResponse(**cached)
 
-    provider = await get_provider(request.model)
+    # Embeddings bypass chat routing strategy — direct provider lookup.
+    # The routing strategy (local-only/cloud-only/etc.) governs chat completions,
+    # not infrastructure like embeddings that the memory system depends on.
+    provider = await get_embed_provider(request.model)
     is_local = provider.is_local
 
     global _local_inflight
