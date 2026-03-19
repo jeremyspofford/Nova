@@ -32,6 +32,22 @@
 **Blocked by:** Friction log with file-based screenshot storage.
 **Added:** 2026-03-19
 
+## Cloud LLM Providers
+
+### Activate ChatGPT Subscription Provider
+**What:** Run `codex login` to authenticate, then set `CHATGPT_TOKEN_DIR=~/.codex` in `.env`. Nova's `ChatGPTSubscriptionProvider` is already fully built — streaming, tool calls, auto-discovery from `~/.codex/auth.json`. Just needs the auth token.
+**Why:** Gets GPT-4o and o3 on subscription (zero API cost) with full tool support. Currently the only working cloud provider with tool calls — Claude subscription OAuth is limited to Haiku 4.5.
+**How:** `codex login` → add `CHATGPT_TOKEN_DIR=~/.codex` to `.env` → restart llm-gateway. Models available: `chatgpt/gpt-4o`, `chatgpt/o3`, `chatgpt/o4-mini`.
+**Blocked by:** Nothing — codex CLI needs to be installed (`npm i -g @openai/codex`), then one login.
+**Added:** 2026-03-19
+
+### Re-test Claude 4.6 Subscription OAuth
+**What:** Periodically test whether Anthropic has enabled Sonnet/Opus 4.6 for subscription OAuth on the public messages API.
+**Why:** Currently `claude-sonnet-4-6` and `claude-opus-4-6` return `invalid_request_error: "Error"` via OAuth token on `api.anthropic.com/v1/messages`. Only `claude-haiku-4-5-20251001` works. Claude Code uses a different internal API path. When Anthropic fixes this, update `_MODEL_MAP` in `claude_subscription_provider.py`.
+**How:** `curl -s https://api.anthropic.com/v1/messages -H "x-api-key: $TOKEN" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" -d '{"model":"claude-sonnet-4-6","max_tokens":10,"messages":[{"role":"user","content":"hi"}]}'` — if it returns a message instead of "Error", it's fixed.
+**Blocked by:** Anthropic API change (external).
+**Added:** 2026-03-19
+
 ## Design System
 
 ### Create DESIGN.md via /design-consultation
