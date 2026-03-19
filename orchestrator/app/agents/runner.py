@@ -149,6 +149,7 @@ async def run_agent_turn_streaming(
     skip_tool_preresolution: bool = False,
     explicit_model: bool = False,
     guest_mode: bool = False,
+    allowed_tools: list[str] | None = None,
 ):
     """Streaming variant — yields text deltas as they arrive from the LLM.
 
@@ -234,6 +235,13 @@ async def run_agent_turn_streaming(
 
     prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages, model=model)
 
+    # Resolve effective tool set: pod allowlist filters available tools
+    if allowed_tools is not None:
+        _allowed_set = set(allowed_tools)
+        effective_tools = [t for t in get_all_tools() if t.name in _allowed_set]
+    else:
+        effective_tools = get_all_tools()
+
     if guest_mode:
         # Guest mode: no tools at all
         streaming_messages = prompt_messages
@@ -247,6 +255,7 @@ async def run_agent_turn_streaming(
             messages=prompt_messages,
             model=model,
             metadata={"agent_id": agent_id, "session_id": session_id},
+            tools=effective_tools,
         )
 
     # Pass tools when history contains tool interactions — Anthropic requires
@@ -255,7 +264,7 @@ async def run_agent_turn_streaming(
     complete_req = CompleteRequest(
         model=model,
         messages=streaming_messages,
-        tools=get_all_tools() if used_tools else [],
+        tools=effective_tools if used_tools else [],
         stream=True,
         metadata={"agent_id": agent_id, "session_id": session_id},
     )
@@ -508,6 +517,7 @@ async def _resolve_tool_rounds(
     model: str,
     metadata: dict,
     max_rounds: int = 5,
+    tools: list | None = None,
 ) -> tuple[list[Message], bool]:
     """
     Execute any tool-call rounds the LLM requests, returning the enriched
@@ -520,7 +530,7 @@ async def _resolve_tool_rounds(
         messages=messages,
         model=model,
         metadata=metadata,
-        tools=None,
+        tools=tools,
         max_rounds=max_rounds,
         return_messages=True,
     )

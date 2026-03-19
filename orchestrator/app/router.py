@@ -277,6 +277,45 @@ class ChatRequest(BaseModel):
     deep_research: bool = False
 
 
+# ── Chat pod config cache ─────────────────────────────────────────────────────
+# Pod config is loaded from DB on first chat request, then cached with a short
+# TTL to avoid per-message queries. Config changes take effect within the TTL.
+
+_chat_pod_cache: dict | None = None
+_chat_pod_cache_at: float = 0.0
+_CHAT_POD_TTL = 8.0  # seconds
+
+
+async def _get_chat_pod_config() -> dict | None:
+    """Load the chat pod and its first agent config. Returns None if no chat pod."""
+    global _chat_pod_cache, _chat_pod_cache_at
+    now = _time.monotonic()
+    if _chat_pod_cache is not None and (now - _chat_pod_cache_at) < _CHAT_POD_TTL:
+        return _chat_pod_cache
+
+    from app.db import get_pool
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT p.id AS pod_id, p.name AS pod_name,
+                   pa.model, pa.system_prompt, pa.allowed_tools,
+                   pa.temperature, pa.max_tokens
+            FROM pods p
+            JOIN pod_agents pa ON pa.pod_id = p.id
+            WHERE p.is_chat_default = true AND p.enabled = true
+            ORDER BY pa.position ASC
+            LIMIT 1
+            """
+        )
+    if row:
+        _chat_pod_cache = dict(row)
+    else:
+        _chat_pod_cache = None
+    _chat_pod_cache_at = now
+    return _chat_pod_cache
+
+
 @router.post("/api/v1/chat/stream")
 async def chat_stream(req: ChatRequest, user: UserDep):
     """
@@ -285,6 +324,10 @@ async def chat_stream(req: ChatRequest, user: UserDep):
     This endpoint is for the dashboard chat UI — it uses the admin secret
     so no API key is needed. External API consumers should use
     POST /v1/chat/completions with an API key instead.
+
+    Chat is backed by the "chat pod" — a pod marked is_chat_default=true in
+    the pods table. The pod's agent config controls model, system_prompt, and
+    allowed tools. Falls back to legacy behavior if no chat pod is configured.
 
     - model: override the agent's configured model for this turn only
     - session_id: pass back the X-Session-Id header value to continue a conversation
@@ -300,6 +343,12 @@ async def chat_stream(req: ChatRequest, user: UserDep):
     agent = agents[0]
     is_guest = user.role == "guest"
 
+    # Load chat pod config (cached, ~8s TTL)
+    chat_pod = await _get_chat_pod_config()
+    allowed_tools: list[str] | None = None
+    if chat_pod and chat_pod.get("allowed_tools"):
+        allowed_tools = list(chat_pod["allowed_tools"])
+
     # Guest isolation: validate model against allowlist
     if is_guest:
         from app.guest import validate_guest_model
@@ -310,10 +359,11 @@ async def chat_stream(req: ChatRequest, user: UserDep):
         explicit_model = True  # prevent intelligent routing from overriding
     else:
         from app.model_resolver import resolve_default_model, is_auto_resolved
-        model = req.model or await resolve_default_model()
-        # Treat as explicit if user sent a model OR if the admin configured a specific default
-        # (only "auto" should trigger intelligent routing override)
-        explicit_model = bool(req.model) or not await is_auto_resolved()
+        # Pod model takes precedence over global default, request model overrides both
+        pod_model = chat_pod["model"] if chat_pod and chat_pod.get("model") else None
+        model = req.model or pod_model or await resolve_default_model()
+        # Treat as explicit if user sent a model, pod has a model, or admin configured a specific default
+        explicit_model = bool(req.model) or bool(pod_model) or not await is_auto_resolved()
     task_id = uuid4()
     # Use conversation_id as session_id when available (for memory-service compatibility)
     session_id = req.conversation_id or req.session_id or str(uuid4())
@@ -339,8 +389,10 @@ async def chat_stream(req: ChatRequest, user: UserDep):
         from app.guest import GUEST_SYSTEM_PROMPT
         system_prompt = GUEST_SYSTEM_PROMPT
     else:
+        # Pod system prompt takes precedence over agent config default
+        base_prompt = (chat_pod["system_prompt"] if chat_pod and chat_pod.get("system_prompt") else None) or agent.config.system_prompt
         # Build style/research modifiers for system prompt
-        system_prompt = agent.config.system_prompt
+        system_prompt = base_prompt
         modifiers: list[str] = [BASE_FORMAT_PROMPT]
         if req.output_style and req.output_style in STYLE_PROMPTS:
             modifiers.append(STYLE_PROMPTS[req.output_style])
@@ -374,6 +426,7 @@ async def chat_stream(req: ChatRequest, user: UserDep):
                 skip_tool_preresolution=True,
                 explicit_model=explicit_model,
                 guest_mode=is_guest,
+                allowed_tools=allowed_tools,
             ),
             error_label="Chat stream",
             sandbox_token=sandbox_token,

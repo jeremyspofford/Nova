@@ -104,6 +104,33 @@ PLATFORM_TOOLS: list[ToolDefinition] = [
             "required": ["agent_id", "message"],
         },
     ),
+    ToolDefinition(
+        name="create_task",
+        description=(
+            "Submit a task to a pipeline pod for autonomous execution. Use this when the user's "
+            "request requires multi-step code changes, thorough analysis, or work that benefits "
+            "from the full pipeline (context gathering, guardrails, code review). Returns a task "
+            "ID — the user will be notified when it completes."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "Clear description of what to accomplish",
+                },
+                "pod_name": {
+                    "type": "string",
+                    "description": "Target pod name (default: system default pod, usually 'Quartet')",
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Additional context to include (code snippets, file paths, constraints)",
+                },
+            },
+            "required": ["description"],
+        },
+    ),
 ]
 
 
@@ -133,6 +160,12 @@ async def execute_tool(name: str, arguments: dict) -> str:
             return await _execute_send_message_to_agent(
                 agent_id=arguments["agent_id"],
                 message=arguments["message"],
+            )
+        elif name == "create_task":
+            return await _execute_create_task(
+                description=arguments["description"],
+                pod_name=arguments.get("pod_name"),
+                context=arguments.get("context"),
             )
         else:
             return f"Unknown tool '{name}'. Available: {[t.name for t in PLATFORM_TOOLS]}"
@@ -243,3 +276,68 @@ async def _execute_send_message_to_agent(agent_id: str, message: str) -> str:
         return result.get("response", "(no response)")
     except Exception as e:
         return f"Failed to reach agent {agent_id}: {e}"
+
+
+async def _execute_create_task(
+    description: str,
+    pod_name: str | None = None,
+    context: str | None = None,
+) -> str:
+    """Submit a task to a pipeline pod for autonomous execution."""
+    import json as _json
+    from uuid import uuid4
+    from app.db import get_pool
+    from app.queue import enqueue_task
+
+    pool = get_pool()
+
+    # Resolve the target pod
+    if pod_name:
+        row = await pool.fetchrow(
+            "SELECT id, name FROM pods WHERE name = $1 AND enabled = true",
+            pod_name,
+        )
+        if not row:
+            available = await pool.fetch(
+                "SELECT name FROM pods WHERE enabled = true ORDER BY name"
+            )
+            names = [r["name"] for r in available]
+            return (
+                f"Pod '{pod_name}' not found or disabled. "
+                f"Available pods: {', '.join(names) or 'none'}"
+            )
+    else:
+        row = await pool.fetchrow(
+            "SELECT id, name FROM pods WHERE is_system_default = true LIMIT 1"
+        )
+        if not row:
+            return "No system default pod configured. Specify a pod_name explicitly."
+        pod_name = row["name"]
+
+    pod_id = str(row["id"])
+
+    # Build task input
+    user_input = description
+    if context:
+        user_input = f"{description}\n\nAdditional context:\n{context}"
+
+    task_id = str(uuid4())
+    metadata = _json.dumps({"source": "chat"})
+
+    await pool.execute(
+        """
+        INSERT INTO tasks (id, user_input, pod_id, status, metadata, created_at)
+        VALUES ($1::uuid, $2, $3::uuid, 'submitted', $4::jsonb, now())
+        """,
+        task_id,
+        user_input,
+        pod_id,
+        metadata,
+    )
+
+    await enqueue_task(task_id)
+
+    return (
+        f"Task submitted to pod '{pod_name}' (ID: {task_id}). "
+        f"The pipeline will execute this autonomously — you'll be notified when it completes."
+    )
