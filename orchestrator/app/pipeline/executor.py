@@ -197,6 +197,8 @@ async def _run_pipeline(task_id: str) -> None:
 
     # ── Execute pipeline ───────────────────────────────────────────────────
     code_review_iterations = 0
+    direction_iterations = 0
+    acceptance_iterations = 0
     task_agent_idx: int | None = None
     i = 0
 
@@ -270,8 +272,8 @@ async def _run_pipeline(task_id: str) -> None:
                                 for iss in code_review_result.get("issues", [])
                             )
                             state.completed["_refactor_feedback"] = issues_text
-                            # Clear checkpoints so Task, Guardrail, and Code Review re-run
-                            for clear_role in ("task", "guardrail", "code_review"):
+                            # Clear checkpoints so Task, critique, Guardrail, and Code Review re-run
+                            for clear_role in ("task", "critique_direction", "guardrail", "code_review", "critique_acceptance"):
                                 checkpoint.pop(clear_role, None)
                                 state.completed.pop(clear_role, None)
                             i = task_agent_idx
@@ -346,10 +348,10 @@ async def _run_pipeline(task_id: str) -> None:
                         for iss in result.get("issues", [])
                     )
                     state.completed["_refactor_feedback"] = issues_text
-                    # Clear task checkpoint so Task Agent re-runs
-                    if "task" in checkpoint:
-                        del checkpoint["task"]
-                        state.completed.pop("task", None)
+                    # Clear checkpoints so Task, critique, guardrail, and Code Review re-run
+                    for clear_role in ("task", "critique_direction", "guardrail", "code_review", "critique_acceptance"):
+                        checkpoint.pop(clear_role, None)
+                        state.completed.pop(clear_role, None)
                     i = task_agent_idx
                     continue
                 else:
@@ -359,6 +361,50 @@ async def _run_pipeline(task_id: str) -> None:
                     )
             elif verdict == "reject":
                 state.flags.add("code_review_rejected")
+
+        # Set has_code_artifacts flag after Task Agent produces code
+        if agent.role == "task":
+            if result.get("artifact_type") in ("code", "config") or result.get("files_changed"):
+                state.flags.add("has_code_artifacts")
+
+        # ── Critique-Direction handling ──────────────────────────────
+        if agent.role == "critique_direction":
+            verdict = result.get("verdict", "approved")
+            if verdict == "approved":
+                state.flags.add("critique_approved")
+                logger.info(f"Task {task_id}: Critique-Direction approved")
+            elif verdict == "needs_revision":
+                direction_iterations += 1
+                if direction_iterations < settings.clarification_max_rounds and task_agent_idx is not None:
+                    state.completed["_critique_feedback"] = result.get("feedback", "")
+                    for clear_role in ("task", "critique_direction"):
+                        checkpoint.pop(clear_role, None)
+                        state.completed.pop(clear_role, None)
+                    i = task_agent_idx
+                    continue
+                else:
+                    await _pause_for_human_review(task_id, "Critique-Direction exhausted revision rounds", state)
+                    return
+            elif verdict == "needs_clarification":
+                questions = result.get("questions", ["Could you clarify your request?"])
+                await _pause_for_clarification(task_id, questions)
+                return
+
+        # ── Critique-Acceptance handling ─────────────────────────────
+        if agent.role == "critique_acceptance":
+            verdict = result.get("verdict", "pass")
+            if verdict == "fail":
+                acceptance_iterations += 1
+                if acceptance_iterations <= 1 and task_agent_idx is not None:
+                    state.completed["_acceptance_feedback"] = result.get("feedback", "")
+                    for clear_role in ("task", "guardrail", "code_review", "critique_acceptance"):
+                        checkpoint.pop(clear_role, None)
+                        state.completed.pop(clear_role, None)
+                    i = task_agent_idx
+                    continue
+                else:
+                    await _pause_for_human_review(task_id, "Critique-Acceptance exhausted revision rounds", state)
+                    return
 
         # Save checkpoint after successful stage
         await save_checkpoint(task_id, agent.role, result)
@@ -502,6 +548,7 @@ async def _run_agent(
     """
     from .agents.context     import ContextAgent
     from .agents.task        import TaskAgent
+    from .agents.critique    import CritiqueDirectionAgent, CritiqueAcceptanceAgent
     from .agents.guardrail   import GuardrailAgent
     from .agents.code_review import CodeReviewAgent
     from .agents.decision    import DecisionAgent
@@ -538,11 +585,13 @@ async def _run_agent(
                  or await resolve_default_model())
 
     AGENT_CLASSES = {
-        "context":     ContextAgent,
-        "task":        TaskAgent,
-        "guardrail":   GuardrailAgent,
-        "code_review": CodeReviewAgent,
-        "decision":    DecisionAgent,
+        "context":             ContextAgent,
+        "task":                TaskAgent,
+        "critique_direction":  CritiqueDirectionAgent,
+        "guardrail":           GuardrailAgent,
+        "code_review":         CodeReviewAgent,
+        "critique_acceptance": CritiqueAcceptanceAgent,
+        "decision":            DecisionAgent,
     }
 
     agent_cls = AGENT_CLASSES.get(agent.role)
@@ -553,11 +602,13 @@ async def _run_agent(
     # Map pipeline stage → routing tier + task_type for adaptive model routing
     # If a tier: prefix was found in model resolution, it overrides the default.
     _STAGE_TIER_MAP: dict[str, tuple[str, str]] = {
-        "context": ("cheap", "context_retrieval"),
-        "task": ("best", "task_execution"),
-        "guardrail": ("mid", "guardrail"),
-        "code_review": ("mid", "code_review"),
-        "decision": ("cheap", "decision"),
+        "context":             ("cheap", "context_retrieval"),
+        "task":                ("best", "task_execution"),
+        "critique_direction":  ("mid", "critique"),
+        "guardrail":           ("mid", "guardrail"),
+        "code_review":         ("mid", "code_review"),
+        "critique_acceptance": ("mid", "critique"),
+        "decision":            ("cheap", "decision"),
     }
     _tier, _task_type = _STAGE_TIER_MAP.get(agent.role, ("mid", "task_execution"))
     if _tier_override:
@@ -967,6 +1018,32 @@ async def _pause_for_human_review(
         )
     await _audit(task_id, "task_escalated", "warning", {"message": escalation_message})
     logger.warning(f"Task {task_id} paused for human review: {escalation_message}")
+
+
+async def _pause_for_clarification(task_id: str, questions: list[str]) -> None:
+    """Pause pipeline for user clarification."""
+    import json as _json
+    from datetime import datetime, timezone
+    from uuid import UUID as _UUID
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'clarification_needed',
+                metadata = COALESCE(metadata, '{}'::jsonb)
+                    || jsonb_build_object(
+                        'clarification_questions', $2::jsonb,
+                        'clarification_requested_at', $3::text
+                    )
+            WHERE id = $1
+            """,
+            _UUID(task_id) if not isinstance(task_id, _UUID) else task_id,
+            _json.dumps(questions),
+            datetime.now(timezone.utc).isoformat(),
+        )
+    logger.info(f"Task {task_id}: paused for clarification ({len(questions)} questions)")
 
 
 async def _create_session(task_id: str, agent: AgentRow, resolved_model: str | None = None) -> str:
