@@ -448,12 +448,6 @@ async def _run_pipeline(task_id: str) -> None:
     if commands_run:
         final_output += f"\n\n**Commands run:**\n" + "\n".join(f"- {c}" for c in commands_run)
 
-    # Best-effort memory extraction — fire-and-forget, never blocks completion
-    asyncio.create_task(
-        _extract_task_memory(task_id, task.user_input, final_output, state),
-        name=f"memory:{task_id}",
-    )
-
     await _complete_task(task_id, final_output, state)
 
 
@@ -546,12 +540,13 @@ async def _run_agent(
     Returns (None, session_id) if the agent failed and on_failure=abort.
     On on_failure=skip, returns ({}, session_id) so the pipeline continues.
     """
-    from .agents.context     import ContextAgent
-    from .agents.task        import TaskAgent
-    from .agents.critique    import CritiqueDirectionAgent, CritiqueAcceptanceAgent
-    from .agents.guardrail   import GuardrailAgent
-    from .agents.code_review import CodeReviewAgent
-    from .agents.decision    import DecisionAgent
+    from .agents.context       import ContextAgent
+    from .agents.task          import TaskAgent
+    from .agents.critique      import CritiqueDirectionAgent, CritiqueAcceptanceAgent
+    from .agents.guardrail     import GuardrailAgent
+    from .agents.code_review   import CodeReviewAgent
+    from .agents.decision      import DecisionAgent
+    from .agents.post_pipeline import DocumentationAgent, DiagrammingAgent, SecurityReviewAgent, MemoryExtractionAgent
     from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox
 
     # Resolve model: per-task override → agent → complexity → stage default → pod → auto
@@ -592,6 +587,10 @@ async def _run_agent(
         "code_review":         CodeReviewAgent,
         "critique_acceptance": CritiqueAcceptanceAgent,
         "decision":            DecisionAgent,
+        "documentation":       DocumentationAgent,
+        "diagramming":         DiagrammingAgent,
+        "security_review":     SecurityReviewAgent,
+        "memory_extraction":   MemoryExtractionAgent,
     }
 
     agent_cls = AGENT_CLASSES.get(agent.role)
@@ -609,6 +608,10 @@ async def _run_agent(
         "code_review":         ("mid", "code_review"),
         "critique_acceptance": ("mid", "critique"),
         "decision":            ("cheap", "decision"),
+        "documentation":       ("cheap", "post_pipeline"),
+        "diagramming":         ("cheap", "post_pipeline"),
+        "security_review":     ("cheap", "post_pipeline"),
+        "memory_extraction":   ("cheap", "post_pipeline"),
     }
     _tier, _task_type = _STAGE_TIER_MAP.get(agent.role, ("mid", "task_execution"))
     if _tier_override:
@@ -1234,78 +1237,6 @@ async def _heartbeat_loop(task_id: str) -> None:
         except Exception:
             logger.exception(f"Heartbeat error for task {task_id}")
             await asyncio.sleep(interval)
-
-
-async def _extract_task_memory(
-    task_id: str,
-    user_input: str,
-    final_output: str,
-    state: PipelineState,
-) -> None:
-    """
-    Post-pipeline: emit a structured episode to the engram ingestion queue
-    so Nova can learn from prior task runs.
-
-    Constructs a rich text summary of the pipeline run (task input, output,
-    flags, guardrail blocks, code review findings) and pushes it to the
-    engram queue for decomposition into the memory graph.
-
-    Failure is logged as a warning; the pipeline result is never affected.
-    """
-    import json as _json
-    from datetime import datetime, timezone
-
-    import redis.asyncio as aioredis
-
-    from ..config import settings
-
-    # Build rich text for engram decomposition
-    flags = sorted(state.flags)
-    lines = [
-        f"Pipeline task completed.",
-        f"Task: {user_input[:300]}",
-        f"Output: {final_output[:400]}",
-    ]
-    if flags:
-        lines.append(f"Flags: {', '.join(flags)}")
-
-    guardrail = state.completed.get("guardrail", {})
-    if guardrail.get("blocked"):
-        findings = guardrail.get("findings", [])
-        if findings:
-            top = findings[0]
-            lines.append(
-                f"Guardrail blocked: {top.get('type', 'unknown')} — {top.get('description', '')}"
-            )
-
-    review = state.completed.get("code_review", {})
-    issues = review.get("issues", [])
-    if issues:
-        issue_lines = [
-            f"[{iss.get('severity', 'info').upper()}] {iss.get('description', '')}"
-            + (f" in {iss['file']}:{iss.get('line', '')}" if iss.get("file") else "")
-            for iss in issues[:5]
-        ]
-        lines.append("Code review findings:\n" + "\n".join(issue_lines))
-
-    raw_text = "\n".join(lines)
-
-    try:
-        base_url = settings.redis_url.rsplit("/", 1)[0]
-        redis = aioredis.from_url(f"{base_url}/0", decode_responses=True)
-        payload = _json.dumps({
-            "raw_text": raw_text,
-            "source_type": "pipeline",
-            "source_id": task_id,
-            "session_id": task_id,
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
-            "metadata": {"task_id": task_id, "flags": flags},
-        })
-        await redis.lpush("engram:ingestion:queue", payload)
-        await redis.aclose()
-        logger.debug("Emitted pipeline memory to engram queue for task %s", task_id)
-    except Exception as exc:
-        logger.warning("Engram queue push failed for task %s: %s", task_id, exc)
 
 
 async def _maybe_compact_state(state: PipelineState, task_id: str) -> None:

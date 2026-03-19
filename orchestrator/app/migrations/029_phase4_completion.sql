@@ -17,3 +17,16 @@ CROSS JOIN (VALUES
 ) AS a(name, role, description, position, temperature, max_tokens, timeout_seconds, max_retries, on_failure, run_condition)
 WHERE p.name = 'Quartet'
 ON CONFLICT (pod_id, position) DO NOTHING;
+
+-- Insert post-pipeline agents (positions 8-11, parallel group)
+INSERT INTO pod_agents (pod_id, name, role, description, position, temperature, max_tokens, timeout_seconds, max_retries, on_failure, run_condition, parallel_group, artifact_type)
+SELECT p.id, a.name, a.role, a.description, a.position, a.temperature, a.max_tokens, a.timeout_seconds, a.max_retries, a.on_failure, a.run_condition::jsonb, a.parallel_group, a.artifact_type
+FROM pods p
+CROSS JOIN (VALUES
+    ('Documentation Agent',     'documentation',     'Summarizes what was done, why, and what changed.',              8, 0.3, 4096, 60, 1, 'skip', '{"type":"always"}',                             'post_pipeline', 'documentation'),
+    ('Diagramming Agent',       'diagramming',       'Generates Mermaid diagrams of changes.',                        9, 0.3, 4096, 60, 1, 'skip', '{"type":"on_flag","flag":"has_code_artifacts"}', 'post_pipeline', 'diagram'),
+    ('Security Review Agent',   'security_review',   'Scans code artifacts for vulnerabilities.',                    10, 0.2, 4096, 60, 1, 'skip', '{"type":"on_flag","flag":"has_code_artifacts"}', 'post_pipeline', 'security_review'),
+    ('Memory Extraction Agent', 'memory_extraction', 'Distills pipeline context into structured engrams.',           11, 0.3, 4096, 60, 1, 'skip', '{"type":"always"}',                             'post_pipeline', NULL)
+) AS a(name, role, description, position, temperature, max_tokens, timeout_seconds, max_retries, on_failure, run_condition, parallel_group, artifact_type)
+WHERE p.name = 'Quartet'
+ON CONFLICT (pod_id, position) DO NOTHING;
