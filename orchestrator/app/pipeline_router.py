@@ -1048,6 +1048,16 @@ async def pipeline_stats(_admin: AdminDep) -> dict:
     }
 
 
+@router.post("/api/v1/pipeline/reap-now", tags=["pipeline-ops"])
+async def trigger_reap_now(_admin: AdminDep) -> dict:
+    """Admin-only: trigger one reaper cycle immediately (for testing)."""
+    from .reaper import _reap_stale_running_tasks, _reap_stuck_queued_tasks, _reap_timed_out_sessions
+    await _reap_stale_running_tasks()
+    await _reap_stuck_queued_tasks()
+    await _reap_timed_out_sessions()
+    return {"status": "reaped"}
+
+
 @router.get("/api/v1/pipeline/stats/latency")
 async def pipeline_latency_stats(_admin: AdminDep) -> dict:
     """Per-stage latency breakdown from the last 7 days of agent sessions."""

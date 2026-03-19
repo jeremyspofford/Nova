@@ -1,6 +1,7 @@
 """Integration test configuration — real services, no mocks."""
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -37,6 +38,7 @@ SERVICE_URLS = {
 # ---------------------------------------------------------------------------
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requires_llm: skip unless an LLM provider is available")
+    config.addinivalue_line("markers", "pipeline: full pipeline tests requiring LLM provider")
 
 
 # ---------------------------------------------------------------------------
@@ -117,3 +119,86 @@ async def llm_available(llm_gateway: httpx.AsyncClient) -> bool:
     except Exception:
         pass
     return False
+
+
+@pytest_asyncio.fixture
+async def create_test_pod(orchestrator: httpx.AsyncClient, admin_headers: dict):
+    """Factory fixture — creates a pod with configurable agents, auto-deletes on teardown."""
+    created_pod_ids = []
+
+    async def _create(name: str, agents: list[dict], **pod_kwargs) -> dict:
+        pod_name = f"nova-test-{name}"
+        resp = await orchestrator.post(
+            "/api/v1/pods",
+            json={"name": pod_name, "description": f"Test pod: {name}", "enabled": True, **pod_kwargs},
+            headers=admin_headers,
+        )
+        assert resp.status_code in (200, 201), f"Failed to create pod: {resp.text}"
+        pod = resp.json()
+        created_pod_ids.append(pod["id"])
+
+        for agent_cfg in agents:
+            resp = await orchestrator.post(
+                f"/api/v1/pods/{pod['id']}/agents",
+                json=agent_cfg,
+                headers=admin_headers,
+            )
+            assert resp.status_code in (200, 201), f"Failed to create agent: {resp.text}"
+
+        return pod
+
+    yield _create
+
+    for pod_id in created_pod_ids:
+        await orchestrator.delete(f"/api/v1/pods/{pod_id}", headers=admin_headers)
+
+
+@pytest_asyncio.fixture
+async def force_cleanup_task(orchestrator: httpx.AsyncClient, admin_headers: dict):
+    """Tracks task IDs and force-deletes them on teardown (even non-terminal tasks)."""
+    task_ids = []
+
+    def _track(task_id: str):
+        task_ids.append(task_id)
+
+    yield _track
+
+    for task_id in task_ids:
+        await orchestrator.post(
+            f"/api/v1/pipeline/tasks/{task_id}/cancel",
+            headers=admin_headers,
+        )
+        await orchestrator.delete(
+            f"/api/v1/pipeline/tasks/{task_id}",
+            headers=admin_headers,
+        )
+
+
+@pytest_asyncio.fixture
+async def pipeline_task(orchestrator: httpx.AsyncClient, admin_headers: dict, force_cleanup_task):
+    """Submit a pipeline task and poll until terminal state."""
+    async def _submit(user_input: str, pod_name: str | None = None, timeout: int = 120, poll_interval: int = 3) -> dict:
+        body = {"user_input": user_input}
+        if pod_name:
+            body["pod_name"] = pod_name
+        resp = await orchestrator.post(
+            "/api/v1/pipeline/tasks",
+            json=body,
+            headers=admin_headers,
+        )
+        assert resp.status_code == 202, resp.text
+        task_id = resp.json().get("task_id") or resp.json().get("id")
+        force_cleanup_task(task_id)
+
+        data = {}
+        for _ in range(timeout // poll_interval):
+            await asyncio.sleep(poll_interval)
+            resp = await orchestrator.get(f"/api/v1/pipeline/tasks/{task_id}", headers=admin_headers)
+            assert resp.status_code == 200
+            data = resp.json()
+            if data["status"] in ("complete", "completed", "failed", "cancelled", "clarification_needed", "pending_human_review"):
+                return data
+
+        pytest.fail(f"Task {task_id} did not reach terminal state within {timeout}s (last: {data.get('status')})")
+
+    yield _submit
