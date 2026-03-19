@@ -2,7 +2,7 @@
 
 > Living document. Keep up to date as work progresses.
 >
-> **Last updated:** 2026-03-17
+> **Last updated:** 2026-03-19
 >
 > **Vision:** A self-directed autonomous AI platform. You define a goal. Nova breaks it into
 > subtasks, executes them through a coordinated pipeline of specialized agents with built-in
@@ -17,8 +17,8 @@
 
 | Level | Description | Target Phase |
 |---|---|---|
-| **1 — Pipeline autonomy** | Quartet runs all 4 agents without human input. Escalates only on critical flags. | ✅ Designed (Phase 4) |
-| **2 — Async execution** | Tasks run in the background. Submit and come back. Push notification on complete. | 🔜 Phase 4 |
+| **1 — Pipeline autonomy** | Quartet runs all 7 agents without human input. Escalates only on critical flags. | ✅ Delivered (Phase 4) |
+| **2 — Async execution** | Tasks run in the background. Submit and come back. Push notification on complete. | ✅ Delivered (Phase 4) |
 | **3 — Self-aware** | Nova understands its own architecture, config, health; can inspect and modify its own platform. | 🔜 Phase 7a |
 | **4 — Triggered execution** | Tasks start from external events — git push, cron, webhook, Slack. | 🔜 Phase 9 |
 | **5 — Reactive** | Nova watches continuous streams (cameras, sensors, services), applies AI judgment, acts autonomously. | 🔜 Phase 9a |
@@ -126,7 +126,7 @@ Built with Vite + React + Tailwind + TanStack Query + recharts.
 
 ---
 
-## 🔜 Phase 4 — Quartet Pipeline + Async Queue + ClaudeCode Provider
+## ✅ Phase 4 — Quartet Pipeline + Async Queue + Subscription Routing
 
 > The execution foundation everything above sits on.
 > Self-directed operation will trigger dozens of pipeline runs per goal —
