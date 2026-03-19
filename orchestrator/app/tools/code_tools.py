@@ -278,6 +278,9 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     if blocked:
         return f"Command blocked: {reason}"
 
+    # Warning check — non-blocking, prepended to result
+    warned, warning_msg = _is_command_warned(command)
+
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
@@ -300,7 +303,10 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     out = stdout.decode(errors="replace").strip()
     err = stderr.decode(errors="replace").strip()
 
-    parts = [f"$ {command}", f"exit code: {proc.returncode}"]
+    parts = []
+    if warned:
+        parts.append(f"WARNING: {warning_msg}. The command ran — verify the result.")
+    parts.extend([f"$ {command}", f"exit code: {proc.returncode}"])
     if out:
         parts.append(f"stdout:\n{out}")
     if err:
@@ -358,6 +364,36 @@ def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
             if fragment in cmd_lower:
                 return True, reason
 
+    return False, ""
+
+
+# ─── Destructive command warnings (non-blocking) ─────────────────────────────
+# These commands are legitimate but dangerous. The warning is prepended to the
+# tool result so the LLM sees it and can flag it to the user.
+
+_WARN_PATTERNS: list[tuple[str, str]] = [
+    ("git push --force",    "Force-push rewrites remote history"),
+    ("git push -f",         "Force-push rewrites remote history"),
+    ("git reset --hard",    "Discards all uncommitted changes permanently"),
+    ("git clean -f",        "Deletes untracked files permanently"),
+    ("drop table",          "Destructive SQL — drops table permanently"),
+    ("drop database",       "Destructive SQL — drops database permanently"),
+    ("truncate ",           "Destructive SQL — removes all rows"),
+    ("docker system prune", "Removes unused Docker resources"),
+    ("docker volume rm",    "Removes Docker volume data permanently"),
+    ("chmod 777",           "World-writable permissions — security risk"),
+]
+
+
+def _is_command_warned(command: str) -> tuple[bool, str]:
+    """
+    Return (True, warning) for dangerous-but-legitimate commands.
+    Unlike _is_command_blocked, this does NOT prevent execution.
+    """
+    cmd_lower = command.lower().strip()
+    for fragment, warning in _WARN_PATTERNS:
+        if fragment in cmd_lower:
+            return True, warning
     return False, ""
 
 
