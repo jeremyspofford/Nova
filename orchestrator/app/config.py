@@ -77,6 +77,10 @@ class Settings(BaseSettings):
     # e.g. CF-Connecting-IP (Cloudflare), X-Real-IP (nginx), X-Forwarded-For
     trusted_proxy_header: str = ""
 
+    # Clarification loop
+    clarification_max_rounds: int = 2
+    clarification_timeout_hours: int = 24
+
     # User auth
     jwt_secret: str = ""  # Auto-generated if empty (stored in platform_config)
     google_client_id: str = ""

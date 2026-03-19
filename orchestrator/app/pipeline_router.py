@@ -30,7 +30,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.auth import AdminDep, ApiKeyDep
@@ -239,7 +239,7 @@ async def cancel_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
             UPDATE tasks
             SET status = 'cancelled', completed_at = now()
             WHERE id = $1::uuid
-              AND status IN ('queued', 'pending_human_review')
+              AND status IN ('queued', 'pending_human_review', 'clarification_needed')
             """,
             task_id,
         )
@@ -249,6 +249,56 @@ async def cancel_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
             detail="Task cannot be cancelled in its current state",
         )
     return {"task_id": task_id, "status": "cancelled"}
+
+
+class ClarifyRequest(BaseModel):
+    answers: list[str]
+
+
+@router.post("/api/v1/pipeline/tasks/{task_id}/clarify", status_code=200)
+async def clarify_pipeline_task(
+    task_id: str,
+    req: ClarifyRequest,
+    _admin: AdminDep,
+) -> dict:
+    """Answer clarification questions for a paused pipeline task and re-queue it."""
+    if not req.answers:
+        raise HTTPException(status_code=400, detail="answers list required")
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        task = await conn.fetchrow(
+            "SELECT id, status, metadata FROM tasks WHERE id = $1::uuid",
+            task_id,
+        )
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if task["status"] != "clarification_needed":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Task is in '{task['status']}' state, not 'clarification_needed'",
+            )
+
+        # metadata comes back as a dict via asyncpg's JSONB codec
+        metadata = dict(task["metadata"]) if task["metadata"] else {}
+        metadata["clarification_answers"] = req.answers
+        metadata["clarification_round"] = metadata.get("clarification_round", 0) + 1
+
+        await conn.execute(
+            """
+            UPDATE tasks
+            SET status = 'queued',
+                metadata = $2::jsonb,
+                queued_at = now()
+            WHERE id = $1::uuid
+            """,
+            task_id,
+            metadata,
+        )
+
+    await enqueue_task(task_id)
+    log.info("Task %s re-queued after clarification (round=%d)", task_id, metadata["clarification_round"])
+    return {"status": "re-queued", "task_id": task_id}
 
 
 @router.delete("/api/v1/pipeline/tasks/{task_id}", status_code=204)
@@ -1051,10 +1101,11 @@ async def pipeline_stats(_admin: AdminDep) -> dict:
 @router.post("/api/v1/pipeline/reap-now", tags=["pipeline-ops"])
 async def trigger_reap_now(_admin: AdminDep) -> dict:
     """Admin-only: trigger one reaper cycle immediately (for testing)."""
-    from .reaper import _reap_stale_running_tasks, _reap_stuck_queued_tasks, _reap_timed_out_sessions
+    from .reaper import _reap_stale_running_tasks, _reap_stuck_queued_tasks, _reap_timed_out_sessions, _reap_stale_clarifications
     await _reap_stale_running_tasks()
     await _reap_stuck_queued_tasks()
     await _reap_timed_out_sessions()
+    await _reap_stale_clarifications()
     return {"status": "reaped"}
 
 

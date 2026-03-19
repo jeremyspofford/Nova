@@ -39,6 +39,7 @@ async def reaper_loop() -> None:
             await _reap_stale_running_tasks()
             await _reap_stuck_queued_tasks()
             await _reap_timed_out_sessions()
+            await _reap_stale_clarifications()
             # Run task history cleanup once per ~60 cycles (~hourly at 60s interval)
             _cycle += 1
             if _cycle % 60 == 0:
@@ -221,6 +222,44 @@ async def _reap_timed_out_sessions() -> None:
             await _audit(conn, "session_timeout", "warning",
                          task_id=task_id,
                          data={"session_id": session_id, "role": session["role"]})
+
+
+# ── Reap stale clarification tasks ────────────────────────────────────────────
+
+async def _reap_stale_clarifications() -> None:
+    """Cancel tasks stuck in clarification_needed past the timeout."""
+    from .db import get_pool
+
+    timeout_hours = settings.clarification_timeout_hours
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        stale = await conn.fetch(
+            """
+            SELECT id FROM tasks
+            WHERE status = 'clarification_needed'
+              AND (metadata->>'clarification_requested_at')::timestamptz
+                  < now() - ($1 || ' hours')::interval
+            """,
+            str(timeout_hours),
+        )
+        for task in stale:
+            task_id = str(task["id"])
+            logger.warning(
+                "Reaper: task %s clarification timed out after %dh — cancelling",
+                task_id, timeout_hours,
+            )
+            await conn.execute(
+                """
+                UPDATE tasks
+                SET status = 'cancelled',
+                    error = 'Timed out waiting for clarification',
+                    completed_at = now()
+                WHERE id = $1
+                """,
+                task["id"],
+            )
+            await _audit(conn, "task_cancelled", "warning", task_id=task_id,
+                         data={"reason": "clarification_timeout"})
 
 
 # ── Auto-cleanup expired task history ─────────────────────────────────────────

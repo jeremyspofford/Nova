@@ -209,3 +209,43 @@ class TestSubscriptionRouting:
         """Provider status endpoint should list available providers."""
         resp = await llm_gateway.get("/health/providers")
         assert resp.status_code == 200
+
+
+class TestClarificationLoop:
+    async def test_clarify_rejects_non_clarification_task(
+        self, orchestrator: httpx.AsyncClient, admin_headers: dict, force_cleanup_task,
+    ):
+        """Calling /clarify on a non-clarification_needed task returns 409."""
+        resp = await orchestrator.post(
+            "/api/v1/pipeline/tasks",
+            json={"user_input": "nova-test-clarify: simple task"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 202
+        task_id = resp.json().get("task_id") or resp.json().get("id")
+        force_cleanup_task(task_id)
+        await asyncio.sleep(1)
+
+        resp = await orchestrator.post(
+            f"/api/v1/pipeline/tasks/{task_id}/clarify",
+            json={"answers": ["test answer"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+
+    async def test_clarify_404_on_missing_task(self, orchestrator: httpx.AsyncClient, admin_headers: dict):
+        resp = await orchestrator.post(
+            "/api/v1/pipeline/tasks/00000000-0000-0000-0000-000000000000/clarify",
+            json={"answers": ["test"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+    async def test_clarify_requires_answers(self, orchestrator: httpx.AsyncClient, admin_headers: dict):
+        resp = await orchestrator.post(
+            "/api/v1/pipeline/tasks/00000000-0000-0000-0000-000000000000/clarify",
+            json={"answers": []},
+            headers=admin_headers,
+        )
+        # Should return 400 for empty answers or 404 for missing task — either is valid
+        assert resp.status_code in (400, 404)
