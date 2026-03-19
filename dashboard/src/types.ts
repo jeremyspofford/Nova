@@ -63,6 +63,7 @@ export type TaskStatus =
   | 'failed'
   | 'cancelled'
   | 'pending_human_review'
+  | 'clarification_needed'
 
 export interface PipelineTask {
   id: string

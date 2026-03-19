@@ -1,6 +1,8 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
+import { useNotifications } from '../../hooks/useNotifications'
 
 const STORAGE_KEY = 'nova-sidebar-collapsed'
 
@@ -20,6 +22,7 @@ export function AppLayout({
   fullWidth?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const qc = useQueryClient()
 
   useEffect(() => {
     try {
@@ -28,6 +31,13 @@ export function AppLayout({
       // Ignore storage errors
     }
   }, [collapsed])
+
+  const handleNotification = useCallback(() => {
+    qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+    qc.invalidateQueries({ queryKey: ['attention-count'] })
+  }, [qc])
+
+  useNotifications(handleNotification)
 
   return (
     <div className="flex h-screen bg-surface-root">

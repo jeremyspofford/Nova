@@ -19,6 +19,7 @@ import {
 import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
 import { hasMinRole, type Role } from '../../lib/roles'
+import { useAttentionCount } from '../../hooks/useAttentionCount'
 
 type NavItem = {
   to: string
@@ -84,6 +85,7 @@ export function Sidebar({
   const location = useLocation()
   const { user, authConfig } = useAuth()
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
+  const { data: attentionCount = 0 } = useAttentionCount()
 
   const isActive = (to: string) => {
     if (to === '/chat') return location.pathname === '/' || location.pathname === '/chat'
@@ -126,6 +128,7 @@ export function Sidebar({
                 {visibleItems.map(item => {
                   const Icon = item.icon
                   const active = isActive(item.to)
+                  const badge = item.to === '/tasks' ? attentionCount : (item.badge ?? 0)
                   return (
                     <NavLink
                       key={item.to}
@@ -146,9 +149,9 @@ export function Sidebar({
                       {!collapsed && (
                         <>
                           <span className="truncate">{item.label}</span>
-                          {item.badge != null && item.badge > 0 && (
+                          {badge > 0 && (
                             <span className="ml-auto text-micro bg-accent-dim text-accent rounded-full px-1.5 py-0.5 leading-none">
-                              {item.badge}
+                              {badge}
                             </span>
                           )}
                         </>

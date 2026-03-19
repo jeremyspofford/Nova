@@ -177,6 +177,12 @@ export const bulkDeletePipelineTasks = (statuses = 'complete,failed,cancelled') 
     { method: 'DELETE' },
   )
 
+export const clarifyPipelineTask = (task_id: string, answers: string[]) =>
+  apiFetch<{ task_id: string; status: string }>(
+    `/api/v1/pipeline/tasks/${task_id}/clarify`,
+    { method: 'POST', body: JSON.stringify({ answers }) },
+  )
+
 // ── Pods ───────────────────────────────────────────────────────────────────────
 
 export const getPods = () => apiFetch<Pod[]>('/api/v1/pods')

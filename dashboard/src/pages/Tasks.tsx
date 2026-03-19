@@ -15,6 +15,7 @@ import {
   deletePipelineTask, bulkDeletePipelineTasks,
   getTaskFindings, getTaskReviews,
   getPipelineStats, getPipelineLatency,
+  clarifyPipelineTask,
 } from '../api'
 import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
@@ -123,6 +124,7 @@ function statusToBadgeColor(status: TaskStatus): SemanticColor {
   if (status === 'failed') return 'danger'
   if (status === 'cancelled') return 'neutral'
   if (status === 'pending_human_review') return 'info'
+  if (status === 'clarification_needed') return 'warning'
   if (ACTIVE_TASK_STATUSES.has(status)) return 'warning'
   return 'neutral'
 }
@@ -132,6 +134,7 @@ function statusToStatusDot(status: TaskStatus): 'success' | 'warning' | 'danger'
   if (status === 'failed') return 'danger'
   if (status === 'cancelled') return 'neutral'
   if (status === 'pending_human_review') return 'warning'
+  if (status === 'clarification_needed') return 'warning'
   if (ACTIVE_TASK_STATUSES.has(status)) return 'warning'
   return 'neutral'
 }
@@ -157,7 +160,7 @@ function matchesFilter(task: PipelineTask, filter: StatusFilter): boolean {
   if (filter === 'all') return true
   if (filter === 'running') return ACTIVE_TASK_STATUSES.has(task.status) && task.status !== 'queued'
   if (filter === 'queued') return task.status === 'queued'
-  if (filter === 'review') return task.status === 'pending_human_review'
+  if (filter === 'review') return task.status === 'pending_human_review' || task.status === 'clarification_needed'
   if (filter === 'complete') return task.status === 'complete'
   if (filter === 'failed') return task.status === 'failed' || task.status === 'cancelled'
   return true
@@ -345,6 +348,80 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
   )
 }
 
+// ── Clarification panel (for clarification_needed tasks) ───────────────────────
+
+function ClarificationPanel({ task, onDone }: { task: PipelineTask; onDone: () => void }) {
+  const qc = useQueryClient()
+  const questions: string[] = Array.isArray(task.metadata?.clarification_questions)
+    ? (task.metadata.clarification_questions as string[])
+    : []
+  const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ''))
+
+  const clarify = useMutation({
+    mutationFn: () => clarifyPipelineTask(task.id, answers),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+      onDone()
+    },
+  })
+
+  const canSubmit = answers.every(a => a.trim().length > 0)
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="flex items-center gap-1.5 mb-1.5 text-caption font-semibold text-warning">
+          <MessageSquare size={13} /> Clarification Needed
+        </div>
+        <p className="text-compact text-content-secondary">
+          The pipeline needs more information before it can proceed. Answer the questions below.
+        </p>
+      </div>
+
+      {questions.length === 0 ? (
+        <p className="text-compact text-content-tertiary">No specific questions provided.</p>
+      ) : (
+        <div className="space-y-3">
+          {questions.map((q, i) => (
+            <div key={i}>
+              <p className="mb-1 text-caption font-medium text-content-primary">
+                {i + 1}. {q}
+              </p>
+              <Textarea
+                rows={2}
+                placeholder="Your answer..."
+                value={answers[i]}
+                onChange={e => {
+                  const next = [...answers]
+                  next[i] = e.target.value
+                  setAnswers(next)
+                }}
+                autoResize={false}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="border-t border-border-subtle pt-3 flex gap-2 items-center">
+        <Button
+          variant="primary"
+          size="sm"
+          icon={<Send size={12} />}
+          onClick={() => clarify.mutate()}
+          disabled={!canSubmit}
+          loading={clarify.isPending}
+        >
+          Submit Answers
+        </Button>
+        {clarify.isError && (
+          <span className="text-caption text-danger">Failed — try again</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Task detail sheet ─────────────────────────────────────────────────────────
 
 function TaskDetailSheet({
@@ -379,6 +456,7 @@ function TaskDetailSheet({
   const isActive = ACTIVE_TASK_STATUSES.has(task.status)
   const isTerminal = ['complete', 'failed', 'cancelled'].includes(task.status)
   const needsReview = task.status === 'pending_human_review'
+  const needsClarification = task.status === 'clarification_needed'
 
   const handleDiscuss = () => {
     setPrefillInput(buildTaskContext(task))
@@ -390,6 +468,7 @@ function TaskDetailSheet({
     { id: 'findings', label: 'Findings' },
     { id: 'reviews', label: 'Reviews' },
     ...(needsReview ? [{ id: 'review', label: 'Review' }] : []),
+    ...(needsClarification ? [{ id: 'clarify', label: 'Clarify' }] : []),
   ]
 
   return (
@@ -453,6 +532,9 @@ function TaskDetailSheet({
           {detailTab === 'review' && needsReview && (
             <ReviewPanel task={task} onDone={onClose} />
           )}
+          {detailTab === 'clarify' && needsClarification && (
+            <ClarificationPanel task={task} onDone={onClose} />
+          )}
         </div>
 
         {/* Actions */}
@@ -477,16 +559,24 @@ function TaskDetailSheet({
             </Button>
           )}
           {needsReview && (
-            <>
-              <Button
-                variant="primary"
-                size="sm"
-                icon={<ThumbsUp size={14} />}
-                onClick={() => setDetailTab('review')}
-              >
-                Review
-              </Button>
-            </>
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<ThumbsUp size={14} />}
+              onClick={() => setDetailTab('review')}
+            >
+              Review
+            </Button>
+          )}
+          {needsClarification && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon={<MessageSquare size={14} />}
+              onClick={() => setDetailTab('clarify')}
+            >
+              Answer
+            </Button>
           )}
           {isTerminal && (
             <Button
@@ -624,6 +714,7 @@ function TaskRow({
   const { setPrefillInput } = useChatStore()
 
   const needsReview = task.status === 'pending_human_review'
+  const needsClarification = task.status === 'clarification_needed'
   const isActive = ACTIVE_TASK_STATUSES.has(task.status)
   const isTerminal = ['complete', 'failed', 'cancelled'].includes(task.status)
 
@@ -656,7 +747,7 @@ function TaskRow({
       className={clsx(
         'flex items-center gap-3 px-4 py-3 border-b border-border-subtle cursor-pointer transition-colors',
         'hover:bg-surface-card-hover',
-        needsReview && 'bg-info-dim/30',
+        (needsReview || needsClarification) && 'bg-info-dim/30',
       )}
     >
       {/* Status dot */}
@@ -829,8 +920,8 @@ export function Tasks() {
     .filter(t => !search || t.user_input.toLowerCase().includes(search.toLowerCase()) || t.id.includes(search))
     .filter(t => !podFilter || t.pod_name === podFilter)
 
-  // Count review tasks for alert badge
-  const reviewCount = tasks.filter(t => t.status === 'pending_human_review').length
+  // Count review/clarification tasks for alert badge
+  const reviewCount = tasks.filter(t => t.status === 'pending_human_review' || t.status === 'clarification_needed').length
   const hasHistory = tasks.some(t => ['complete', 'failed', 'cancelled'].includes(t.status))
 
   const uniquePods = [...new Set(tasks.map(t => t.pod_name).filter(Boolean) as string[])]
