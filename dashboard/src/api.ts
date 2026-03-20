@@ -619,6 +619,27 @@ export const updatePlatformConfig = (key: string, value: string) =>
     body: JSON.stringify({ value }),
   })
 
+// ── Tool Permissions ─────────────────────────────────────────────────────────
+
+export interface ToolGroupStatus {
+  name: string
+  display_name: string
+  description: string
+  tools: string[]
+  tool_count: number
+  enabled: boolean
+  is_mcp: boolean
+}
+
+export const getToolPermissions = () =>
+  apiFetch<ToolGroupStatus[]>('/api/v1/tool-permissions')
+
+export const updateToolPermissions = (groups: Record<string, boolean>) =>
+  apiFetch<ToolGroupStatus[]>('/api/v1/tool-permissions', {
+    method: 'PATCH',
+    body: JSON.stringify({ groups }),
+  })
+
 // ── Identity ─────────────────────────────────────────────────────────────────
 
 export interface NovaIdentity {

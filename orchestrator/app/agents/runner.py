@@ -29,6 +29,7 @@ from app.config import settings
 from app.stimulus import emit_stimulus
 from app.store import get_redis
 from app.tools import ALL_TOOLS, execute_tool, get_all_tools
+from app.tool_permissions import resolve_effective_tools
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +64,10 @@ async def run_agent_turn(
         except Exception:
             pass
 
-        # 1. Fetch context concurrently (+ intelligent routing when auto-model)
+        # 1. Resolve tool permissions (fast DB read — before the gather)
+        effective_tools, disabled_groups = await resolve_effective_tools()
+
+        # 2. Fetch context concurrently (+ intelligent routing when auto-model)
         from app.model_classifier import classify_and_resolve
 
         async def _noop_classify():
@@ -72,7 +76,7 @@ async def run_agent_turn(
         classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
 
         nova_ctx, (memory_ctx, _mem_count, _engram_ids, _retrieval_log_id), (category, classified_model) = await asyncio.gather(
-            _build_nova_context(model, agent_id, session_id),
+            _build_nova_context(model, agent_id, session_id, effective_tools, disabled_groups),
             _get_memory_context(agent_id, query, session_id),
             classify_coro,
         )
@@ -80,15 +84,15 @@ async def run_agent_turn(
         if classified_model:
             model = classified_model
 
-        # 2. Build prompt
+        # 3. Build prompt
         prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages, model=model)
 
-        # 3. LLM call with tool loop — returns 4-tuple now
+        # 4. LLM call with tool loop
         assistant_content, input_tokens, output_tokens, cost_usd = await _run_tool_loop(
             messages=prompt_messages,
             model=model,
             metadata={"agent_id": agent_id, "task_id": str(task_id), "session_id": session_id},
-            tools=None,   # None → ALL_TOOLS for normal agent turns
+            tools=effective_tools,
         )
 
         # 4. Store exchange in episodic memory
@@ -187,6 +191,9 @@ async def run_agent_turn_streaming(
     _engram_ids: list[str] = []
     _retrieval_log_id: str | None = None
 
+    # Resolve tool permissions before context build (fast DB read)
+    effective_tools, disabled_groups = await resolve_effective_tools(allowed_tools)
+
     if guest_mode:
         # Guest isolation: no context, no memory, no tools, no classification
         nova_ctx = ""
@@ -216,7 +223,7 @@ async def run_agent_turn_streaming(
             return result, int((time.monotonic() - t) * 1000)
 
         (nova_ctx, _ctx_ms), ((memory_ctx, memory_count, _engram_ids, _retrieval_log_id), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
-            _timed(_build_nova_context(model, agent_id, session_id)),
+            _timed(_build_nova_context(model, agent_id, session_id, effective_tools, disabled_groups)),
             _timed(_get_memory_context(agent_id, query, session_id)),
             _timed(classify_coro),
         )
@@ -234,13 +241,6 @@ async def run_agent_turn_streaming(
         yield json.dumps({"status": {"step": "model", "state": "done", "detail": model}})
 
     prompt_messages = _build_prompt(system_prompt, nova_ctx, memory_ctx, messages, model=model)
-
-    # Resolve effective tool set: pod allowlist filters available tools
-    if allowed_tools is not None:
-        _allowed_set = set(allowed_tools)
-        effective_tools = [t for t in get_all_tools() if t.name in _allowed_set]
-    else:
-        effective_tools = get_all_tools()
 
     if guest_mode:
         # Guest mode: no tools at all
@@ -453,7 +453,58 @@ async def _safe_list_agents(agent_id: str) -> str:
         return "  (unavailable)"
 
 
-async def _build_nova_context(model: str, agent_id: str, session_id: str) -> str:
+def _format_tool_list(tools: list) -> str:
+    """Generate a concise tool list for the system prompt from effective tools.
+
+    Groups tools by their registry group and formats as:
+      Group: tool_name — first sentence of description
+    MCP tools are grouped under their server name.
+    """
+    from app.tools import get_registry
+
+    # Build group membership lookup from registry
+    tool_to_group: dict[str, str] = {}
+    group_order: list[str] = []
+    for g in get_registry():
+        group_order.append(g.name)
+        for t in g.tools:
+            tool_to_group[t.name] = g.name
+
+    # Categorize effective tools
+    grouped: dict[str, list[str]] = {}
+    for t in tools:
+        if t.name.startswith("mcp__"):
+            parts = t.name.split("__")
+            group = f"MCP: {parts[1]}" if len(parts) >= 2 else "MCP"
+        else:
+            group = tool_to_group.get(t.name, "Other")
+        grouped.setdefault(group, [])
+        # First sentence of description
+        desc = (t.description or "").split(".")[0].strip()
+        entry = f"{t.name} — {desc}" if desc else t.name
+        grouped[group].append(entry)
+
+    # Format: registry groups first (in order), then MCP groups sorted
+    lines: list[str] = []
+    seen: set[str] = set()
+    for group_name in group_order:
+        if group_name in grouped:
+            tools_str = ", ".join(grouped[group_name])
+            lines.append(f"  {group_name}: {tools_str}")
+            seen.add(group_name)
+    for group_name in sorted(grouped.keys()):
+        if group_name not in seen:
+            tools_str = ", ".join(grouped[group_name])
+            lines.append(f"  {group_name}: {tools_str}")
+
+    return "\n".join(lines) if lines else "  (no tools available)"
+
+
+async def _build_nova_context(
+    model: str, agent_id: str, session_id: str,
+    effective_tools: list | None = None,
+    disabled_groups: set[str] | None = None,
+) -> str:
     """
     Build the context blocks injected into every system prompt.
 
@@ -479,7 +530,22 @@ async def _build_nova_context(model: str, agent_id: str, session_id: str) -> str
         identity_lines.append(persona)
     identity_block = "\n".join(identity_lines)
 
-    # 2. Platform context
+    # 2. Platform context — tool list is generated dynamically from effective tools
+    tool_list_block = _format_tool_list(effective_tools or get_all_tools())
+
+    # Disabled groups notice — lets Nova explain WHY it can't do something
+    disabled_notice = ""
+    if disabled_groups:
+        from app.tools import get_registry
+        group_labels = {g.name: g.display_name for g in get_registry()}
+        disabled_labels = [group_labels.get(g, g) for g in sorted(disabled_groups)]
+        disabled_notice = (
+            f"\n\n### Disabled tool groups\n"
+            f"The following capabilities are disabled by your admin: {', '.join(disabled_labels)}.\n"
+            f"If a user asks you to do something that requires a disabled tool, explain that "
+            f"the capability is disabled in Settings and suggest they re-enable it."
+        )
+
     platform_block = (
         f"## Platform Context\n"
         f"- Your model:    {model}\n"
@@ -488,13 +554,11 @@ async def _build_nova_context(model: str, agent_id: str, session_id: str) -> str
         f"\n### Active agents in this instance:\n"
         f"{agents_block}\n"
         f"\n### Tools available to you:\n"
-        f"  Platform:   list_agents, get_agent_info, create_agent, list_available_models, send_message_to_agent\n"
-        f"  Filesystem: list_dir, read_file, write_file\n"
-        f"  Shell:      run_shell (runs in workspace, hard timeout {settings.shell_timeout_seconds}s)\n"
-        f"  Search:     search_codebase (ripgrep across workspace files)\n"
-        f"  Git:        git_status, git_diff, git_log, git_commit\n"
+        f"{tool_list_block}\n"
         f"\nWorkspace root: {settings.workspace_root}  (all file/shell paths are relative to this)\n"
+        f"Shell timeout: {settings.shell_timeout_seconds}s\n"
         f"Answer model-identity questions using 'Your model' above (never guess)."
+        f"{disabled_notice}"
     )
 
     # 3. Response style
@@ -604,7 +668,9 @@ async def _run_tool_loop(
     When return_messages=True, also returns (messages, used_tools) for streaming pre-resolution.
 
     Args:
-        tools:  None → ALL_TOOLS; [] → no tools; [...] → explicit subset.
+        tools:  Callers must pass explicit tool list (from resolve_effective_tools).
+                None → all tools (fallback for callers that don't manage permissions).
+                [] → no tools.
     """
     effective_tools = get_all_tools() if tools is None else tools
     llm_client = get_llm_client()

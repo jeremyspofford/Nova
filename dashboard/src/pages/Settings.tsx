@@ -23,6 +23,7 @@ import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
 import { AccountSection } from './settings/AccountSection'
 import { GuestAccessSection } from './settings/GuestAccessSection'
 import { LocalInferenceSection } from './settings/LocalInferenceSection'
+import { ToolPermissionsSection } from './settings/ToolPermissionsSection'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
 
@@ -57,6 +58,12 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'provider-status', label: 'Provider Status', icon: Activity },
       { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'pipeline-models', label: 'Pipeline Models', icon: Layers },
+    ],
+  },
+  {
+    label: 'Capabilities',
+    items: [
+      { id: 'tool-permissions', label: 'Tool Permissions', icon: Wrench },
     ],
   },
   {
@@ -309,6 +316,10 @@ export function Settings() {
 
           <div id="llm-routing">
             <LLMRoutingSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+          </div>
+
+          <div id="tool-permissions">
+            <ToolPermissionsSection />
           </div>
 
           <div id="provider-status">

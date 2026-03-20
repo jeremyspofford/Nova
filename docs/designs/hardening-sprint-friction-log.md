@@ -88,8 +88,9 @@ Build a lightweight friction log (CRUD API, dashboard widget, friction log page,
 | Router placement | Dedicated `friction_router.py` | router.py is 600+ lines, #3 most-touched file |
 | Auto-friction loop guard | Tag Fix-This tasks with `source: friction_log`, skip | Simpler than parent_id chains, prevents noise |
 | Screenshot in list API | Thumbnail in list, full on detail | Better UX, client-side resize avoids backend Pillow dep |
-| Screenshot storage | Files on disk, path in DB | Keeps DB lean, file serve endpoint |
-| Sprint Health placement | Header on Friction Log page | Minimal diff, sprint-focused context |
+| Screenshot storage | Docker volume at `/data/friction-screenshots/`, relative path in DB (`friction-screenshots/{uuid}.jpg`) | Survives rebuilds, isolated from workspace, backup-friendly |
+| Sprint Health placement | **Overview page** (new page, build scope) | CEO intent: success rate is a dashboard number visible at a glance. Overview page created as Nova's home base. |
+| Overview page | New `/overview` route as Nova's home base | Sprint Health card + quick links (recent tasks, active pods, friction count, chat). Root `/` route updated. |
 | Nav placement | Core section, after Tasks | Primary workflow during sprint |
 | Floating button | Fixed bottom-right, all pages | Frictionless capture from any context |
 | Implementation approach | Approach B (friction log + dogfood) | Balances "start fixing" with structured capture |
@@ -102,6 +103,7 @@ Build a lightweight friction log (CRUD API, dashboard widget, friction log page,
 - **Large screenshots:** Client-side 5MB limit + server content-length check
 - **Zero tasks:** Sprint Health shows "No tasks yet" empty state
 - **500+ friction entries:** Pagination on list endpoint
+- **Auto-friction flood:** When 3+ consecutive auto-entries share the same error pattern, collapse into one card: "Pipeline failed 5 times: {error} (most recent: 10 min ago)" with expand-to-see-all
 
 ## Error Handling
 
@@ -202,6 +204,18 @@ Build a lightweight friction log (CRUD API, dashboard widget, friction log page,
 
 Auto-created friction entries (from pipeline failures) display a small `[auto]` badge in `info` color after the severity badge. Manual entries do not have this badge.
 
+- **Tooltip on `[auto]` badge:** "Automatically logged when a pipeline task failed." Discoverable context for first-time users.
+- **Collapse consecutive auto-entries:** When 3+ auto-entries share the same error pattern, collapse into one card showing count + most recent timestamp + expand link. `aria-expanded="false"`, Enter/Space to expand, `aria-label="{N} similar pipeline failures, expand to view"`.
+
+### Fix This — Inline Task Status
+
+After clicking "Fix This," the friction entry card shows inline task progress:
+- **In progress:** "Fix in progress (task abc-123)" with link to task detail, `Loader2` spinner
+- **Complete:** "Fix complete" with green check, link to task detail + output preview
+- **Failed:** "Fix failed" with red X, link to task detail + Retry button
+
+Reuses the DelegationCard status pattern from chat.
+
 ### Interaction States
 
 | Feature | Loading | Empty | Error | Success |
@@ -218,15 +232,37 @@ Auto-created friction entries (from pipeline failures) display a small `[auto]` 
 - Sheet: full-width on `<md`, 400px right-drawer on `>=md`
 - Floating button: icon-only on `<md`, icon + text on `>=md`
 - Filters: stacked on `<sm`, inline on `>=sm`
+- Entry cards: full-width all viewports, description `line-clamp-2` on `<md`
+- Thumbnails: 48x48 on `<md`, 64x64 on `>=md`
+- Collapsed auto-entry groups: expand inline (not modal/sheet)
 
-### Accessibility
+### Accessibility (Full Spec)
 
+**Semantic structure:**
+- Entry list container: `role="list"` with `aria-label="Friction log entries"`
+- Each entry card: `role="listitem"`
+- Sprint Health metrics: each metric `role="status"` with `aria-label="Success rate: {value}%"`, etc.
+
+**Keyboard navigation:**
 - Floating button: `aria-label="Log friction"`
 - Sheet: focus trap, Escape to close, auto-focus textarea
 - RadioGroup: arrow key nav (built-in)
-- Drop zone: `aria-label="Drop screenshot here or paste with Ctrl+V"`
-- Action buttons: descriptive `aria-label` per entry
+- Drop zone: `aria-label="Drop screenshot here or paste with Ctrl+V"`, `tabindex="0"`, Enter opens file picker fallback
+- Collapsed auto-entry group: Enter/Space to expand, `aria-expanded` attribute
+
+**Action button labels (per entry):**
+- Fix This: `aria-label="Fix friction entry: {first 30 chars of description}"`
+- Mark Fixed: `aria-label="Mark fixed: {first 30 chars of description}"`
+- Delete: `aria-label="Delete friction entry: {first 30 chars of description}"`
+- Dismiss (auto-entries): `aria-label="Dismiss: {first 30 chars of description}"`
+
+**State announcements:**
+- Fix This status changes: `aria-live="polite"` region for "Fix in progress" / "Fix complete" / "Fix failed"
+- New auto-entries appearing: `aria-live="polite"` for count updates
+
+**Contrast & targets:**
 - All Badge colors meet WCAG AA contrast
+- All interactive elements 44px minimum touch target
 
 ## Deferred
 
@@ -240,4 +276,4 @@ Auto-created friction entries (from pipeline failures) display a small `[auto]` 
 - Multi-tenant friction scoping (beyond user_id column)
 - Mobile-first optimization (responsive basics specified, not mobile-first)
 - Notification on auto-friction creation
-- DESIGN.md creation (design system established through code)
+- ~~DESIGN.md creation~~ → Now a **pre-implementation dependency** (decided in tool permissions design review). Run `/design-consultation` before implementing friction log UI.

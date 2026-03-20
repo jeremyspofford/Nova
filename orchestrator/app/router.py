@@ -673,6 +673,65 @@ async def list_available_tools(_admin: AdminDep):
     return categories
 
 
+# ── Tool permissions ──────────────────────────────────────────────────────────
+
+
+class ToolPermissionUpdate(BaseModel):
+    groups: dict[str, bool]  # {"Web": false, "Git": true}
+
+
+@router.get("/api/v1/tool-permissions")
+async def get_tool_permissions(_admin: AdminDep):
+    """Return all tool groups with their enabled/disabled status."""
+    from app.tool_permissions import get_tool_groups_with_status
+    return await get_tool_groups_with_status()
+
+
+@router.patch("/api/v1/tool-permissions")
+async def update_tool_permissions(req: ToolPermissionUpdate, _admin: AdminDep):
+    """Toggle tool groups on/off. Accepts {"groups": {"Web": false, "Git": true}}."""
+    from app.tool_permissions import (
+        get_disabled_tool_groups, get_valid_group_names,
+        get_tool_groups_with_status, set_disabled_groups,
+    )
+
+    # Validate group names against registry
+    valid = get_valid_group_names()
+    unknown = set(req.groups.keys()) - valid
+    if unknown:
+        raise HTTPException(422, f"Unknown tool groups: {sorted(unknown)}")
+
+    old_disabled = await get_disabled_tool_groups()
+    new_disabled = set(old_disabled)
+    for group, enabled in req.groups.items():
+        if enabled:
+            new_disabled.discard(group)
+        else:
+            new_disabled.add(group)
+    await set_disabled_groups(new_disabled)
+
+    # Audit log — record what changed
+    if old_disabled != new_disabled:
+        try:
+            import json as _json
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO platform_config_audit
+                        (config_key, old_value, new_value)
+                    VALUES ($1, $2::jsonb, $3::jsonb)
+                    """,
+                    "tool_permissions",
+                    _json.dumps({"disabled_groups": sorted(old_disabled)}),
+                    _json.dumps({"disabled_groups": sorted(new_disabled)}),
+                )
+        except Exception as e:
+            log.warning(f"Audit log write failed (non-critical): {e}")
+
+    return await get_tool_groups_with_status()
+
+
 # ── Usage reporting (admin-only) ──────────────────────────────────────────────
 
 @router.get("/api/v1/training-data/export")

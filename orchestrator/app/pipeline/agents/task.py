@@ -65,7 +65,7 @@ After completing your work, return ONLY valid JSON matching this exact schema:
         Agent's issues list so the Task Agent knows exactly what to fix.
         """
         from ...agents.runner import run_agent_turn_raw
-        from ...tools import get_all_tools
+        from ...tool_permissions import resolve_effective_tools
 
         context = state.completed.get("context", {})
 
@@ -97,14 +97,12 @@ After completing your work, return ONLY valid JSON matching this exact schema:
             "When finished, return your structured JSON result."
         )
 
+        effective, _ = await resolve_effective_tools(self.allowed_tools)
         raw_output, in_tokens, out_tokens, cost_usd = await run_agent_turn_raw(
             system_prompt=self.system_prompt,
             user_message=prompt,
             model=self.model,
-            tools=None if self.allowed_tools is None else [
-                t for t in get_all_tools()
-                if t.name in self.allowed_tools
-            ],
+            tools=effective,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             return_usage=True,
