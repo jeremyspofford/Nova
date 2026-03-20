@@ -67,7 +67,6 @@ export function MobileNav() {
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
 
   const isActive = (to: string) => {
-    if (to === '/chat') return location.pathname === '/' || location.pathname === '/chat'
     return location.pathname === to
   }
 

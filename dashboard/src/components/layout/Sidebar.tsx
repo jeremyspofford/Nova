@@ -1,5 +1,6 @@
 import { useLocation, NavLink } from 'react-router-dom'
 import {
+  LayoutDashboard,
   MessageSquare,
   ListTodo,
   AlertTriangle,
@@ -39,6 +40,7 @@ const navSections: NavSection[] = [
   {
     // Core — no label, always visible
     items: [
+      { to: '/', label: 'Overview', icon: LayoutDashboard, minRole: 'guest' },
       { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
       { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
       { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member' },
@@ -90,7 +92,6 @@ export function Sidebar({
   const { data: attentionCount = 0 } = useAttentionCount()
 
   const isActive = (to: string) => {
-    if (to === '/chat') return location.pathname === '/' || location.pathname === '/chat'
     return location.pathname === to
   }
 

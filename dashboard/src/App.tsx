@@ -27,6 +27,7 @@ import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
 import Friction from './pages/Friction'
+import Overview from './pages/Overview'
 import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
 import ComponentGallery from './pages/dev/ComponentGallery'
 
@@ -156,7 +157,7 @@ function AppShell() {
         <Route path="/dev/components" element={<ComponentGallery />} />
 
         {/* Routes WITH sidebar */}
-        <Route path="/" element={<AppLayout fullWidth><Chat /></AppLayout>} />
+        <Route path="/" element={<AppLayout><Overview /></AppLayout>} />
         <Route path="/chat" element={<AppLayout fullWidth><Chat /></AppLayout>} />
         <Route path="/tasks" element={<AppLayout><Tasks /></AppLayout>} />
         <Route path="/friction" element={<AppLayout><Friction /></AppLayout>} />
