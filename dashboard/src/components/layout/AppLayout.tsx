@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
+import { LogFrictionButton } from '../LogFrictionButton'
 import { useNotifications } from '../../hooks/useNotifications'
 
 const STORAGE_KEY = 'nova-sidebar-collapsed'
@@ -52,6 +53,7 @@ export function AppLayout({
         )}
       </main>
       <MobileNav />
+      <LogFrictionButton />
     </div>
   )
 }

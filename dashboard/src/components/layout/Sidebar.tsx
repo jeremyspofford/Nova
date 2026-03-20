@@ -2,6 +2,7 @@ import { useLocation, NavLink } from 'react-router-dom'
 import {
   MessageSquare,
   ListTodo,
+  AlertTriangle,
   Target,
   Brain,
   Boxes,
@@ -40,6 +41,7 @@ const navSections: NavSection[] = [
     items: [
       { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
       { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
+      { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member' },
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
       { to: '/engrams', label: 'Memory', icon: Brain, minRole: 'member' },
     ],

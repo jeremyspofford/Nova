@@ -1067,7 +1067,9 @@ async def pipeline_stats(_admin: AdminDep) -> dict:
               COUNT(*) FILTER (WHERE status = 'queued') AS queued_count,
               COUNT(*) FILTER (WHERE status = 'complete' AND completed_at >= CURRENT_DATE) AS completed_today,
               COUNT(*) FILTER (WHERE status = 'complete' AND completed_at >= NOW() - INTERVAL '7 days') AS completed_this_week,
-              COUNT(*) FILTER (WHERE status = 'failed' AND completed_at >= CURRENT_DATE) AS failed_today
+              COUNT(*) FILTER (WHERE status = 'failed' AND completed_at >= CURRENT_DATE) AS failed_today,
+              COUNT(*) FILTER (WHERE status = 'failed' AND completed_at >= NOW() - INTERVAL '7 days') AS failed_this_week,
+              COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) AS submitted_today
             FROM tasks
             """
         )
@@ -1096,6 +1098,8 @@ async def pipeline_stats(_admin: AdminDep) -> dict:
         "completed_today": counts["completed_today"],
         "completed_this_week": counts["completed_this_week"],
         "failed_today": counts["failed_today"],
+        "failed_this_week": counts["failed_this_week"],
+        "submitted_today": counts["submitted_today"],
         "success_rate_7d": round(rate_row["rate"], 4),
         "avg_duration_ms": dur_row["avg_ms"],
     }

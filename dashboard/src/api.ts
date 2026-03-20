@@ -640,6 +640,55 @@ export const updateToolPermissions = (groups: Record<string, boolean>) =>
     body: JSON.stringify({ groups }),
   })
 
+// ── Friction Log ─────────────────────────────────────────────────────────────
+
+export interface FrictionEntry {
+  id: string
+  description: string
+  severity: 'blocker' | 'annoyance' | 'idea'
+  status: 'open' | 'in_progress' | 'fixed'
+  source: 'manual' | 'auto'
+  task_id: string | null
+  user_id: string | null
+  has_screenshot: boolean
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface FrictionStats {
+  open_count: number
+  in_progress_count: number
+  fixed_count: number
+  total_count: number
+  blocker_count: number
+}
+
+export const getFrictionEntries = (params?: { severity?: string; status?: string; limit?: number; offset?: number }) => {
+  const query = new URLSearchParams()
+  if (params?.severity) query.set('severity', params.severity)
+  if (params?.status) query.set('status', params.status)
+  if (params?.limit) query.set('limit', String(params.limit))
+  if (params?.offset) query.set('offset', String(params.offset))
+  const qs = query.toString()
+  return apiFetch<FrictionEntry[]>(`/api/v1/friction${qs ? `?${qs}` : ''}`)
+}
+
+export const createFrictionEntry = (data: { description: string; severity: string; screenshot?: string; screenshot_thumb?: string }) =>
+  apiFetch<FrictionEntry>('/api/v1/friction', { method: 'POST', body: JSON.stringify(data) })
+
+export const updateFrictionEntry = (id: string, data: { status?: string; severity?: string }) =>
+  apiFetch<FrictionEntry>(`/api/v1/friction/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteFrictionEntry = (id: string) =>
+  apiFetch<void>(`/api/v1/friction/${id}`, { method: 'DELETE' })
+
+export const fixFrictionEntry = (id: string) =>
+  apiFetch<{ task_id: string }>(`/api/v1/friction/${id}/fix`, { method: 'POST' })
+
+export const getFrictionStats = () =>
+  apiFetch<FrictionStats>('/api/v1/friction/stats')
+
 // ── Identity ─────────────────────────────────────────────────────────────────
 
 export interface NovaIdentity {
@@ -658,6 +707,8 @@ export interface PipelineStats {
   completed_today: number
   completed_this_week: number
   failed_today: number
+  failed_this_week: number
+  submitted_today: number
   success_rate_7d: number
   avg_duration_ms: number
 }

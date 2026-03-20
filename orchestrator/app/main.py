@@ -13,6 +13,7 @@ from app.clients import close_clients
 from app.config import settings
 from app.db import close_db, init_db
 from app.auth_router import router as auth_router
+from app.friction_router import router as friction_router
 from app.goals_router import goals_router
 from app.health import health_router
 from app.pipeline_router import router as pipeline_router
@@ -119,7 +120,10 @@ async def lifespan(app: FastAPI):
 
     from app.chat_scorer import chat_scorer_loop
     _chat_scorer_task = asyncio.create_task(chat_scorer_loop(), name="chat-scorer")
-    log.info("Queue worker, reaper, effectiveness loop, and chat scorer started")
+
+    from app.auto_friction import auto_friction_subscriber
+    _auto_friction_task = asyncio.create_task(auto_friction_subscriber(), name="auto-friction")
+    log.info("Queue worker, reaper, effectiveness loop, chat scorer, and auto-friction subscriber started")
 
     yield
 
@@ -128,8 +132,9 @@ async def lifespan(app: FastAPI):
     _reaper_task.cancel()
     _effectiveness_task.cancel()
     _chat_scorer_task.cancel()
+    _auto_friction_task.cancel()
     # Wait briefly for graceful shutdown
-    await asyncio.gather(_queue_task, _reaper_task, _effectiveness_task, _chat_scorer_task, return_exceptions=True)
+    await asyncio.gather(_queue_task, _reaper_task, _effectiveness_task, _chat_scorer_task, _auto_friction_task, return_exceptions=True)
 
     # Gracefully stop MCP server subprocesses
     from app.pipeline.tools import stop_all_servers
@@ -165,4 +170,5 @@ app.include_router(health_router)
 app.include_router(router)
 app.include_router(auth_router)
 app.include_router(pipeline_router)
+app.include_router(friction_router)
 app.include_router(goals_router)
