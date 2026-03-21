@@ -64,6 +64,17 @@ export function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // Auto-load persisted conversation on mount (page refresh / rebuild)
+  useEffect(() => {
+    if (conversationId && messages.length === 0 && !isStreaming) {
+      loadConversation(conversationId).catch(() => {
+        // Conversation no longer exists — start fresh
+        resetConversation()
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])  // Run once on mount only
+
   // Prevent iOS keyboard from shifting the viewport (mobile only)
   useEffect(() => {
     const vv = window.visualViewport
