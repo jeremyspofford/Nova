@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle, Lightbulb } from "lucide-react";
+import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle, Lightbulb, CheckCircle2, ArrowRight } from "lucide-react";
 import { Section, Button, Toggle, Badge, StatusDot, Card } from "../../components/ui";
 import { ConfigField, useConfigValue, type ConfigSectionProps } from "./shared";
 import { recoveryFetch } from "../../api-recovery";
@@ -50,6 +50,11 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
   const customAuth = useConfigValue(entries, "inference.custom_auth_header", "");
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  // Track backend switching for confirmation banner
+  const [switchInfo, setSwitchInfo] = useState<{ from: string; to: string } | null>(null);
+  const [switchConfirmed, setSwitchConfirmed] = useState(false);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const { data: recommendation } = useQuery<InferenceRecommendation>({
     queryKey: ["inference-recommendation"],
@@ -109,11 +114,49 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
     }
   }, [configBackend]);
 
+  // Detect when a backend switch completes (state becomes "ready" while we're tracking a switch)
+  useEffect(() => {
+    if (switchInfo && status?.state === "ready" && status.backend === switchInfo.to) {
+      setSwitchConfirmed(true);
+      // Auto-dismiss after 8 seconds
+      confirmTimerRef.current = setTimeout(() => {
+        setSwitchConfirmed(false);
+        setSwitchInfo(null);
+      }, 8_000);
+    }
+    return () => { if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current); };
+  }, [switchInfo, status?.state, status?.backend]);
+
   const currentState = status?.state || "stopped";
   const stateInfo = STATE_LABELS[currentState] || STATE_LABELS.stopped;
   const isTransitioning = currentState === "starting" || currentState === "draining";
   const hasGpu = hardware?.gpus && hardware.gpus.length > 0;
   const primaryGpu = hardware?.gpus?.[0];
+
+  /** Switch backend: save config + start the new backend (recovery controller stops the old one) */
+  const handleSwitchBackend = (backend: string) => {
+    const currentBackend = status?.backend || configBackend;
+    if (backend === currentBackend && currentState === "ready") return; // already active
+
+    setSelectedBackend(backend);
+    onSave("inference.backend", backend);
+
+    // Clear any previous confirmation
+    setSwitchConfirmed(false);
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+
+    if (backend === "none" || backend === "custom") {
+      // No container to start — just save config
+      setSwitchInfo(null);
+      return;
+    }
+
+    // Track the switch and start the new backend
+    if (currentBackend && currentBackend !== backend) {
+      setSwitchInfo({ from: currentBackend, to: backend });
+    }
+    startBackend.mutate(backend);
+  };
 
   return (
     <Section id="local-inference" icon={Cpu} title="Local Inference" description="Manage your local AI inference backend">
@@ -157,6 +200,36 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
         </Card>
       )}
 
+      {/* Switch Confirmation Banner */}
+      {switchConfirmed && switchInfo && (
+        <div className="mb-4 p-3 bg-success/10 border border-emerald-300 dark:border-emerald-700 rounded-sm text-compact flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+          <span className="text-emerald-800 dark:text-emerald-300">
+            Switched from <strong>{BACKENDS.find(b => b.value === switchInfo.from)?.label || switchInfo.from}</strong>
+            <ArrowRight className="w-3 h-3 inline mx-1" />
+            <strong>{BACKENDS.find(b => b.value === switchInfo.to)?.label || switchInfo.to}</strong>
+            {" "}&mdash; backend is running.
+          </span>
+          <button
+            className="ml-auto text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-200 text-caption"
+            onClick={() => { setSwitchConfirmed(false); setSwitchInfo(null); }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* In-progress Switch Banner */}
+      {switchInfo && !switchConfirmed && isTransitioning && (
+        <div className="mb-4 p-3 bg-surface-elevated border border-border-subtle rounded-sm text-compact flex items-center gap-2">
+          <RefreshCw className="w-4 h-4 text-accent animate-spin flex-shrink-0" />
+          <span className="text-content-secondary">
+            Switching from <strong>{BACKENDS.find(b => b.value === switchInfo.from)?.label || switchInfo.from}</strong>
+            {" "}to <strong>{BACKENDS.find(b => b.value === switchInfo.to)?.label || switchInfo.to}</strong>...
+          </span>
+        </div>
+      )}
+
       {/* Backend Selector */}
       <div className="space-y-3">
         <label className="block text-compact font-medium text-content-secondary">Backend</label>
@@ -166,10 +239,7 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
               key={b.value}
               variant={(status?.backend || configBackend) === b.value ? 'primary' : 'secondary'}
               size="sm"
-              onClick={() => {
-                setSelectedBackend(b.value);
-                onSave("inference.backend", b.value);
-              }}
+              onClick={() => handleSwitchBackend(b.value)}
               disabled={isTransitioning}
             >
               {b.label}

@@ -3,11 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Bot, Sliders, Cpu, Plug, Wrench, Palette,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
-  FileCode, Layers, Gauge, Activity,
+  FileCode, Layers, Gauge, Activity, RotateCcw,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
-import { Section } from '../components/ui'
+import { Section, Button } from '../components/ui'
 import { ConfigField, useConfigValue } from './settings/shared'
 import { LLMRoutingSection } from './settings/LLMRoutingSection'
 import { ProviderStatusSection } from './settings/ProviderStatusSection'
@@ -45,6 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'General',
     items: [
       { id: 'identity', label: 'Nova Identity', icon: Bot },
+      { id: 'appearance', label: 'Theme & Colors', icon: Palette },
       { id: 'account', label: 'Account', icon: CircleUser },
       { id: 'trusted-networks', label: 'Trusted Networks', icon: Shield },
       { id: 'guest-access', label: 'Guest Access', icon: Shield },
@@ -76,15 +77,10 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
+      { id: 'setup-wizard', label: 'Setup Wizard', icon: RotateCcw },
       { id: 'developer-resources', label: 'Developer Resources', icon: FileCode },
       { id: 'notifications', label: 'Notifications', icon: RadioIcon },
       { id: 'recovery', label: 'Recovery & Services', icon: Shield },
-    ],
-  },
-  {
-    label: 'Appearance',
-    items: [
-      { id: 'appearance', label: 'Theme & Colors', icon: Palette },
     ],
   },
 ]
@@ -204,6 +200,41 @@ function SettingsSidebar({ active, isAuthenticated }: { active: string; isAuthen
   )
 }
 
+// ── Setup Wizard re-run ──────────────────────────────────────────────────────
+
+function SetupWizardSection({ onSave }: { onSave: (key: string, value: string) => void }) {
+  const [launching, setLaunching] = useState(false)
+
+  return (
+    <Section
+      icon={RotateCcw}
+      title="Setup Wizard"
+      description="Re-run the guided setup to change your inference engine, model selection, or other initial configuration."
+    >
+      <div className="flex items-center gap-4">
+        <Button
+          variant="outline"
+          size="sm"
+          loading={launching}
+          onClick={() => {
+            setLaunching(true)
+            onSave('onboarding.completed', 'false')
+            // Brief delay so the config write lands before navigation
+            setTimeout(() => {
+              window.location.href = '/onboarding'
+            }, 300)
+          }}
+        >
+          Re-run Setup Wizard
+        </Button>
+        <span className="text-caption text-content-tertiary">
+          Opens the onboarding flow to reconfigure hardware detection, engine, and model.
+        </span>
+      </div>
+    </Section>
+  )
+}
+
 // ── Settings page ────────────────────────────────────────────────────────────
 
 export function Settings() {
@@ -267,7 +298,7 @@ export function Settings() {
         <SettingsSidebar active={active} isAuthenticated={isAuthenticated} />
 
         {/* Content */}
-        <div ref={setContentRef} className="flex-1 min-w-0 space-y-6">
+        <div ref={setContentRef} className="flex-1 min-w-0 space-y-6 [&>div]:scroll-mt-24">
 
           {/* ── General ──────────────────────────────────────────────── */}
 
@@ -292,6 +323,10 @@ export function Settings() {
                 saving={saveMutation.isPending}
               />
             </Section>
+          </div>
+
+          <div id="appearance">
+            <AppearanceSection />
           </div>
 
           {isAuthenticated && (
@@ -346,6 +381,10 @@ export function Settings() {
 
           {/* ── System ───────────────────────────────────────────────── */}
 
+          <div id="setup-wizard">
+            <SetupWizardSection onSave={handleSave} />
+          </div>
+
           <div id="developer-resources">
             <DeveloperResourcesSection />
           </div>
@@ -356,12 +395,6 @@ export function Settings() {
 
           <div id="recovery">
             <RecoverySection />
-          </div>
-
-          {/* ── Appearance ───────────────────────────────────────────── */}
-
-          <div id="appearance">
-            <AppearanceSection />
           </div>
 
         </div>
