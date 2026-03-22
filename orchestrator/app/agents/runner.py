@@ -522,8 +522,7 @@ async def _build_nova_context(
     # 1. Identity block
     identity_lines = [
         "## Identity",
-        f"Your name is {name}. You are a helpful AI assistant with persistent memory.",
-        "You remember previous conversations and can use tools to help users.",
+        f"Your name is {name}.",
     ]
     if persona:
         identity_lines.append("")

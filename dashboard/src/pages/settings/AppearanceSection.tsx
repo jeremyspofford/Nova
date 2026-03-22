@@ -1,5 +1,5 @@
 import React from 'react'
-import { Palette, Moon, Sun, Monitor } from 'lucide-react'
+import { Palette, Moon, Sun, Monitor, Type } from 'lucide-react'
 import { useTheme } from '../../stores/theme-store'
 import { themePresets } from '../../lib/color-palettes'
 import { Section, Button } from '../../components/ui'
@@ -103,6 +103,13 @@ const MODE_OPTIONS: { value: 'light' | 'system' | 'dark'; label: string; icon: R
   { value: 'dark',   label: 'Dark',   icon: Moon    },
 ]
 
+const FONT_SCALE_OPTIONS = [
+  { value: 0.85, label: 'S' },
+  { value: 1,    label: 'M' },
+  { value: 1.15, label: 'L' },
+  { value: 1.3,  label: 'XL' },
+]
+
 export function AppearanceSection() {
   const {
     modePreference, setModePreference,
@@ -110,6 +117,7 @@ export function AppearanceSection() {
     darkPreset, setDarkPreset,
     customLightAccent, setCustomLightAccent,
     customDarkAccent, setCustomDarkAccent,
+    fontScale, setFontScale,
   } = useTheme()
 
   const allPresets = Object.entries(themePresets)
@@ -136,6 +144,28 @@ export function AppearanceSection() {
               }
             >
               <Icon size={13} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Text Size */}
+      <div>
+        <label className="mb-2 block text-caption font-medium text-content-secondary">Text Size</label>
+        <div className="inline-flex rounded-sm border border-border p-0.5">
+          {FONT_SCALE_OPTIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setFontScale(value)}
+              className={
+                'flex items-center gap-1.5 rounded-xs px-3 py-1.5 text-caption font-medium transition-colors ' +
+                (fontScale === value
+                  ? 'bg-surface-elevated text-accent'
+                  : 'text-content-tertiary hover:text-content-secondary')
+              }
+            >
+              <Type size={value === 0.85 ? 11 : value === 1 ? 13 : value === 1.15 ? 15 : 17} />
               {label}
             </button>
           ))}

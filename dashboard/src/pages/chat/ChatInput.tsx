@@ -144,7 +144,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           onChange={onModelChange}
           models={modelPickerItems}
           showAuto
-          className="w-56"
+          className="w-80"
         />
 
         <Button

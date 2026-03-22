@@ -13,6 +13,7 @@ interface ThemeState {
   darkPreset: string
   customLightAccent: string
   customDarkAccent: string
+  fontScale: number
 }
 
 interface ThemeStore {
@@ -27,6 +28,8 @@ interface ThemeStore {
   setCustomLightAccent: (name: string) => void
   customDarkAccent: string
   setCustomDarkAccent: (name: string) => void
+  fontScale: number
+  setFontScale: (scale: number) => void
   activePreset: string                    // whichever of light/dark is active
 }
 
@@ -53,6 +56,7 @@ function loadState(): ThemeState {
       darkPreset: 'default',
       customLightAccent: 'teal',
       customDarkAccent: 'teal',
+      fontScale: 1,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     return state
@@ -71,6 +75,7 @@ function loadState(): ThemeState {
           darkPreset: parsed.preset || 'default',
           customLightAccent: parsed.accent || 'teal',
           customDarkAccent: parsed.accent || 'teal',
+          fontScale: 1,
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
         return state
@@ -84,6 +89,7 @@ function loadState(): ThemeState {
         darkPreset: parsed.darkPreset || 'default',
         customLightAccent: parsed.customLightAccent || 'teal',
         customDarkAccent: parsed.customDarkAccent || 'teal',
+        fontScale: typeof parsed.fontScale === 'number' ? parsed.fontScale : 1,
       }
     } catch { /* fall through */ }
   }
@@ -94,6 +100,7 @@ function loadState(): ThemeState {
     darkPreset: 'default',
     customLightAccent: 'teal',
     customDarkAccent: 'teal',
+    fontScale: 1,
   }
 }
 
@@ -131,6 +138,7 @@ function applyTheme(mode: Mode, state: ThemeState) {
     ...Object.entries(accent).map(([s, v]) => `--accent-${s}:${v}`),
     ...Object.entries(neutral).map(([s, v]) => `--neutral-${s}:${v}`),
     `--card:${cardValue}`,
+    `--font-scale:${state.fontScale}`,
   ].join(';')
 
   let el = document.getElementById('nova-theme-vars') as HTMLStyleElement | null
@@ -195,6 +203,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, customDarkAccent: name, darkPreset: 'custom' }))
   }, [])
 
+  const setFontScale = useCallback((scale: number) => {
+    setState(s => ({ ...s, fontScale: scale }))
+  }, [])
+
   const activePreset = resolvedMode === 'dark' ? state.darkPreset : state.lightPreset
 
   return (
@@ -210,6 +222,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setCustomLightAccent,
       customDarkAccent: state.customDarkAccent,
       setCustomDarkAccent,
+      fontScale: state.fontScale,
+      setFontScale,
       activePreset,
     }}>
       {children}

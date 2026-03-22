@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { Bot, User, FileText } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
@@ -8,7 +8,7 @@ import { ActivityFeed } from '../../components/ActivityFeed'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import type { Message } from '../../stores/chat-store'
 
-export function MessageBubble({ message }: { message: Message }) {
+export const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === 'user'
   const cleanedContent = useMemo(
     () => !isUser && message.content ? cleanToolArtifacts(message.content) : message.content,
@@ -30,7 +30,7 @@ export function MessageBubble({ message }: { message: Message }) {
       </div>
 
       {/* Bubble */}
-      <div className={isUser ? 'max-w-[70%]' : 'flex-1 min-w-0 max-w-[70%]'}>
+      <div className={isUser ? 'max-w-[80%]' : 'flex-1 min-w-0 max-w-[85%]'}>
         <div
           className={clsx(
             'text-compact leading-relaxed rounded-lg px-4 py-3',
@@ -110,4 +110,4 @@ export function MessageBubble({ message }: { message: Message }) {
       </div>
     </div>
   )
-}
+})

@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Bot, Sliders, Cpu, Plug, Wrench, Palette,
+  Bot, Sliders, Cpu, Plug, Wrench, Palette, Users, Bug,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
-  FileCode, Layers, Gauge, Activity, RotateCcw,
+  FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -24,6 +24,8 @@ import { AccountSection } from './settings/AccountSection'
 import { GuestAccessSection } from './settings/GuestAccessSection'
 import { LocalInferenceSection } from './settings/LocalInferenceSection'
 import { ToolPermissionsSection } from './settings/ToolPermissionsSection'
+import { DebugSection } from './settings/DebugSection'
+import { UsersSection } from './settings/UsersSection'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
 
@@ -78,9 +80,11 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'System',
     items: [
       { id: 'setup-wizard', label: 'Setup Wizard', icon: RotateCcw },
-      { id: 'developer-resources', label: 'Developer Resources', icon: FileCode },
+      { id: 'users', label: 'Users', icon: Users },
       { id: 'notifications', label: 'Notifications', icon: RadioIcon },
-      { id: 'recovery', label: 'Recovery & Services', icon: Shield },
+      { id: 'developer-resources', label: 'Developer Resources', icon: FileCode },
+      { id: 'debug', label: 'Debug', icon: Bug },
+      { id: 'recovery', label: 'Recovery', icon: HeartPulse },
     ],
   },
 ]
@@ -385,12 +389,20 @@ export function Settings() {
             <SetupWizardSection onSave={handleSave} />
           </div>
 
-          <div id="developer-resources">
-            <DeveloperResourcesSection />
+          <div id="users">
+            <UsersSection />
           </div>
 
           <div id="notifications">
             <NotificationsSection />
+          </div>
+
+          <div id="developer-resources">
+            <DeveloperResourcesSection />
+          </div>
+
+          <div id="debug">
+            <DebugSection />
           </div>
 
           <div id="recovery">

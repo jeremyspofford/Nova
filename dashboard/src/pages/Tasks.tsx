@@ -5,8 +5,10 @@ import {
   Send, RefreshCw, X, Clock, ChevronDown, ChevronUp,
   ThumbsUp, ThumbsDown, Loader2, Trash2, ShieldAlert,
   FileSearch, AlertTriangle, MessageSquare, Zap, CheckCircle2,
-  ListTodo, DollarSign, Timer,
+  ListTodo, DollarSign, Timer, Brain,
 } from 'lucide-react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -23,7 +25,7 @@ import { useChatStore } from '../stores/chat-store'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Badge, Button, Card, CopyableId, ConfirmDialog, EmptyState,
-  Metric, PipelineStages, SearchInput, Select, Sheet, Skeleton,
+  Metric, Modal, PipelineStages, SearchInput, Select, Skeleton,
   Tabs, Textarea, StatusDot, DataList,
 } from '../components/ui'
 import type { SemanticColor } from '../lib/design-tokens'
@@ -164,6 +166,21 @@ function matchesFilter(task: PipelineTask, filter: StatusFilter): boolean {
   if (filter === 'complete') return task.status === 'complete'
   if (filter === 'failed') return task.status === 'failed' || task.status === 'cancelled'
   return true
+}
+
+type SourceFilter = 'mine' | 'cortex' | 'all'
+
+const SOURCE_FILTERS = [
+  { value: 'mine', label: 'My Tasks' },
+  { value: 'cortex', label: 'Cortex' },
+  { value: 'all', label: 'All Sources' },
+]
+
+function matchesSourceFilter(task: PipelineTask, filter: SourceFilter): boolean {
+  if (filter === 'all') return true
+  const source = task.metadata?.source as string | undefined
+  if (filter === 'cortex') return source === 'cortex'
+  return source !== 'cortex'
 }
 
 // ── Severity badge ────────────────────────────────────────────────────────────
@@ -472,8 +489,26 @@ function TaskDetailSheet({
   ]
 
   return (
-    <Sheet open={open} onClose={onClose} width="wide" title={task.user_input.slice(0, 60) + (task.user_input.length > 60 ? '...' : '')}>
-      <div className="p-5 space-y-5">
+    <Modal open={open} onClose={onClose} size="xl" title={task.user_input.slice(0, 60) + (task.user_input.length > 60 ? '...' : '')}
+      footer={
+        <div className="flex gap-2 w-full">
+          <Button variant="secondary" size="sm" icon={<MessageSquare size={14} />} onClick={handleDiscuss}>Discuss</Button>
+          {isActive && !needsReview && (
+            <Button variant="danger" size="sm" icon={<X size={14} />} onClick={() => cancelMutation.mutate()} loading={cancelMutation.isPending}>Cancel</Button>
+          )}
+          {needsReview && (
+            <Button variant="primary" size="sm" icon={<ThumbsUp size={14} />} onClick={() => setDetailTab('review')}>Review</Button>
+          )}
+          {needsClarification && (
+            <Button variant="primary" size="sm" icon={<MessageSquare size={14} />} onClick={() => setDetailTab('clarify')}>Answer</Button>
+          )}
+          {isTerminal && (
+            <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => deleteMutation.mutate()} loading={deleteMutation.isPending}>Delete</Button>
+          )}
+        </div>
+      }
+    >
+      <div className="space-y-5 text-left">
         {/* Status + ID header */}
         <div className="flex items-center gap-2 flex-wrap">
           <Badge color={statusToBadgeColor(task.status)} dot>
@@ -483,12 +518,23 @@ function TaskDetailSheet({
           {task.pod_name && (
             <Badge color="accent" size="sm">{task.pod_name}</Badge>
           )}
+          {(task.metadata?.source as string) === 'cortex' && (
+            <Badge color="accent" size="sm">
+              <Brain size={10} className="inline mr-0.5" />
+              cortex
+            </Badge>
+          )}
+        </div>
+
+        {/* Task input */}
+        <div>
+          <p className="text-caption text-content-tertiary mb-1">Input</p>
+          <p className="text-compact text-content-primary whitespace-pre-wrap">{task.user_input}</p>
         </div>
 
         {/* Timestamps / metadata */}
         <DataList
           items={[
-            { label: 'Input', value: task.user_input },
             { label: 'Queued', value: task.queued_at ? formatDistanceToNow(new Date(task.queued_at), { addSuffix: true }) : '--' },
             ...(task.started_at ? [{ label: 'Started', value: formatDistanceToNow(new Date(task.started_at), { addSuffix: true }) }] : []),
             ...(task.completed_at ? [{ label: 'Completed', value: formatDistanceToNow(new Date(task.completed_at), { addSuffix: true }) }] : []),
@@ -511,9 +557,11 @@ function TaskDetailSheet({
           {detailTab === 'output' && (
             <div className="space-y-3">
               {task.output ? (
-                <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-surface-elevated p-3 text-mono-sm text-content-secondary">
-                  {task.output}
-                </pre>
+                <div className="rounded-sm bg-surface-elevated p-3 text-compact text-content-secondary markdown-body">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {task.output}
+                  </ReactMarkdown>
+                </div>
               ) : (
                 <p className="text-compact text-content-tertiary">No output yet.</p>
               )}
@@ -537,61 +585,8 @@ function TaskDetailSheet({
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2 border-t border-border-subtle pt-4">
-          <Button
-            variant="secondary"
-            size="sm"
-            icon={<MessageSquare size={14} />}
-            onClick={handleDiscuss}
-          >
-            Discuss
-          </Button>
-          {isActive && !needsReview && (
-            <Button
-              variant="danger"
-              size="sm"
-              icon={<X size={14} />}
-              onClick={() => cancelMutation.mutate()}
-              loading={cancelMutation.isPending}
-            >
-              Cancel
-            </Button>
-          )}
-          {needsReview && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<ThumbsUp size={14} />}
-              onClick={() => setDetailTab('review')}
-            >
-              Review
-            </Button>
-          )}
-          {needsClarification && (
-            <Button
-              variant="primary"
-              size="sm"
-              icon={<MessageSquare size={14} />}
-              onClick={() => setDetailTab('clarify')}
-            >
-              Answer
-            </Button>
-          )}
-          {isTerminal && (
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<Trash2 size={14} />}
-              onClick={() => deleteMutation.mutate()}
-              loading={deleteMutation.isPending}
-            >
-              Delete
-            </Button>
-          )}
-        </div>
       </div>
-    </Sheet>
+    </Modal>
   )
 }
 
@@ -608,13 +603,15 @@ function TaskFindingsTab({ taskId }: { taskId: string }) {
 }
 
 function TaskReviewsTab({ taskId }: { taskId: string }) {
-  const { data: reviews = [], isLoading } = useQuery({
+  const { data: reviews = [], isLoading, isError } = useQuery({
     queryKey: ['task-reviews', taskId],
     queryFn: () => getTaskReviews(taskId),
     staleTime: 10_000,
+    retry: false,
   })
 
   if (isLoading) return <Skeleton lines={3} />
+  if (isError) return <p className="text-compact text-content-tertiary">Could not load code reviews.</p>
   if (reviews.length === 0) return <p className="text-compact text-content-tertiary">No code reviews for this task.</p>
   return <CodeReviewSection reviews={reviews} />
 }
@@ -766,6 +763,12 @@ function TaskRow({
           <CopyableId id={task.id} />
         </div>
         <div className="flex items-center gap-3 mt-1">
+          {(task.metadata?.source as string) === 'cortex' && (
+            <Badge color="accent" size="sm">
+              <Brain size={10} className="inline mr-0.5" />
+              cortex
+            </Badge>
+          )}
           {modelOverride && (
             <span className="text-mono-sm text-content-tertiary">{modelOverride}</span>
           )}
@@ -886,6 +889,7 @@ function StatsRow() {
 
 export function Tasks() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('mine')
   const [search, setSearch] = useState('')
   const [podFilter, setPodFilter] = useState('')
   const [selectedTask, setSelectedTask] = useState<PipelineTask | null>(null)
@@ -917,6 +921,7 @@ export function Tasks() {
   // Filter tasks
   const filteredTasks = tasks
     .filter(t => matchesFilter(t, statusFilter))
+    .filter(t => matchesSourceFilter(t, sourceFilter))
     .filter(t => !search || t.user_input.toLowerCase().includes(search.toLowerCase()) || t.id.includes(search))
     .filter(t => !podFilter || t.pod_name === podFilter)
 
@@ -994,6 +999,15 @@ export function Tasks() {
           className="w-56"
         />
 
+        {/* Source filter */}
+        <div className="w-36">
+          <Select
+            value={sourceFilter}
+            onChange={e => setSourceFilter(e.target.value as SourceFilter)}
+            items={SOURCE_FILTERS}
+          />
+        </div>
+
         {/* Pod filter */}
         {uniquePods.length > 0 && (
           <div className="w-36">
@@ -1026,9 +1040,9 @@ export function Tasks() {
       {filteredTasks.length === 0 ? (
         <EmptyState
           icon={ListTodo}
-          title={statusFilter === 'all' && !search ? 'No tasks yet' : 'No matching tasks'}
+          title={statusFilter === 'all' && sourceFilter === 'all' && !search ? 'No tasks yet' : 'No matching tasks'}
           description={
-            statusFilter === 'all' && !search
+            statusFilter === 'all' && sourceFilter === 'all' && !search
               ? 'Submit your first pipeline task above to get started.'
               : 'Try adjusting your filters or search query.'
           }

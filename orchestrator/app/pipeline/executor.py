@@ -1005,6 +1005,19 @@ async def _complete_task(task_id: str, output: str, state: PipelineState) -> Non
         pass
     await _publish_notification("task_complete", task_id, "Task completed")
 
+    # Auto-close friction log entries when their fix task completes
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE friction_log SET status = 'fixed', updated_at = now()
+                WHERE task_id = $1::uuid AND status != 'fixed'
+                """,
+                task_id,
+            )
+    except Exception:
+        logger.debug(f"Task {task_id}: friction auto-close skipped (no linked entry or table missing)")
+
 
 async def _pause_for_human_review(
     task_id: str, escalation_message: str, state: PipelineState | None = None

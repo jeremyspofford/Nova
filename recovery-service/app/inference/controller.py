@@ -70,23 +70,26 @@ async def start_backend(backend: str) -> dict:
     if current_state in ("starting", "switching"):
         raise ValueError(f"Cannot start {backend}: already {current_state} {current_backend}")
 
+    # Capture old backend BEFORE overwriting Redis — _do_start_backend needs
+    # this to know what to stop.
+    old_backend = current_backend if current_backend != backend else None
+
     await write_config_state("inference.state", "starting")
     await write_config_state("inference.backend", backend)
-    asyncio.create_task(_do_start_backend(backend))
+    asyncio.create_task(_do_start_backend(backend, old_backend=old_backend))
     return {"status": "accepted", "backend": backend}
 
 
-async def _do_start_backend(backend: str) -> None:
+async def _do_start_backend(backend: str, *, old_backend: str | None = None) -> None:
     """Background task: start backend container and wait for healthy."""
     global _switch_progress
     info = BACKENDS[backend]
 
     try:
-        # Stop current backend if switching
-        current = await read_config("inference.backend", "")
-        if current and current != backend and current != "none":
-            _switch_progress = {"step": "stopping", "detail": f"Stopping {current}..."}
-            await _stop_backend(current)
+        # Stop old backend if switching (e.g. ollama → vllm)
+        if old_backend and old_backend in BACKENDS and old_backend != "none":
+            _switch_progress = {"step": "stopping", "detail": f"Stopping {old_backend}..."}
+            await _stop_backend(old_backend)
 
         _switch_progress = {"step": "starting", "detail": f"Starting {backend}..."}
         result = await start_profiled_service(info["profile"], info["service"])
@@ -280,6 +283,14 @@ def _stop_health_monitor() -> None:
 
 async def _health_monitor_loop(backend: str) -> None:
     global _health_failures, _health_backoff
+    import httpx
+
+    health_urls = {
+        "ollama": "http://ollama:11434/api/tags",
+        "vllm": "http://nova-vllm:8000/health",
+        "sglang": "http://nova-sglang:8000/health",
+    }
+
     while True:
         await asyncio.sleep(_health_backoff)
         try:
@@ -287,9 +298,29 @@ async def _health_monitor_loop(backend: str) -> None:
             container_name = info.get("container", "")
             cs = check_container_status(container_name) if container_name else {}
             is_running = isinstance(cs, dict) and cs.get("status") == "running"
-            if not is_running:
+
+            # Container running isn't enough — a crash-looping container
+            # briefly shows "running" before the process exits.  Probe the
+            # actual HTTP health endpoint to confirm.
+            is_healthy = False
+            if is_running:
+                url = health_urls.get(backend)
+                if url:
+                    try:
+                        async with httpx.AsyncClient(timeout=5.0) as client:
+                            r = await client.get(url)
+                            is_healthy = r.status_code == 200
+                    except Exception:
+                        is_healthy = False
+                else:
+                    # Unknown backend type with no URL — trust container status
+                    is_healthy = True
+
+            if not is_healthy:
                 _health_failures += 1
-                logger.warning("Backend %s health check failed (%d/3)", backend, _health_failures)
+                reason = "not running" if not is_running else "health endpoint unreachable"
+                logger.warning("Backend %s health check failed (%d/3): %s",
+                               backend, _health_failures, reason)
                 if _health_failures >= 3:
                     logger.error("Backend %s: 3 consecutive failures, attempting restart", backend)
                     try:

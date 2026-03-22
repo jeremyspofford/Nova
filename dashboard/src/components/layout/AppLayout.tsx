@@ -4,6 +4,7 @@ import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
 import { LogFrictionButton } from '../LogFrictionButton'
 import { useNotifications } from '../../hooks/useNotifications'
+import { useDebug } from '../../stores/debug-store'
 
 const STORAGE_KEY = 'nova-sidebar-collapsed'
 
@@ -23,6 +24,7 @@ export function AppLayout({
   fullWidth?: boolean
 }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const { isDebug } = useDebug()
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -53,7 +55,7 @@ export function AppLayout({
         )}
       </main>
       <MobileNav />
-      <LogFrictionButton />
+      {isDebug && <LogFrictionButton />}
     </div>
   )
 }

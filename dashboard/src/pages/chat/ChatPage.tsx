@@ -44,9 +44,15 @@ export function Chat() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
   // Track conversation switches to use instant scroll (no animation) on load
   const lastConversationId = useRef(conversationId)
   const needsInstantScroll = useRef(true)
+  // Character drip buffer — smooth out bursty network delivery
+  const dripBufferRef = useRef('')      // unreleased characters
+  const dripRevealedRef = useRef('')    // characters released so far
+  const dripIntervalRef = useRef<ReturnType<typeof setInterval>>()
+  const dripMsgIdRef = useRef('')       // which message the drip is targeting
 
   const { data: providers } = useQuery({
     queryKey: ['model-catalog'],
@@ -71,11 +77,19 @@ export function Chat() {
   }, [conversationId])
 
   useEffect(() => {
-    if (!bottomRef.current) return
-    bottomRef.current.scrollIntoView({
-      behavior: needsInstantScroll.current ? 'instant' : 'smooth',
-    })
-    needsInstantScroll.current = false
+    const el = scrollContainerRef.current
+    if (!el) return
+    if (needsInstantScroll.current) {
+      el.scrollTop = el.scrollHeight
+      needsInstantScroll.current = false
+      return
+    }
+    // Only auto-scroll if user is near the bottom (within 150px).
+    // This avoids hijacking scroll when the user is reading earlier messages.
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (distanceFromBottom < 150) {
+      el.scrollTop = el.scrollHeight
+    }
   }, [messages])
 
   // Auto-load persisted conversation on mount (page refresh / rebuild)
@@ -252,13 +266,33 @@ export function Chat() {
           )
         }
         accumulated += event
-        const displayContent = getStableContent(accumulated)
-        setMessages(prev =>
-          prev.map(m =>
-            m.id === assistantMsgId ? { ...m, content: displayContent } : m
-          )
-        )
+        dripBufferRef.current = accumulated.slice(dripRevealedRef.current.length)
+        // Start the drip interval if not already running
+        if (!dripIntervalRef.current) {
+          dripMsgIdRef.current = assistantMsgId
+          dripIntervalRef.current = setInterval(() => {
+            const buf = dripBufferRef.current
+            if (!buf) return
+            // Adaptive rate: release more chars when buffer is large to avoid lag
+            const charsPerTick = buf.length > 200 ? 12 : buf.length > 50 ? 6 : 3
+            const release = buf.slice(0, charsPerTick)
+            dripRevealedRef.current += release
+            dripBufferRef.current = buf.slice(charsPerTick)
+            const displayContent = getStableContent(dripRevealedRef.current)
+            const msgId = dripMsgIdRef.current
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === msgId ? { ...m, content: displayContent } : m
+              )
+            )
+          }, 16) // ~60fps
+        }
       }
+      // Stop drip and flush all remaining content
+      clearInterval(dripIntervalRef.current)
+      dripIntervalRef.current = undefined
+      dripBufferRef.current = ''
+      dripRevealedRef.current = ''
       setMessages(prev =>
         prev.map(m =>
           m.id === assistantMsgId
@@ -267,6 +301,10 @@ export function Chat() {
         )
       )
     } catch (err) {
+      clearInterval(dripIntervalRef.current)
+      dripIntervalRef.current = undefined
+      dripBufferRef.current = ''
+      dripRevealedRef.current = ''
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg)
       setMessages(prev =>
@@ -356,7 +394,7 @@ export function Chat() {
           /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
           <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
             {greeting && (
-              <div className="max-w-3xl w-full mb-8">
+              <div className="max-w-5xl w-full mb-8">
                 <MessageBubble message={{
                   id: 'greeting',
                   role: 'assistant',
@@ -365,15 +403,15 @@ export function Chat() {
                 }} />
               </div>
             )}
-            <div className="w-full max-w-3xl">
+            <div className="w-full max-w-5xl">
               <ChatInput {...chatInputProps} />
             </div>
           </div>
         ) : (
           /* Active chat: scrollable messages + bottom-pinned input */
           <>
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+            <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -397,7 +435,7 @@ export function Chat() {
             </div>
 
             {(streamingStatus || messageQueue.length > 0) && (
-              <p className="text-caption text-content-tertiary text-center py-1">
+              <p className="text-caption text-content-tertiary text-center py-1 min-h-6">
                 {streamingStatus && <>{aiName} is {streamingStatus}</>}
                 {streamingStatus && messageQueue.length > 0 && ' \u00b7 '}
                 {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
@@ -405,7 +443,7 @@ export function Chat() {
             )}
 
             <div className="shrink-0 w-full px-4 pb-4">
-              <div className="max-w-3xl mx-auto">
+              <div className="max-w-5xl mx-auto">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>

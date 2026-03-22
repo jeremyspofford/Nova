@@ -246,8 +246,8 @@ async def fix_friction_entry(entry_id: str, _admin: AdminDep):
 
         await conn.execute(
             """
-            INSERT INTO tasks (id, input, pod_id, status, metadata, created_at)
-            VALUES ($1, $2, $3, 'submitted', $4::jsonb, now())
+            INSERT INTO tasks (id, user_input, pod_id, status, metadata, queued_at)
+            VALUES ($1, $2, $3::uuid, 'queued', $4::jsonb, now())
             """,
             task_id, task_input, pod_id,
             json.dumps({"source": "friction_log", "friction_id": entry_id}),

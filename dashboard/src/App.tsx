@@ -7,6 +7,7 @@ import { CommandPalette } from './components/CommandPalette'
 import { StartupScreen } from './components/StartupScreen'
 import { ChatProvider } from './stores/chat-store'
 import { ThemeProvider } from './stores/theme-store'
+import { DebugProvider } from './stores/debug-store'
 import { AuthProvider, useAuth } from './stores/auth-store'
 import { ToastProvider } from './components/ToastProvider'
 import { Login } from './pages/Login'
@@ -185,11 +186,13 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-        <AuthProvider>
-          <ToastProvider>
-            <AppShell />
-          </ToastProvider>
-        </AuthProvider>
+        <DebugProvider>
+          <AuthProvider>
+            <ToastProvider>
+              <AppShell />
+            </ToastProvider>
+          </AuthProvider>
+        </DebugProvider>
       </ThemeProvider>
     </QueryClientProvider>
   )

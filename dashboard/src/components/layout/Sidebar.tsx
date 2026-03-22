@@ -12,8 +12,6 @@ import {
   Plug,
   BarChart3,
   Settings,
-  HeartPulse,
-  Users,
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
@@ -67,8 +65,6 @@ const navSections: NavSection[] = [
     label: 'System',
     items: [
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
-      { to: '/recovery', label: 'Recovery', icon: HeartPulse, minRole: 'admin' },
-      { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
     ],
   },
 ]

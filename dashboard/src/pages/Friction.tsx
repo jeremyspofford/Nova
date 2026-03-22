@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ClipboardX, AlertTriangle, CheckCircle2, Circle,
-  Wrench, Trash2, Loader2,
+  Wrench, Trash2, Loader2, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
@@ -11,7 +11,7 @@ import {
 } from '../components/ui'
 import {
   getFrictionEntries, getFrictionStats, fixFrictionEntry,
-  updateFrictionEntry, deleteFrictionEntry, getPipelineStats,
+  deleteFrictionEntry, getPipelineStats, getAuthHeaders,
   type FrictionEntry,
 } from '../api'
 import { LogFrictionSheet } from '../components/LogFrictionSheet'
@@ -34,6 +34,7 @@ export default function Friction() {
   const [severityFilter, setSeverityFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
 
   const { data: entries, isLoading } = useQuery({
@@ -65,16 +66,6 @@ export default function Friction() {
       setToast({ variant: 'success', message: 'Fix task created' })
     },
     onError: (e) => setToast({ variant: 'error', message: String(e) }),
-  })
-
-  const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      updateFrictionEntry(id, { status }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['friction'] })
-      qc.invalidateQueries({ queryKey: ['friction-stats'] })
-      setToast({ variant: 'success', message: 'Status updated' })
-    },
   })
 
   const deleteMutation = useMutation({
@@ -170,8 +161,9 @@ export default function Friction() {
             <FrictionEntryCard
               key={entry.id}
               entry={entry}
+              expanded={expandedId === entry.id}
+              onToggle={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
               onFix={() => fixMutation.mutate(entry.id)}
-              onMarkFixed={() => statusMutation.mutate({ id: entry.id, status: 'fixed' })}
               onDelete={() => setDeleteTarget(entry.id)}
               fixing={fixMutation.isPending}
             />
@@ -205,14 +197,16 @@ export default function Friction() {
 
 function FrictionEntryCard({
   entry,
+  expanded,
+  onToggle,
   onFix,
-  onMarkFixed,
   onDelete,
   fixing,
 }: {
   entry: FrictionEntry
+  expanded: boolean
+  onToggle: () => void
   onFix: () => void
-  onMarkFixed: () => void
   onDelete: () => void
   fixing: boolean
 }) {
@@ -221,14 +215,20 @@ function FrictionEntryCard({
   return (
     <Card role="listitem" className="p-4">
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+        <div
+          className="min-w-0 flex-1 cursor-pointer"
+          onClick={onToggle}
+        >
           <div className="flex items-center gap-2 mb-1">
+            {expanded
+              ? <ChevronDown size={14} className="shrink-0 text-content-tertiary" />
+              : <ChevronRight size={14} className="shrink-0 text-content-tertiary" />}
             <StatusDot status={STATUS_COLOR[entry.status] ?? 'neutral'} />
-            <span className="text-compact font-medium text-content-primary truncate">
+            <span className={`text-compact font-medium text-content-primary ${expanded ? '' : 'truncate'}`}>
               {entry.description}
             </span>
           </div>
-          <div className="flex items-center gap-2 text-caption text-content-tertiary">
+          <div className="flex items-center gap-2 text-caption text-content-tertiary ml-5">
             <Badge color={SEVERITY_COLOR[entry.severity] ?? 'neutral'} size="sm">
               {entry.severity}
             </Badge>
@@ -238,7 +238,7 @@ function FrictionEntryCard({
               </span>
             )}
             <span>{timeAgo}</span>
-            {entry.has_screenshot && <span>(img)</span>}
+            {entry.has_screenshot && !expanded && <span>(img)</span>}
           </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -254,17 +254,6 @@ function FrictionEntryCard({
               Fix This
             </Button>
           )}
-          {entry.status !== 'fixed' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onMarkFixed}
-              icon={<CheckCircle2 size={12} />}
-              aria-label={`Mark fixed: ${entry.description.slice(0, 30)}`}
-            >
-              Fixed
-            </Button>
-          )}
           <Button
             variant="ghost"
             size="sm"
@@ -274,9 +263,10 @@ function FrictionEntryCard({
           />
         </div>
       </div>
-      {/* Inline task status for Fix This */}
+
+      {/* Inline task status */}
       {entry.task_id && (
-        <div className="mt-2 text-caption text-content-tertiary flex items-center gap-1.5" aria-live="polite">
+        <div className="mt-2 ml-5 text-caption text-content-tertiary flex items-center gap-1.5" aria-live="polite">
           {entry.status === 'in_progress' ? (
             <><Loader2 size={12} className="animate-spin" /> Fix in progress</>
           ) : entry.status === 'fixed' ? (
@@ -289,7 +279,76 @@ function FrictionEntryCard({
           </a>
         </div>
       )}
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="mt-3 ml-5 space-y-3 border-t border-border-secondary pt-3">
+          {entry.has_screenshot && (
+            <FrictionScreenshot entryId={entry.id} />
+          )}
+          {entry.metadata && Object.keys(entry.metadata).length > 0 && (
+            <div>
+              <span className="text-caption text-content-tertiary block mb-1">Details</span>
+              {entry.source === 'auto' && entry.metadata.error ? (
+                <pre className="text-xs text-content-secondary bg-surface-secondary rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                  {String(entry.metadata.error)}
+                </pre>
+              ) : (
+                <pre className="text-xs text-content-secondary bg-surface-secondary rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                  {JSON.stringify(entry.metadata, null, 2)}
+                </pre>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-4 text-caption text-content-tertiary">
+            <span>Created {new Date(entry.created_at).toLocaleString()}</span>
+            {entry.updated_at !== entry.created_at && (
+              <span>Updated {new Date(entry.updated_at).toLocaleString()}</span>
+            )}
+            {entry.source === 'auto' && typeof entry.metadata.failed_task_id === 'string' && (
+              <a
+                href={`/tasks?id=${entry.metadata.failed_task_id}`}
+                className="text-accent hover:underline"
+              >
+                View failed task
+              </a>
+            )}
+          </div>
+        </div>
+      )}
     </Card>
+  )
+}
+
+function FrictionScreenshot({ entryId }: { entryId: string }) {
+  const [src, setSrc] = useState<string | null>(null)
+
+  useEffect(() => {
+    let revoke: string | null = null
+    const load = async () => {
+      try {
+        const resp = await fetch(`/api/v1/friction/${entryId}/screenshot?thumb=true`, {
+          headers: getAuthHeaders(),
+        })
+        if (resp.ok) {
+          const blob = await resp.blob()
+          const url = URL.createObjectURL(blob)
+          revoke = url
+          setSrc(url)
+        }
+      } catch { /* screenshot unavailable */ }
+    }
+    load()
+    return () => { if (revoke) URL.revokeObjectURL(revoke) }
+  }, [entryId])
+
+  if (!src) return null
+  return (
+    <img
+      src={src}
+      alt="Friction screenshot"
+      className="rounded border border-border-secondary max-w-xs"
+    />
   )
 }
 

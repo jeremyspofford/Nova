@@ -67,7 +67,7 @@ export function Users() {
   )
 }
 
-function UsersTab({ currentRole, currentUserId }: { currentRole: Role; currentUserId?: string }) {
+export function UsersTab({ currentRole, currentUserId }: { currentRole: Role; currentUserId?: string }) {
   const qc = useQueryClient()
   const { data: users = [], isLoading, error } = useQuery({ queryKey: ['users'], queryFn: fetchUsers })
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null)
@@ -196,7 +196,7 @@ function UsersTab({ currentRole, currentUserId }: { currentRole: Role; currentUs
   )
 }
 
-function InvitationsTab({ currentRole }: { currentRole: Role }) {
+export function InvitationsTab({ currentRole }: { currentRole: Role }) {
   const qc = useQueryClient()
   const { data: invites = [], isLoading, error } = useQuery({ queryKey: ['invites'], queryFn: fetchInvites })
 

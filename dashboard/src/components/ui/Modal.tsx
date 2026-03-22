@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import clsx from 'clsx'
 
-type ModalSize = 'sm' | 'md' | 'lg'
+type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
 type ModalProps = {
   open: boolean
@@ -18,6 +18,7 @@ const SIZES: Record<ModalSize, string> = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
 }
 
 export function Modal({ open, onClose, size = 'md', title, children, footer }: ModalProps) {
@@ -72,7 +73,7 @@ export function Modal({ open, onClose, size = 'md', title, children, footer }: M
             </button>
           </div>
         )}
-        <div className="px-6 py-4">{children}</div>
+        <div className="px-6 py-4 max-h-[70vh] overflow-y-auto">{children}</div>
         {footer && (
           <div className="px-6 py-4 border-t border-border-subtle flex justify-end gap-2">
             {footer}

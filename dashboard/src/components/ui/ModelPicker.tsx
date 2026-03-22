@@ -83,7 +83,7 @@ export function ModelPicker({
 
       {open && (
         <div className={clsx(
-          'absolute left-0 right-0 z-40 bg-surface-card border border-border rounded-lg shadow-lg py-1 max-h-60 overflow-y-auto animate-fade-in',
+          'absolute left-0 z-40 min-w-full w-max max-w-[28rem] bg-surface-card border border-border rounded-lg shadow-lg py-1 max-h-60 overflow-y-auto animate-fade-in',
           flipUp ? 'bottom-full mb-1' : 'top-full mt-1',
         )}>
           {showAuto && (
