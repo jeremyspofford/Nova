@@ -44,6 +44,9 @@ export function Chat() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  // Track conversation switches to use instant scroll (no animation) on load
+  const lastConversationId = useRef(conversationId)
+  const needsInstantScroll = useRef(true)
 
   const { data: providers } = useQuery({
     queryKey: ['model-catalog'],
@@ -61,7 +64,18 @@ export function Chat() {
   })
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (conversationId !== lastConversationId.current) {
+      needsInstantScroll.current = true
+      lastConversationId.current = conversationId
+    }
+  }, [conversationId])
+
+  useEffect(() => {
+    if (!bottomRef.current) return
+    bottomRef.current.scrollIntoView({
+      behavior: needsInstantScroll.current ? 'instant' : 'smooth',
+    })
+    needsInstantScroll.current = false
   }, [messages])
 
   // Auto-load persisted conversation on mount (page refresh / rebuild)
