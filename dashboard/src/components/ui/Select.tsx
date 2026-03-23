@@ -20,7 +20,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
       id || (label ? `select-${label.toLowerCase().replace(/\s+/g, '-')}` : undefined)
 
     return (
-      <div className="w-full">
+      <div className={clsx('w-full', className)}>
         {label && (
           <label
             htmlFor={selectId}
@@ -42,7 +42,6 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
               ? 'border-danger ring-2 ring-danger/40'
               : 'border-border focus:border-border-focus focus:ring-2 focus:ring-accent-500/40',
             'disabled:opacity-50 disabled:cursor-not-allowed',
-            className,
           )}
           aria-invalid={error ? true : undefined}
           aria-describedby={

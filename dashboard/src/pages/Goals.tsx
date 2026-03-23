@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Target, Plus, Trash2, DollarSign,
-  TrendingUp, Repeat, Pencil, Zap,
+  TrendingUp, Repeat, Pencil, Zap, Pause, Play,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
@@ -403,6 +403,18 @@ function GoalCard({ goal }: { goal: Goal }) {
     onError: (e) => setToast({ variant: 'error', message: `Failed to trigger: ${e}` }),
   })
 
+  const toggleEnabled = useMutation({
+    mutationFn: () => {
+      const newStatus = goal.status === 'active' ? 'paused' : 'active'
+      return updateGoal(goal.id, { status: newStatus })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      qc.invalidateQueries({ queryKey: ['goal-stats'] })
+    },
+    onError: (e) => setToast({ variant: 'error', message: `Failed to toggle: ${e}` }),
+  })
+
   const { data: goalTasks } = useQuery({
     queryKey: ['goal-tasks', goal.id],
     queryFn: () => getPipelineTasks({ goal_id: goal.id, limit: 5 }),
@@ -450,6 +462,17 @@ function GoalCard({ goal }: { goal: Goal }) {
 
           {/* Controls */}
           <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+            {(goal.status === 'active' || goal.status === 'paused') && (
+              <Tooltip content={goal.status === 'active' ? 'Disable goal' : 'Enable goal'}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon={goal.status === 'active' ? <Pause size={14} /> : <Play size={14} />}
+                  onClick={() => toggleEnabled.mutate()}
+                  loading={toggleEnabled.isPending}
+                />
+              </Tooltip>
+            )}
             {goal.status === 'active' && (
               <Button
                 variant="ghost"

@@ -362,6 +362,12 @@ _DISCOVERY_FNS: dict[str, Any] = {
 }
 
 
+def _vllm_available() -> bool:
+    """Check if vLLM is the active backend AND healthy."""
+    from app.registry import _vllm
+    return _vllm.is_available
+
+
 def _is_provider_available(slug: str) -> bool:
     """Check if a provider has credentials configured."""
     from app.providers.claude_subscription_provider import discover_claude_oauth_token
@@ -369,7 +375,7 @@ def _is_provider_available(slug: str) -> bool:
 
     checks = {
         "ollama": lambda: True,
-        "vllm": lambda: settings.inference_backend == "vllm",
+        "vllm": lambda: _vllm_available(),
         "claude-max": lambda: bool(discover_claude_oauth_token()),
         "chatgpt": lambda: bool(discover_chatgpt_token()),
         "groq": lambda: bool(settings.groq_api_key),

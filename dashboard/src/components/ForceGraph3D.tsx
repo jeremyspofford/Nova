@@ -227,12 +227,13 @@ export function ForceGraph3D({
       console.warn('Bloom pass failed, continuing without glow:', e)
     }
 
-    // ── Auto-rotation ──────────────────────────────────────────────────
-    try {
-      const controls = graph.controls()
-      controls.autoRotate = true
-      controls.autoRotateSpeed = 0.4
-    } catch { /* ok */ }
+    // ── Auto-rotation (manual — TrackballControls lack autoRotate) ─────
+    let rotationFrame: number
+    const autoRotate = () => {
+      try { graph.scene().rotation.y += 0.001 } catch { /* ok */ }
+      rotationFrame = requestAnimationFrame(autoRotate)
+    }
+    autoRotate()
 
     graphRef.current = graph
     initializedRef.current = true
@@ -248,6 +249,7 @@ export function ForceGraph3D({
     ro.observe(el)
 
     return () => {
+      cancelAnimationFrame(rotationFrame)
       ro.disconnect()
       initializedRef.current = false
       graphRef.current = null

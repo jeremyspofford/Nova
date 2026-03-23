@@ -95,6 +95,9 @@ class OpenAICompatibleProvider(ModelProvider):
 
         async with httpx.AsyncClient(timeout=self._timeout, headers=self._extra_headers) as client:
             r = await client.post(f"{self._base_url}/v1/chat/completions", json=payload)
+            if r.status_code >= 400:
+                logger.error("%s complete failed (%d): %s | payload keys: %s",
+                             self._name, r.status_code, r.text[:300], list(payload.keys()))
             r.raise_for_status()
             data = r.json()
 

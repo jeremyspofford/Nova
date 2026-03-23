@@ -36,6 +36,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.warning("Failed to sync Ollama models at startup: %s", e)
 
+    # Probe vLLM/sglang at startup so they appear as available in the catalog
+    try:
+        from app.registry import sync_vllm_models
+        added = await sync_vllm_models()
+        if added:
+            log.info("Synced %d vLLM model(s) into registry", added)
+    except Exception as e:
+        log.debug("vLLM not available at startup: %s", e)
+
     log.info("LLM Gateway ready")
     yield
     log.info("LLM Gateway shutting down")

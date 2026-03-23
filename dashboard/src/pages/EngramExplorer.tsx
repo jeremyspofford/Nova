@@ -4,6 +4,7 @@ import {
   Network, Brain, RefreshCw, Zap, GitMerge,
   Activity, ChevronDown, ChevronRight,
 } from 'lucide-react'
+import { formatDistanceToNow } from 'date-fns'
 import { apiFetch } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
@@ -142,8 +143,8 @@ function ScoreBar({ value, label, compact }: { value: number; label: string; com
 // ── Tab config ───────────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'explorer', label: 'Explorer', icon: Activity },
   { id: 'graph', label: 'Graph Explorer', icon: Network },
+  { id: 'explorer', label: 'Explorer', icon: Activity },
   { id: 'self-model', label: 'Self-Model', icon: Brain },
   { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
 ]
@@ -378,10 +379,6 @@ function GraphTab() {
                 className="w-full h-full"
               />
             </div>
-            {/* Overlay HUD */}
-            <div className="absolute bottom-3 left-3 text-micro text-neutral-400 bg-black/60 backdrop-blur-sm px-2.5 py-1.5 rounded-sm border border-white/5">
-              {graph.node_count} memories, {graph.edge_count} connections — orbit to rotate, scroll to zoom, click a node for details
-            </div>
             {/* Type legend */}
             <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1">
               {Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
@@ -398,6 +395,10 @@ function GraphTab() {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div className="text-caption text-content-tertiary">
+            {graph.node_count} memories &middot; {graph.edge_count} connections &mdash; orbit to rotate, scroll to zoom, click a node for details
           </div>
 
           {/* Detail Sheet */}
@@ -611,6 +612,32 @@ function SelfModelEngrams() {
 
 // ── Consolidation Tab ────────────────────────────────────────────────────────
 
+function summarizeConsolidation(entry: ConsolidationEntry): string[] {
+  const parts: string[] = []
+  if (entry.engrams_reviewed > 0)
+    parts.push(`Reviewed ${entry.engrams_reviewed} memories`)
+  if (entry.schemas_created > 0)
+    parts.push(`extracted ${entry.schemas_created} pattern${entry.schemas_created > 1 ? 's' : ''}`)
+  if (entry.edges_strengthened > 0)
+    parts.push(`strengthened ${entry.edges_strengthened} connection${entry.edges_strengthened > 1 ? 's' : ''}`)
+  if (entry.edges_pruned > 0)
+    parts.push(`pruned ${entry.edges_pruned} weak edge${entry.edges_pruned > 1 ? 's' : ''}`)
+  if (entry.engrams_merged > 0)
+    parts.push(`merged ${entry.engrams_merged} duplicate${entry.engrams_merged > 1 ? 's' : ''}`)
+  if (entry.engrams_pruned > 0)
+    parts.push(`archived ${entry.engrams_pruned} dead memor${entry.engrams_pruned > 1 ? 'ies' : 'y'}`)
+  if (entry.contradictions_resolved > 0)
+    parts.push(`resolved ${entry.contradictions_resolved} contradiction${entry.contradictions_resolved > 1 ? 's' : ''}`)
+  return parts
+}
+
+const TRIGGER_COLOR: Record<string, SemanticColor> = {
+  manual: 'info',
+  idle: 'neutral',
+  scheduled: 'accent',
+  threshold: 'warning',
+}
+
 function ConsolidationTab() {
   const { data, isLoading, refetch } = useQuery<{ count: number; entries: ConsolidationEntry[] }>({
     queryKey: ['engram-consolidation-log'],
@@ -652,57 +679,100 @@ function ConsolidationTab() {
         />
       )}
 
-      {data?.entries.map((entry) => (
-        <Card key={entry.id} variant="default" className="p-4">
-          <div
-            className="flex items-center gap-3 cursor-pointer"
-            onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-          >
-            {expandedId === entry.id ? (
-              <ChevronDown className="w-4 h-4 text-content-tertiary shrink-0" />
-            ) : (
-              <ChevronRight className="w-4 h-4 text-content-tertiary shrink-0" />
-            )}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge color="neutral" size="sm">{entry.trigger}</Badge>
-                <span className="text-caption text-content-tertiary">
-                  {entry.created_at ? new Date(entry.created_at).toLocaleString() : 'unknown'}
-                </span>
-                <span className="text-caption text-content-tertiary ml-auto">{entry.duration_ms}ms</span>
-              </div>
-            </div>
-          </div>
+      {data?.entries.map((entry) => {
+        const summary = summarizeConsolidation(entry)
+        const selfModel = entry.self_model_updates as Record<string, unknown> | null
+        const hadActivity = summary.length > 0
 
-          {expandedId === entry.id && (
-            <div className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-              <StatCell label="Reviewed" value={entry.engrams_reviewed} />
-              <StatCell label="Schemas Created" value={entry.schemas_created} />
-              <StatCell label="Edges Strengthened" value={entry.edges_strengthened} />
-              <StatCell label="Edges Pruned" value={entry.edges_pruned} />
-              <StatCell label="Engrams Pruned" value={entry.engrams_pruned} />
-              <StatCell label="Merged" value={entry.engrams_merged} />
-              <StatCell label="Contradictions" value={entry.contradictions_resolved} />
-              <div className="p-2 rounded-sm bg-surface-elevated">
-                <div className="text-caption text-content-tertiary">Maturity</div>
-                <div className="text-compact font-medium text-content-primary">
-                  {(entry.self_model_updates as Record<string, string>)?.maturity_stage ?? '-'}
+        return (
+          <Card key={entry.id} variant="default" className="p-4">
+            <div
+              className="flex items-center gap-3 cursor-pointer"
+              onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+            >
+              {expandedId === entry.id ? (
+                <ChevronDown className="w-4 h-4 text-content-tertiary shrink-0" />
+              ) : (
+                <ChevronRight className="w-4 h-4 text-content-tertiary shrink-0" />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge color={TRIGGER_COLOR[entry.trigger] ?? 'neutral'} size="sm">{entry.trigger}</Badge>
+                  <span className="text-caption text-content-secondary">
+                    {hadActivity ? summary.join(', ') : 'No changes — memory is stable'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 text-micro text-content-tertiary">
+                  <span>{entry.created_at ? formatDistanceToNow(new Date(entry.created_at), { addSuffix: true }) : 'unknown'}</span>
+                  <span>{entry.duration_ms}ms</span>
+                  {selfModel?.maturity_stage != null && (
+                    <span>maturity: {String(selfModel.maturity_stage)}</span>
+                  )}
                 </div>
               </div>
             </div>
-          )}
-        </Card>
-      ))}
+
+            {expandedId === entry.id && (
+              <div className="mt-3 pt-3 border-t border-border-subtle space-y-3">
+                {/* Non-zero stats */}
+                {hadActivity ? (
+                  <div className="flex flex-wrap gap-2">
+                    {entry.engrams_reviewed > 0 && <StatPill label="Reviewed" value={entry.engrams_reviewed} />}
+                    {entry.schemas_created > 0 && <StatPill label="Patterns" value={entry.schemas_created} />}
+                    {entry.edges_strengthened > 0 && <StatPill label="Strengthened" value={entry.edges_strengthened} />}
+                    {entry.edges_pruned > 0 && <StatPill label="Edges pruned" value={entry.edges_pruned} />}
+                    {entry.engrams_merged > 0 && <StatPill label="Merged" value={entry.engrams_merged} />}
+                    {entry.engrams_pruned > 0 && <StatPill label="Archived" value={entry.engrams_pruned} />}
+                    {entry.contradictions_resolved > 0 && <StatPill label="Contradictions" value={entry.contradictions_resolved} />}
+                  </div>
+                ) : (
+                  <p className="text-caption text-content-tertiary">
+                    All phases ran but found nothing to change. This is normal for a stable memory graph.
+                  </p>
+                )}
+
+                {/* Self-model snapshot */}
+                {selfModel && Object.keys(selfModel).length > 0 && (
+                  <div>
+                    <p className="text-micro font-medium uppercase tracking-wider text-content-tertiary mb-1.5">Self-Model Snapshot</p>
+                    <div className="flex flex-wrap gap-2">
+                      {selfModel.maturity_stage != null && (
+                        <StatPill label="Maturity" value={String(selfModel.maturity_stage)} />
+                      )}
+                      {typeof selfModel.total_engrams === 'number' && (
+                        <StatPill label="Total engrams" value={selfModel.total_engrams} />
+                      )}
+                      {typeof selfModel.schema_count === 'number' && selfModel.schema_count > 0 && (
+                        <StatPill label="Schemas" value={selfModel.schema_count} />
+                      )}
+                      {typeof selfModel.reflection_count === 'number' && selfModel.reflection_count > 0 && (
+                        <StatPill label="Reflections" value={selfModel.reflection_count} />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Meta */}
+                <div className="flex items-center gap-4 text-micro text-content-tertiary">
+                  <span>{entry.created_at ? new Date(entry.created_at).toLocaleString() : 'unknown'}</span>
+                  <span>Duration: {entry.duration_ms}ms</span>
+                  {entry.model_used && <span>Model: {entry.model_used}</span>}
+                </div>
+              </div>
+            )}
+          </Card>
+        )
+      })}
     </div>
   )
 }
 
-function StatCell({ label, value }: { label: string; value: number }) {
+function StatPill({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="p-2 rounded-sm bg-surface-elevated">
-      <div className="text-caption text-content-tertiary">{label}</div>
-      <div className="text-display font-mono text-accent">{value}</div>
-    </div>
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm bg-surface-elevated text-caption">
+      <span className="text-content-tertiary">{label}</span>
+      <span className="font-mono font-medium text-content-secondary">{value}</span>
+    </span>
   )
 }
 
@@ -742,7 +812,7 @@ const HELP_ENTRIES: Record<string, { term: string; definition: string }[]> = {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function EngramExplorer() {
-  const [activeTab, setActiveTab] = useState('explorer')
+  const [activeTab, setActiveTab] = useState('graph')
 
   return (
     <div className="px-4 py-6 sm:px-6 space-y-6">

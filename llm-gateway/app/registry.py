@@ -358,6 +358,35 @@ async def sync_ollama_models() -> int:
     return added
 
 
+async def sync_vllm_models() -> int:
+    """Probe vLLM, run a health check, and register any served models.
+    Called at startup. Returns count of newly registered models."""
+    import httpx
+    # Trigger health check to flip _healthy flag
+    await _vllm.check_health()
+    if not _vllm.is_available:
+        return 0
+
+    try:
+        async with httpx.AsyncClient(base_url="http://nova-vllm:8000", timeout=5.0) as client:
+            resp = await client.get("/v1/models")
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:
+        log.debug("sync_vllm_models: vLLM unreachable: %s", e)
+        return 0
+
+    added = 0
+    for m in data.get("data", []):
+        model_id = m["id"]
+        if model_id not in MODEL_REGISTRY and model_id != DEFAULT_MODEL_KEY:
+            MODEL_REGISTRY[model_id] = _vllm
+            _local.update_local_models(_local._local_models | {model_id})
+            added += 1
+            log.info("Auto-registered vLLM model: %s", model_id)
+    return added
+
+
 # ── Model → provider routing table ────────────────────────────────────────────
 #
 # Naming convention:
@@ -503,7 +532,7 @@ def get_provider_catalog() -> list[dict]:
         {"slug": "openai",      "name": "OpenAI API",          "type": "paid",         "instance": _litellm,
          "available": bool(settings.openai_api_key),      "default_model": "gpt-4o"},
         {"slug": "vllm",        "name": "vLLM",                "type": "local",        "instance": _vllm,
-         "available": _vllm.is_available,                 "default_model": None},
+         "default_model": None},
     ]
 
     # Count models per provider
@@ -511,6 +540,12 @@ def get_provider_catalog() -> list[dict]:
     for meta in _PROVIDER_META:
         instance = meta["instance"]
         slug = meta["slug"]
+
+        # Resolve availability: use explicit value if set, otherwise check the instance
+        if "available" in meta:
+            available = meta["available"]
+        else:
+            available = getattr(instance, "is_available", False)
 
         # Special-case: anthropic/openai share _litellm but route by prefix
         if slug == "anthropic":
@@ -527,7 +562,7 @@ def get_provider_catalog() -> list[dict]:
             "slug": slug,
             "name": meta["name"],
             "type": meta["type"],
-            "available": meta["available"],
+            "available": available,
             "model_count": count,
             "default_model": meta["default_model"],
         })
