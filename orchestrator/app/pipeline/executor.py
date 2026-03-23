@@ -890,8 +890,8 @@ async def _load_task(task_id: str) -> TaskRow | None:
         retry_count=row["retry_count"],
         max_retries=row["max_retries"],
         status=row["status"],
-        checkpoint=dict(row["checkpoint"] or {}),
-        metadata=dict(row["metadata"] or {}),
+        checkpoint=row["checkpoint"] if isinstance(row["checkpoint"], dict) else {},
+        metadata=row["metadata"] if isinstance(row["metadata"], dict) else {},
     )
 
 

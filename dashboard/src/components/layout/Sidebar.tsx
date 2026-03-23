@@ -18,11 +18,13 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
+import { useDebug } from '../../stores/debug-store'
 import { hasMinRole, type Role } from '../../lib/roles'
 import { useAttentionCount } from '../../hooks/useAttentionCount'
 
 type NavItem = {
   to: string
+  debugOnly?: boolean
   label: string
   icon: typeof MessageSquare
   minRole: Role
@@ -41,7 +43,7 @@ const navSections: NavSection[] = [
       { to: '/', label: 'Overview', icon: LayoutDashboard, minRole: 'guest' },
       { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
       { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
-      { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member' },
+      { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member', debugOnly: true },
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
       { to: '/engrams', label: 'Memory', icon: Brain, minRole: 'member' },
     ],
@@ -86,6 +88,7 @@ export function Sidebar({
   const { user, authConfig } = useAuth()
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
   const { data: attentionCount = 0 } = useAttentionCount()
+  const { isDebug } = useDebug()
 
   const isActive = (to: string) => {
     return location.pathname === to
@@ -111,7 +114,9 @@ export function Sidebar({
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-4">
         {navSections.map((section, sIdx) => {
-          const visibleItems = section.items.filter(item => hasMinRole(userRole, item.minRole))
+          const visibleItems = section.items.filter(item =>
+            hasMinRole(userRole, item.minRole) && (!item.debugOnly || isDebug)
+          )
           if (visibleItems.length === 0) return null
           return (
             <div key={sIdx}>

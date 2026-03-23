@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Bot, Sliders, Cpu, Plug, Wrench, Palette, Users, Bug,
+  Bot, Sliders, Cpu, Plug, Wrench, Palette, Users, Bug, Database,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
   FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
-import { Section, Button } from '../components/ui'
+import { Section, Button, ConfirmDialog, Toast } from '../components/ui'
 import { ConfigField, useConfigValue } from './settings/shared'
 import { LLMRoutingSection } from './settings/LLMRoutingSection'
 import { ProviderStatusSection } from './settings/ProviderStatusSection'
@@ -84,6 +84,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'notifications', label: 'Notifications', icon: RadioIcon },
       { id: 'developer-resources', label: 'Developer Resources', icon: FileCode },
       { id: 'debug', label: 'Debug', icon: Bug },
+      { id: 'data', label: 'Data', icon: Database },
       { id: 'recovery', label: 'Recovery', icon: HeartPulse },
     ],
   },
@@ -239,6 +240,84 @@ function SetupWizardSection({ onSave }: { onSave: (key: string, value: string) =
   )
 }
 
+// ── Data management ─────────────────────────────────────────────────────────
+
+function DataManagementSection() {
+  const qc = useQueryClient()
+  const [confirmTarget, setConfirmTarget] = useState<'friction' | 'tasks' | null>(null)
+  const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
+
+  const clearFriction = useMutation({
+    mutationFn: async () => {
+      const { bulkDeleteFrictionEntries } = await import('../api')
+      return bulkDeleteFrictionEntries()
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['friction'] })
+      qc.invalidateQueries({ queryKey: ['friction-stats'] })
+      setConfirmTarget(null)
+      setToast({ variant: 'success', message: `Cleared ${data.deleted} friction entries` })
+    },
+    onError: (e) => { setConfirmTarget(null); setToast({ variant: 'error', message: String(e) }) },
+  })
+
+  const clearTasks = useMutation({
+    mutationFn: async () => {
+      const { bulkDeletePipelineTasks } = await import('../api')
+      return bulkDeletePipelineTasks()
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+      setConfirmTarget(null)
+      setToast({ variant: 'success', message: `Cleared ${data.deleted} pipeline tasks` })
+    },
+    onError: (e) => { setConfirmTarget(null); setToast({ variant: 'error', message: String(e) }) },
+  })
+
+  return (
+    <Section icon={Database} title="Data" description="Clear accumulated data. Active/queued tasks are never deleted.">
+      <div className="space-y-3">
+        <div className="flex items-center justify-between py-2">
+          <div>
+            <p className="text-compact text-content-primary">Friction Logs</p>
+            <p className="text-caption text-content-tertiary">Delete all friction log entries and screenshots.</p>
+          </div>
+          <Button variant="danger" size="sm" onClick={() => setConfirmTarget('friction')}>Clear All</Button>
+        </div>
+        <div className="flex items-center justify-between py-2">
+          <div>
+            <p className="text-compact text-content-primary">Pipeline Task History</p>
+            <p className="text-caption text-content-tertiary">Delete all completed, failed, and cancelled tasks.</p>
+          </div>
+          <Button variant="danger" size="sm" onClick={() => setConfirmTarget('tasks')}>Clear All</Button>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmTarget === 'friction'}
+        title="Clear all friction logs?"
+        description="This will permanently delete all friction log entries and their screenshots."
+        confirmLabel="Clear All"
+        destructive
+        onConfirm={() => clearFriction.mutate()}
+        onClose={() => setConfirmTarget(null)}
+      />
+      <ConfirmDialog
+        open={confirmTarget === 'tasks'}
+        title="Clear pipeline task history?"
+        description="This will permanently delete all completed, failed, and cancelled pipeline tasks. Active and queued tasks will not be affected."
+        confirmLabel="Clear All"
+        destructive
+        onConfirm={() => clearTasks.mutate()}
+        onClose={() => setConfirmTarget(null)}
+      />
+      {toast && (
+        <Toast variant={toast.variant} message={toast.message} onDismiss={() => setToast(null)} />
+      )}
+    </Section>
+  )
+}
+
 // ── Settings page ────────────────────────────────────────────────────────────
 
 export function Settings() {
@@ -309,18 +388,18 @@ export function Settings() {
           <div id="identity">
             <Section icon={Bot} title="Nova Identity" description="How Nova presents itself. Changes appear in the next Chat session.">
               <ConfigField label="Name" configKey="nova.name" value={novaName} placeholder="Nova" description="Shown in the dashboard header and chat UI." onSave={handleSave} saving={saveMutation.isPending} />
-              <ConfigField label="Greeting message" configKey="nova.greeting" value={novaGreeting} placeholder="Hello! I'm Nova..." description="The first message shown in the Chat page before the user types anything." onSave={handleSave} saving={saveMutation.isPending} />
+              <ConfigField label="Greeting message" configKey="nova.greeting" value={novaGreeting} multiline rows={3} placeholder="Hello! I'm Nova..." description="The first message shown in the Chat page before the user types anything." onSave={handleSave} saving={saveMutation.isPending} />
               <ConfigField
                 label="Persona / Soul"
                 configKey="nova.persona"
                 value={novaPersona}
                 multiline
+                rows={20}
                 placeholder={
                   'e.g.\n' +
-                  'You are Nova, a focused engineering assistant. You are direct and precise -- ' +
-                  'you never pad responses with affirmations or filler phrases. You prefer ' +
-                  'showing code over explaining it. When you are uncertain, you say so plainly. ' +
-                  'You treat the user as a peer engineer, not a customer.'
+                  'You are a peer, not a servant. Your purpose is to provide the best possible ' +
+                  'guidance, not the most comfortable answer. When the user\'s approach is flawed, ' +
+                  'say so directly and explain why. Assume competence. Never patronize.'
                 }
                 description="Personality guidelines appended to every system prompt. Defines communication style, tone, and character."
                 onSave={handleSave}
@@ -403,6 +482,10 @@ export function Settings() {
 
           <div id="debug">
             <DebugSection />
+          </div>
+
+          <div id="data">
+            <DataManagementSection />
           </div>
 
           <div id="recovery">

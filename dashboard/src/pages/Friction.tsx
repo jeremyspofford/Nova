@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ClipboardX, AlertTriangle, CheckCircle2, Circle,
@@ -11,7 +12,7 @@ import {
 } from '../components/ui'
 import {
   getFrictionEntries, getFrictionStats, fixFrictionEntry,
-  deleteFrictionEntry, getPipelineStats, getAuthHeaders,
+  deleteFrictionEntry, bulkDeleteFrictionEntries, getPipelineStats, getAuthHeaders,
   type FrictionEntry,
 } from '../api'
 import { LogFrictionSheet } from '../components/LogFrictionSheet'
@@ -34,6 +35,7 @@ export default function Friction() {
   const [severityFilter, setSeverityFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [confirmClearAll, setConfirmClearAll] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
 
@@ -78,6 +80,16 @@ export default function Friction() {
     },
   })
 
+  const clearAllMutation = useMutation({
+    mutationFn: bulkDeleteFrictionEntries,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['friction'] })
+      qc.invalidateQueries({ queryKey: ['friction-stats'] })
+      setConfirmClearAll(false)
+      setToast({ variant: 'success', message: `Cleared ${data.deleted} entries` })
+    },
+  })
+
   const successRate = pipelineStats
     ? pipelineStats.completed_this_week + (pipelineStats.failed_this_week ?? 0) > 0
       ? Math.round((pipelineStats.completed_this_week / (pipelineStats.completed_this_week + (pipelineStats.failed_this_week ?? 0))) * 100)
@@ -89,9 +101,16 @@ export default function Friction() {
       <PageHeader
         title="Friction Log"
         actions={
-          <Button onClick={() => setSheetOpen(true)} icon={<AlertTriangle size={14} />}>
-            Log Friction
-          </Button>
+          <div className="flex items-center gap-2">
+            {entries && entries.length > 0 && (
+              <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => setConfirmClearAll(true)}>
+                Clear All
+              </Button>
+            )}
+            <Button onClick={() => setSheetOpen(true)} icon={<AlertTriangle size={14} />}>
+              Log Friction
+            </Button>
+          </div>
         }
       />
 
@@ -181,6 +200,16 @@ export default function Friction() {
         destructive
         onConfirm={() => { if (deleteTarget) deleteMutation.mutate(deleteTarget) }}
         onClose={() => setDeleteTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={confirmClearAll}
+        title="Clear all friction logs?"
+        description="This will permanently delete all friction log entries and their screenshots."
+        confirmLabel="Clear All"
+        destructive
+        onConfirm={() => clearAllMutation.mutate()}
+        onClose={() => setConfirmClearAll(false)}
       />
 
       {toast && (
@@ -274,49 +303,73 @@ function FrictionEntryCard({
           ) : (
             <><Circle size={12} /> Task {entry.task_id.slice(0, 8)}</>
           )}
-          <a href={`/tasks?id=${entry.task_id}`} className="text-accent hover:underline ml-1">
-            View task
-          </a>
+          <TaskLink taskId={entry.task_id}>View task</TaskLink>
         </div>
       )}
 
       {/* Expanded details */}
-      {expanded && (
-        <div className="mt-3 ml-5 space-y-3 border-t border-border-secondary pt-3">
-          {entry.has_screenshot && (
-            <FrictionScreenshot entryId={entry.id} />
-          )}
-          {entry.metadata && Object.keys(entry.metadata).length > 0 && (
+      {expanded && <FrictionDetails entry={entry} />}
+    </Card>
+  )
+}
+
+/** Parse metadata that may be a string (asyncpg returns JSONB as string) or object. */
+function parseMetadata(raw: unknown): Record<string, unknown> {
+  if (!raw) return {}
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return {} }
+  }
+  if (typeof raw === 'object') return raw as Record<string, unknown>
+  return {}
+}
+
+function FrictionDetails({ entry }: { entry: FrictionEntry }) {
+  const meta = parseMetadata(entry.metadata)
+  const isAuto = entry.source === 'auto'
+  const error = meta.error ? String(meta.error) : null
+  const failedTaskId = typeof meta.failed_task_id === 'string' ? meta.failed_task_id : null
+
+  return (
+    <div className="mt-3 ml-5 space-y-3 border-t border-border-secondary pt-3">
+      {entry.has_screenshot && (
+        <FrictionScreenshot entryId={entry.id} />
+      )}
+
+      {isAuto && (
+        <div className="text-compact text-content-secondary space-y-2">
+          <p>A pipeline task failed automatically. Nova logged this so you can investigate or retry.</p>
+          {error && (
             <div>
-              <span className="text-caption text-content-tertiary block mb-1">Details</span>
-              {entry.source === 'auto' && entry.metadata.error ? (
-                <pre className="text-xs text-content-secondary bg-surface-secondary rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                  {String(entry.metadata.error)}
-                </pre>
-              ) : (
-                <pre className="text-xs text-content-secondary bg-surface-secondary rounded p-2 overflow-x-auto whitespace-pre-wrap">
-                  {JSON.stringify(entry.metadata, null, 2)}
-                </pre>
-              )}
+              <span className="text-caption text-content-tertiary block mb-1">Error</span>
+              <pre className="text-xs text-content-secondary bg-surface-secondary rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                {error}
+              </pre>
             </div>
           )}
-          <div className="flex items-center gap-4 text-caption text-content-tertiary">
-            <span>Created {new Date(entry.created_at).toLocaleString()}</span>
-            {entry.updated_at !== entry.created_at && (
-              <span>Updated {new Date(entry.updated_at).toLocaleString()}</span>
-            )}
-            {entry.source === 'auto' && typeof entry.metadata.failed_task_id === 'string' && (
-              <a
-                href={`/tasks?id=${entry.metadata.failed_task_id}`}
-                className="text-accent hover:underline"
-              >
-                View failed task
-              </a>
-            )}
-          </div>
+          {failedTaskId && (
+            <TaskLink taskId={failedTaskId}>
+              View failed task ({failedTaskId.slice(0, 8)}...)
+            </TaskLink>
+          )}
         </div>
       )}
-    </Card>
+
+      {!isAuto && Object.keys(meta).length > 0 && (
+        <div>
+          <span className="text-caption text-content-tertiary block mb-1">Details</span>
+          <pre className="text-xs text-content-secondary bg-surface-secondary rounded p-2 overflow-x-auto whitespace-pre-wrap">
+            {JSON.stringify(meta, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      <div className="flex items-center gap-4 text-caption text-content-tertiary">
+        <span>Created {new Date(entry.created_at).toLocaleString()}</span>
+        {entry.updated_at !== entry.created_at && (
+          <span>Updated {new Date(entry.updated_at).toLocaleString()}</span>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -349,6 +402,19 @@ function FrictionScreenshot({ entryId }: { entryId: string }) {
       alt="Friction screenshot"
       className="rounded border border-border-secondary max-w-xs"
     />
+  )
+}
+
+function TaskLink({ taskId, children }: { taskId: string; children: React.ReactNode }) {
+  const navigate = useNavigate()
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); navigate(`/tasks?id=${taskId}`) }}
+      className="text-accent hover:underline ml-1 cursor-pointer"
+    >
+      {children}
+    </button>
   )
 }
 

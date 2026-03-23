@@ -282,8 +282,7 @@ async def clarify_pipeline_task(
                 detail=f"Task is in '{task['status']}' state, not 'clarification_needed'",
             )
 
-        # metadata comes back as a dict via asyncpg's JSONB codec
-        metadata = dict(task["metadata"]) if task["metadata"] else {}
+        metadata = task["metadata"] if isinstance(task["metadata"], dict) else {}
         metadata["clarification_answers"] = req.answers
         metadata["clarification_round"] = metadata.get("clarification_round", 0) + 1
 

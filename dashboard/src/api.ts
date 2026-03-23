@@ -683,6 +683,9 @@ export const updateFrictionEntry = (id: string, data: { status?: string; severit
 export const deleteFrictionEntry = (id: string) =>
   apiFetch<void>(`/api/v1/friction/${id}`, { method: 'DELETE' })
 
+export const bulkDeleteFrictionEntries = () =>
+  apiFetch<{ deleted: number }>('/api/v1/friction', { method: 'DELETE' })
+
 export const fixFrictionEntry = (id: string) =>
   apiFetch<{ task_id: string }>(`/api/v1/friction/${id}/fix`, { method: 'POST' })
 

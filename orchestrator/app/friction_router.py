@@ -194,6 +194,25 @@ async def update_friction_entry(entry_id: str, req: UpdateFrictionEntry, _admin:
     return _row_to_dict(row)
 
 
+@router.delete("/api/v1/friction")
+async def bulk_delete_friction_entries(_admin: AdminDep):
+    """Delete all friction log entries and their screenshot files."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "DELETE FROM friction_log RETURNING screenshot_path, screenshot_thumb_path"
+        )
+    # Clean up screenshot files
+    for row in rows:
+        for path_col in ("screenshot_path", "screenshot_thumb_path"):
+            if row[path_col]:
+                try:
+                    Path(row[path_col]).unlink(missing_ok=True)
+                except Exception:
+                    pass
+    return {"deleted": len(rows)}
+
+
 @router.delete("/api/v1/friction/{entry_id}", status_code=204)
 async def delete_friction_entry(entry_id: str, _admin: AdminDep):
     """Delete a friction entry and its screenshot files."""

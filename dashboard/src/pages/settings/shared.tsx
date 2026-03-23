@@ -26,6 +26,7 @@ export function ConfigField({
   value,
   description,
   multiline = false,
+  rows,
   placeholder = '',
   onSave,
   saving,
@@ -35,6 +36,7 @@ export function ConfigField({
   value: string
   description?: string
   multiline?: boolean
+  rows?: number
   placeholder?: string
   onSave: (key: string, value: string) => void
   saving: boolean
@@ -88,7 +90,7 @@ export function ConfigField({
           value={draft}
           onChange={e => handleChange(e.target.value)}
           placeholder={placeholder}
-          rows={6}
+          rows={rows ?? 6}
           autoResize={false}
           description={description}
         />

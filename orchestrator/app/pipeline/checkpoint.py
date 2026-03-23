@@ -75,7 +75,7 @@ async def load_checkpoint(task_id: str) -> dict[str, Any]:
         )
         if row is None:
             return {}
-        return dict(row["checkpoint"] or {})
+        return row["checkpoint"] if isinstance(row["checkpoint"], dict) else {}
 
 
 async def clear_checkpoint(task_id: str) -> None:

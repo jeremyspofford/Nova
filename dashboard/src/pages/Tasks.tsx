@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useCallback, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Send, RefreshCw, X, Clock, ChevronDown, ChevronUp,
@@ -450,7 +450,11 @@ function TaskDetailSheet({
   open: boolean
   onClose: () => void
 }) {
-  const [detailTab, setDetailTab] = useState('output')
+  const [detailTab, setDetailTab] = useState(
+    task?.status === 'pending_human_review' ? 'review'
+      : task?.status === 'clarification_needed' ? 'clarify'
+      : 'output'
+  )
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { setPrefillInput } = useChatStore()
@@ -495,12 +499,6 @@ function TaskDetailSheet({
           <Button variant="secondary" size="sm" icon={<MessageSquare size={14} />} onClick={handleDiscuss}>Discuss</Button>
           {isActive && !needsReview && (
             <Button variant="danger" size="sm" icon={<X size={14} />} onClick={() => cancelMutation.mutate()} loading={cancelMutation.isPending}>Cancel</Button>
-          )}
-          {needsReview && (
-            <Button variant="primary" size="sm" icon={<ThumbsUp size={14} />} onClick={() => setDetailTab('review')}>Review</Button>
-          )}
-          {needsClarification && (
-            <Button variant="primary" size="sm" icon={<MessageSquare size={14} />} onClick={() => setDetailTab('clarify')}>Answer</Button>
           )}
           {isTerminal && (
             <Button variant="ghost" size="sm" icon={<Trash2 size={14} />} onClick={() => deleteMutation.mutate()} loading={deleteMutation.isPending}>Delete</Button>
@@ -894,6 +892,7 @@ export function Tasks() {
   const [podFilter, setPodFilter] = useState('')
   const [selectedTask, setSelectedTask] = useState<PipelineTask | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
   const qc = useQueryClient()
 
   const { data: tasks = [], isFetching } = useQuery({
@@ -901,6 +900,21 @@ export function Tasks() {
     queryFn: () => getPipelineTasks({ limit: 100 }),
     refetchInterval: statusFilter === 'complete' || statusFilter === 'failed' ? 30_000 : 3_000,
   })
+
+  // Auto-open task from ?id= query param (e.g. from friction log links)
+  useEffect(() => {
+    const targetId = searchParams.get('id')
+    if (targetId && tasks.length > 0 && !selectedTask) {
+      const match = tasks.find(t => t.id === targetId)
+      if (match) {
+        setSelectedTask(match)
+        // Also clear source filter in case the task is a cortex task
+        setSourceFilter('all')
+        // Clean up the URL
+        setSearchParams({}, { replace: true })
+      }
+    }
+  }, [tasks, searchParams, selectedTask, setSearchParams])
 
   const { data: queueStats } = useQuery({
     queryKey: ['queue-stats'],
@@ -912,8 +926,8 @@ export function Tasks() {
 
   const bulkDelete = useMutation({
     mutationFn: () => bulkDeletePipelineTasks(),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
       setConfirmClear(false)
     },
   })
