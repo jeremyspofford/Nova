@@ -63,6 +63,10 @@ def validate_type(
     expected type. Designed to be called at function entry points to fail
     fast with clear context.
 
+    Special handling: bool values are rejected even when (int, float) is
+    expected, since bool is a subclass of int in Python. This ensures
+    strict type checking and prevents accidental boolean-as-integer bugs.
+
     Parameters
     ----------
     value:
@@ -94,7 +98,24 @@ def validate_type(
     Traceback (most recent call last):
         ...
     TypeError: 'item' must be (int, str), got 'list'
+
+    >>> validate_type(True, (int, float), 'value')  # Raises TypeError
+    Traceback (most recent call last):
+        ...
+    TypeError: 'value' must be (int, float), got 'bool'
     """
+    # Special handling: reject bool even though it's a subclass of int
+    # This prevents accidental bool-as-int bugs and ensures strict type checking
+    if isinstance(value, bool):
+        if isinstance(expected_type, tuple):
+            type_names = ", ".join(t.__name__ for t in expected_type)
+            expected_str = f"({type_names})"
+        else:
+            expected_str = expected_type.__name__
+        raise TypeError(
+            f"'{param_name}' must be {expected_str}, got 'bool'"
+        )
+
     if not isinstance(value, expected_type):
         # Format expected type(s) for error message
         if isinstance(expected_type, tuple):

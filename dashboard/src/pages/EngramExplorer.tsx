@@ -11,6 +11,7 @@ import {
   EmptyState, Skeleton, Tooltip, Sheet,
 } from '../components/ui'
 import { ForceGraph } from '../components/ForceGraph'
+import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { SemanticColor } from '../lib/design-tokens'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -366,36 +367,38 @@ function GraphTab() {
 
       {graph && graph.nodes.length > 0 && (
         <>
-          <Card variant="default" className="overflow-hidden">
-            <div className="h-[600px] relative">
-              <ForceGraph
+          <div className="rounded-md overflow-hidden border border-border-subtle relative">
+            <div className="h-[700px]">
+              <ForceGraph3D
                 nodes={graph.nodes}
                 edges={graph.edges}
                 selectedId={selectedNode?.id ?? null}
                 onSelectNode={handleSelectNode}
+                onBackgroundClick={() => setSelectedNode(null)}
                 className="w-full h-full"
               />
-              <div className="absolute bottom-3 left-3 text-micro text-content-tertiary bg-surface-card/80 px-2 py-1 rounded-sm">
-                {graph.node_count} memories, {graph.edge_count} connections — click to select, drag to rearrange
-              </div>
-              {/* Type legend */}
-              <div className="absolute top-3 right-3 bg-surface-card/90 border border-border-subtle rounded-sm px-3 py-2 space-y-1">
-                {Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
-                  <div key={type} className="flex items-center gap-2 text-micro">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a' }}
-                    />
-                    <Tooltip content={TYPE_DESCRIPTIONS[type] ?? type}>
-                      <span className="text-content-tertiary cursor-help">
-                        {type === 'self_model' ? 'self model' : type}
-                      </span>
-                    </Tooltip>
-                  </div>
-                ))}
-              </div>
             </div>
-          </Card>
+            {/* Overlay HUD */}
+            <div className="absolute bottom-3 left-3 text-micro text-neutral-400 bg-black/60 backdrop-blur-sm px-2.5 py-1.5 rounded-sm border border-white/5">
+              {graph.node_count} memories, {graph.edge_count} connections — orbit to rotate, scroll to zoom, click a node for details
+            </div>
+            {/* Type legend */}
+            <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1">
+              {Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
+                <div key={type} className="flex items-center gap-2 text-micro">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}
+                  />
+                  <Tooltip content={TYPE_DESCRIPTIONS[type] ?? type}>
+                    <span className="text-neutral-400 cursor-help">
+                      {type === 'self_model' ? 'self model' : type}
+                    </span>
+                  </Tooltip>
+                </div>
+              ))}
+            </div>
+          </div>
 
           {/* Detail Sheet */}
           <Sheet

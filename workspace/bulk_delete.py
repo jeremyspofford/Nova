@@ -72,9 +72,9 @@ def bulk_delete(
 ) -> BulkDeleteResult:
     """Remove all items whose ``id_key`` value appears in *target_ids*.
 
-    When the source list contains duplicate IDs, only the **first**
-    occurrence of each ID is deleted; subsequent items sharing that ID
-    are kept in ``remaining``.
+    When the source list contains duplicate IDs, all occurrences of those
+    IDs are deleted. This is the standard behavior for bulk delete operations
+    and matches the expectations of most users.
 
     Parameters
     ----------
@@ -117,6 +117,15 @@ def bulk_delete(
     [{'id': 'y', 'v': 2}]
     >>> result.not_found
     set()
+
+    >>> items = [{"id": "a"}, {"id": "a"}, {"id": "b"}]
+    >>> result = bulk_delete(items, {"a"})
+    >>> len(result.deleted)
+    2
+    >>> result.deleted[0]["id"]
+    'a'
+    >>> result.deleted[1]["id"]
+    'a'
     """
     if not isinstance(items, list):
         raise TypeError(f"'items' must be a list, got {type(items).__name__!r}")
@@ -139,19 +148,19 @@ def bulk_delete(
                 f"'items[{idx}]' must be a dict, got {type(item).__name__!r}"
             )
 
-    seen_ids: set[str] = set()
     deleted: list[dict[str, Any]] = []
     remaining: list[dict[str, Any]] = []
+    found_ids: set[str] = set()
 
     for item in items:
         item_id = item.get(id_key)
-        if item_id is not None and item_id in target_ids and item_id not in seen_ids:
+        if item_id is not None and item_id in target_ids:
             deleted.append(item)
-            seen_ids.add(item_id)
+            found_ids.add(item_id)
         else:
             remaining.append(item)
 
-    not_found = target_ids - seen_ids
+    not_found = target_ids - found_ids
 
     return BulkDeleteResult(
         deleted=deleted,

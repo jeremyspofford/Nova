@@ -138,7 +138,7 @@ class TestModelSwitch:
         r = await recovery.patch(
             "/api/v1/recovery/env",
             headers=admin_headers,
-            json={"updates": {"VLLM_MODEL": "Qwen/Qwen2.5-3B-Instruct"}},
+            json={"updates": {"VLLM_MODEL": "Qwen/Qwen2.5-1.5B-Instruct"}},
         )
         assert r.status_code == 200
 
@@ -162,7 +162,7 @@ class TestModelSwitch:
         r = await recovery.post(
             "/api/v1/recovery/inference/backend/vllm/switch-model",
             headers=admin_headers,
-            json={"model": "Qwen/Qwen2.5-3B-Instruct"},
+            json={"model": "Qwen/Qwen2.5-1.5B-Instruct"},
         )
         # 202 = accepted, 400 = backend not active (OK in test env)
         assert r.status_code in (202, 400)

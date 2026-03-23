@@ -6,19 +6,18 @@
 export function cleanToolArtifacts(text: string): string {
   let cleaned = text
 
-  // 1. Remove complete paired blocks: <tool_call>...</tool_call>, <tool_response>...</tool_response>
-  cleaned = cleaned.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, '')
-  cleaned = cleaned.replace(/<tool_response>[\s\S]*?<\/tool_response>/g, '')
+  // 1. Remove complete paired blocks (with or without underscore):
+  //    <tool_call>...</tool_call>, <toolcall>...</toolcall>, <tool_response>...</tool_response>, etc.
+  cleaned = cleaned.replace(/<tool_?call>[\s\S]*?<\/tool_?call>/g, '')
+  cleaned = cleaned.replace(/<tool_?response>[\s\S]*?<\/tool_?response>/g, '')
 
   // 2. Remove partial/truncated tool blocks: anything from a tool-like marker to a closing tag
-  //    Handles: _call>{...}</tool_call>, call>{...}</tool_call>, etc.
   cleaned = cleaned.replace(/_?call>[\s\S]*?<\/tool[_\s>]/g, '')
   cleaned = cleaned.replace(/_?response>[\s\S]*?<\/tool[_\s>]/g, '')
 
-  // 3. Remove orphaned closing tags and fragments
-  cleaned = cleaned.replace(/<\/tool_?(?:call|response)?>/g, '')
+  // 3. Remove orphaned opening/closing tags and fragments (with or without underscore)
+  cleaned = cleaned.replace(/<\/?tool_?(?:call|response)?>/g, '')
   cleaned = cleaned.replace(/<\/tool\b[^>]*>/g, '')
-  cleaned = cleaned.replace(/<tool_(?:call|response)>/g, '')
   cleaned = cleaned.replace(/\b_?(?:call|response)>/g, '')
 
   // 4. Remove bare JSON tool invocations: {"name": "...", "parameters": {...}}

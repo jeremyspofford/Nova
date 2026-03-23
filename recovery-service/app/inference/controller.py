@@ -37,6 +37,9 @@ async def get_backend_status() -> dict:
         info = BACKENDS[backend]
         container_status = check_container_status(info["container"])
     result = {"backend": backend, "state": state, "container_status": container_status}
+    # Fetch the active model from the backend's OpenAI-compatible endpoint
+    if state == "ready" and container_status and container_status.get("running"):
+        result["active_model"] = await _probe_active_model(backend)
     progress = get_switch_progress()
     if progress:
         result["switch_progress"] = progress
@@ -45,6 +48,31 @@ async def get_backend_status() -> dict:
         if error:
             result["error"] = error
     return result
+
+
+async def _probe_active_model(backend: str) -> str | None:
+    """Query the backend's /v1/models endpoint for the active model name."""
+    import httpx
+    urls = {
+        "vllm": "http://nova-vllm:8000/v1/models",
+        "sglang": "http://nova-sglang:8000/v1/models",
+        "ollama": "http://ollama:11434/api/tags",
+    }
+    url = urls.get(backend)
+    if not url:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=3) as client:
+            resp = await client.get(url)
+            data = resp.json()
+            if backend == "ollama":
+                models = data.get("models", [])
+                return models[0]["name"] if models else None
+            else:
+                items = data.get("data", [])
+                return items[0]["id"] if items else None
+    except Exception:
+        return None
 
 
 async def list_backends() -> list[dict]:

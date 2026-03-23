@@ -773,7 +773,7 @@ export function Models() {
             <HardDrive className="h-5 w-5 text-accent" />
             <h2 className="text-compact font-semibold text-content-primary">Local Models</h2>
             <Badge
-              color={backendState === 'running' ? 'success' : backendState === 'switching' ? 'warning' : 'danger'}
+              color={backendState === 'ready' || backendState === 'running' ? 'success' : backendState === 'switching' || backendState === 'starting' ? 'warning' : 'danger'}
               dot
               size="sm"
             >
@@ -787,10 +787,18 @@ export function Models() {
           {/* Active model status */}
           <Card>
             <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
-              <h3 className="text-compact font-medium text-content-primary">Active Model</h3>
-              <span className="text-mono-sm text-content-tertiary">
+              <div>
+                <h3 className="text-compact font-medium text-content-primary">Active Model</h3>
+                {backendStatus.data?.active_model && (
+                  <p className="text-mono-sm text-content-secondary mt-0.5">{backendStatus.data.active_model}</p>
+                )}
+              </div>
+              <Badge
+                color={backendStatus.data?.container_status?.health === 'healthy' ? 'success' : 'warning'}
+                size="sm"
+              >
                 {backendStatus.data?.container_status?.status ?? 'unknown'}
-              </span>
+              </Badge>
             </div>
             {isSwitching && backendStatus.data?.switch_progress && (
               <div className="px-4 py-3 bg-warning-dim border-b border-border-subtle">

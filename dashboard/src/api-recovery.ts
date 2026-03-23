@@ -234,7 +234,8 @@ export const getChatIntegrationsStatus = () =>
 export interface BackendStatus {
   backend: string
   state: string
-  container_status: { status: string } | null
+  active_model?: string | null
+  container_status: { status: string; health?: string; running?: boolean } | null
   switch_progress?: {
     step: string
     detail: string
