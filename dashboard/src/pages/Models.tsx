@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   discoverModels,
@@ -26,7 +27,7 @@ import {
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Badge, Button, Card, EmptyState, Metric, ProgressBar,
-  SearchInput, Select, Skeleton, StatusDot, Table,
+  SearchInput, Select, Skeleton, StatusDot, Table, Tooltip,
 } from '../components/ui'
 import type { TableColumn } from '../components/ui'
 import type { SemanticColor } from '../lib/design-tokens'
@@ -142,10 +143,12 @@ function GPUStatsCard() {
 // ── Provider Card ─────────────────────────────────────────────────────────────
 
 function ProviderCard({ provider }: { provider: ProviderModelList }) {
+  const navigate = useNavigate()
   const badge = TYPE_BADGE[provider.type] ?? TYPE_BADGE.free
   const configured = provider.available
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; latency_ms?: number; error?: string } | null>(null)
+  const dotStatus = testResult ? (testResult.ok ? 'success' : 'danger') : configured ? 'neutral' : 'neutral'
 
   const handleTest = async () => {
     setTesting(true)
@@ -167,7 +170,7 @@ function ProviderCard({ provider }: { provider: ProviderModelList }) {
       <div className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <StatusDot status={configured ? 'success' : 'neutral'} />
+            <StatusDot status={dotStatus} />
             <h3 className="text-compact font-semibold text-content-primary">{provider.name}</h3>
             <Badge color={badge.color} size="sm">{badge.label}</Badge>
             {provider.models.length > 0 && configured && (
@@ -225,12 +228,12 @@ function ProviderCard({ provider }: { provider: ProviderModelList }) {
                 </li>
               ))}
             </ul>
-            <a
-              href="/settings"
+            <button
+              onClick={() => navigate('/settings#provider-status')}
               className="inline-flex items-center gap-1 text-caption text-accent hover:underline"
             >
               Configure in Settings <ExternalLink className="h-3 w-3" />
-            </a>
+            </button>
           </div>
         )}
       </div>
@@ -265,9 +268,11 @@ function RoutingStatsSection() {
       <div className="flex items-center gap-2">
         <Zap size={16} className="text-accent" />
         <span className="text-compact font-semibold text-content-primary">Routing Stats (7d)</span>
-        <Badge color={stats.fallback_rate_pct > 20 ? 'warning' : 'success'} size="sm">
-          {stats.fallback_rate_pct.toFixed(1)}% fallback
-        </Badge>
+        <Tooltip content="Percentage of requests where the primary model failed and a fallback was used.">
+          <Badge color={stats.fallback_rate_pct > 20 ? 'warning' : 'success'} size="sm">
+            {stats.fallback_rate_pct.toFixed(1)}% fallback
+          </Badge>
+        </Tooltip>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-caption">
@@ -297,9 +302,19 @@ function RoutingStatsSection() {
   )
 }
 
+// ── Help entries ─────────────────────────────────────────────────────────────
+
+const HELP_ENTRIES = [
+  { term: 'Ollama', definition: "A local inference engine that runs AI models on your machine's CPU or GPU — free but slower than cloud." },
+  { term: 'Routing Strategy', definition: 'How Nova decides where to send requests — local-first tries your machine first, cloud-first prefers API providers, etc.' },
+  { term: 'Provider', definition: 'An AI service Nova can call — Anthropic (Claude), OpenAI (GPT), Groq, Gemini, etc. Each needs an API key.' },
+  { term: 'Pulled Models', definition: 'AI models downloaded and cached locally in Ollama, ready for immediate inference.' },
+]
+
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export function Models() {
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const [pullInput, setPullInput] = useState('')
   const [pullingModels, setPullingModels] = useState<Set<string>>(new Set())
@@ -483,7 +498,8 @@ export function Models() {
       {/* Header */}
       <PageHeader
         title="Models"
-        description={totalAvailable > 0 ? `${totalAvailable} models available` : undefined}
+        description={`Available LLM providers, routing stats, and model configuration.${totalAvailable > 0 ? ` ${totalAvailable} models available.` : ''}`}
+        helpEntries={HELP_ENTRIES}
         actions={
           <Button
             variant="secondary"
@@ -919,7 +935,7 @@ export function Models() {
             icon={Server}
             title="No local inference backend"
             description="No local inference backend is configured. Set one up in Settings to run models locally."
-            action={{ label: 'Configure in Settings', onClick: () => { window.location.href = '/settings' } }}
+            action={{ label: 'Configure in Settings', onClick: () => navigate('/settings#local-inference') }}
           />
         </section>
       )}
@@ -933,6 +949,7 @@ export function Models() {
           <Cloud className="h-5 w-5 text-info" />
           <h2 className="text-compact font-semibold text-content-primary">Cloud Providers</h2>
         </div>
+        <p className="text-caption text-content-tertiary">Remote AI services accessed via API key — requests are billed per token by the provider.</p>
 
         {catalog.isLoading && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

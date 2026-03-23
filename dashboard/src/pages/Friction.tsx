@@ -8,8 +8,17 @@ import {
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Card, Badge, StatusDot, Button, Metric, Select,
-  Skeleton, EmptyState, ConfirmDialog, Toast,
+  Skeleton, EmptyState, ConfirmDialog, Toast, Tooltip,
 } from '../components/ui'
+
+const HELP_ENTRIES = [
+  { term: 'Friction', definition: 'An issue, bug, or rough edge found while using Nova — a lightweight issue tracker built into the dashboard.' },
+  { term: 'Blocker', definition: 'A critical issue that prevents normal use — highest severity.' },
+  { term: 'Annoyance', definition: "A non-critical problem that's irritating but doesn't block usage." },
+  { term: 'Idea', definition: 'A feature request or improvement suggestion — lowest severity.' },
+  { term: 'Auto Friction', definition: 'Friction entries generated automatically when pipeline tasks fail — captures the error context for debugging.' },
+  { term: 'Fix This', definition: 'Creates a pipeline task to investigate and resolve the friction entry — Nova tries to fix its own bugs.' },
+]
 import {
   getFrictionEntries, getFrictionStats, fixFrictionEntry,
   deleteFrictionEntry, bulkDeleteFrictionEntries, getPipelineStats, getAuthHeaders,
@@ -100,6 +109,7 @@ export default function Friction() {
     <div className="space-y-6">
       <PageHeader
         title="Friction Log"
+        description="Track issues, bugs, and rough edges found while using Nova."
         actions={
           <div className="flex items-center gap-2">
             {entries && entries.length > 0 && (
@@ -112,6 +122,7 @@ export default function Friction() {
             </Button>
           </div>
         }
+        helpEntries={HELP_ENTRIES}
       />
 
       {/* Sprint Health */}
@@ -119,16 +130,16 @@ export default function Friction() {
         {pipelineStats ? (
           <>
             <Card className="p-4">
-              <Metric label="Success Rate (7d)" value={successRate !== null ? `${successRate}%` : '--'} />
+              <Metric label="Success Rate (7d)" value={successRate !== null ? `${successRate}%` : '--'} tooltip="Percentage of pipeline tasks that completed successfully in the last 7 days." />
             </Card>
             <Card className="p-4">
-              <Metric label="Submitted Today" value={pipelineStats.submitted_today ?? 0} />
+              <Metric label="Submitted Today" value={pipelineStats.submitted_today ?? 0} tooltip="Pipeline tasks submitted today." />
             </Card>
             <Card className="p-4">
-              <Metric label="Failed Today" value={pipelineStats.failed_today ?? 0} />
+              <Metric label="Failed Today" value={pipelineStats.failed_today ?? 0} tooltip="Pipeline tasks that failed today." />
             </Card>
             <Card className="p-4">
-              <Metric label="Open Friction" value={stats?.open_count ?? 0} />
+              <Metric label="Open Friction" value={stats?.open_count ?? 0} tooltip="Unresolved friction entries." />
             </Card>
           </>
         ) : (
@@ -163,6 +174,7 @@ export default function Friction() {
       </div>
 
       {/* Entry list */}
+      <p className="text-caption text-content-tertiary -mt-3">Logged issues sorted by recency — expand an entry for details, or hit Fix This to dispatch a self-repair task.</p>
       {isLoading ? (
         <div className="space-y-3">
           {[1, 2, 3].map(i => <Card key={i} className="p-4"><Skeleton lines={3} /></Card>)}
@@ -262,9 +274,9 @@ function FrictionEntryCard({
               {entry.severity}
             </Badge>
             {entry.source === 'auto' && (
-              <span title="Automatically logged when a pipeline task failed.">
+              <Tooltip content="Automatically generated from pipeline failures.">
                 <Badge color="info" size="sm">auto</Badge>
-              </span>
+              </Tooltip>
             )}
             <span>{timeAgo}</span>
             {entry.has_screenshot && !expanded && <span>(img)</span>}
@@ -272,16 +284,18 @@ function FrictionEntryCard({
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
           {entry.status !== 'fixed' && !entry.task_id && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={onFix}
-              disabled={fixing}
-              icon={fixing ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
-              aria-label={`Fix friction entry: ${entry.description.slice(0, 30)}`}
-            >
-              Fix This
-            </Button>
+            <Tooltip content="Create a pipeline task to investigate and fix this issue.">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onFix}
+                disabled={fixing}
+                icon={fixing ? <Loader2 size={12} className="animate-spin" /> : <Wrench size={12} />}
+                aria-label={`Fix friction entry: ${entry.description.slice(0, 30)}`}
+              >
+                Fix This
+              </Button>
+            </Tooltip>
           )}
           <Button
             variant="ghost"

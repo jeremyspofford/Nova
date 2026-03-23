@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle, Lightbulb, CheckCircle2, ArrowRight } from "lucide-react";
+import { Cpu, Play, Square, RefreshCw, Wifi, AlertCircle, Lightbulb, CheckCircle2, ArrowRight, Eye, EyeOff } from "lucide-react";
 import { Section, Button, Toggle, Badge, StatusDot, Card } from "../../components/ui";
 import { ConfigField, useConfigValue, type ConfigSectionProps } from "./shared";
-import { recoveryFetch } from "../../api-recovery";
+import { recoveryFetch, getEnvVars, patchEnv } from "../../api-recovery";
 import { getRecommendation, type InferenceRecommendation } from "../../api-recovery";
 
 interface HardwareInfo {
@@ -20,6 +20,8 @@ interface BackendStatus {
   backend: string;
   state: string;
   container_status: unknown;
+  error?: string;
+  switch_progress?: { step: string; detail: string };
 }
 
 const BACKENDS = [
@@ -38,7 +40,88 @@ const STATE_LABELS: Record<string, { label: string; status: 'success' | 'neutral
   error:    { label: "Error",        status: "danger" },
 };
 
-export function LocalInferenceSection({ entries, onSave, saving }: ConfigSectionProps) {
+function HuggingFaceTokenField() {
+  const queryClient = useQueryClient();
+  const { data: envVars } = useQuery({
+    queryKey: ["env-vars"],
+    queryFn: getEnvVars,
+    staleTime: 30_000,
+  });
+
+  const currentToken = envVars?.HF_TOKEN ?? "";
+  const [draft, setDraft] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showToken, setShowToken] = useState(false);
+
+  useEffect(() => {
+    setDraft(currentToken);
+    setDirty(false);
+  }, [currentToken]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await patchEnv({ HF_TOKEN: draft });
+      queryClient.invalidateQueries({ queryKey: ["env-vars"] });
+      setDirty(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-border-subtle space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-caption font-medium text-content-secondary">HuggingFace Token</label>
+        {dirty && (
+          <Button size="sm" onClick={handleSave} loading={saving}>Save</Button>
+        )}
+      </div>
+      {!currentToken && (
+        <div className="rounded-sm bg-surface-elevated p-2.5 text-caption text-content-tertiary space-y-1.5">
+          <p>
+            <span className="font-medium text-content-secondary">Not required for the default model.</span>{" "}
+            Only needed if you switch to a gated model (Llama, Gemma, etc.).
+          </p>
+          <p>To use a gated model:</p>
+          <ol className="list-decimal list-inside space-y-0.5 ml-1">
+            <li>Accept the model&apos;s license on its <span className="text-content-secondary">HuggingFace page</span></li>
+            <li>Create a token at{" "}
+              <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+                huggingface.co/settings/tokens
+              </a>
+            </li>
+            <li>Paste it below and restart the backend</li>
+          </ol>
+        </div>
+      )}
+      <div className="relative">
+        <input
+          type={showToken ? "text" : "password"}
+          value={draft}
+          onChange={e => { setDraft(e.target.value); setDirty(e.target.value !== currentToken) }}
+          placeholder="hf_..."
+          className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 pr-8 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors font-mono"
+        />
+        <button
+          type="button"
+          onClick={() => setShowToken(!showToken)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-content-tertiary hover:text-content-primary transition-colors"
+        >
+          {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+        </button>
+      </div>
+      {currentToken && (
+        <p className="text-caption text-content-tertiary">
+          Token set. Requires container restart after changes.
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function LocalInferenceSection({ entries, onSave, saving, inline }: ConfigSectionProps & { inline?: boolean }) {
   const queryClient = useQueryClient();
   const [selectedBackend, setSelectedBackend] = useState<string>("");
   const [showRemote, setShowRemote] = useState(false);
@@ -151,15 +234,17 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
       return;
     }
 
-    // Track the switch and start the new backend
+    // Track the switch — only show "switching" banner when actually changing backends
     if (currentBackend && currentBackend !== backend) {
       setSwitchInfo({ from: currentBackend, to: backend });
+    } else {
+      setSwitchInfo(null); // restarting same backend, no switch banner needed
     }
     startBackend.mutate(backend);
   };
 
-  return (
-    <Section id="local-inference" icon={Cpu} title="Local Inference" description="Manage your local AI inference backend">
+  const content = (
+    <>
       {/* Recommendation Banner */}
       {recommendation && status && recommendation.backend !== status.backend && status.backend !== "none" && (
         <div className="mb-4 p-3 bg-warning-dim border border-amber-200 dark:border-amber-800 rounded-sm text-compact flex items-start gap-2">
@@ -250,7 +335,7 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
 
       {/* Status */}
       {status && status.backend !== "none" && (
-        <Card variant="default" className="mt-4 p-3">
+        <Card variant="default" className="mt-4 p-3 space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <StatusDot status={stateInfo.status} pulse={isTransitioning} />
@@ -283,6 +368,11 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
               />
             </div>
           </div>
+          {currentState === "error" && status.error && (
+            <div className="rounded-sm bg-danger-dim p-2 text-caption text-danger">
+              {status.error}
+            </div>
+          )}
         </Card>
       )}
 
@@ -342,6 +432,11 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
         </div>
       )}
 
+      {/* HuggingFace Token — needed for vLLM/SGLang to download gated models */}
+      {["vllm", "sglang"].includes((status?.backend || configBackend).replace(/"/g, '')) && (
+        <HuggingFaceTokenField />
+      )}
+
       {/* Remote Backend Toggle */}
       <div className="mt-4 pt-4 border-t border-border-subtle">
         <div className="flex items-center gap-2 text-compact text-content-tertiary">
@@ -384,6 +479,14 @@ export function LocalInferenceSection({ entries, onSave, saving }: ConfigSection
           No GPU detected and no remote server configured. Consider using Ollama (CPU) or configure cloud providers below.
         </div>
       )}
+    </>
+  );
+
+  if (inline) return content;
+
+  return (
+    <Section id="local-inference" icon={Cpu} title="Local Inference" description="Manage your local AI inference backend">
+      {content}
     </Section>
   );
 }

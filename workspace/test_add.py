@@ -3,7 +3,15 @@ test_add.py
 ===========
 Integration and unit tests for :mod:`add`.
 
-Verifies that the add() function correctly adds two numbers.
+Verifies that the add() function correctly adds two numbers and handles
+invalid inputs with appropriate error messages.
+
+Covers:
+- Basic addition: positive integers, negative integers, floats
+- Type mixing: int + float combinations
+- Return types: int when both inputs are int, float otherwise
+- Type validation: TypeError for non-numeric inputs
+- Error message format: consistent pattern with context
 """
 
 import unittest
@@ -73,6 +81,118 @@ class TestAdd(unittest.TestCase):
         result = add(5, 2.5)
         self.assertIsInstance(result, float,
                               f"Expected float, got {type(result)}")
+
+
+# ---------------------------------------------------------------------------
+# Type validation tests
+# ---------------------------------------------------------------------------
+
+class TestAddTypeErrors(unittest.TestCase):
+    """Tests for type validation in add() function."""
+
+    def test_add_rejects_string_as_first_argument(self):
+        """add('5', 3) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add('5', 3)
+        error_msg = str(cm.exception)
+        self.assertIn("'a'", error_msg)
+        self.assertIn("(int, float)", error_msg)
+        self.assertIn("'str'", error_msg)
+
+    def test_add_rejects_string_as_second_argument(self):
+        """add(5, '3') must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add(5, '3')
+        error_msg = str(cm.exception)
+        self.assertIn("'b'", error_msg)
+        self.assertIn("(int, float)", error_msg)
+        self.assertIn("'str'", error_msg)
+
+    def test_add_rejects_list_as_first_argument(self):
+        """add([5], 3) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add([5], 3)
+        error_msg = str(cm.exception)
+        self.assertIn("'a'", error_msg)
+        self.assertIn("'list'", error_msg)
+
+    def test_add_rejects_list_as_second_argument(self):
+        """add(5, [3]) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add(5, [3])
+        error_msg = str(cm.exception)
+        self.assertIn("'b'", error_msg)
+        self.assertIn("'list'", error_msg)
+
+    def test_add_rejects_dict_as_first_argument(self):
+        """add({}, 3) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add({}, 3)
+        error_msg = str(cm.exception)
+        self.assertIn("'a'", error_msg)
+        self.assertIn("'dict'", error_msg)
+
+    def test_add_rejects_dict_as_second_argument(self):
+        """add(5, {}) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add(5, {})
+        error_msg = str(cm.exception)
+        self.assertIn("'b'", error_msg)
+        self.assertIn("'dict'", error_msg)
+
+    def test_add_rejects_none_as_first_argument(self):
+        """add(None, 3) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add(None, 3)
+        error_msg = str(cm.exception)
+        self.assertIn("'a'", error_msg)
+        self.assertIn("'NoneType'", error_msg)
+
+    def test_add_rejects_none_as_second_argument(self):
+        """add(5, None) must raise TypeError."""
+        with self.assertRaises(TypeError) as cm:
+            add(5, None)
+        error_msg = str(cm.exception)
+        self.assertIn("'b'", error_msg)
+        self.assertIn("'NoneType'", error_msg)
+
+    def test_add_rejects_bool_as_first_argument(self):
+        """add(True, 3) must raise TypeError (bool is not accepted)."""
+        with self.assertRaises(TypeError) as cm:
+            add(True, 3)
+        error_msg = str(cm.exception)
+        self.assertIn("'a'", error_msg)
+
+    def test_add_rejects_bool_as_second_argument(self):
+        """add(5, False) must raise TypeError (bool is not accepted)."""
+        with self.assertRaises(TypeError) as cm:
+            add(5, False)
+        error_msg = str(cm.exception)
+        self.assertIn("'b'", error_msg)
+
+    def test_add_error_message_format_first_argument(self):
+        """Error message for first argument must include param name and types."""
+        with self.assertRaises(TypeError) as cm:
+            add("not_a_number", 5)
+        error_msg = str(cm.exception)
+        # Must include parameter name
+        self.assertIn("'a'", error_msg)
+        # Must include expected types
+        self.assertIn("(int, float)", error_msg)
+        # Must include actual type
+        self.assertIn("'str'", error_msg)
+
+    def test_add_error_message_format_second_argument(self):
+        """Error message for second argument must include param name and types."""
+        with self.assertRaises(TypeError) as cm:
+            add(5, "not_a_number")
+        error_msg = str(cm.exception)
+        # Must include parameter name
+        self.assertIn("'b'", error_msg)
+        # Must include expected types
+        self.assertIn("(int, float)", error_msg)
+        # Must include actual type
+        self.assertIn("'str'", error_msg)
 
 
 if __name__ == '__main__':

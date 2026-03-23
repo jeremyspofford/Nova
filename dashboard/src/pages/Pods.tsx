@@ -12,7 +12,7 @@ import { ModelPicker } from '../components/ModelPicker'
 import { ToolPicker } from '../components/ToolPicker'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
-  Card, Badge, Toggle, StatusDot, PipelineStages, Metric,
+  Card, Badge, Toggle, StatusDot, PipelineStages, Metric, Tooltip,
   Button, Input, Textarea, Select, RadioGroup, Modal, ConfirmDialog, EmptyState, Skeleton,
 } from '../components/ui'
 
@@ -616,6 +616,11 @@ const REVIEW_LABELS: Record<string, string> = {
   on_escalation:  'On Escalation',
 }
 
+const REVIEW_TOOLTIPS: Record<string, string> = {
+  on_escalation: 'Human review is requested when the guardrail agent flags concerns.',
+  never:         'Tasks complete without human review.',
+}
+
 function PodCard({ pod, onDelete }: { pod: Pod; onDelete: (pod: Pod) => void }) {
   const [expanded, setExpanded] = useState(false)
   const qc = useQueryClient()
@@ -665,7 +670,9 @@ function PodCard({ pod, onDelete }: { pod: Pod; onDelete: (pod: Pod) => void }) 
         </button>
 
         {/* Pipeline stages indicator */}
-        <PipelineStages stages={pipelineStatuses} compact className="hidden sm:inline-flex" />
+        <Tooltip content="Pipeline stages: Context, Task, Guardrail, Code Review, Decision">
+          <PipelineStages stages={pipelineStatuses} compact className="hidden sm:inline-flex" />
+        </Tooltip>
 
         {/* Agent count */}
         <Badge color="neutral" size="sm">
@@ -681,9 +688,17 @@ function PodCard({ pod, onDelete }: { pod: Pod; onDelete: (pod: Pod) => void }) 
         )}
 
         {/* Review setting */}
-        <span className="hidden text-caption text-content-tertiary sm:inline">
-          Review: {REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}
-        </span>
+        {REVIEW_TOOLTIPS[pod.require_human_review] ? (
+          <Tooltip content={REVIEW_TOOLTIPS[pod.require_human_review]}>
+            <span className="hidden text-caption text-content-tertiary sm:inline">
+              Review: {REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}
+            </span>
+          </Tooltip>
+        ) : (
+          <span className="hidden text-caption text-content-tertiary sm:inline">
+            Review: {REVIEW_LABELS[pod.require_human_review] ?? pod.require_human_review}
+          </span>
+        )}
 
         {/* Routing keywords */}
         {(pod.routing_keywords?.length ?? 0) > 0 && (
@@ -781,6 +796,17 @@ function CreatePodModal({ open, onClose }: { open: boolean; onClose: () => void 
   )
 }
 
+// ── Help entries ─────────────────────────────────────────────────────────────
+
+const HELP_ENTRIES = [
+  { term: 'Pod', definition: 'An isolated pipeline configuration — each pod defines which AI models and settings are used for each stage of task execution.' },
+  { term: 'Agent Role', definition: 'Each pod has 5 agents: Context (gathers info), Task (does the work), Guardrail (safety check), Code Review (quality check), Decision (pass/fail).' },
+  { term: 'Sandbox Tier', definition: "How isolated the agent's execution environment is — from 'isolated' (most restricted) to 'host' (full system access)." },
+  { term: 'Routing Keywords', definition: "Terms that trigger this pod — when a task matches these keywords, it's routed to this pod's pipeline." },
+  { term: 'Fallback Models', definition: 'Secondary AI models used if the primary model is unavailable or rate-limited.' },
+  { term: 'On Failure', definition: 'What happens when an agent fails — abort (stop), skip (continue), or escalate (flag for human review).' },
+]
+
 // ── Main page ────────────────────────────────────────────────────────────────
 
 export function Pods() {
@@ -809,7 +835,8 @@ export function Pods() {
     <div className="space-y-6 px-4 py-6 sm:px-6">
       <PageHeader
         title="Pods"
-        description="Inspect and configure agent pipeline pods"
+        description="Inspect and configure agent pipeline pods."
+        helpEntries={HELP_ENTRIES}
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -855,6 +882,7 @@ export function Pods() {
       {enabled.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-micro font-semibold uppercase tracking-wider text-content-tertiary">Active Pods</h2>
+          <p className="text-caption text-content-tertiary">Pods currently receiving routed tasks from the orchestrator.</p>
           {enabled.map(pod => <PodCard key={pod.id} pod={pod} onDelete={setDeletingPod} />)}
         </div>
       )}
@@ -863,6 +891,7 @@ export function Pods() {
       {disabled.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-micro font-semibold uppercase tracking-wider text-content-tertiary">Disabled Pods</h2>
+          <p className="text-caption text-content-tertiary">Inactive pods that won't receive tasks until re-enabled.</p>
           {disabled.map(pod => <PodCard key={pod.id} pod={pod} onDelete={setDeletingPod} />)}
         </div>
       )}

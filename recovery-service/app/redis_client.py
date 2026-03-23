@@ -30,10 +30,20 @@ async def get_config_redis() -> aioredis.Redis:
 
 
 async def read_config(key: str, default: str = "") -> str:
-    """Read a nova:config:* key from the gateway's Redis db (db1)."""
+    """Read a nova:config:* key from the gateway's Redis db (db1).
+    Values may be JSON-encoded strings (e.g. '"vllm"') — unwrap them."""
     r = await get_config_redis()
     val = await r.get(f"nova:config:{key}")
-    return val if val is not None else default
+    if val is None:
+        return default
+    # Dashboard writes config values as JSON strings — unwrap one level
+    try:
+        parsed = json.loads(val)
+        if isinstance(parsed, str):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return val
 
 
 async def write_system(key: str, data: dict) -> None:

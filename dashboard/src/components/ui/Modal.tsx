@@ -50,7 +50,7 @@ export function Modal({ open, onClose, size = 'md', title, children, footer }: M
       }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" />
+      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
       {/* Content */}
       <div

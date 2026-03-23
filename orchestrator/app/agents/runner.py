@@ -43,6 +43,7 @@ async def run_agent_turn(
     system_prompt: str,
     api_key_id: UUID | None = None,
     explicit_model: bool = False,
+    agent_name: str = "Chat",
 ) -> TaskResult:
     """Execute one agent turn: memory retrieval → LLM call → memory storage → usage log."""
     from app.usage import log_usage
@@ -118,6 +119,7 @@ async def run_agent_turn(
             cost_usd=cost_usd,
             duration_ms=duration_ms,
             metadata=_usage_meta,
+            agent_name=agent_name,
         )
 
         return TaskResult(
@@ -154,6 +156,7 @@ async def run_agent_turn_streaming(
     explicit_model: bool = False,
     guest_mode: bool = False,
     allowed_tools: list[str] | None = None,
+    agent_name: str = "Chat",
 ):
     """Streaming variant — yields text deltas as they arrive from the LLM.
 
@@ -246,11 +249,10 @@ async def run_agent_turn_streaming(
         # Guest mode: no tools at all
         streaming_messages = prompt_messages
         used_tools = False
-    elif skip_tool_preresolution:
-        # Pass tools directly to streaming — no pre-flight LLM call
-        streaming_messages = prompt_messages
-        used_tools = True  # Always include tools so model can use them
     else:
+        # Resolve tool calls before streaming the final response.
+        # The tool loop calls the LLM, executes any tool calls, feeds results
+        # back, and repeats up to 5 rounds. The final text is then streamed.
         streaming_messages, used_tools = await _resolve_tool_rounds(
             messages=prompt_messages,
             model=model,
@@ -319,6 +321,7 @@ async def run_agent_turn_streaming(
         cost_usd=stream_cost_usd,
         duration_ms=duration_ms,
         metadata=_usage_meta,
+        agent_name=agent_name,
     )
 
     # Phase 4b: Pre-warm memory cache for the next message in this session
@@ -453,6 +456,31 @@ async def _safe_list_agents(agent_id: str) -> str:
         return "  (unavailable)"
 
 
+async def _safe_list_goals() -> str:
+    """Load active/paused goals for injection into the chat context."""
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT title, status, priority, progress, iteration "
+                "FROM goals WHERE status IN ('active', 'paused') "
+                "ORDER BY priority ASC, created_at ASC LIMIT 10"
+            )
+        if not rows:
+            return ""
+        lines = ["\n\n### Active Goals"]
+        for r in rows:
+            pct = round(r["progress"] * 100)
+            lines.append(
+                f"  - [{r['status']}] {r['title']}  "
+                f"(priority={r['priority']}, progress={pct}%, iter={r['iteration']})"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        log.debug("Could not load goals for context: %s", e)
+        return ""
+
+
 def _format_tool_list(tools: list) -> str:
     """Generate a concise tool list for the system prompt from effective tools.
 
@@ -513,10 +541,11 @@ async def _build_nova_context(
       2. ## Platform Context - tools, active agents, session info
       3. ## Response Style   - formatting rules
     """
-    # Load identity and agent list concurrently
-    (name, persona), agents_block = await asyncio.gather(
+    # Load identity, agent list, and active goals concurrently
+    (name, persona), agents_block, goals_block = await asyncio.gather(
         _get_platform_identity(),
         _safe_list_agents(agent_id),
+        _safe_list_goals(),
     )
 
     # 1. Identity block
@@ -558,6 +587,7 @@ async def _build_nova_context(
         f"Shell timeout: {settings.shell_timeout_seconds}s\n"
         f"Answer model-identity questions using 'Your model' above (never guess)."
         f"{disabled_notice}"
+        f"{goals_block}"
     )
 
     # 3. Response style

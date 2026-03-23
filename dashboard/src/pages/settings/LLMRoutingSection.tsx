@@ -4,6 +4,7 @@ import { Save, RotateCcw, Radio, Wifi, WifiOff, Power } from 'lucide-react'
 import { getOllamaStatus, discoverModels, resolveModel, testProvider, type PlatformConfigEntry } from '../../api'
 import { Section, Button, Input, Select, Toggle, StatusDot, Card, Slider, Badge } from '../../components/ui'
 import { ConfigField, useConfigValue } from './shared'
+import { LocalInferenceSection } from './LocalInferenceSection'
 
 // ── LLM Routing section ──────────────────────────────────────────────────────
 
@@ -414,8 +415,11 @@ export function LLMRoutingSection({
     <Section
       icon={Radio}
       title="LLM Routing"
-      description="Control how requests are routed between local Ollama and cloud providers."
+      description="Configure your inference backend and control how requests are routed between local and cloud providers."
     >
+      {/* Local inference backend */}
+      <LocalInferenceSection entries={entries} onSave={onSave} saving={saving} inline />
+
       {/* Strategy selector */}
       <div>
         <div className="mb-2 flex items-center gap-2">
@@ -452,9 +456,9 @@ export function LLMRoutingSection({
           <Card variant="default" className="p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <StatusDot status={ollamaStatus?.healthy ? 'success' : 'danger'} />
+                <StatusDot status={ollamaStatus == null ? 'neutral' : ollamaStatus.healthy ? 'success' : 'danger'} />
                 <span className="text-compact font-medium text-content-primary">
-                  Ollama {ollamaStatus?.healthy ? 'Online' : 'Offline'}
+                  Ollama {ollamaStatus == null ? 'Checking...' : ollamaStatus.healthy ? 'Online' : 'Offline'}
                 </span>
               </div>
               <span className="text-caption font-mono text-content-tertiary">

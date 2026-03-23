@@ -14,6 +14,7 @@ interface ThemeState {
   customLightAccent: string
   customDarkAccent: string
   fontScale: number
+  timezone: string                        // IANA timezone (e.g. "America/New_York")
 }
 
 interface ThemeStore {
@@ -30,6 +31,8 @@ interface ThemeStore {
   setCustomDarkAccent: (name: string) => void
   fontScale: number
   setFontScale: (scale: number) => void
+  timezone: string
+  setTimezone: (tz: string) => void
   activePreset: string                    // whichever of light/dark is active
 }
 
@@ -38,6 +41,10 @@ const OLD_STORAGE_KEY = 'nova-theme'
 
 function getSystemMode(): Mode {
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+}
+
+function getBrowserTimezone(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone } catch { return 'UTC' }
 }
 
 function resolveMode(pref: ModePreference): Mode {
@@ -57,6 +64,7 @@ function loadState(): ThemeState {
       customLightAccent: 'teal',
       customDarkAccent: 'teal',
       fontScale: 1,
+      timezone: getBrowserTimezone(),
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     return state
@@ -76,6 +84,7 @@ function loadState(): ThemeState {
           customLightAccent: parsed.accent || 'teal',
           customDarkAccent: parsed.accent || 'teal',
           fontScale: 1,
+          timezone: getBrowserTimezone(),
         }
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
         return state
@@ -90,6 +99,7 @@ function loadState(): ThemeState {
         customLightAccent: parsed.customLightAccent || 'teal',
         customDarkAccent: parsed.customDarkAccent || 'teal',
         fontScale: typeof parsed.fontScale === 'number' ? parsed.fontScale : 1,
+        timezone: parsed.timezone || getBrowserTimezone(),
       }
     } catch { /* fall through */ }
   }
@@ -101,6 +111,7 @@ function loadState(): ThemeState {
     customLightAccent: 'teal',
     customDarkAccent: 'teal',
     fontScale: 1,
+    timezone: getBrowserTimezone(),
   }
 }
 
@@ -207,6 +218,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setState(s => ({ ...s, fontScale: scale }))
   }, [])
 
+  const setTimezone = useCallback((tz: string) => {
+    setState(s => ({ ...s, timezone: tz }))
+  }, [])
+
   const activePreset = resolvedMode === 'dark' ? state.darkPreset : state.lightPreset
 
   return (
@@ -224,6 +239,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       setCustomDarkAccent,
       fontScale: state.fontScale,
       setFontScale,
+      timezone: state.timezone,
+      setTimezone,
       activePreset,
     }}>
       {children}

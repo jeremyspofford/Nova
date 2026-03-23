@@ -38,7 +38,7 @@ class OllamaProvider(ModelProvider):
         self._base_url = base_url
         self._default_model = default_model
         # Health state
-        self._healthy: bool = True  # optimistic on startup
+        self._healthy: bool = False  # conservative — verify before reporting online
         self._last_health_check: float = 0.0
         self._wol_sent_at: float = 0.0
         self._health_lock = asyncio.Lock()

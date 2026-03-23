@@ -66,7 +66,7 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
   }, [oauthDrafts, queryClient])
 
   return (
-    <>
+    <div className="space-y-6">
       {/* Authentication section */}
       <Section
         icon={Shield}
@@ -193,6 +193,6 @@ export function TrustedNetworksSection({ entries, onSave, saving }: ConfigSectio
           saving={saving}
         />
       </Section>
-    </>
+    </div>
   )
 }

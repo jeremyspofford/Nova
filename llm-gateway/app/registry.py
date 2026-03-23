@@ -554,41 +554,52 @@ async def get_embed_provider(model: str) -> ModelProvider:
 
 async def get_provider(model: str) -> ModelProvider:
     """
-    Look up the provider for a model ID, applying the routing strategy for local models.
-    Non-local models always route to their designated provider.
+    Look up the provider for a model ID, applying the routing strategy.
+
+    When strategy is local-only or cloud-only, the strategy takes precedence
+    over any specific model requested — this ensures the routing setting in
+    the dashboard actually controls where requests go, even when the model
+    classifier or pipeline requests a specific cloud/local model.
     """
     # Refresh local backend config (cached 5s, no-op most calls)
     await _local.refresh_config()
 
+    strategy = await get_routing_strategy()
+
+    # ── Enforce hard strategies regardless of requested model ─────────
+    if strategy == "local-only":
+        if not _is_local_model(model):
+            log.info("Routing strategy is local-only, redirecting '%s' to local backend", model)
+        return _local
+
+    if strategy == "cloud-only":
+        if _is_local_model(model):
+            log.info("Routing strategy is cloud-only, redirecting '%s' to cloud", model)
+            return _cloud_fallback
+        # Fall through to normal cloud provider lookup below
+
+    # ── Local model — apply strategy ──────────────────────────────────
+    if _is_local_model(model):
+        if strategy == "local-first":
+            return OllamaCloudFallback(ollama=_local, cloud=_cloud_fallback)
+        elif strategy == "cloud-first":
+            return OllamaCloudFallback(ollama=_cloud_fallback, cloud=_local)
+        else:
+            return _local
+
+    # ── Non-local model with soft strategy ────────────────────────────
     # Subscription preference — try zero-cost subscription providers first
-    # Only for non-local models: explicit local model requests (llama3.2, etc.) bypass this
-    if not _is_local_model(model) and await get_prefer_subscription():
+    if await get_prefer_subscription():
         if _claude_subscription.is_available:
             return _claude_subscription
         if _chatgpt_subscription.is_available:
             return _chatgpt_subscription
 
-    # Non-local models — direct lookup, no strategy applied
-    if not _is_local_model(model):
-        provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY[DEFAULT_MODEL_KEY]
-        if model not in MODEL_REGISTRY:
-            log.warning("Unknown model '%s', using default fallback provider", model)
-        return provider
-
-    # Local model — apply routing strategy
-    strategy = await get_routing_strategy()
-
-    if strategy == "local-only":
-        return _local
-    elif strategy == "local-first":
-        return OllamaCloudFallback(ollama=_local, cloud=_cloud_fallback)
-    elif strategy == "cloud-only":
-        return _cloud_fallback
-    elif strategy == "cloud-first":
-        return OllamaCloudFallback(ollama=_cloud_fallback, cloud=_local)
-    else:
-        log.warning("Unknown routing strategy '%s', using local-first", strategy)
-        return OllamaCloudFallback(ollama=_local, cloud=_cloud_fallback)
+    # Direct provider lookup
+    provider = MODEL_REGISTRY.get(model) or MODEL_REGISTRY[DEFAULT_MODEL_KEY]
+    if model not in MODEL_REGISTRY:
+        log.warning("Unknown model '%s', using default fallback provider", model)
+    return provider
 
 
 def get_provider_sync(model: str) -> ModelProvider:

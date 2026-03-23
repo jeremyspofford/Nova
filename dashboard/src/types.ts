@@ -29,6 +29,8 @@ export interface UsageEvent {
   cost_usd: number | null
   duration_ms: number | null
   created_at: string
+  agent_name: string | null
+  pod_name: string | null
 }
 
 export interface ApiKey {
@@ -70,6 +72,7 @@ export interface PipelineTask {
   status: TaskStatus
   pod_id: string | null
   pod_name: string | null
+  goal_id: string | null
   user_input: string
   output: string | null
   error: string | null

@@ -31,6 +31,8 @@ def log_usage(
     metadata: dict | None = None,
     outcome_score: float | None = None,
     outcome_confidence: float | None = None,
+    agent_name: str | None = None,
+    pod_name: str | None = None,
 ) -> None:
     """Schedule a usage event insert as a background task.
 
@@ -51,6 +53,8 @@ def log_usage(
             metadata=metadata,
             outcome_score=outcome_score,
             outcome_confidence=outcome_confidence,
+            agent_name=agent_name,
+            pod_name=pod_name,
         )
     )
 

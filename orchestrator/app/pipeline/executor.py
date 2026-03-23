@@ -720,7 +720,7 @@ async def _run_agent(
                 api_key_id=None,
                 agent_id=None,
                 session_id=session_id,
-                model=model,
+                model=instance._usage.get("model") or model,
                 input_tokens=instance._usage.get("input_tokens", 0),
                 output_tokens=instance._usage.get("output_tokens", 0),
                 cost_usd=instance._usage.get("cost_usd"),
@@ -728,6 +728,8 @@ async def _run_agent(
                 metadata=_meta,
                 outcome_score=_oscore,
                 outcome_confidence=_oconf,
+                agent_name=agent.name,
+                pod_name=pod.name,
             )
         except Exception as exc:
             logger.debug("Stage outcome scoring failed: %s", exc)

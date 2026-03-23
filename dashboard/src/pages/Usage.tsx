@@ -11,12 +11,21 @@ import {
   aggregateWeekly,
   aggregateDaily,
   aggregateByModel,
+  aggregateByAgent,
   type UsageView,
 } from '../lib/aggregations'
 import clsx from 'clsx'
 import { useTheme } from '../stores/theme-store'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, Tabs, Metric } from '../components/ui'
+
+const HELP_ENTRIES = [
+  { term: 'Tokens', definition: 'The units AI models process — input tokens are your prompt, output tokens are the response. Cost is calculated per token.' },
+  { term: 'Cost', definition: "Estimated spend based on each provider's per-token pricing. Local models (Ollama) are free." },
+  { term: 'Key Name', definition: "The API key identifier — shows which key was used for each call (e.g. 'anthropic', 'openai')." },
+  { term: 'Duration', definition: 'How long the AI model took to generate a response, in milliseconds.' },
+  { term: 'Agent', definition: 'Which pipeline agent made the call — context, task, guardrail, code_review, or decision.' },
+]
 
 /** Read a CSS variable as an rgb() string for use in inline chart styles */
 function cssVar(name: string): string {
@@ -29,6 +38,7 @@ const VIEW_TABS = [
   { id: 'weekly',  label: 'Weekly' },
   { id: 'daily',   label: 'Daily' },
   { id: 'model',   label: 'By Model' },
+  { id: 'agent',   label: 'By Agent' },
 ]
 
 const VIEW_DESCRIPTIONS: Record<UsageView, string> = {
@@ -36,7 +46,10 @@ const VIEW_DESCRIPTIONS: Record<UsageView, string> = {
   weekly:  'Daily cost (last 7 days)',
   daily:   'Hourly cost (last 24 hours)',
   model:   'Total cost per model (all time)',
+  agent:   'Total cost per agent (all time)',
 }
+
+const HORIZONTAL_VIEWS: UsageView[] = ['model', 'agent']
 
 function getChartData(
   view: UsageView,
@@ -48,6 +61,7 @@ function getChartData(
     case 'weekly':  return aggregateWeekly(events)
     case 'daily':   return aggregateDaily(events)
     case 'model':   return aggregateByModel(events, sortBy)
+    case 'agent':   return aggregateByAgent(events, sortBy)
   }
 }
 
@@ -87,12 +101,14 @@ export function Usage() {
   const shownCount  = Math.min(totalCalls, 50)
 
   const chartData   = getChartData(view, events, sortBy)
+  const isHorizontal = HORIZONTAL_VIEWS.includes(view)
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Usage" description="Track LLM costs and usage across all providers and models." />
+      <PageHeader title="Usage" description="Track LLM costs and usage across all providers and models." helpEntries={HELP_ENTRIES} />
 
       {/* Period cost cards */}
+      <p className="text-caption text-content-tertiary -mt-3">Estimated spend per time window — based on per-token pricing from each provider.</p>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Today',      value: `$${costInPeriod(dayAgo).toFixed(4)}`   },
@@ -128,7 +144,7 @@ export function Usage() {
               activeTab={view}
               onChange={(id) => setView(id as UsageView)}
             />
-            {view === 'model' && (
+            {(view === 'model' || view === 'agent') && (
               <div className="flex items-center gap-0.5 rounded-sm border border-border p-0.5 shrink-0">
                 {(['cost', 'alpha'] as const).map(s => (
                   <button
@@ -156,18 +172,18 @@ export function Usage() {
             <p className="py-8 text-center text-compact text-content-tertiary">
               {isLoading ? 'Loading...' : 'No data for this period'}
             </p>
-          ) : view === 'model' ? (
+          ) : isHorizontal ? (
             <ResponsiveContainer width="100%" height={Math.max(180, chartData.length * 36)}>
               <BarChart
                 layout="vertical"
                 data={chartData}
-                margin={{ top: 0, right: 30, left: 0, bottom: 0 }}
+                margin={{ top: 0, right: 30, left: 10, bottom: 0 }}
               >
                 <CartesianGrid strokeDasharray="3 3" stroke={chartColors.grid} horizontal={false} />
                 <YAxis
                   type="category"
                   dataKey="label"
-                  width={110}
+                  width={Math.min(220, Math.max(110, chartData.reduce((m, d) => Math.max(m, d.label.length), 0) * 7))}
                   tick={{ fontSize: 10, fill: chartColors.tick }}
                   axisLine={false}
                   tickLine={false}
@@ -260,6 +276,7 @@ export function Usage() {
             <thead>
               <tr className="bg-surface-elevated">
                 <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Time</th>
+                <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Agent</th>
                 <th className="px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Model</th>
                 <th className="hidden sm:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">Key</th>
                 <th className="hidden lg:table-cell px-4 py-3 text-left text-caption font-medium text-content-tertiary uppercase tracking-wider">In</th>
@@ -274,7 +291,13 @@ export function Usage() {
                   <td className="px-4 py-3 text-content-secondary whitespace-nowrap text-caption">
                     {formatDistanceToNow(new Date(e.created_at), { addSuffix: true })}
                   </td>
-                  <td className="px-4 py-3 font-mono text-mono-sm text-content-primary max-w-32 sm:max-w-48 truncate">{e.model}</td>
+                  <td className="px-4 py-3 text-caption text-content-primary whitespace-nowrap">
+                    <span>{e.agent_name || '\u2014'}</span>
+                    {e.pod_name && (
+                      <span className="ml-1.5 text-content-tertiary text-[10px]">{e.pod_name}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-mono-sm text-content-primary max-w-32 sm:max-w-48 truncate">{e.model || 'unknown'}</td>
                   <td className="hidden sm:table-cell px-4 py-3 text-content-tertiary text-caption">{e.key_name ?? 'dev'}</td>
                   <td className="hidden lg:table-cell px-4 py-3 text-content-tertiary text-caption">{e.input_tokens.toLocaleString()}</td>
                   <td className="hidden lg:table-cell px-4 py-3 text-content-tertiary text-caption">{e.output_tokens.toLocaleString()}</td>

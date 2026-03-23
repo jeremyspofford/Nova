@@ -43,3 +43,6 @@ export { Skeleton } from './Skeleton'
 // Form
 export { SearchInput } from './SearchInput'
 export { ModelPicker } from './ModelPicker'
+
+// Help
+export { PageHelp } from './PageHelp'

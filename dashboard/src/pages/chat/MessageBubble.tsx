@@ -77,17 +77,13 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
                 {cleanedContent}
               </ReactMarkdown>
             )
-          ) : (
-            !isUser && message.activitySteps && message.activitySteps.length > 0
-              ? null  // ActivityFeed handles the "waiting" visual
-              : message.isStreaming ? (
-                <span className="inline-flex items-center gap-1 py-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.3s]" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.15s]" />
-                  <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce" />
-                </span>
-              ) : '\u2014'
-          )}
+          ) : message.isStreaming ? (
+            <span className="inline-flex items-center gap-1 py-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce" />
+            </span>
+          ) : '\u2014'}
         </div>
 
         {/* Footer: time, model, category */}

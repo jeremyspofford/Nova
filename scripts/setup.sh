@@ -37,10 +37,18 @@ if [ "${OLLAMA_BASE_URL:-}" = "auto" ] || [ "${OLLAMA_BASE_URL:-}" = "host" ]; t
   export OLLAMA_BASE_URL="${RESOLVED_URL}"
 fi
 
-# ── Determine if local Ollama is needed ──────────────────────────────────────
+# ── Determine which local inference backends are active ──────────────────────
 USE_LOCAL_OLLAMA=false
+USE_LOCAL_VLLM=false
+USE_LOCAL_SGLANG=false
 case "${COMPOSE_PROFILES:-}" in
-  *local-ollama*) USE_LOCAL_OLLAMA=true ;;
+  *local-ollama*)  USE_LOCAL_OLLAMA=true ;;
+esac
+case "${COMPOSE_PROFILES:-}" in
+  *local-vllm*)    USE_LOCAL_VLLM=true ;;
+esac
+case "${COMPOSE_PROFILES:-}" in
+  *local-sglang*)  USE_LOCAL_SGLANG=true ;;
 esac
 
 # Skip Ollama entirely for cloud-only mode
@@ -48,25 +56,34 @@ if [ "${LLM_ROUTING_STRATEGY:-local-first}" = "cloud-only" ]; then
   USE_LOCAL_OLLAMA=false
 fi
 
+NEEDS_LOCAL_INFERENCE=false
+if [ "${USE_LOCAL_OLLAMA}" = "true" ] || [ "${USE_LOCAL_VLLM}" = "true" ] || [ "${USE_LOCAL_SGLANG}" = "true" ]; then
+  NEEDS_LOCAL_INFERENCE=true
+fi
+
 # ── Detect GPU and pick compose files ────────────────────────────────────────
 COMPOSE_FILES="-f docker-compose.yml"
 
-if [ "${USE_LOCAL_OLLAMA}" = "true" ]; then
-  if [ "${NOVA_GPU:-auto}" = "nvidia" ] || ([ "${NOVA_GPU:-auto}" = "auto" ] && command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null); then
-    COMPOSE_FILES="${COMPOSE_FILES} -f docker-compose.gpu.yml"
-    echo "✓ NVIDIA GPU detected — using docker-compose.gpu.yml overlay"
-    echo "  (set NOVA_GPU=cpu in .env to disable GPU mode)"
-  elif [ "${NOVA_GPU:-auto}" = "rocm" ]; then
-    COMPOSE_FILES="${COMPOSE_FILES} -f docker-compose.rocm.yml"
-    echo "✓ AMD ROCm GPU mode enabled"
-  else
-    echo "  Running in CPU mode (Apple Silicon uses Metal automatically)"
-  fi
+if [ "${NOVA_GPU:-auto}" = "nvidia" ] || ([ "${NOVA_GPU:-auto}" = "auto" ] && command -v nvidia-smi &>/dev/null && nvidia-smi &>/dev/null); then
+  COMPOSE_FILES="${COMPOSE_FILES} -f docker-compose.gpu.yml"
+  echo "✓ NVIDIA GPU detected — using docker-compose.gpu.yml overlay"
+  echo "  (set NOVA_GPU=cpu in .env to disable GPU mode)"
+elif [ "${NOVA_GPU:-auto}" = "rocm" ]; then
+  COMPOSE_FILES="${COMPOSE_FILES} -f docker-compose.rocm.yml"
+  echo "✓ AMD ROCm GPU mode enabled"
 else
+  if [ "${USE_LOCAL_VLLM}" = "true" ] || [ "${USE_LOCAL_SGLANG}" = "true" ]; then
+    echo "⚠ No GPU detected but vLLM/SGLang requested — these require a GPU"
+    echo "  Consider using Ollama (CPU-capable) or cloud providers instead"
+  fi
+  echo "  Running in CPU mode (Apple Silicon uses Metal automatically)"
+fi
+
+if [ "${NEEDS_LOCAL_INFERENCE}" = "false" ]; then
   if [ "${LLM_ROUTING_STRATEGY:-local-first}" = "cloud-only" ]; then
-    echo "  Cloud-only mode — skipping local Ollama"
+    echo "  Cloud-only mode — no local inference backend"
   else
-    echo "  Using remote Ollama at ${OLLAMA_BASE_URL:-<not set>}"
+    echo "  Using remote inference at ${OLLAMA_BASE_URL:-<not set>}"
   fi
 fi
 
@@ -114,12 +131,16 @@ fi
 
 # ── Start infrastructure services ────────────────────────────────────────────
 echo ""
-if [ "${USE_LOCAL_OLLAMA}" = "true" ]; then
-  echo "→ Starting infrastructure (postgres, redis, ollama)..."
-  cd "${PROJECT_ROOT}"
-  docker compose ${COMPOSE_FILES} up -d postgres redis ollama
+echo "→ Starting infrastructure (postgres, redis)..."
+cd "${PROJECT_ROOT}"
+docker compose ${COMPOSE_FILES} up -d postgres redis
 
+# ── Start Ollama if configured ───────────────────────────────────────────────
+if [ "${USE_LOCAL_OLLAMA}" = "true" ]; then
   echo ""
+  echo "→ Starting Ollama..."
+  docker compose ${COMPOSE_FILES} up -d ollama
+
   echo "→ Waiting for Ollama to be healthy (this can take 30-60 s on first run)..."
   docker compose ${COMPOSE_FILES} up -d --wait ollama 2>/dev/null || {
     echo "  (falling back to port polling — upgrade Docker Compose for faster startup)"
@@ -144,10 +165,21 @@ if [ "${USE_LOCAL_OLLAMA}" = "true" ]; then
     docker compose ${COMPOSE_FILES} exec -T ollama ollama pull "${model}" \
       || echo "  ⚠ Failed to pull ${model} (may already exist — continuing)"
   done
-else
-  echo "→ Starting infrastructure (postgres, redis)..."
-  cd "${PROJECT_ROOT}"
-  docker compose ${COMPOSE_FILES} up -d postgres redis
+fi
+
+# ── Start vLLM / SGLang if configured ───────────────────────────────────────
+if [ "${USE_LOCAL_VLLM}" = "true" ]; then
+  echo ""
+  echo "→ Starting vLLM (model: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct})..."
+  echo "  First start downloads the model from HuggingFace — this may take several minutes."
+  docker compose ${COMPOSE_FILES} --profile local-vllm up -d nova-vllm
+fi
+
+if [ "${USE_LOCAL_SGLANG}" = "true" ]; then
+  echo ""
+  echo "→ Starting SGLang (model: ${SGLANG_MODEL:-Qwen/Qwen2.5-3B-Instruct})..."
+  echo "  First start downloads the model from HuggingFace — this may take several minutes."
+  docker compose ${COMPOSE_FILES} --profile local-sglang up -d nova-sglang
 fi
 
 # ── Start all Nova platform services ─────────────────────────────────────────

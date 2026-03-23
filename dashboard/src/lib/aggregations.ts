@@ -7,7 +7,7 @@ export interface ChartDataPoint {
   calls: number   // number of API calls
 }
 
-export type UsageView = 'alltime' | 'weekly' | 'daily' | 'model'
+export type UsageView = 'alltime' | 'weekly' | 'daily' | 'model' | 'agent'
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -119,8 +119,7 @@ export function aggregateByModel(
   const buckets = new Map<string, ChartDataPoint>()
 
   for (const e of events) {
-    // Full model ID kept for precision — chart rotates labels automatically
-    const label = e.model
+    const label = e.model || 'unknown'
     if (!buckets.has(label)) buckets.set(label, emptyBucket(label))
     accumulate(buckets.get(label)!, e)
   }
@@ -131,5 +130,28 @@ export function aggregateByModel(
     return points.sort((a, b) => a.label.localeCompare(b.label))
   }
   // Default: highest cost first; ties broken alphabetically for stability
+  return points.sort((a, b) => b.cost - a.cost || a.label.localeCompare(b.label))
+}
+
+// ─── By Agent — one bar per agent (with pod prefix when available) ───────────
+
+export function aggregateByAgent(
+  events: UsageEvent[],
+  sortBy: 'cost' | 'alpha' = 'cost',
+): ChartDataPoint[] {
+  const buckets = new Map<string, ChartDataPoint>()
+
+  for (const e of events) {
+    const agent = e.agent_name || 'unknown'
+    const label = e.pod_name ? `${e.pod_name} > ${agent}` : agent
+    if (!buckets.has(label)) buckets.set(label, emptyBucket(label))
+    accumulate(buckets.get(label)!, e)
+  }
+
+  const points = [...buckets.values()]
+
+  if (sortBy === 'alpha') {
+    return points.sort((a, b) => a.label.localeCompare(b.label))
+  }
   return points.sort((a, b) => b.cost - a.cost || a.label.localeCompare(b.label))
 }

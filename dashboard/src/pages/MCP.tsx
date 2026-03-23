@@ -443,7 +443,7 @@ function CatalogCard({
   onInstall: (entry: CatalogEntry) => void
 }) {
   return (
-    <Card variant="hoverable" className="p-4 flex flex-col gap-3">
+    <Card variant="hoverable" className="p-4 flex flex-col">
       <div className="flex-1">
         <div className="flex items-start justify-between gap-2">
           <span className="text-compact font-medium text-content-primary">{entry.displayName}</span>
@@ -467,12 +467,21 @@ function CatalogCard({
           ))}
         </div>
       </div>
-      <Button size="sm" className="w-full" onClick={() => onInstall(entry)}>
+      <Button size="sm" className="w-full mt-4" onClick={() => onInstall(entry)}>
         Install
       </Button>
     </Card>
   )
 }
+
+// ── Help entries ─────────────────────────────────────────────────────────────
+
+const HELP_ENTRIES = [
+  { term: 'MCP', definition: 'Model Context Protocol — an open standard for connecting AI models to external tools and data sources.' },
+  { term: 'Transport', definition: 'How Nova communicates with the MCP server — stdio runs it as a subprocess, HTTP connects to a remote URL.' },
+  { term: 'Tool', definition: "A specific function an MCP server provides — e.g. 'search files', 'run SQL', 'fetch web page'." },
+  { term: 'Server', definition: 'A program implementing the MCP protocol that provides one or more tools for Nova to use during tasks.' },
+]
 
 // ── MCP page ──────────────────────────────────────────────────────────────────
 
@@ -569,6 +578,7 @@ export function MCP() {
             {showForm ? 'Cancel' : 'Add Server'}
           </Button>
         }
+        helpEntries={HELP_ENTRIES}
       />
 
       {/* Add / edit server form */}

@@ -281,6 +281,8 @@ async def insert_usage_event(
     metadata: dict | None = None,
     outcome_score: float | None = None,
     outcome_confidence: float | None = None,
+    agent_name: str | None = None,
+    pod_name: str | None = None,
 ) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -289,8 +291,9 @@ async def insert_usage_event(
             INSERT INTO usage_events
                 (api_key_id, agent_id, session_id, model,
                  input_tokens, output_tokens, cost_usd, duration_ms,
-                 metadata, outcome_score, outcome_confidence)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
+                 metadata, outcome_score, outcome_confidence,
+                 agent_name, pod_name)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11, $12, $13)
             """,
             api_key_id,
             agent_id,
@@ -303,4 +306,6 @@ async def insert_usage_event(
             json.dumps(metadata) if metadata else "{}",
             outcome_score,
             outcome_confidence,
+            agent_name,
+            pod_name,
         )

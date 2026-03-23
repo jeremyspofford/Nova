@@ -11,6 +11,13 @@ import {
   type ActivityEvent,
 } from '../api'
 
+const HELP_ENTRIES = [
+  { term: 'Sprint Health', definition: "A snapshot of today's task pipeline performance — success rate, submissions, failures, and unresolved issues." },
+  { term: 'Friction', definition: 'Issues, bugs, and rough edges discovered while using Nova — logged manually or automatically from pipeline failures.' },
+  { term: 'Pipeline', definition: "Nova's 5-stage task execution chain — Context, Task, Guardrail, Code Review, and Decision agents working in sequence." },
+  { term: 'Engrams', definition: "Individual units of memory in Nova's knowledge graph — facts, preferences, procedures, and entities learned from conversations." },
+]
+
 const SEVERITY_ICON: Record<string, React.ReactNode> = {
   info: <Activity size={12} className="text-blue-400" />,
   warning: <AlertTriangle size={12} className="text-amber-400" />,
@@ -48,9 +55,11 @@ export default function Overview() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Overview" />
+      <PageHeader title="Overview" description="System health and recent activity at a glance." helpEntries={HELP_ENTRIES} />
 
       {/* Sprint Health */}
+      <h3 className="text-compact font-semibold text-content-primary">Sprint Health</h3>
+      <p className="text-caption text-content-tertiary -mt-4">Pipeline success rate, throughput, and open issues for the current period.</p>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {statsLoading ? (
           [1, 2, 3, 4].map(i => (
@@ -63,16 +72,17 @@ export default function Overview() {
                 label="Success Rate (7d)"
                 value={successRate !== null ? `${successRate}%` : '--'}
                 icon={rateIcon}
+                tooltip="Percentage of pipeline tasks that completed successfully in the last 7 days."
               />
             </Card>
             <Card className="p-4">
-              <Metric label="Submitted Today" value={pipelineStats?.submitted_today ?? 0} />
+              <Metric label="Submitted Today" value={pipelineStats?.submitted_today ?? 0} tooltip="Tasks submitted to the pipeline queue today." />
             </Card>
             <Card className="p-4">
-              <Metric label="Failed Today" value={pipelineStats?.failed_today ?? 0} />
+              <Metric label="Failed Today" value={pipelineStats?.failed_today ?? 0} tooltip="Tasks that failed or were aborted today." />
             </Card>
             <Card className="p-4">
-              <Metric label="Open Friction" value={frictionStats?.open_count ?? 0} />
+              <Metric label="Open Friction" value={frictionStats?.open_count ?? 0} tooltip="Unresolved friction log entries — bugs and issues found during use." />
             </Card>
           </>
         )}
@@ -81,7 +91,8 @@ export default function Overview() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Activity */}
         <Card className="p-5">
-          <h3 className="text-compact font-semibold text-content-primary mb-4">Recent Activity</h3>
+          <h3 className="text-compact font-semibold text-content-primary mb-1">Recent Activity</h3>
+          <p className="text-caption text-content-tertiary mb-4">Events from across all services — task completions, failures, and system changes.</p>
           {activityLoading ? (
             <Skeleton lines={5} />
           ) : !activity?.length ? (

@@ -1,6 +1,7 @@
 """Goal CRUD endpoints — used by dashboard and cortex."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
@@ -30,6 +31,7 @@ def _validate_and_compute_next(cron_expr: str) -> datetime:
 class CreateGoalRequest(BaseModel):
     title: str
     description: str | None = None
+    success_criteria: str | None = None
     priority: int = 0
     max_iterations: int | None = 50
     max_cost_usd: float | None = None
@@ -43,6 +45,7 @@ class CreateGoalRequest(BaseModel):
 class UpdateGoalRequest(BaseModel):
     title: str | None = None
     description: str | None = None
+    success_criteria: str | None = None
     status: str | None = None
     priority: int | None = None
     progress: float | None = None
@@ -57,6 +60,7 @@ class GoalResponse(BaseModel):
     id: UUID
     title: str
     description: str | None
+    success_criteria: str | None
     status: str
     priority: int
     progress: float
@@ -92,15 +96,15 @@ async def create_goal(req: CreateGoalRequest, user: UserDep):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO goals (title, description, priority, max_iterations,
-                               max_cost_usd, check_interval_seconds, parent_goal_id,
-                               created_by, schedule_cron, schedule_next_at,
-                               max_completions, created_via)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            INSERT INTO goals (title, description, success_criteria, priority,
+                               max_iterations, max_cost_usd, check_interval_seconds,
+                               parent_goal_id, created_by, schedule_cron,
+                               schedule_next_at, max_completions, created_via)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             RETURNING *
             """,
-            req.title, req.description, req.priority, req.max_iterations,
-            req.max_cost_usd, req.check_interval_seconds,
+            req.title, req.description, req.success_criteria, req.priority,
+            req.max_iterations, req.max_cost_usd, req.check_interval_seconds,
             req.parent_goal_id, user.email,
             req.schedule_cron, schedule_next_at,
             req.max_completions, req.created_via,
@@ -247,14 +251,21 @@ async def delete_goal(goal_id: UUID, _user: UserDep):
 
 
 def _row_to_goal(row) -> GoalResponse:
+    plan = row["current_plan"]
+    if isinstance(plan, str):
+        try:
+            plan = json.loads(plan)
+        except (json.JSONDecodeError, TypeError):
+            plan = None
     return GoalResponse(
         id=row["id"],
         title=row["title"],
         description=row["description"],
+        success_criteria=row.get("success_criteria"),
         status=row["status"],
         priority=row["priority"],
         progress=row["progress"],
-        current_plan=row["current_plan"],
+        current_plan=plan,
         iteration=row["iteration"],
         max_iterations=row["max_iterations"],
         max_cost_usd=row["max_cost_usd"],

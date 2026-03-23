@@ -136,10 +136,11 @@ export const submitPipelineTask = (
     },
   )
 
-export const getPipelineTasks = (params: { status?: string; pod_id?: string; limit?: number } = {}) => {
+export const getPipelineTasks = (params: { status?: string; pod_id?: string; goal_id?: string; limit?: number } = {}) => {
   const qs = new URLSearchParams()
   if (params.status)  qs.set('status', params.status)
   if (params.pod_id)  qs.set('pod_id', params.pod_id)
+  if (params.goal_id) qs.set('goal_id', params.goal_id)
   if (params.limit)   qs.set('limit', String(params.limit))
   return apiFetch<PipelineTask[]>(`/api/v1/pipeline/tasks?${qs}`)
 }
@@ -171,7 +172,7 @@ export const getTaskReviews = (task_id: string) =>
 export const deletePipelineTask = (task_id: string) =>
   apiFetch<void>(`/api/v1/pipeline/tasks/${task_id}`, { method: 'DELETE' })
 
-export const bulkDeletePipelineTasks = (statuses = 'complete,failed,cancelled') =>
+export const bulkDeletePipelineTasks = (statuses = 'complete,failed,cancelled,pending_human_review,clarification_needed') =>
   apiFetch<{ deleted: number; statuses: string[] }>(
     `/api/v1/pipeline/tasks?status=${encodeURIComponent(statuses)}`,
     { method: 'DELETE' },
@@ -416,6 +417,7 @@ export interface Goal {
   id: string
   title: string
   description: string | null
+  success_criteria: string | null
   status: 'active' | 'paused' | 'completed' | 'failed' | 'cancelled'
   priority: number
   progress: number
@@ -440,7 +442,7 @@ export const getGoals = (status?: string) => {
 export const getGoal = (id: string) =>
   apiFetch<Goal>(`/api/v1/goals/${id}`)
 
-export const createGoal = (data: { title: string; description?: string; priority?: number; max_cost_usd?: number }) =>
+export const createGoal = (data: { title: string; description?: string; success_criteria?: string; priority?: number; max_iterations?: number | null; max_cost_usd?: number; check_interval_seconds?: number }) =>
   apiFetch<Goal>('/api/v1/goals', {
     method: 'POST',
     body: JSON.stringify(data),
@@ -479,6 +481,9 @@ export const pauseCortex = () =>
 
 export const resumeCortex = () =>
   apiFetch<{ status: string }>('/cortex-api/api/v1/cortex/resume', { method: 'POST' })
+
+export const triggerGoal = (goalId: string) =>
+  apiFetch<{ status: string; task_id?: string }>(`/cortex-api/api/v1/cortex/trigger/${goalId}`, { method: 'POST' })
 
 export const getCortexDrives = () =>
   apiFetch<{ drives: CortexDrive[] }>('/cortex-api/api/v1/cortex/drives')

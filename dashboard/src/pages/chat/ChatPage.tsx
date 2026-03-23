@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { streamChat, discoverModels, resolveModel, apiFetch, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
 import { useAuth } from '../../stores/auth-store'
-import { cleanToolArtifacts, getStableContent } from '../../utils/cleanToolArtifacts'
+import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import { ConversationSidebar } from '../../components/ConversationSidebar'
 import { MessageBubble } from './MessageBubble'
@@ -48,11 +48,6 @@ export function Chat() {
   // Track conversation switches to use instant scroll (no animation) on load
   const lastConversationId = useRef(conversationId)
   const needsInstantScroll = useRef(true)
-  // Character drip buffer — smooth out bursty network delivery
-  const dripBufferRef = useRef('')      // unreleased characters
-  const dripRevealedRef = useRef('')    // characters released so far
-  const dripIntervalRef = useRef<ReturnType<typeof setInterval>>()
-  const dripMsgIdRef = useRef('')       // which message the drip is targeting
 
   const { data: providers } = useQuery({
     queryKey: ['model-catalog'],
@@ -152,6 +147,8 @@ export function Chat() {
       isStreaming: true,
     }
 
+    // Always scroll to bottom when user sends a message
+    needsInstantScroll.current = true
     if (fromQueue) {
       // User message already shown when queued
       setMessages(prev => [...prev, assistantMsg])
@@ -266,33 +263,9 @@ export function Chat() {
           )
         }
         accumulated += event
-        dripBufferRef.current = accumulated.slice(dripRevealedRef.current.length)
-        // Start the drip interval if not already running
-        if (!dripIntervalRef.current) {
-          dripMsgIdRef.current = assistantMsgId
-          dripIntervalRef.current = setInterval(() => {
-            const buf = dripBufferRef.current
-            if (!buf) return
-            // Adaptive rate: release more chars when buffer is large to avoid lag
-            const charsPerTick = buf.length > 200 ? 12 : buf.length > 50 ? 6 : 3
-            const release = buf.slice(0, charsPerTick)
-            dripRevealedRef.current += release
-            dripBufferRef.current = buf.slice(charsPerTick)
-            const displayContent = getStableContent(dripRevealedRef.current)
-            const msgId = dripMsgIdRef.current
-            setMessages(prev =>
-              prev.map(m =>
-                m.id === msgId ? { ...m, content: displayContent } : m
-              )
-            )
-          }, 16) // ~60fps
-        }
       }
-      // Stop drip and flush all remaining content
-      clearInterval(dripIntervalRef.current)
-      dripIntervalRef.current = undefined
-      dripBufferRef.current = ''
-      dripRevealedRef.current = ''
+      // Stream complete — show the full response at once
+      needsInstantScroll.current = true
       setMessages(prev =>
         prev.map(m =>
           m.id === assistantMsgId
@@ -301,10 +274,6 @@ export function Chat() {
         )
       )
     } catch (err) {
-      clearInterval(dripIntervalRef.current)
-      dripIntervalRef.current = undefined
-      dripBufferRef.current = ''
-      dripRevealedRef.current = ''
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg)
       setMessages(prev =>

@@ -11,6 +11,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
+import { formatAbsoluteDate, formatDuration } from '../utils/formatDate'
+import { useTheme } from '../stores/theme-store'
 import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
   reviewPipelineTask, getQueueStats, getPods, discoverModels,
@@ -26,9 +28,19 @@ import { PageHeader } from '../components/layout/PageHeader'
 import {
   Badge, Button, Card, CopyableId, ConfirmDialog, EmptyState,
   Metric, Modal, PipelineStages, SearchInput, Select, Skeleton,
-  Tabs, Textarea, StatusDot, DataList,
+  Tabs, Textarea, StatusDot, DataList, Tooltip,
 } from '../components/ui'
 import type { SemanticColor } from '../lib/design-tokens'
+
+const HELP_ENTRIES = [
+  { term: 'Pipeline', definition: 'The 5-stage agent chain that processes every task — Context gathers info, Task executes, Guardrail validates safety, Code Review checks quality, Decision determines success.' },
+  { term: 'Stage', definition: 'One of 5 sequential phases a task passes through. Each stage has its own AI agent.' },
+  { term: 'Guardrail', definition: 'A safety-validation agent that checks task outputs for security issues, policy violations, or harmful content.' },
+  { term: 'Code Review', definition: 'An agent that reviews task output for correctness, quality, and adherence to requirements.' },
+  { term: 'Escalation', definition: 'When a task is flagged for human review instead of being automatically resolved.' },
+  { term: 'Finding', definition: 'A specific concern raised by the guardrail agent — e.g. a security risk or policy violation.' },
+  { term: 'Verdict', definition: "The code review agent's assessment — approved, rejected, or needs-fix." },
+]
 
 // ── Task context builder for chat ─────────────────────────────────────────────
 
@@ -271,18 +283,6 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
   const [comment, setComment] = useState('')
   const qc = useQueryClient()
 
-  const { data: findings = [], isLoading: findingsLoading } = useQuery({
-    queryKey: ['task-findings', task.id],
-    queryFn: () => getTaskFindings(task.id),
-    staleTime: 10_000,
-  })
-
-  const { data: reviews = [], isLoading: reviewsLoading } = useQuery({
-    queryKey: ['task-reviews', task.id],
-    queryFn: () => getTaskReviews(task.id),
-    staleTime: 10_000,
-  })
-
   const review = useMutation({
     mutationFn: ({ decision }: { decision: 'approve' | 'reject' }) =>
       reviewPipelineTask(task.id, decision, comment || undefined),
@@ -293,7 +293,6 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
   })
 
   const escalationMsg = task.metadata?.escalation_message as string | undefined
-  const isLoading = findingsLoading || reviewsLoading
 
   return (
     <div className="space-y-4">
@@ -307,27 +306,9 @@ function ReviewPanel({ task, onDone }: { task: PipelineTask; onDone: () => void 
         </p>
       </div>
 
-      {/* Task output */}
-      {task.output && (
-        <div>
-          <p className="mb-1 text-caption font-medium text-content-tertiary">Pipeline Output</p>
-          <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-surface-elevated border border-border-subtle p-3 text-mono-sm text-content-secondary">
-            {task.output}
-          </pre>
-        </div>
-      )}
-
-      {/* Guardrail findings & code reviews */}
-      {isLoading ? (
-        <div className="flex items-center gap-2 text-caption text-content-tertiary">
-          <Loader2 size={12} className="animate-spin" /> Loading review context...
-        </div>
-      ) : (
-        <>
-          <FindingsSection findings={findings} />
-          <CodeReviewSection reviews={reviews} />
-        </>
-      )}
+      <p className="text-caption text-content-tertiary">
+        Check the Findings and Code Review tabs for details, then approve or reject below.
+      </p>
 
       {/* Decision area */}
       <div className="border-t border-border-subtle pt-3 space-y-2">
@@ -441,7 +422,7 @@ function ClarificationPanel({ task, onDone }: { task: PipelineTask; onDone: () =
 
 // ── Task detail sheet ─────────────────────────────────────────────────────────
 
-function TaskDetailSheet({
+export function TaskDetailSheet({
   task,
   open,
   onClose,
@@ -458,6 +439,7 @@ function TaskDetailSheet({
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { setPrefillInput } = useChatStore()
+  const { timezone } = useTheme()
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelPipelineTask(task!.id),
@@ -487,7 +469,7 @@ function TaskDetailSheet({
   const detailTabs = [
     { id: 'output', label: 'Output' },
     { id: 'findings', label: 'Findings' },
-    { id: 'reviews', label: 'Reviews' },
+    { id: 'reviews', label: 'Code Review' },
     ...(needsReview ? [{ id: 'review', label: 'Review' }] : []),
     ...(needsClarification ? [{ id: 'clarify', label: 'Clarify' }] : []),
   ]
@@ -533,9 +515,18 @@ function TaskDetailSheet({
         {/* Timestamps / metadata */}
         <DataList
           items={[
-            { label: 'Queued', value: task.queued_at ? formatDistanceToNow(new Date(task.queued_at), { addSuffix: true }) : '--' },
-            ...(task.started_at ? [{ label: 'Started', value: formatDistanceToNow(new Date(task.started_at), { addSuffix: true }) }] : []),
-            ...(task.completed_at ? [{ label: 'Completed', value: formatDistanceToNow(new Date(task.completed_at), { addSuffix: true }) }] : []),
+            ...(task.queued_at ? [{
+              label: 'Queued',
+              value: task.started_at
+                ? `${formatDuration(task.queued_at, task.started_at)} in queue`
+                : formatAbsoluteDate(task.queued_at, timezone),
+            }] : []),
+            ...(task.started_at ? [{ label: 'Started', value: formatAbsoluteDate(task.started_at, timezone) }] : []),
+            ...(task.completed_at && task.started_at ? [{
+              label: 'Duration',
+              value: formatDuration(task.started_at, task.completed_at),
+            }] : []),
+            ...(task.completed_at ? [{ label: 'Completed', value: formatAbsoluteDate(task.completed_at, timezone) }] : []),
             { label: 'Retries', value: `${task.retry_count}/${task.max_retries}` },
             ...(task.current_stage ? [{ label: 'Current Stage', value: task.current_stage }] : []),
           ]}
@@ -856,6 +847,7 @@ function StatsRow() {
           label="Active Tasks"
           value={stats?.active_count ?? 0}
           icon={<Zap size={12} />}
+          tooltip="Tasks currently running in the pipeline."
         />
       </Card>
       <Card className="p-4">
@@ -863,6 +855,7 @@ function StatsRow() {
           label="Completed Today"
           value={stats?.completed_today ?? 0}
           icon={<CheckCircle2 size={12} />}
+          tooltip="Tasks that finished successfully today."
         />
       </Card>
       <Card className="p-4">
@@ -870,6 +863,7 @@ function StatsRow() {
           label="Failed Today"
           value={stats?.failed_today ?? 0}
           icon={<AlertTriangle size={12} />}
+          tooltip="Tasks that failed or were aborted today."
         />
       </Card>
       <Card className="p-4">
@@ -877,6 +871,7 @@ function StatsRow() {
           label="Avg Latency"
           value={latency ? `${(latency.avg_total_ms / 1000).toFixed(1)}s` : '--'}
           icon={<Timer size={12} />}
+          tooltip="Average time from task submission to completion over the last 7 days."
         />
       </Card>
     </div>
@@ -941,7 +936,7 @@ export function Tasks() {
 
   // Count review/clarification tasks for alert badge
   const reviewCount = tasks.filter(t => t.status === 'pending_human_review' || t.status === 'clarification_needed').length
-  const hasHistory = tasks.some(t => ['complete', 'failed', 'cancelled'].includes(t.status))
+  const hasHistory = tasks.length > 0
 
   const uniquePods = [...new Set(tasks.map(t => t.pod_name).filter(Boolean) as string[])]
 
@@ -949,13 +944,14 @@ export function Tasks() {
     <div className="space-y-6">
       <PageHeader
         title="Pipeline Tasks"
-        description="Submit and monitor async agent tasks"
+        description="Submit and monitor async agent tasks."
+        helpEntries={HELP_ENTRIES}
         actions={
           <div className="flex items-center gap-3">
             {queueStats && (
               <div className="hidden sm:flex gap-3 text-caption text-content-tertiary">
-                <span>Queue: <strong className="text-content-primary">{queueStats.queue_depth}</strong></span>
-                <span>Dead letter: <strong className={queueStats.dead_letter_depth > 0 ? 'text-danger' : 'text-content-primary'}>{queueStats.dead_letter_depth}</strong></span>
+                <Tooltip content="Tasks waiting in the Redis queue to be picked up."><span>Queue: <strong className="text-content-primary">{queueStats.queue_depth}</strong></span></Tooltip>
+                <Tooltip content="Tasks that failed repeatedly and were moved out of the queue."><span>Dead letter: <strong className={queueStats.dead_letter_depth > 0 ? 'text-danger' : 'text-content-primary'}>{queueStats.dead_letter_depth}</strong></span></Tooltip>
               </div>
             )}
             <Button
@@ -970,6 +966,7 @@ export function Tasks() {
       />
 
       {/* Stats row */}
+      <p className="text-caption text-content-tertiary -mb-4">Each task flows through 5 pipeline stages before producing a final result or escalating for review.</p>
       <StatsRow />
 
       {/* Submit form */}
@@ -1085,7 +1082,7 @@ export function Tasks() {
         open={confirmClear}
         onClose={() => setConfirmClear(false)}
         title="Clear Task History"
-        description="This will permanently delete all completed, failed, and cancelled tasks. Active tasks will not be affected."
+        description="This will permanently delete all non-running tasks — completed, failed, cancelled, and tasks waiting for review or clarification. Only actively running tasks are kept."
         confirmLabel={bulkDelete.isPending ? 'Deleting...' : 'Delete All'}
         onConfirm={() => bulkDelete.mutate()}
         destructive

@@ -1,12 +1,23 @@
 [
   {
+    "id": "Qwen/Qwen2.5-3B-Instruct",
+    "ollama_id": "qwen2.5:3b",
+    "name": "Qwen 2.5 3B",
+    "category": "general",
+    "min_vram_gb": 2.5,
+    "backends": ["vllm", "sglang", "ollama"],
+    "default": true,
+    "description": "Fast, capable general-purpose model. Works out of the box — no HuggingFace token required."
+  },
+  {
     "id": "meta-llama/Llama-3.2-3B-Instruct",
     "ollama_id": "llama3.2",
     "name": "Llama 3.2 3B",
     "category": "general",
     "min_vram_gb": 2.5,
+    "gated": true,
     "backends": ["vllm", "sglang", "ollama"],
-    "description": "Fast, capable general-purpose model. Great starting point."
+    "description": "Fast, capable general-purpose model. Requires HuggingFace token + license acceptance."
   },
   {
     "id": "meta-llama/Llama-3.1-8B-Instruct",
@@ -14,8 +25,9 @@
     "name": "Llama 3.1 8B",
     "category": "general",
     "min_vram_gb": 5.5,
+    "gated": true,
     "backends": ["vllm", "sglang", "ollama"],
-    "description": "Larger, more capable. Best general-purpose for 8GB+ VRAM."
+    "description": "Larger, more capable. Best general-purpose for 8GB+ VRAM. Requires HuggingFace token."
   },
   {
     "id": "Qwen/Qwen2.5-7B-Instruct-AWQ",
@@ -58,8 +70,9 @@
     "name": "Llama 3.1 70B (AWQ)",
     "category": "reasoning",
     "min_vram_gb": 36.0,
+    "gated": true,
     "backends": ["vllm", "sglang"],
-    "description": "Frontier-class reasoning. Requires 40GB+ VRAM (A100/H100)."
+    "description": "Frontier-class reasoning. Requires 40GB+ VRAM (A100/H100). Requires HuggingFace token."
   },
   {
     "id": "mistralai/Mistral-7B-Instruct-v0.3",

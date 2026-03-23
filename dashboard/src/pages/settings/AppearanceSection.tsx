@@ -103,6 +103,23 @@ const MODE_OPTIONS: { value: 'light' | 'system' | 'dark'; label: string; icon: R
   { value: 'dark',   label: 'Dark',   icon: Moon    },
 ]
 
+const TIMEZONES = [
+  'UTC',
+  'US/Eastern', 'US/Central', 'US/Mountain', 'US/Pacific', 'US/Alaska', 'US/Hawaii',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+  'America/Phoenix', 'America/Anchorage', 'America/Toronto', 'America/Vancouver',
+  'America/Mexico_City', 'America/Sao_Paulo', 'America/Argentina/Buenos_Aires',
+  'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Amsterdam',
+  'Europe/Madrid', 'Europe/Rome', 'Europe/Zurich', 'Europe/Stockholm',
+  'Europe/Moscow', 'Europe/Istanbul',
+  'Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Hong_Kong',
+  'Asia/Singapore', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Bangkok',
+  'Asia/Jakarta', 'Asia/Taipei',
+  'Australia/Sydney', 'Australia/Melbourne', 'Australia/Perth',
+  'Pacific/Auckland', 'Pacific/Honolulu',
+  'Africa/Cairo', 'Africa/Johannesburg', 'Africa/Lagos',
+]
+
 const FONT_SCALE_OPTIONS = [
   { value: 0.85, label: 'S' },
   { value: 1,    label: 'M' },
@@ -118,6 +135,7 @@ export function AppearanceSection() {
     customLightAccent, setCustomLightAccent,
     customDarkAccent, setCustomDarkAccent,
     fontScale, setFontScale,
+    timezone, setTimezone,
   } = useTheme()
 
   const allPresets = Object.entries(themePresets)
@@ -170,6 +188,20 @@ export function AppearanceSection() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Timezone */}
+      <div>
+        <label className="mb-2 block text-caption font-medium text-content-secondary">Timezone</label>
+        <select
+          value={timezone}
+          onChange={e => setTimezone(e.target.value)}
+          className="h-9 rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none transition-colors duration-fast focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
+        >
+          {TIMEZONES.map(tz => (
+            <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
+          ))}
+        </select>
       </div>
 
       {/* Light Theme */}

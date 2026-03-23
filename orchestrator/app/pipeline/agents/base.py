@@ -160,6 +160,9 @@ class BaseAgent:
                         self.ROLE, self.model, model,
                     )
 
+                # Use the gateway's resolved model (handles tier routing / auto)
+                resolved_model = data.get("model") or model
+
                 # Accumulate usage
                 in_tokens = data.get("input_tokens", 0) or 0
                 out_tokens = data.get("output_tokens", 0) or 0
@@ -168,6 +171,7 @@ class BaseAgent:
                 self._usage["output_tokens"] += out_tokens
                 self._usage["cost_usd"] += cost
                 self._usage["llm_calls"] += 1
+                self._usage["model"] = resolved_model
 
                 content = data["content"]
 
@@ -175,7 +179,7 @@ class BaseAgent:
                 self._training_log.append({
                     "messages": messages,
                     "response": content,
-                    "model": model,
+                    "model": resolved_model,
                     "input_tokens": in_tokens,
                     "output_tokens": out_tokens,
                     "cost_usd": cost,
@@ -183,7 +187,7 @@ class BaseAgent:
                     "temperature": self.temperature,
                 })
 
-                return content, model
+                return content, resolved_model
             except Exception as exc:
                 last_exc = exc
                 logger.warning("[%s] Model '%s' failed: %s", self.ROLE, model, exc)

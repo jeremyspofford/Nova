@@ -45,6 +45,8 @@ class CycleState:
     action_taken: str = "none"
     outcome: str = ""
     error: str | None = None
+    resolved_model: str | None = None
+    goal_id: str | None = None
 
 
 async def _report_outcome(
@@ -59,6 +61,7 @@ async def _report_outcome(
                 "model": model,
                 "outcome_score": score,
                 "outcome_confidence": confidence,
+                "agent_name": "Cortex",
                 "metadata": {
                     "task_type": "planning",
                     "source": "cortex",
@@ -148,14 +151,13 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
                 except Exception as e:
                     log.debug("Idle consolidation failed: %s", e)
 
-            await _update_state(state)
             await write_entry(
                 f"Cycle {state.cycle_number}: idle. Budget {state.budget_pct:.0f}% used ({state.budget_tier}). "
                 f"All drives quiet.",
                 entry_type="narration",
                 metadata={"cycle": state.cycle_number, "action": "idle"},
             )
-            await _report_outcome(state, settings.planning_model or "unknown", 0.6, 0.5)
+            await _update_state(state)
             return state
 
         drive = state.winner.result
@@ -178,7 +180,7 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
                 urgency=state.winner.result.urgency if state.winner else 0,
                 action_summary=state.winner.result.proposed_action or state.action_taken if state.winner else state.action_taken,
                 outcome=state.outcome[:500],
-                goal_id=state.winner.result.context.get("scheduled_goal_ids", [None])[0] if state.winner else None,
+                goal_id=(state.winner.result.context.get("scheduled_goal_ids") or [None])[0] if state.winner else None,
                 budget_tier=state.budget_tier,
             )
 
@@ -189,13 +191,11 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         await _update_state(state)
 
         # ── SCORE ───────────────────────────────────────────────────
-        _model = settings.planning_model or "unknown"
-        if state.action_taken == "idle":
-            await _report_outcome(state, _model, 0.6, 0.5)
-        elif state.error:
-            await _report_outcome(state, _model, 0.2, 0.9)
-        else:
-            await _report_outcome(state, _model, 0.7, 0.7)
+        if state.resolved_model:
+            if state.error:
+                await _report_outcome(state, state.resolved_model, 0.2, 0.9)
+            else:
+                await _report_outcome(state, state.resolved_model, 0.7, 0.7)
 
     except Exception as e:
         state.error = str(e)
@@ -208,8 +208,8 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
             )
         except Exception:
             pass  # Don't let journal failure mask the original error
-        if state.budget_tier != "none":
-            await _report_outcome(state, settings.planning_model or "unknown", 0.2, 0.9)
+        if state.resolved_model:
+            await _report_outcome(state, state.resolved_model, 0.2, 0.9)
 
     return state
 
@@ -264,6 +264,8 @@ Your response is the action plan (not code, just a description)."""
         })
         if resp.status_code == 200:
             data = resp.json()
+            # Capture the actual model the gateway resolved to
+            state.resolved_model = data.get("model") or state.resolved_model
             return data.get("content", "No plan generated")
         else:
             log.warning("LLM planning call failed: %d %s", resp.status_code, resp.text[:200])
@@ -300,14 +302,7 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
 
     goal = stale_goals[0]
     goal_id = goal["id"]
-
-    # Mark goal as checked
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE goals SET last_checked_at = NOW(), iteration = iteration + 1, updated_at = NOW() WHERE id = $1::uuid",
-            goal_id,
-        )
+    state.goal_id = goal_id
 
     # Dispatch a pipeline task for this goal
     try:
@@ -324,6 +319,21 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
         if resp.status_code in (200, 201, 202):
             data = resp.json()
             task_id = data.get("task_id", "unknown")
+
+            # Only mark checked and persist plan AFTER successful dispatch
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """UPDATE goals
+                       SET last_checked_at = NOW(),
+                           iteration = iteration + 1,
+                           current_plan = $1::jsonb,
+                           updated_at = NOW()
+                       WHERE id = $2::uuid""",
+                    json.dumps({"plan": plan, "cycle": state.cycle_number}),
+                    goal_id,
+                )
+
             return f"Dispatched task {task_id} for goal '{goal['title']}'"
         else:
             return f"Failed to dispatch task: HTTP {resp.status_code} — {resp.text[:200]}"
@@ -409,11 +419,14 @@ async def _reflect(state: CycleState) -> None:
         content += f"\n\nERROR: {state.error}"
         entry_type = "escalation"
 
-    await write_entry(content, entry_type=entry_type, metadata={
+    metadata = {
         "cycle": state.cycle_number,
         "drive": state.action_taken,
         "budget_tier": state.budget_tier,
-    })
+    }
+    if state.goal_id:
+        metadata["goal_id"] = state.goal_id
+    await write_entry(content, entry_type=entry_type, metadata=metadata)
 
 
 async def _update_state(state: CycleState) -> None:

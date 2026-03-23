@@ -40,6 +40,10 @@ async def get_backend_status() -> dict:
     progress = get_switch_progress()
     if progress:
         result["switch_progress"] = progress
+    if state == "error":
+        error = await read_config("inference.error", "")
+        if error:
+            result["error"] = error
     return result
 
 
@@ -102,11 +106,13 @@ async def _do_start_backend(backend: str, *, old_backend: str | None = None) -> 
         await _wait_for_healthy(info["container"], backend, timeout=timeout)
 
         await write_config_state("inference.state", "ready")
+        await write_config_state("inference.error", "")
         _switch_progress = {"step": "ready", "detail": f"{backend} is ready"}
         logger.info("Backend %s started successfully", backend)
         _start_health_monitor(backend)
     except Exception as e:
         await write_config_state("inference.state", "error")
+        await write_config_state("inference.error", str(e))
         _switch_progress = {"step": "error", "detail": str(e)}
         logger.error("Failed to start backend %s: %s", backend, e)
     finally:
@@ -232,36 +238,40 @@ async def _drain_requests(timeout: float = 15.0) -> None:
 
 async def _wait_for_healthy(container_name: str, backend: str, timeout: float = 120.0) -> None:
     import httpx
+
+    health_endpoints = {
+        "vllm": f"http://{container_name}:8000/v1/models",
+        "sglang": f"http://{container_name}:8000/v1/models",
+        "ollama": "http://ollama:11434/api/tags",
+    }
+    endpoint = health_endpoints.get(backend)
+    if not endpoint:
+        return  # custom/none backends don't need health checks
+
+    restart_count = 0
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         status = check_container_status(container_name)
-        if isinstance(status, dict) and status.get("status") == "running":
-            if backend == "vllm":
-                try:
-                    async with httpx.AsyncClient(timeout=3.0) as client:
-                        r = await client.get("http://nova-vllm:8000/health")
-                        if r.status_code == 200:
-                            return
-                except Exception:
-                    pass
-            elif backend == "sglang":
-                try:
-                    async with httpx.AsyncClient(timeout=3.0) as client:
-                        r = await client.get("http://nova-sglang:8000/health")
-                        if r.status_code == 200:
-                            return
-                except Exception:
-                    pass
-            elif backend == "ollama":
-                try:
-                    async with httpx.AsyncClient(timeout=3.0) as client:
-                        r = await client.get("http://ollama:11434/api/tags")
-                        if r.status_code == 200:
-                            return
-                except Exception:
-                    pass
-            else:
-                return
+        container_state = status.get("status", "") if isinstance(status, dict) else ""
+
+        # Detect crash-looping: container is restarting or exited
+        if container_state in ("restarting", "exited", "dead"):
+            restart_count += 1
+            if restart_count >= 3:
+                raise RuntimeError(
+                    f"Container {container_name} is crash-looping (state: {container_state}). "
+                    f"Check logs with: docker compose logs {container_name}"
+                )
+
+        if container_state == "running":
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    r = await client.get(endpoint)
+                    if r.status_code == 200:
+                        return
+            except Exception:
+                pass
+
         await asyncio.sleep(5)
     raise TimeoutError(f"Container {container_name} did not become healthy within {timeout}s")
 

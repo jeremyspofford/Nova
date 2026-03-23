@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Bot, Sliders, Cpu, Plug, Wrench, Palette, Users, Bug, Database,
+  Bot, Wrench, Palette, Users, Bug, Database, Lock,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
-  FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse,
+  FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -22,7 +22,6 @@ import { TrustedNetworksSection } from './settings/TrustedNetworksSection'
 import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
 import { AccountSection } from './settings/AccountSection'
 import { GuestAccessSection } from './settings/GuestAccessSection'
-import { LocalInferenceSection } from './settings/LocalInferenceSection'
 import { ToolPermissionsSection } from './settings/ToolPermissionsSection'
 import { DebugSection } from './settings/DebugSection'
 import { UsersSection } from './settings/UsersSection'
@@ -47,25 +46,25 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'General',
     items: [
       { id: 'identity', label: 'Nova Identity', icon: Bot },
-      { id: 'appearance', label: 'Theme & Colors', icon: Palette },
+      { id: 'appearance', label: 'Appearance', icon: Palette },
       { id: 'account', label: 'Account', icon: CircleUser },
-      { id: 'trusted-networks', label: 'Trusted Networks', icon: Shield },
+    ],
+  },
+  {
+    label: 'Security',
+    items: [
+      { id: 'users', label: 'Users', icon: Users },
+      { id: 'trusted-networks', label: 'Trusted Networks', icon: Lock },
       { id: 'guest-access', label: 'Guest Access', icon: Shield },
     ],
   },
   {
-    label: 'AI & Models',
+    label: 'AI & Pipeline',
     items: [
-      { id: 'local-inference', label: 'Local Inference', icon: Cpu },
       { id: 'llm-routing', label: 'LLM Routing', icon: RadioIcon },
       { id: 'provider-status', label: 'Provider Status', icon: Activity },
-      { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'pipeline-models', label: 'Pipeline Models', icon: Layers },
-    ],
-  },
-  {
-    label: 'Capabilities',
-    items: [
+      { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'tool-permissions', label: 'Tool Permissions', icon: Wrench },
     ],
   },
@@ -74,15 +73,14 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'remote-access', label: 'Remote Access', icon: Globe },
       { id: 'chat-integrations', label: 'Chat Integrations', icon: MessageSquare },
+      { id: 'notifications', label: 'Notifications', icon: Bell },
     ],
   },
   {
     label: 'System',
     items: [
       { id: 'setup-wizard', label: 'Setup Wizard', icon: RotateCcw },
-      { id: 'users', label: 'Users', icon: Users },
-      { id: 'notifications', label: 'Notifications', icon: RadioIcon },
-      { id: 'developer-resources', label: 'Developer Resources', icon: FileCode },
+      { id: 'developer-tools', label: 'Developer Tools', icon: FileCode },
       { id: 'debug', label: 'Debug', icon: Bug },
       { id: 'data', label: 'Data', icon: Database },
       { id: 'recovery', label: 'Recovery', icon: HeartPulse },
@@ -418,6 +416,12 @@ export function Settings() {
             </div>
           )}
 
+          {/* ── Security ──────────────────────────────────────────────── */}
+
+          <div id="users">
+            <UsersSection />
+          </div>
+
           <div id="trusted-networks">
             <TrustedNetworksSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
@@ -426,30 +430,26 @@ export function Settings() {
             <GuestAccessSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
 
-          {/* ── AI & Models ──────────────────────────────────────────── */}
-
-          <div id="local-inference">
-            <LocalInferenceSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
-          </div>
+          {/* ── AI & Pipeline ─────────────────────────────────────────── */}
 
           <div id="llm-routing">
             <LLMRoutingSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
-          </div>
-
-          <div id="tool-permissions">
-            <ToolPermissionsSection />
           </div>
 
           <div id="provider-status">
             <ProviderStatusSection />
           </div>
 
+          <div id="pipeline-models">
+            <PipelineModelsSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+          </div>
+
           <div id="context-budgets">
             <ContextBudgetSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
 
-          <div id="pipeline-models">
-            <PipelineModelsSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+          <div id="tool-permissions">
+            <ToolPermissionsSection />
           </div>
 
           {/* ── Connections ──────────────────────────────────────────── */}
@@ -462,21 +462,17 @@ export function Settings() {
             <ChatIntegrationsSection />
           </div>
 
+          <div id="notifications">
+            <NotificationsSection />
+          </div>
+
           {/* ── System ───────────────────────────────────────────────── */}
 
           <div id="setup-wizard">
             <SetupWizardSection onSave={handleSave} />
           </div>
 
-          <div id="users">
-            <UsersSection />
-          </div>
-
-          <div id="notifications">
-            <NotificationsSection />
-          </div>
-
-          <div id="developer-resources">
+          <div id="developer-tools">
             <DeveloperResourcesSection />
           </div>
 

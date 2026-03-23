@@ -181,13 +181,14 @@ async def list_pipeline_tasks(
     offset: int = Query(default=0, ge=0),
     status: str | None = Query(default=None),
     pod_id: str | None = Query(default=None),
+    goal_id: str | None = Query(default=None),
 ) -> list[dict]:
-    """List recent pipeline tasks, newest first. Optionally filter by status or pod."""
+    """List recent pipeline tasks, newest first. Optionally filter by status, pod, or goal."""
     pool = get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT t.id, t.status, t.pod_id, p.name AS pod_name,
+            SELECT t.id, t.status, t.pod_id, t.goal_id, p.name AS pod_name,
                    t.user_input, t.output, t.error, t.current_stage,
                    t.retry_count, t.max_retries,
                    t.queued_at, t.started_at, t.completed_at, t.metadata
@@ -195,10 +196,11 @@ async def list_pipeline_tasks(
             LEFT JOIN pods p ON p.id = t.pod_id
             WHERE ($1::text IS NULL OR t.status = $1)
               AND ($2::uuid IS NULL OR t.pod_id = $2::uuid)
+              AND ($3::uuid IS NULL OR t.goal_id = $3::uuid)
             ORDER BY t.queued_at DESC
-            LIMIT $3 OFFSET $4
+            LIMIT $4 OFFSET $5
             """,
-            status, pod_id, limit, offset,
+            status, pod_id, goal_id, limit, offset,
         )
     return [_task_dict(r) for r in rows]
 
@@ -340,7 +342,7 @@ async def bulk_delete_pipeline_tasks(
     Only allows terminal statuses (complete, failed, cancelled).
     Admin-only.
     """
-    ALLOWED = {"complete", "failed", "cancelled"}
+    ALLOWED = {"complete", "failed", "cancelled", "pending_human_review", "clarification_needed"}
     requested = {s.strip() for s in status.split(",")}
     invalid = requested - ALLOWED
     if invalid:
@@ -1193,6 +1195,6 @@ def _task_dict(row) -> dict:
     """Convert a task DB row to a JSON-serialisable dict."""
     return _row_to_dict(
         row,
-        uuid_fields=("id", "pod_id"),
+        uuid_fields=("id", "pod_id", "goal_id"),
         dt_fields=("queued_at", "started_at", "completed_at"),
     )

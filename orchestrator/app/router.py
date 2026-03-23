@@ -189,6 +189,7 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
             model=agent.config.model,
             system_prompt=agent.config.system_prompt,
             api_key_id=key.id,
+            agent_name=agent.config.name,
         )
         await store_task_result(result)
         await update_agent_status(str(req.agent_id), AgentStatus.idle)
@@ -225,6 +226,7 @@ async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
                 system_prompt=agent.config.system_prompt,
                 api_key_id=key.id,
                 skip_tool_preresolution=True,
+                agent_name=agent.config.name,
             ),
             error_label="Streaming",
             sandbox_token=sandbox_token,
@@ -427,6 +429,7 @@ async def chat_stream(req: ChatRequest, user: UserDep):
                 explicit_model=explicit_model,
                 guest_mode=is_guest,
                 allowed_tools=allowed_tools,
+                agent_name=agent.config.name,
             ),
             error_label="Chat stream",
             sandbox_token=sandbox_token,
@@ -814,18 +817,26 @@ async def get_usage(
     _admin: AdminDep,
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
+    include_outcomes: bool = Query(default=False),
 ):
-    """Recent usage events with key name join, newest first. Admin-only."""
+    """Recent usage events with key name join, newest first. Admin-only.
+
+    By default, excludes zero-token outcome events (e.g. cortex scoring).
+    Pass include_outcomes=true to include them.
+    """
     pool = get_pool()
+    outcome_filter = "" if include_outcomes else "WHERE (u.input_tokens > 0 OR u.output_tokens > 0)"
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            """
+            f"""
             SELECT u.id, u.api_key_id, k.name AS key_name,
                    u.agent_id, u.session_id, u.model,
                    u.input_tokens, u.output_tokens, u.cost_usd,
-                   u.duration_ms, u.created_at
+                   u.duration_ms, u.created_at,
+                   u.agent_name, u.pod_name
             FROM   usage_events u
             LEFT   JOIN api_keys k ON k.id = u.api_key_id
+            {outcome_filter}
             ORDER  BY u.created_at DESC
             LIMIT  $1 OFFSET $2
             """,
@@ -843,6 +854,8 @@ class UsageEventRequest(BaseModel):
     outcome_score: float | None = None
     outcome_confidence: float | None = None
     metadata: dict | None = None
+    agent_name: str | None = None
+    pod_name: str | None = None
 
 
 @router.post("/api/v1/usage/events", status_code=201)
@@ -861,6 +874,8 @@ async def create_usage_event(req: UsageEventRequest, _key: ApiKeyDep):
         metadata=req.metadata,
         outcome_score=req.outcome_score,
         outcome_confidence=req.outcome_confidence,
+        agent_name=req.agent_name,
+        pod_name=req.pod_name,
     )
     return {"status": "created"}
 
