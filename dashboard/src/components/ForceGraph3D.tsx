@@ -41,6 +41,20 @@ interface ForceGraph3DProps {
   className?: string
 }
 
+// ── Color helpers ─────────────────────────────────────────────────────────────
+
+function getCSSColor(varName: string): string {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+  if (!raw) return '#71717a'
+  const parts = raw.split(' ').map(Number)
+  if (parts.length !== 3) return '#71717a'
+  return '#' + parts.map(n => n.toString(16).padStart(2, '0')).join('')
+}
+
+function getAccentColor(): string {
+  return getCSSColor('--accent-500')
+}
+
 // ── Color mapping ────────────────────────────────────────────────────────────
 
 const TYPE_COLORS: Record<string, string> = {
@@ -116,7 +130,7 @@ export function ForceGraph3D({
     const graph = (ForceGraph3DLib as any)()(el)
       .width(width)
       .height(height)
-      .backgroundColor('#030305')
+      .backgroundColor(getCSSColor('--neutral-950'))
       .showNavInfo(false)
 
       // ── Node appearance ──────────────────────────────────────────────
@@ -172,10 +186,7 @@ export function ForceGraph3D({
       .linkDirectionalParticles((link: any) => Math.ceil((link.weight ?? 0.5) * 3))
       .linkDirectionalParticleWidth(1.2)
       .linkDirectionalParticleSpeed(0.005)
-      .linkDirectionalParticleColor((link: any) => {
-        const sourceNode = typeof link.source === 'object' ? link.source : null
-        return TYPE_COLORS[sourceNode?.type] ?? '#60a5fa'
-      })
+      .linkDirectionalParticleColor(() => getAccentColor())
 
       // ── Interaction ──────────────────────────────────────────────────
       .onNodeClick((node: any) => {
@@ -230,7 +241,7 @@ export function ForceGraph3D({
     // ── Auto-rotation (manual — TrackballControls lack autoRotate) ─────
     let rotationFrame: number
     const autoRotate = () => {
-      try { graph.scene().rotation.y += 0.001 } catch { /* ok */ }
+      try { graph.scene().rotation.y += 0.003 } catch { /* ok */ }
       rotationFrame = requestAnimationFrame(autoRotate)
     }
     autoRotate()
@@ -263,7 +274,7 @@ export function ForceGraph3D({
     const graph = graphRef.current
     if (!graph) return
     graph.nodeColor((node: any) => {
-      if (node.id === selectedId) return '#ffffff'
+      if (node.id === selectedId) return getCSSColor('--accent-300')
       return TYPE_COLORS[node.type] ?? DEFAULT_COLOR
     })
   }, [selectedId])

@@ -112,6 +112,9 @@ class LocalInferenceProvider(ModelProvider):
                 self._delegate = self._create_delegate(backend, url_override,
                                                        custom_url=custom_url, custom_auth=custom_auth)
                 self._local_models.clear()
+                # Probe the new delegate so it's available immediately
+                if self._delegate and hasattr(self._delegate, 'check_health'):
+                    await self._delegate.check_health()
                 logger.info("Local inference backend changed to: %s", backend)
 
     def _create_delegate(self, backend: str, url_override: str,

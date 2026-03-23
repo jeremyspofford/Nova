@@ -47,7 +47,7 @@ export function Badge({
       )}
     >
       {dot && (
-        <span className={clsx('inline-block h-1.5 w-1.5 rounded-full', dotColors[color])} />
+        <span className={clsx('inline-block h-1.5 w-1.5 rounded-full shadow-[0_0_4px_currentColor]', dotColors[color])} />
       )}
       {children}
     </span>

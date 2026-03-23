@@ -32,7 +32,7 @@ export function ProgressBar({
     >
       <div
         className={clsx(
-          'h-full bg-accent rounded-full',
+          'h-full bg-accent rounded-full dark:shadow-[0_0_8px_rgb(var(--accent-500)/0.3)]',
           variant === 'indeterminate' && 'animate-shimmer bg-[length:200%_100%] bg-gradient-to-r from-accent via-accent-hover to-accent w-full',
         )}
         style={variant === 'determinate' ? { width: `${clampedValue}%`, transition: 'width 300ms ease' } : undefined}

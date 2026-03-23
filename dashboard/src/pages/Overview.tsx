@@ -67,7 +67,7 @@ export default function Overview() {
           ))
         ) : (
           <>
-            <Card className="p-4">
+            <Card className="p-4 animate-fade-in-up-delay-1">
               <Metric
                 label="Success Rate (7d)"
                 value={successRate !== null ? `${successRate}%` : '--'}
@@ -75,13 +75,13 @@ export default function Overview() {
                 tooltip="Percentage of pipeline tasks that completed successfully in the last 7 days."
               />
             </Card>
-            <Card className="p-4">
+            <Card className="p-4 animate-fade-in-up-delay-2">
               <Metric label="Submitted Today" value={pipelineStats?.submitted_today ?? 0} tooltip="Tasks submitted to the pipeline queue today." />
             </Card>
-            <Card className="p-4">
+            <Card className="p-4 animate-fade-in-up-delay-3">
               <Metric label="Failed Today" value={pipelineStats?.failed_today ?? 0} tooltip="Tasks that failed or were aborted today." />
             </Card>
-            <Card className="p-4">
+            <Card className="p-4 animate-fade-in-up-delay-4">
               <Metric label="Open Friction" value={frictionStats?.open_count ?? 0} tooltip="Unresolved friction log entries — bugs and issues found during use." />
             </Card>
           </>
@@ -145,7 +145,7 @@ function NavCard({
   return (
     <Link to={to}>
       <Card className="p-4 hover:bg-surface-elevated transition-colors cursor-pointer h-full">
-        <Icon size={20} className="text-content-tertiary mb-2" />
+        <Icon size={20} className="text-accent/50 mb-2" />
         <p className="text-compact font-medium text-content-primary">{label}</p>
         <p className="text-caption text-content-tertiary">{description}</p>
       </Card>

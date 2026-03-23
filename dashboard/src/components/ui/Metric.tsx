@@ -26,7 +26,7 @@ export function Metric({
   return (
     <div className={clsx('flex flex-col gap-1', className)}>
       {tooltip ? <Tooltip content={tooltip} side="bottom">{labelContent}</Tooltip> : labelContent}
-      <span className="text-display font-mono text-content-primary">{value}</span>
+      <span className="text-display font-mono text-content-primary dark:drop-shadow-[0_0_8px_rgb(var(--accent-500)/0.15)]">{value}</span>
       {change && (
         <span
           className={clsx(

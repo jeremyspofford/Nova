@@ -43,13 +43,13 @@ export function Sheet({ open, onClose, width = 'default', title, children }: She
   return createPortal(
     <div className="fixed inset-0 z-50 animate-fade-in">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* Panel */}
       <div
         className={clsx(
           'fixed right-0 top-0 bottom-0 flex flex-col',
-          'bg-surface-card border-l border-border-subtle shadow-lg',
+          'bg-surface-card border-l border-border-subtle shadow-lg dark:bg-[rgb(18_18_24/0.95)] dark:backdrop-blur-xl dark:border-white/[0.06]',
           'animate-slide-in-right',
           WIDTHS[width],
         )}

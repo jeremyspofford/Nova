@@ -8,7 +8,7 @@
  *  - Stale-while-revalidate for the app shell after initial load
  */
 
-const CACHE_NAME = 'nova-shell-v1'
+const CACHE_NAME = 'nova-shell-v2'
 
 // App shell files cached on install — updated on new SW deployment
 const SHELL_FILES = [

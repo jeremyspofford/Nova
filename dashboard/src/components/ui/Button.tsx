@@ -7,7 +7,7 @@ export type ButtonSize = 'sm' | 'md' | 'lg'
 
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
-    'bg-accent text-neutral-950 hover:bg-accent-hover active:bg-accent-400',
+    'bg-accent text-neutral-950 hover:bg-accent-hover active:bg-accent-400 dark:shadow-[0_0_20px_rgb(var(--accent-500)/0.2)] dark:hover:shadow-[0_0_28px_rgb(var(--accent-500)/0.3)]',
   secondary:
     'bg-surface-elevated border border-border text-content-primary hover:bg-surface-card-hover active:bg-surface-card',
   ghost:
@@ -55,7 +55,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
       ref={ref}
       disabled={disabled || loading}
       className={clsx(
-        'inline-flex items-center justify-center font-medium transition-colors duration-fast',
+        'inline-flex items-center justify-center font-medium transition-all duration-fast',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40',
         'disabled:opacity-50 disabled:pointer-events-none',
         VARIANTS[variant],

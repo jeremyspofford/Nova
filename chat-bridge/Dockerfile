@@ -3,10 +3,12 @@ FROM python:3.12-slim
 WORKDIR /app
 
 COPY nova-contracts /nova-contracts
-RUN pip install --no-cache-dir /nova-contracts
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir /nova-contracts
 
 COPY chat-bridge/pyproject.toml .
-RUN pip install --no-cache-dir .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install .
 
 COPY chat-bridge/app/ app/
 

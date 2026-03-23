@@ -97,13 +97,13 @@ export function Sidebar({
   return (
     <aside
       className={clsx(
-        'hidden md:flex flex-col h-full bg-surface border-r border-border-subtle transition-[width] duration-200 ease-in-out shrink-0',
+        'hidden md:flex flex-col h-full bg-surface border-r border-border-subtle transition-[width] duration-200 ease-in-out shrink-0 dark:bg-surface-root/80 dark:backdrop-blur-xl dark:border-white/[0.04]',
         collapsed ? 'w-[60px]' : 'w-[240px]',
       )}
     >
       {/* Logo */}
       <div className={clsx('flex items-center gap-2.5 px-3 h-14 shrink-0', collapsed && 'justify-center')}>
-        <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shrink-0">
+        <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shrink-0 dark:shadow-[0_0_16px_rgb(var(--accent-500)/0.3)]">
           <span className="text-white text-compact font-bold leading-none">N</span>
         </div>
         {!collapsed && (
@@ -142,7 +142,7 @@ export function Sidebar({
                         'relative flex items-center gap-2.5 rounded-md text-compact font-medium transition-colors duration-fast',
                         collapsed ? 'justify-center px-2 py-2' : 'px-2.5 py-2',
                         active
-                          ? 'bg-accent-dim text-accent'
+                          ? 'bg-accent-dim text-accent dark:shadow-[inset_0_0_20px_rgb(var(--accent-500)/0.06)]'
                           : 'text-content-secondary hover:text-content-primary hover:bg-surface-card',
                       )}
                     >

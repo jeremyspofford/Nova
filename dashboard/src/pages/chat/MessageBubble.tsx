@@ -36,7 +36,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
             'text-compact leading-relaxed rounded-lg px-4 py-3',
             isUser
               ? 'bg-accent-dim text-content-primary whitespace-pre-wrap'
-              : 'bg-surface-card border border-border-subtle text-content-primary markdown-body overflow-x-auto',
+              : 'bg-surface-card border border-border-subtle text-content-primary markdown-body overflow-x-auto dark:bg-surface-card/80 dark:backdrop-blur-md dark:border-white/[0.06]',
           )}
         >
           {!isUser && message.activitySteps && message.activitySteps.length > 0 && (
@@ -79,9 +79,9 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
             )
           ) : message.isStreaming ? (
             <span className="inline-flex items-center gap-1 py-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.3s]" />
-              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.15s]" />
-              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.3s] dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.15s] dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]" />
             </span>
           ) : '\u2014'}
         </div>

@@ -1,16 +1,17 @@
-# Nova Workspace
+# Nova Workspace (legacy default)
 
-This directory is mounted into the orchestrator container at `/workspace`.
+The default workspace location has moved to `~/.nova/workspace/`.
 
-Nova agents can read and write files here using the `read_file`, `write_file`,
-`list_dir`, `run_shell`, `search_codebase`, and git tools.
+This directory exists for backward compatibility. If you have `NOVA_WORKSPACE`
+set to this path in your `.env`, update it or remove the override to use the
+new default.
 
-## Using your own project
+## Configuring your workspace
 
-Point agents at your actual project by setting `NOVA_WORKSPACE` in `.env`:
+Set `NOVA_WORKSPACE` in `.env` to point at any directory:
 
 ```
-NOVA_WORKSPACE=/Users/you/my-project
+NOVA_WORKSPACE=/home/you/projects/my-app
 ```
 
 Then restart the orchestrator:
@@ -19,9 +20,7 @@ Then restart the orchestrator:
 docker compose up -d --no-deps orchestrator
 ```
 
-The `/workspace` mount updates automatically — no rebuild required.
-
 ## Security note
 
-Everything in this directory is accessible to Nova agents.
-Do not place secrets, credentials, or `.env` files here.
+Everything in the workspace directory is accessible to Nova agents.
+Do not place secrets, credentials, or `.env` files there.

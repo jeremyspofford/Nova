@@ -50,12 +50,12 @@ export function Modal({ open, onClose, size = 'md', title, children, footer }: M
       }}
     >
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
       {/* Content */}
       <div
         className={clsx(
-          'relative w-full bg-surface-card rounded-xl border border-border-subtle shadow-lg',
+          'relative w-full bg-surface-card rounded-xl border border-border-subtle shadow-lg dark:bg-[rgb(18_18_24/0.9)] dark:backdrop-blur-xl dark:border-white/[0.08]',
           'transform transition-transform',
           SIZES[size],
         )}

@@ -17,7 +17,8 @@ RUN install -m 0755 -d /etc/apt/keyrings && \
 WORKDIR /app
 
 COPY recovery-service/pyproject.toml .
-RUN pip install --no-cache-dir .
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install .
 
 COPY recovery-service/app/ app/
 

@@ -30,6 +30,18 @@ set -a
 . "${PROJECT_ROOT}/.env"
 set +a
 
+# ── Create workspace directory ────────────────────────────────────────────────
+# Resolve ~ manually since Docker Compose doesn't expand it in all contexts
+NOVA_WORKSPACE="${NOVA_WORKSPACE:-${HOME}/.nova/workspace}"
+NOVA_WORKSPACE="${NOVA_WORKSPACE/#\~/$HOME}"
+if [ ! -d "${NOVA_WORKSPACE}" ]; then
+  mkdir -p "${NOVA_WORKSPACE}"
+  echo "✓ Created workspace at ${NOVA_WORKSPACE}"
+else
+  echo "✓ Workspace: ${NOVA_WORKSPACE}"
+fi
+export NOVA_WORKSPACE
+
 # ── Resolve magic Ollama URL values ──────────────────────────────────────────
 if [ "${OLLAMA_BASE_URL:-}" = "auto" ] || [ "${OLLAMA_BASE_URL:-}" = "host" ]; then
   RESOLVED_URL="$(bash "${SCRIPT_DIR}/resolve-ollama-url.sh")"

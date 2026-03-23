@@ -33,7 +33,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
               'px-3 py-2 text-compact font-medium whitespace-nowrap transition-colors duration-fast',
               'border-b-2 -mb-px',
               active
-                ? 'text-accent border-accent'
+                ? 'text-accent border-accent dark:shadow-[0_2px_8px_rgb(var(--accent-500)/0.2)]'
                 : 'text-content-tertiary hover:text-content-secondary border-transparent',
             )}
           >

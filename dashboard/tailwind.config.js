@@ -92,8 +92,8 @@ export default {
         xl: '16px',
       },
       fontSize: {
-        display: ['calc(28px * var(--font-scale, 1))', { lineHeight: '1.2', fontWeight: '700' }],
-        h1: ['calc(22px * var(--font-scale, 1))', { lineHeight: '1.3', fontWeight: '700' }],
+        display: ['calc(32px * var(--font-scale, 1))', { lineHeight: '1.1', fontWeight: '800', letterSpacing: '-0.02em' }],
+        h1: ['calc(24px * var(--font-scale, 1))', { lineHeight: '1.2', fontWeight: '700', letterSpacing: '-0.02em' }],
         h2: ['calc(18px * var(--font-scale, 1))', { lineHeight: '1.3', fontWeight: '600' }],
         h3: ['calc(16px * var(--font-scale, 1))', { lineHeight: '1.4', fontWeight: '600' }],
         h4: ['calc(14px * var(--font-scale, 1))', { lineHeight: '1.4', fontWeight: '600' }],
@@ -109,6 +109,9 @@ export default {
         md: '0 4px 12px rgba(0,0,0,0.08)',
         lg: '0 8px 24px rgba(0,0,0,0.12)',
         glow: '0 0 20px rgb(var(--accent-500) / 0.06)',
+        'glow-lg': '0 0 40px rgb(var(--accent-500) / 0.12)',
+        'glow-accent': '0 0 0 1px rgb(var(--accent-500) / 0.15), 0 0 20px rgb(var(--accent-500) / 0.08)',
+        'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.06)',
         'dark-sm': '0 1px 2px rgba(0,0,0,0.3)',
         'dark-md': '0 4px 12px rgba(0,0,0,0.4)',
         'dark-lg': '0 8px 24px rgba(0,0,0,0.5)',
@@ -124,6 +127,13 @@ export default {
         'slide-in-right': 'slideInRight 200ms ease',
         'slide-out-right': 'slideOutRight 200ms ease',
         'fade-in': 'fadeIn 150ms ease',
+        'fade-in-up': 'fadeInUp 400ms ease-out both',
+        'fade-in-up-delay-1': 'fadeInUp 400ms ease-out 50ms both',
+        'fade-in-up-delay-2': 'fadeInUp 400ms ease-out 100ms both',
+        'fade-in-up-delay-3': 'fadeInUp 400ms ease-out 150ms both',
+        'fade-in-up-delay-4': 'fadeInUp 400ms ease-out 200ms both',
+        'glow-pulse': 'glowPulse 3s ease-in-out infinite',
+        'slide-in-bottom': 'slideInBottom 300ms ease-out both',
       },
       keyframes: {
         shimmer: {
@@ -141,6 +151,18 @@ export default {
         fadeIn: {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
+        },
+        fadeInUp: {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        glowPulse: {
+          '0%, 100%': { boxShadow: '0 0 20px rgb(var(--accent-500) / 0.06)' },
+          '50%': { boxShadow: '0 0 30px rgb(var(--accent-500) / 0.12)' },
+        },
+        slideInBottom: {
+          '0%': { opacity: '0', transform: 'translateY(12px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
       },
     },

@@ -49,7 +49,7 @@ export function AppLayout({
         {fullWidth ? (
           children
         ) : (
-          <div className="mx-auto max-w-[1200px] w-full px-6 py-8">
+          <div className="mx-auto max-w-[1200px] w-full px-6 py-8 animate-fade-in">
             {children}
           </div>
         )}

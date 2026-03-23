@@ -311,11 +311,11 @@ services:
       # Phase 3: workspace path inside the container
       WORKSPACE_ROOT: /workspace
       SHELL_TIMEOUT_SECONDS: ${SHELL_TIMEOUT_SECONDS:-30}
-    # Phase 3: mount your host project directory at /workspace so agents can
-    # read/write real files. Set NOVA_WORKSPACE in .env to your project root.
-    # Defaults to a ./workspace subdirectory of this repo for zero-config dev.
+    # Mount the host workspace at /workspace so agents can read/write files.
+    # Set NOVA_WORKSPACE in .env to point at any directory.
+    # Default: ~/.nova/workspace (created by setup.sh)
     volumes:
-      - ${NOVA_WORKSPACE:-./workspace}:/workspace:rw
+      - ${NOVA_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
     ports:
       - "8000:8000"
     depends_on:

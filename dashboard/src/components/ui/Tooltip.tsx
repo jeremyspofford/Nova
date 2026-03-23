@@ -43,7 +43,7 @@ export function Tooltip({ content, side = 'top', children }: TooltipProps) {
         <span
           className={clsx(
             'absolute z-50 max-w-xs whitespace-normal text-center',
-            'bg-neutral-900 text-neutral-100 text-micro px-2 py-1 rounded-sm shadow-md',
+            'bg-neutral-900/90 backdrop-blur-lg dark:border dark:border-white/[0.06] text-neutral-100 text-micro px-2 py-1 rounded-sm shadow-md',
             'pointer-events-none animate-fade-in',
             POSITIONS[side],
           )}

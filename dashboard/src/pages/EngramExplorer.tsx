@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Network, Brain, RefreshCw, Zap, GitMerge,
-  Activity, ChevronDown, ChevronRight,
+  Activity, ChevronDown, ChevronRight, Box, LayoutList,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { apiFetch } from '../api'
@@ -320,6 +320,13 @@ function GraphTab() {
   const [query, setQuery] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedNode, setSelectedNode] = useState<EngramNode | null>(null)
+  const [viewMode, setViewMode] = useState<'graph3d' | 'list'>(() => {
+    try { return (localStorage.getItem('nova-graph-view') as 'graph3d' | 'list') || 'graph3d' } catch { return 'graph3d' }
+  })
+
+  useEffect(() => {
+    try { localStorage.setItem('nova-graph-view', viewMode) } catch { /* ok */ }
+  }, [viewMode])
 
   const { data: graph, isLoading } = useQuery<GraphData>({
     queryKey: ['engram-graph', searchQuery],
@@ -362,44 +369,110 @@ function GraphTab() {
         <Button type="submit" icon={<Network size={14} />}>
           Explore
         </Button>
+        <div className="flex border border-border-subtle rounded-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setViewMode('graph3d')}
+            className={`p-1.5 transition-colors ${viewMode === 'graph3d' ? 'bg-accent-dim text-accent' : 'text-content-tertiary hover:text-content-secondary'}`}
+            title="3D Graph"
+          >
+            <Box size={14} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`p-1.5 transition-colors ${viewMode === 'list' ? 'bg-accent-dim text-accent' : 'text-content-tertiary hover:text-content-secondary'}`}
+            title="List View"
+          >
+            <LayoutList size={14} />
+          </button>
+        </div>
       </form>
 
       {isLoading && <Skeleton lines={5} />}
 
       {graph && graph.nodes.length > 0 && (
         <>
-          <div className="rounded-md overflow-hidden border border-border-subtle relative">
-            <div className="h-[700px]">
-              <ForceGraph3D
-                nodes={graph.nodes}
-                edges={graph.edges}
-                selectedId={selectedNode?.id ?? null}
-                onSelectNode={handleSelectNode}
-                onBackgroundClick={() => setSelectedNode(null)}
-                className="w-full h-full"
-              />
-            </div>
-            {/* Type legend */}
-            <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1">
-              {Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
-                <div key={type} className="flex items-center gap-2 text-micro">
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}
+          {viewMode === 'graph3d' ? (
+            <>
+              <div className="rounded-md overflow-hidden border border-border-subtle relative">
+                <div className="h-[700px]">
+                  <ForceGraph3D
+                    nodes={graph.nodes}
+                    edges={graph.edges}
+                    selectedId={selectedNode?.id ?? null}
+                    onSelectNode={handleSelectNode}
+                    onBackgroundClick={() => setSelectedNode(null)}
+                    className="w-full h-full"
                   />
-                  <Tooltip content={TYPE_DESCRIPTIONS[type] ?? type}>
-                    <span className="text-neutral-400 cursor-help">
-                      {type === 'self_model' ? 'self model' : type}
-                    </span>
-                  </Tooltip>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="text-caption text-content-tertiary">
-            {graph.node_count} memories &middot; {graph.edge_count} connections &mdash; orbit to rotate, scroll to zoom, click a node for details
-          </div>
+                {/* Type legend */}
+                <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1">
+                  {Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
+                    <div key={type} className="flex items-center gap-2 text-micro">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}
+                      />
+                      <Tooltip content={TYPE_DESCRIPTIONS[type] ?? type}>
+                        <span className="text-neutral-400 cursor-help">
+                          {type === 'self_model' ? 'self model' : type}
+                        </span>
+                      </Tooltip>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="text-caption text-content-tertiary">
+                {graph.node_count} memories &middot; {graph.edge_count} connections &mdash; orbit to rotate, scroll to zoom, click a node for details
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <p className="text-caption text-content-tertiary">{graph.nodes.length} memories</p>
+                {graph.nodes.map(node => {
+                  const typeDesc = TYPE_DESCRIPTIONS[node.type]
+                  const badge = (
+                    <Badge color={TYPE_BADGE_COLOR[node.type] ?? 'neutral'} size="sm">
+                      {node.type === 'self_model' ? 'self model' : node.type}
+                    </Badge>
+                  )
+                  const edges = graph.edges.filter(e => e.source === node.id || e.target === node.id)
+                  return (
+                    <Card
+                      key={node.id}
+                      variant="hoverable"
+                      className={`p-4 cursor-pointer transition-colors ${selectedNode?.id === node.id ? 'ring-1 ring-accent' : ''}`}
+                      onClick={() => handleSelectNode(node.id)}
+                    >
+                      <div className="flex items-start gap-3">
+                        {typeDesc ? <Tooltip content={typeDesc}>{badge}</Tooltip> : badge}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-compact text-content-primary line-clamp-2">{node.content}</p>
+                          <div className="flex gap-4 mt-2">
+                            <ScoreBar value={node.importance} label="Importance" compact />
+                            <ScoreBar value={node.activation} label="Activation" compact />
+                          </div>
+                        </div>
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <Tooltip content="Times this memory was retrieved during conversations">
+                            <span className="text-caption text-content-tertiary">{node.access_count.toLocaleString()} recalls</span>
+                          </Tooltip>
+                          <span className="text-micro text-content-tertiary">{edges.length} connection{edges.length !== 1 ? 's' : ''}</span>
+                          {node.created_at && (
+                            <span className="text-micro text-content-tertiary">
+                              {new Date(node.created_at).toLocaleDateString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </Card>
+                  )
+                })}
+              </div>
+            </>
+          )}
 
           {/* Detail Sheet */}
           <Sheet
