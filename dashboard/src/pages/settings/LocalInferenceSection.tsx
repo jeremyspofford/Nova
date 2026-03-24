@@ -40,6 +40,60 @@ const STATE_LABELS: Record<string, { label: string; status: 'success' | 'neutral
   error:    { label: "Error",        status: "danger" },
 };
 
+function BackendModelField({ backend, onRestart }: { backend: string; onRestart: () => void }) {
+  const queryClient = useQueryClient();
+  const { data: envVars } = useQuery({
+    queryKey: ["env-vars"],
+    queryFn: getEnvVars,
+    staleTime: 30_000,
+  });
+
+  const envKey = backend === "sglang" ? "SGLANG_MODEL" : "VLLM_MODEL";
+  const defaultModel = "Qwen/Qwen2.5-1.5B-Instruct";
+  const currentModel = envVars?.[envKey] ?? defaultModel;
+  const [draft, setDraft] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraft(currentModel);
+    setDirty(false);
+  }, [currentModel]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await patchEnv({ [envKey]: draft });
+      queryClient.invalidateQueries({ queryKey: ["env-vars"] });
+      setDirty(false);
+      onRestart();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-border-subtle space-y-1.5">
+      <div className="flex items-center justify-between">
+        <label className="text-caption font-medium text-content-secondary">Model</label>
+        {dirty && (
+          <Button size="sm" onClick={handleSave} loading={saving}>Save & Restart</Button>
+        )}
+      </div>
+      <input
+        type="text"
+        value={draft}
+        onChange={e => { setDraft(e.target.value); setDirty(e.target.value !== currentModel) }}
+        placeholder="org/model-name"
+        className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors font-mono"
+      />
+      <p className="text-caption text-content-tertiary">
+        HuggingFace model ID. Changing the model restarts the backend to load it.
+      </p>
+    </div>
+  );
+}
+
 function HuggingFaceTokenField() {
   const queryClient = useQueryClient();
   const { data: envVars } = useQuery({
@@ -432,9 +486,15 @@ export function LocalInferenceSection({ entries, onSave, saving, inline }: Confi
         </div>
       )}
 
-      {/* HuggingFace Token — needed for vLLM/SGLang to download gated models */}
+      {/* Model + HuggingFace Token — shown for vLLM/SGLang */}
       {["vllm", "sglang"].includes((status?.backend || configBackend).replace(/"/g, '')) && (
-        <HuggingFaceTokenField />
+        <>
+          <BackendModelField
+            backend={(status?.backend || configBackend).replace(/"/g, '')}
+            onRestart={() => startBackend.mutate((status?.backend || configBackend).replace(/"/g, ''))}
+          />
+          <HuggingFaceTokenField />
+        </>
       )}
 
       {/* Remote Backend Toggle */}

@@ -97,6 +97,24 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
                 log.warning("Failed to persist conversation messages: %s", e)
 
 
+# ── Sandbox tier (runtime from DB) ────────────────────────────────────────────
+
+async def _get_sandbox_tier() -> SandboxTier:
+    """Read the sandbox tier from platform_config (DB), falling back to env var."""
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT value #>> '{}' AS val FROM platform_config WHERE key = 'shell.sandbox'"
+            )
+        if row and row["val"] in SandboxTier.__members__:
+            return SandboxTier(row["val"])
+    except Exception:
+        pass
+    from app.config import settings as _s
+    return SandboxTier(_s.shell_sandbox) if _s.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+
+
 # ── Agent lifecycle ───────────────────────────────────────────────────────────
 
 @router.post("/api/v1/agents", response_model=AgentInfo, status_code=201)
@@ -177,8 +195,8 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
     session_id = req.session_id or str(uuid4())
     await update_agent_status(str(req.agent_id), AgentStatus.running)
 
-    # Set sandbox tier from global config for interactive turns
-    tier = SandboxTier(_settings.shell_sandbox) if _settings.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    # Set sandbox tier from DB config for this request
+    tier = await _get_sandbox_tier()
     sandbox_token = set_sandbox(tier)
     try:
         result = await run_agent_turn(
@@ -210,8 +228,8 @@ async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
     session_id = req.session_id or str(uuid4())
     await update_agent_status(str(req.agent_id), AgentStatus.running)
 
-    # Set sandbox tier from global config for interactive turns
-    tier = SandboxTier(_settings.shell_sandbox) if _settings.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    # Set sandbox tier from DB config for this request
+    tier = await _get_sandbox_tier()
     sandbox_token = set_sandbox(tier)
 
     return StreamingResponse(
@@ -409,9 +427,8 @@ async def chat_stream(req: ChatRequest, user: UserDep):
 
     await update_agent_status(str(agent.id), AgentStatus.running)
 
-    # Set sandbox tier from global config for interactive turns
-    from app.config import settings as _settings
-    tier = SandboxTier(_settings.shell_sandbox) if _settings.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    # Set sandbox tier from DB config for this request
+    tier = await _get_sandbox_tier()
     sandbox_token = set_sandbox(tier)
 
     return StreamingResponse(

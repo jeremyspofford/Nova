@@ -528,6 +528,41 @@ def _format_tool_list(tools: list) -> str:
     return "\n".join(lines) if lines else "  (no tools available)"
 
 
+def _sandbox_context() -> str:
+    """Build a context string describing the current sandbox tier and its implications."""
+    from app.tools.sandbox import get_sandbox, get_root, SandboxTier
+
+    tier = get_sandbox()
+    root = str(get_root()) if tier != SandboxTier.isolated else "(none)"
+
+    descriptions = {
+        SandboxTier.workspace: (
+            f"Sandbox tier: workspace\n"
+            f"Filesystem root: {root}  (all file/shell paths are relative to this)\n"
+            f"You have access to the user's workspace directory. "
+            f"You cannot access files outside this directory."
+        ),
+        SandboxTier.nova: (
+            f"Sandbox tier: nova (self-modification)\n"
+            f"Filesystem root: {root}  (all file/shell paths are relative to this)\n"
+            f"You have access to Nova's own source code. You can read and modify the codebase "
+            f"that runs you — Dockerfiles, Python services, the dashboard, configuration, etc. "
+            f"Be careful with changes that could break running services."
+        ),
+        SandboxTier.host: (
+            f"Sandbox tier: host (full system access)\n"
+            f"Filesystem root: /\n"
+            f"You have unrestricted filesystem access. Exercise extreme caution — "
+            f"you can read and write any file on the system."
+        ),
+        SandboxTier.isolated: (
+            f"Sandbox tier: isolated (no filesystem access)\n"
+            f"You have no filesystem or shell access. You can only respond with text."
+        ),
+    }
+    return descriptions.get(tier, f"Sandbox tier: {tier.value}\nFilesystem root: {root}")
+
+
 async def _build_nova_context(
     model: str, agent_id: str, session_id: str,
     effective_tools: list | None = None,
@@ -583,7 +618,8 @@ async def _build_nova_context(
         f"{agents_block}\n"
         f"\n### Tools available to you:\n"
         f"{tool_list_block}\n"
-        f"\nWorkspace root: {settings.workspace_root}  (all file/shell paths are relative to this)\n"
+        f"\n### Filesystem access\n"
+        f"{_sandbox_context()}\n"
         f"Shell timeout: {settings.shell_timeout_seconds}s\n"
         f"Answer model-identity questions using 'Your model' above (never guess)."
         f"{disabled_notice}"

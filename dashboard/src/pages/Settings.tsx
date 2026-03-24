@@ -23,6 +23,7 @@ import { DeveloperResourcesSection } from './settings/DeveloperResourcesSection'
 import { AccountSection } from './settings/AccountSection'
 import { GuestAccessSection } from './settings/GuestAccessSection'
 import { ToolPermissionsSection } from './settings/ToolPermissionsSection'
+import { SandboxSection } from './settings/SandboxSection'
 import { DebugSection } from './settings/DebugSection'
 import { UsersSection } from './settings/UsersSection'
 import { useAuth } from '../stores/auth-store'
@@ -66,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'pipeline-models', label: 'Pipeline Models', icon: Layers },
       { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'tool-permissions', label: 'Tool Permissions', icon: Wrench },
+      { id: 'sandbox', label: 'Sandbox', icon: Shield },
     ],
   },
   {
@@ -450,6 +452,10 @@ export function Settings() {
 
           <div id="tool-permissions">
             <ToolPermissionsSection />
+          </div>
+
+          <div id="sandbox">
+            <SandboxSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
 
           {/* ── Connections ──────────────────────────────────────────── */}
