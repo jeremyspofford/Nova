@@ -19,8 +19,8 @@ class Settings(BaseSettings):
     embedding_model: str = "nomic-embed-text"  # Ollama default
     embedding_dimensions: int = 768
 
-    # Embedding resilience — fallback model if primary fails (text-embedding-004 = free Gemini)
-    embedding_fallback_model: str = "text-embedding-004"
+    # Embedding resilience — fallback model if primary fails (gemini-embedding-001 = free Gemini)
+    embedding_fallback_model: str = "gemini-embedding-001"
     embedding_max_retries: int = 2
     embedding_retry_delay: float = 1.0
 

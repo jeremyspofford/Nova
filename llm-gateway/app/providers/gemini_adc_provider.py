@@ -158,11 +158,11 @@ class GeminiADCProvider(ModelProvider):
 
         embeddings = []
         for text in request.texts:
-            result = await asyncio.to_thread(
-                genai.embed_content,
-                model=sdk_model,
-                content=text,
-            )
+            kwargs: dict = {"model": sdk_model, "content": text}
+            # Truncate to requested dimensions (Matryoshka embedding support)
+            if request.dimensions:
+                kwargs["output_dimensionality"] = request.dimensions
+            result = await asyncio.to_thread(genai.embed_content, **kwargs)
             embeddings.append(result["embedding"])
 
         return EmbedResponse(

@@ -465,7 +465,7 @@ MODEL_REGISTRY: dict[str, ModelProvider] = {
 
     # ── Embedding models ──────────────────────────────────────────────────────
     "nomic-embed-text":                   _ollama,     # local, free, 768-dim
-    "text-embedding-004":                 _gemini,     # Gemini free tier
+    "gemini-embedding-001":               _gemini,     # Gemini free tier
     "text-embedding-3-small":             _litellm,    # OpenAI paid
 
     # ── Catch-all: smart fallback across all configured providers ──────────────
