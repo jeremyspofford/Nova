@@ -432,6 +432,10 @@ export interface Goal {
   created_by: string
   created_at: string
   updated_at: string
+  // Maturation fields (populated when goal maturation is active)
+  maturation_status?: string | null
+  scope_analysis?: unknown | null
+  spec?: string | null
 }
 
 export const getGoals = (status?: string) => {

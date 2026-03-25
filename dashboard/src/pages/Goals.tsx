@@ -3,10 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Target, Plus, Trash2, DollarSign,
   TrendingUp, Repeat, Pencil, Zap, Pause, Play,
+  ChevronDown, ChevronRight, Check, X as XIcon,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
-import { getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getPipelineTasks, getGoalStats, type Goal } from '../api'
+import { apiFetch, getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getPipelineTasks, getGoalStats, type Goal } from '../api'
 import type { PipelineTask } from '../types'
 import { TaskDetailSheet } from './Tasks'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -14,6 +15,7 @@ import {
   Badge, Button, Card, ConfirmDialog, EmptyState, Input,
   Metric, Modal, ProgressBar, Select, Skeleton, StatusDot, Textarea, Toast, Tooltip,
 } from '../components/ui'
+import { DiscussionThread } from '../components/DiscussionThread'
 import type { SemanticColor } from '../lib/design-tokens'
 
 const HELP_ENTRIES = [
@@ -32,6 +34,15 @@ const STATUS_COLOR: Record<string, SemanticColor> = {
   completed: 'info',
   failed: 'danger',
   cancelled: 'neutral',
+}
+
+const MATURATION_COLORS: Record<string, string> = {
+  triaging: 'bg-stone-700/40 text-stone-300',
+  scoping: 'bg-blue-900/30 text-blue-400',
+  speccing: 'bg-purple-900/30 text-purple-400',
+  review: 'bg-amber-900/30 text-amber-400',
+  building: 'bg-teal-900/30 text-teal-400',
+  verifying: 'bg-emerald-900/30 text-emerald-400',
 }
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'failed'
@@ -377,6 +388,9 @@ function GoalCard({ goal }: { goal: Goal }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [editing, setEditing] = useState(false)
   const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
+  const [maturationOpen, setMaturationOpen] = useState(false)
+  const [rejectFeedback, setRejectFeedback] = useState('')
+  const [showRejectForm, setShowRejectForm] = useState(false)
   const qc = useQueryClient()
   const [selectedTask, setSelectedTask] = useState<PipelineTask | null>(null)
 
@@ -415,6 +429,30 @@ function GoalCard({ goal }: { goal: Goal }) {
     onError: (e) => setToast({ variant: 'error', message: `Failed to toggle: ${e}` }),
   })
 
+  const approveSpec = useMutation({
+    mutationFn: () => apiFetch<void>(`/api/v1/goals/${goal.id}/approve-spec`, { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      setToast({ variant: 'success', message: 'Spec approved.' })
+    },
+    onError: (e) => setToast({ variant: 'error', message: `Failed to approve: ${e}` }),
+  })
+
+  const rejectSpec = useMutation({
+    mutationFn: (feedback: string) =>
+      apiFetch<void>(`/api/v1/goals/${goal.id}/reject-spec`, {
+        method: 'POST',
+        body: JSON.stringify({ feedback }),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      setShowRejectForm(false)
+      setRejectFeedback('')
+      setToast({ variant: 'success', message: 'Spec rejected. Goal will re-scope.' })
+    },
+    onError: (e) => setToast({ variant: 'error', message: `Failed to reject: ${e}` }),
+  })
+
   const { data: goalTasks } = useQuery({
     queryKey: ['goal-tasks', goal.id],
     queryFn: () => getPipelineTasks({ goal_id: goal.id, limit: 5 }),
@@ -447,6 +485,14 @@ function GoalCard({ goal }: { goal: Goal }) {
                 {goal.title}
               </span>
               <Badge color={color} size="sm">{goal.status}</Badge>
+              {goal.maturation_status && (
+                <span className={clsx(
+                  'inline-flex px-1.5 py-0.5 rounded text-micro font-medium',
+                  MATURATION_COLORS[goal.maturation_status] ?? 'bg-neutral-700 text-neutral-300',
+                )}>
+                  {goal.maturation_status}
+                </span>
+              )}
               {goal.priority <= 2 && (
                 <Badge color={goal.priority <= 1 ? 'danger' : 'warning'} size="sm">
                   {priorityLabel(goal.priority)}
@@ -623,6 +669,111 @@ function GoalCard({ goal }: { goal: Goal }) {
                 </div>
               ) : (
                 <p className="mt-1 text-caption text-content-tertiary">No tasks dispatched yet.</p>
+              )}
+            </div>
+
+            {/* Maturation & Discussion */}
+            <div className="mt-3 pt-3 border-t border-border-subtle">
+              <button
+                onClick={(e) => { e.stopPropagation(); setMaturationOpen(v => !v) }}
+                className="flex items-center gap-1.5 text-caption font-medium text-content-secondary hover:text-content-primary transition-colors"
+              >
+                {maturationOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                Maturation & Discussion
+                {goal.maturation_status && (
+                  <span className={clsx(
+                    'ml-1.5 inline-flex px-1.5 py-0.5 rounded text-micro font-medium',
+                    MATURATION_COLORS[goal.maturation_status] ?? 'bg-neutral-700 text-neutral-300',
+                  )}>
+                    {goal.maturation_status}
+                  </span>
+                )}
+              </button>
+
+              {maturationOpen && (
+                <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
+                  {/* Scope analysis */}
+                  {goal.scope_analysis != null && (
+                    <div>
+                      <span className="text-caption font-medium text-content-secondary">Scope Analysis</span>
+                      <div className="mt-1 p-2.5 rounded-sm bg-surface-elevated text-caption text-content-secondary overflow-x-auto">
+                        <pre className="whitespace-pre-wrap font-mono text-[11px]">
+                          {typeof goal.scope_analysis === 'string'
+                            ? goal.scope_analysis
+                            : JSON.stringify(goal.scope_analysis, null, 2) as string}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Spec */}
+                  {goal.spec && (
+                    <div>
+                      <span className="text-caption font-medium text-content-secondary">Spec</span>
+                      <div className="mt-1 p-2.5 rounded-sm bg-surface-elevated text-caption text-content-secondary overflow-x-auto">
+                        <pre className="whitespace-pre-wrap font-mono text-[11px]">
+                          {goal.spec}
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Approve/Reject when in review */}
+                  {goal.maturation_status === 'review' && (
+                    <div className="flex items-start gap-2">
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        icon={<Check size={14} />}
+                        onClick={() => approveSpec.mutate()}
+                        loading={approveSpec.isPending}
+                      >
+                        Approve Spec
+                      </Button>
+                      {!showRejectForm ? (
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          icon={<XIcon size={14} />}
+                          onClick={() => setShowRejectForm(true)}
+                        >
+                          Reject Spec
+                        </Button>
+                      ) : (
+                        <div className="flex-1 space-y-2">
+                          <input
+                            value={rejectFeedback}
+                            onChange={e => setRejectFeedback(e.target.value)}
+                            placeholder="Feedback for rejection..."
+                            className="h-8 w-full rounded-sm border border-border bg-surface-input px-2.5 text-caption text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
+                            autoFocus
+                          />
+                          <div className="flex gap-1.5">
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => rejectSpec.mutate(rejectFeedback)}
+                              loading={rejectSpec.isPending}
+                              disabled={!rejectFeedback.trim()}
+                            >
+                              Confirm Reject
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => { setShowRejectForm(false); setRejectFeedback('') }}
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Discussion thread */}
+                  <DiscussionThread entityType="goal" entityId={goal.id} />
+                </div>
               )}
             </div>
           </div>
