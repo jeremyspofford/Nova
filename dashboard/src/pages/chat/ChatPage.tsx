@@ -6,6 +6,7 @@ import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import { ConversationSidebar } from '../../components/ConversationSidebar'
+import { ModelManagerModal, getHiddenModels } from '../../components/ModelManagerModal'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
 
@@ -41,6 +42,8 @@ export function Chat() {
   const { name: aiName, greeting } = useNovaIdentity()
   const [isStreaming, setIsStreaming] = useState(false)
   const [messageQueue, setMessageQueue] = useState<string[]>([])
+  const [modelManagerOpen, setModelManagerOpen] = useState(false)
+  const [hiddenModels, setHiddenModels] = useState<Set<string>>(() => getHiddenModels())
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -54,15 +57,25 @@ export function Chat() {
     queryFn: () => discoverModels(),
     staleTime: 60_000,
   })
-  const models = (providers ?? [])
+  const allModels = (providers ?? [])
     .filter(p => p.available)
     .flatMap(p => p.models.filter(m => m.registered).map(m => ({ id: m.id, provider: p.name })))
+  const models = allModels.filter(m => !hiddenModels.has(m.id))
 
   const { data: resolved } = useQuery({
     queryKey: ['resolved-model'],
     queryFn: resolveModel,
     staleTime: 30_000,
   })
+
+  // Default to the resolved model when no explicit model has been selected,
+  // or when the current selection has been hidden
+  useEffect(() => {
+    const needsDefault = !modelId || modelId === 'auto' || (modelId && hiddenModels.has(modelId))
+    if (needsDefault && resolved?.model) {
+      setModelId(resolved.model)
+    }
+  }, [modelId, resolved, hiddenModels, setModelId])
 
   useEffect(() => {
     if (conversationId !== lastConversationId.current) {
@@ -336,6 +349,7 @@ export function Chat() {
     resolvedModel: resolved?.model,
     onNewChat: startNewConversation,
     hasMessages: messages.length > 0,
+    onManageModels: () => setModelManagerOpen(true),
   }
 
   const handleSelectConversation = useCallback(async (id: string) => {
@@ -419,6 +433,12 @@ export function Chat() {
           </>
         )}
       </div>
+
+      <ModelManagerModal
+        open={modelManagerOpen}
+        onClose={() => setModelManagerOpen(false)}
+        onSave={setHiddenModels}
+      />
     </div>
   )
 }

@@ -1,7 +1,9 @@
+import { useRef, useEffect } from 'react'
 import clsx from 'clsx'
 
 type CheckboxProps = {
   checked?: boolean
+  indeterminate?: boolean
   onChange?: (checked: boolean) => void
   label?: string
   description?: string
@@ -12,6 +14,7 @@ type CheckboxProps = {
 
 export function Checkbox({
   checked = false,
+  indeterminate = false,
   onChange,
   label,
   description,
@@ -19,7 +22,16 @@ export function Checkbox({
   className,
   id,
 }: CheckboxProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
   const checkboxId = id || (label ? `checkbox-${label.toLowerCase().replace(/\s+/g, '-')}` : undefined)
+
+  useEffect(() => {
+    if (inputRef.current) {
+      inputRef.current.indeterminate = indeterminate
+    }
+  }, [indeterminate])
+
+  const filled = checked || indeterminate
 
   return (
     <label
@@ -32,6 +44,7 @@ export function Checkbox({
     >
       <span className="relative mt-0.5 flex-shrink-0">
         <input
+          ref={inputRef}
           id={checkboxId}
           type="checkbox"
           checked={checked}
@@ -43,12 +56,12 @@ export function Checkbox({
           className={clsx(
             'block h-4 w-4 rounded-xs border transition-colors duration-fast',
             'peer-focus-visible:ring-2 peer-focus-visible:ring-accent-500/40',
-            checked
+            filled
               ? 'bg-accent border-accent'
               : 'bg-surface-input border-border',
           )}
         >
-          {checked && (
+          {filled && (
             <svg
               className="h-4 w-4 text-neutral-950"
               viewBox="0 0 16 16"
@@ -58,7 +71,10 @@ export function Checkbox({
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path d="M4 8l3 3 5-5" />
+              {indeterminate
+                ? <path d="M4 8h8" />
+                : <path d="M4 8l3 3 5-5" />
+              }
             </svg>
           )}
         </span>

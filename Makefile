@@ -1,4 +1,4 @@
-.PHONY: help setup up dev build down logs ps watch migrate backup restore website test test-quick
+.PHONY: help setup up dev build down logs ps watch migrate backup restore website test test-quick prune prune-all
 
 DASHBOARD    = dashboard
 
@@ -80,3 +80,18 @@ backup: ## Create a database backup (emergency — normally use the Recovery UI)
 
 restore: ## List or restore backups (emergency — normally use the Recovery UI)
 	@./scripts/restore.sh $(F)
+
+# ── Cleanup ────────────────────────────────────────────────────────────────
+prune: ## Remove stopped containers, dangling images, build cache (preserves ALL volumes)
+	docker system prune -f
+	@echo "\n  Volumes untouched. Use 'make prune-all' to also clean model caches."
+
+prune-all: ## Backup DB, then prune everything including model cache volumes
+	@echo "This will remove Ollama/vLLM/SGLang model caches (re-downloadable)."
+	@echo "Postgres and Redis data are safe (bind-mounted to ./data/)."
+	@read -p "Continue? [y/N] " yn; [ "$$yn" = "y" ] || exit 1
+	@./scripts/backup.sh
+	docker system prune -f
+	@for v in ollama-data nova-vllm-cache nova-sglang-cache tailscale-state; do \
+	  docker volume rm "nova_$$v" 2>/dev/null && echo "  Removed $$v" || true; \
+	done

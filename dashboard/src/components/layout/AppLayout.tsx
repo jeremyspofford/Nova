@@ -3,7 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
 import { LogFrictionButton } from '../LogFrictionButton'
-import { useNotifications } from '../../hooks/useNotifications'
+import { useNotifications, toastVariantFor, type PipelineNotification } from '../../hooks/useNotifications'
+import { useToast } from '../ToastProvider'
 import { useDebug } from '../../stores/debug-store'
 
 const STORAGE_KEY = 'nova-sidebar-collapsed'
@@ -35,10 +36,13 @@ export function AppLayout({
     }
   }, [collapsed])
 
-  const handleNotification = useCallback(() => {
+  const { addToast } = useToast()
+
+  const handleNotification = useCallback((n: PipelineNotification) => {
     qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
     qc.invalidateQueries({ queryKey: ['attention-count'] })
-  }, [qc])
+    addToast({ variant: toastVariantFor(n.type), message: n.body || n.title })
+  }, [qc, addToast])
 
   useNotifications(handleNotification)
 

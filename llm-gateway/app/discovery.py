@@ -99,6 +99,21 @@ class PullRequest(BaseModel):
     name: str
 
 
+# ── Auto-registration helper ──────────────────────────────────────────────────
+
+def _ensure_registered(model_id: str, provider: "ModelProvider") -> None:
+    """Register a discovered model in MODEL_REGISTRY if not already present.
+
+    This ensures that dynamically discovered models (from provider APIs) are
+    routable, not just visible.  The provider's own auth gating guarantees we
+    only register models the user actually has access to.
+    """
+    from app.registry import MODEL_REGISTRY, DEFAULT_MODEL_KEY
+    if model_id not in MODEL_REGISTRY and model_id != DEFAULT_MODEL_KEY:
+        MODEL_REGISTRY[model_id] = provider
+        log.debug("Auto-registered discovered model: %s", model_id)
+
+
 # ── Per-provider discovery coroutines ─────────────────────────────────────────
 
 async def _discover_ollama() -> list[DiscoveredModel]:
@@ -133,12 +148,12 @@ async def _discover_vllm() -> list[DiscoveredModel]:
             r = await client.get(f"{url}/v1/models")
             if r.status_code == 200:
                 data = r.json()
+                from app.registry import _vllm
                 for m in data.get("data", []):
                     model_id = m.get("id", "")
                     if model_id:
-                        from app.registry import MODEL_REGISTRY
-                        registered = model_id in MODEL_REGISTRY
-                        models.append(DiscoveredModel(id=model_id, registered=registered))
+                        _ensure_registered(model_id, _vllm)
+                        models.append(DiscoveredModel(id=model_id, registered=True))
     except Exception as e:
         log.debug("vLLM discovery failed: %s", e)
     return models
@@ -156,15 +171,15 @@ async def _discover_groq() -> list[DiscoveredModel]:
             )
             resp.raise_for_status()
             data = resp.json()
-            from app.registry import MODEL_REGISTRY
-            return [
-                DiscoveredModel(
-                    id=f"groq/{m['id']}",
-                    registered=f"groq/{m['id']}" in MODEL_REGISTRY,
-                )
-                for m in data.get("data", [])
-                if m.get("active", True)
-            ]
+            from app.registry import _groq
+            models = []
+            for m in data.get("data", []):
+                if not m.get("active", True):
+                    continue
+                model_id = f"groq/{m['id']}"
+                _ensure_registered(model_id, _groq)
+                models.append(DiscoveredModel(id=model_id, registered=True))
+            return models
     except Exception as e:
         log.debug("Groq discovery failed: %s", e)
         return []
@@ -185,14 +200,13 @@ async def _discover_anthropic() -> list[DiscoveredModel]:
             )
             resp.raise_for_status()
             data = resp.json()
-            from app.registry import MODEL_REGISTRY
-            return [
-                DiscoveredModel(
-                    id=m["id"],
-                    registered=m["id"] in MODEL_REGISTRY,
-                )
-                for m in data.get("data", [])
-            ]
+            from app.registry import _litellm
+            models = []
+            for m in data.get("data", []):
+                model_id = m["id"]
+                _ensure_registered(model_id, _litellm)
+                models.append(DiscoveredModel(id=model_id, registered=True))
+            return models
     except Exception as e:
         log.debug("Anthropic discovery failed: %s", e)
         return []
@@ -210,17 +224,17 @@ async def _discover_openai() -> list[DiscoveredModel]:
             )
             resp.raise_for_status()
             data = resp.json()
-            from app.registry import MODEL_REGISTRY
+            from app.registry import _litellm
             # Filter to chat models only (skip embeddings, tts, etc.)
             chat_prefixes = ("gpt-", "o1", "o3", "o4", "chatgpt-")
-            return [
-                DiscoveredModel(
-                    id=m["id"],
-                    registered=m["id"] in MODEL_REGISTRY,
-                )
-                for m in data.get("data", [])
-                if any(m["id"].startswith(p) for p in chat_prefixes)
-            ]
+            models = []
+            for m in data.get("data", []):
+                if not any(m["id"].startswith(p) for p in chat_prefixes):
+                    continue
+                model_id = m["id"]
+                _ensure_registered(model_id, _litellm)
+                models.append(DiscoveredModel(id=model_id, registered=True))
+            return models
     except Exception as e:
         log.debug("OpenAI discovery failed: %s", e)
         return []
@@ -233,19 +247,18 @@ async def _discover_openrouter() -> list[DiscoveredModel]:
             resp = await client.get("https://openrouter.ai/api/v1/models")
             resp.raise_for_status()
             data = resp.json()
-            from app.registry import MODEL_REGISTRY
+            from app.registry import _openrouter
             # Only show free models to keep the list manageable
             free_models = [
                 m for m in data.get("data", [])
                 if ":free" in m.get("id", "")
             ][:30]  # cap at 30
-            return [
-                DiscoveredModel(
-                    id=f"openrouter/{m['id']}",
-                    registered=f"openrouter/{m['id']}" in MODEL_REGISTRY,
-                )
-                for m in free_models
-            ]
+            models = []
+            for m in free_models:
+                model_id = f"openrouter/{m['id']}"
+                _ensure_registered(model_id, _openrouter)
+                models.append(DiscoveredModel(id=model_id, registered=True))
+            return models
     except Exception as e:
         log.debug("OpenRouter discovery failed: %s", e)
         return []
@@ -262,15 +275,15 @@ async def _discover_gemini() -> list[DiscoveredModel]:
             )
             resp.raise_for_status()
             data = resp.json()
-            from app.registry import MODEL_REGISTRY
-            return [
-                DiscoveredModel(
-                    id=f"gemini/{m['name'].removeprefix('models/')}",
-                    registered=f"gemini/{m['name'].removeprefix('models/')}" in MODEL_REGISTRY,
-                )
-                for m in data.get("models", [])
-                if "generateContent" in m.get("supportedGenerationMethods", [])
-            ]
+            from app.registry import _gemini
+            models = []
+            for m in data.get("models", []):
+                if "generateContent" not in m.get("supportedGenerationMethods", []):
+                    continue
+                model_id = f"gemini/{m['name'].removeprefix('models/')}"
+                _ensure_registered(model_id, _gemini)
+                models.append(DiscoveredModel(id=model_id, registered=True))
+            return models
     except Exception as e:
         log.debug("Gemini discovery failed: %s", e)
         return []
@@ -288,14 +301,15 @@ async def _discover_github() -> list[DiscoveredModel]:
             )
             resp.raise_for_status()
             data = resp.json()
-            from app.registry import MODEL_REGISTRY
-            return [
-                DiscoveredModel(
-                    id=f"github/{m['id']}",
-                    registered=f"github/{m['id']}" in MODEL_REGISTRY,
-                )
-                for m in data.get("data", data) if isinstance(m, dict)
-            ]
+            from app.registry import _github
+            models = []
+            for m in data.get("data", data):
+                if not isinstance(m, dict):
+                    continue
+                model_id = f"github/{m['id']}"
+                _ensure_registered(model_id, _github)
+                models.append(DiscoveredModel(id=model_id, registered=True))
+            return models
     except Exception as e:
         log.debug("GitHub Models discovery failed: %s", e)
         return []
@@ -304,23 +318,26 @@ async def _discover_github() -> list[DiscoveredModel]:
 async def _discover_from_model_map(slug: str) -> list[DiscoveredModel]:
     """For providers without listing APIs (Claude Max, ChatGPT, Cerebras),
     return models from the provider's own _MODEL_MAP or registry entries."""
-    from app.registry import MODEL_REGISTRY
-
     if slug == "claude-max":
         from app.providers.claude_subscription_provider import _MODEL_MAP
-        return [
-            DiscoveredModel(id=k, registered=k in MODEL_REGISTRY)
-            for k in _MODEL_MAP
-            if k.startswith("claude-max/")
-        ]
+        from app.registry import _claude_subscription
+        models = []
+        for k in _MODEL_MAP:
+            if k.startswith("claude-max/"):
+                _ensure_registered(k, _claude_subscription)
+                models.append(DiscoveredModel(id=k, registered=True))
+        return models
     elif slug == "chatgpt":
         from app.providers.chatgpt_subscription_provider import _MODEL_MAP
-        return [
-            DiscoveredModel(id=k, registered=k in MODEL_REGISTRY)
-            for k in _MODEL_MAP
-            if k.startswith("chatgpt/")
-        ]
+        from app.registry import _chatgpt_subscription
+        models = []
+        for k in _MODEL_MAP:
+            if k.startswith("chatgpt/"):
+                _ensure_registered(k, _chatgpt_subscription)
+                models.append(DiscoveredModel(id=k, registered=True))
+        return models
     elif slug == "cerebras":
+        from app.registry import MODEL_REGISTRY
         return [
             DiscoveredModel(id=k, registered=True)
             for k in MODEL_REGISTRY

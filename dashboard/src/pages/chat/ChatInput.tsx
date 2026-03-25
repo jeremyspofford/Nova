@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Plus, RefreshCw } from 'lucide-react'
+import { Send, Plus, RefreshCw, SlidersHorizontal } from 'lucide-react'
 import clsx from 'clsx'
 import { useChatStore } from '../../stores/chat-store'
 import { useFileAttach } from '../../hooks/useFileAttach'
@@ -19,9 +19,10 @@ interface Props {
   resolvedModel?: string
   onNewChat: () => void
   hasMessages: boolean
+  onManageModels: () => void
 }
 
-export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onModelChange, resolvedModel, onNewChat, hasMessages }: Props) {
+export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onModelChange, resolvedModel, onNewChat, hasMessages, onManageModels }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -139,13 +140,23 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     >
       {/* Model selector + New chat row */}
       <div className="flex items-center justify-between mb-2 gap-2">
-        <ModelPicker
-          value={modelId}
-          onChange={onModelChange}
-          models={modelPickerItems}
-          showAuto
-          className="w-80"
-        />
+        <div className="flex items-center gap-1.5">
+          <ModelPicker
+            value={modelId}
+            onChange={onModelChange}
+            models={modelPickerItems}
+            className="w-72"
+          />
+          <Tooltip content="Manage models">
+            <button
+              type="button"
+              onClick={onManageModels}
+              className="flex items-center justify-center rounded-sm p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated transition-colors duration-fast"
+            >
+              <SlidersHorizontal size={14} />
+            </button>
+          </Tooltip>
+        </div>
 
         <Button
           variant="ghost"

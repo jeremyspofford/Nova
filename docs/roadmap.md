@@ -1908,6 +1908,7 @@ Allow users to interact with Nova through their preferred messaging platform ins
 - Periodic Reaper — background `asyncio.create_task` replacing startup-only stale recovery
 - Docker Compose profiles — `--profile mac`, `--profile gpu`, `--profile cpu`
 - Webhook system — outbound POST on task/goal lifecycle events; persistent retry queue
+- Configurable backup destination — support S3-compatible, NFS, or custom path via `BACKUP_DIR` (currently hardcoded to `./backups/`). Enables off-host backup storage for disaster recovery.
 
 **Triggered execution (Autonomy Level 4):**
 - Inbound webhooks — GitHub PR opened → Nova reviews it automatically

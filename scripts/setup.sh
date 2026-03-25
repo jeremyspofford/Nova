@@ -42,6 +42,16 @@ else
 fi
 export NOVA_WORKSPACE
 
+# ── Create persistent data directories ──────────────────────────────────
+POSTGRES_DATA_DIR="${POSTGRES_DATA_DIR:-${PROJECT_ROOT}/data/postgres}"
+REDIS_DATA_DIR="${REDIS_DATA_DIR:-${PROJECT_ROOT}/data/redis}"
+for dir in "${POSTGRES_DATA_DIR}" "${REDIS_DATA_DIR}"; do
+  if [ ! -d "${dir}" ]; then
+    mkdir -p "${dir}"
+    echo "✓ Created data directory: ${dir}"
+  fi
+done
+
 # ── Resolve magic Ollama URL values ──────────────────────────────────────────
 if [ "${OLLAMA_BASE_URL:-}" = "auto" ] || [ "${OLLAMA_BASE_URL:-}" = "host" ]; then
   RESOLVED_URL="$(bash "${SCRIPT_DIR}/resolve-ollama-url.sh")"
@@ -182,7 +192,7 @@ fi
 # ── Start vLLM / SGLang if configured ───────────────────────────────────────
 if [ "${USE_LOCAL_VLLM}" = "true" ]; then
   echo ""
-  echo "→ Starting vLLM (model: ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct})..."
+  echo "→ Starting vLLM (model: ${VLLM_MODEL:-Qwen/Qwen2.5-1.5B-Instruct})..."
   echo "  First start downloads the model from HuggingFace — this may take several minutes."
   docker compose ${COMPOSE_FILES} --profile local-vllm up -d nova-vllm
 fi

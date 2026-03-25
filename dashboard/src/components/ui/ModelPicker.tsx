@@ -1,10 +1,15 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { ChevronDown, Check } from 'lucide-react'
 import clsx from 'clsx'
 
 type ModelItem = {
   id: string
   provider?: string
+}
+
+type ModelGroup = {
+  provider: string
+  models: ModelItem[]
 }
 
 type ModelPickerProps = {
@@ -25,6 +30,19 @@ export function ModelPicker({
   const [open, setOpen] = useState(false)
   const [flipUp, setFlipUp] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+  const groups = useMemo<ModelGroup[]>(() => {
+    const map = new Map<string, ModelItem[]>()
+    for (const m of models) {
+      const key = m.provider ?? ''
+      const list = map.get(key)
+      if (list) list.push(m)
+      else map.set(key, [m])
+    }
+    return Array.from(map, ([provider, items]) => ({ provider, models: items }))
+  }, [models])
+
+  const hasGroups = groups.some(g => g.provider !== '')
 
   const handleClickOutside = useCallback((e: MouseEvent) => {
     if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -101,26 +119,29 @@ export function ModelPicker({
               )}
             </button>
           )}
-          {models.map((model) => (
-            <button
-              key={model.id}
-              type="button"
-              onClick={() => handleSelect(model.id)}
-              className={clsx(
-                'flex items-center justify-between w-full px-3 py-1.5 text-compact text-left hover:bg-surface-card-hover transition-colors duration-fast',
-                value === model.id && 'text-accent',
+          {groups.map((group) => (
+            <Fragment key={group.provider}>
+              {hasGroups && group.provider && (
+                <div className="px-3 pt-2.5 pb-1 text-micro font-semibold uppercase tracking-wide text-content-tertiary select-none">
+                  {group.provider}
+                </div>
               )}
-            >
-              <div className="flex items-center gap-2 truncate">
-                <span className="truncate">{model.id}</span>
-                {model.provider && (
-                  <span className="text-micro text-content-tertiary shrink-0">
-                    {model.provider}
-                  </span>
-                )}
-              </div>
-              {value === model.id && <Check className="w-3.5 h-3.5 shrink-0" />}
-            </button>
+              {group.models.map((model) => (
+                <button
+                  key={model.id}
+                  type="button"
+                  onClick={() => handleSelect(model.id)}
+                  className={clsx(
+                    'flex items-center justify-between w-full py-1.5 text-compact text-left hover:bg-surface-card-hover transition-colors duration-fast',
+                    hasGroups ? 'pl-5 pr-3' : 'px-3',
+                    value === model.id && 'text-accent',
+                  )}
+                >
+                  <span className="truncate">{model.id}</span>
+                  {value === model.id && <Check className="w-3.5 h-3.5 shrink-0" />}
+                </button>
+              ))}
+            </Fragment>
           ))}
         </div>
       )}

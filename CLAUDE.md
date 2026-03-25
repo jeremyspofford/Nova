@@ -15,10 +15,10 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 - **chat-api** (8080) — WebSocket streaming bridge for external clients (FastAPI)
 - **chat-bridge** (8090) — Multi-platform chat integration: Telegram, Slack (FastAPI + httpx + redis). Optional, start with `--profile bridges`.
 - **dashboard** (3000/5173) — React admin UI (Vite dev / nginx prod)
-- **postgres** (5432) — pgvector-enabled PostgreSQL 16
+- **postgres** (5432) — pgvector-enabled PostgreSQL 16 (data bind-mounted to `./data/postgres/`)
 - **recovery** (8888) — Backup/restore, factory reset, service management (FastAPI + asyncpg + Docker SDK). Only depends on postgres — stays alive when other services crash.
 - **cortex** (8100) — Autonomous brain: thinking loop, goals, drives, budget tracking (FastAPI + asyncpg)
-- **redis** (6379) — State, task queue (BRPOP), rate limiting, session memory
+- **redis** (6379) — State, task queue (BRPOP), rate limiting, session memory (data bind-mounted to `./data/redis/`)
 
 **Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/engrams/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), recovery (`/recovery-api`), and cortex (`/cortex-api`). Chat-api forwards to orchestrator's streaming endpoint. Chat-bridge calls orchestrator (`/api/v1/tasks/stream`) to relay messages from external platforms. Cortex calls orchestrator (task dispatch, goal management), llm-gateway (planning, evaluation), and memory-service (read/write knowledge). Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
 
@@ -53,6 +53,10 @@ docker compose -f docker-compose.yml -f docker-compose.rocm.yml up -d  # AMD ROC
 make backup               # create a database backup to ./backups/
 make restore              # list available backups
 make restore F=<file>     # restore a specific backup
+
+# Cleanup (NEVER run raw docker system prune — use these instead)
+make prune                # remove containers, images, build cache (preserves ALL volumes)
+make prune-all            # backup DB first, then prune + remove model cache volumes
 ```
 
 **Dashboard dev server:** Runs on port 5173 via Vite with proxy to backend services. Production uses nginx on port 3000.
@@ -131,6 +135,7 @@ Several settings are runtime-configurable via Redis (db 1, prefix `nova:config:`
 
 - `.env` — DB password, admin secret, API keys for providers, `DEFAULT_CHAT_MODEL`, `NOVA_WORKSPACE`, `LOG_LEVEL`, `REQUIRE_AUTH`
 - `OLLAMA_BASE_URL` — Set to `auto` (probes host, falls back to Docker), `host` (always use host machine), or explicit URL
+- `POSTGRES_DATA_DIR` / `REDIS_DATA_DIR` — Host bind-mount paths for critical data (default: `./data/postgres`, `./data/redis`). Immune to `docker volume prune`.
 - `models.yaml` — Ollama models to auto-pull on startup
 - Context budgets in orchestrator config: system=10%, tools=15%, memory=40%, history=20%, working=15%
 
