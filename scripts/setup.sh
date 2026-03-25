@@ -30,6 +30,13 @@ set -a
 . "${PROJECT_ROOT}/.env"
 set +a
 
+# ── Generate credential master key if not set ─────────────────────────────────
+if grep -q "^CREDENTIAL_MASTER_KEY=$" "${PROJECT_ROOT}/.env" 2>/dev/null; then
+  CREDENTIAL_MASTER_KEY=$(openssl rand -hex 32)
+  sed -i "s/^CREDENTIAL_MASTER_KEY=$/CREDENTIAL_MASTER_KEY=${CREDENTIAL_MASTER_KEY}/" "${PROJECT_ROOT}/.env"
+  echo "  Generated CREDENTIAL_MASTER_KEY"
+fi
+
 # ── Create workspace directory ────────────────────────────────────────────────
 # Resolve ~ manually since Docker Compose doesn't expand it in all contexts
 NOVA_WORKSPACE="${NOVA_WORKSPACE:-${HOME}/.nova/workspace}"
