@@ -6,6 +6,7 @@ import type { IntelRecommendation } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
 import { RecommendationCard } from '../components/intel/RecommendationCard'
+import { FeedStatusBar } from '../components/intel/FeedStatusBar'
 import { FeedManagerModal } from '../components/intel/FeedManagerModal'
 
 type StatusFilter = 'pending' | 'approved' | 'deferred' | 'implemented' | 'all'
@@ -125,6 +126,9 @@ export function Intelligence() {
           </Card>
         </div>
       )}
+
+      {/* Feed status */}
+      <FeedStatusBar onManageFeeds={() => setFeedManagerOpen(true)} />
 
       {/* Filter tabs */}
       <Tabs
