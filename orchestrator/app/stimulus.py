@@ -18,6 +18,14 @@ log = logging.getLogger(__name__)
 STIMULUS_KEY = "cortex:stimuli"
 _CORTEX_REDIS_DB = 5
 
+# Intelligence stimuli
+RECOMMENDATION_CREATED = "recommendation.created"
+RECOMMENDATION_APPROVED = "recommendation.approved"
+RECOMMENDATION_COMMENTED = "recommendation.commented"
+GOAL_SPEC_APPROVED = "goal.spec_approved"
+GOAL_SPEC_REJECTED = "goal.spec_rejected"
+GOAL_COMMENTED = "goal.commented"
+
 _redis: aioredis.Redis | None = None
 
 

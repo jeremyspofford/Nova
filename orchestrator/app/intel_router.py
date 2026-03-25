@@ -12,6 +12,11 @@ from pydantic import BaseModel
 
 from app.auth import AdminDep, UserDep
 from app.db import get_pool
+from app.stimulus import (
+    RECOMMENDATION_APPROVED,
+    RECOMMENDATION_COMMENTED,
+    emit_stimulus,
+)
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +87,17 @@ class ContentItem(BaseModel):
 
 class IngestContentRequest(BaseModel):
     items: list[ContentItem]
+
+
+class UpdateRecommendationRequest(BaseModel):
+    status: str | None = None
+    decided_by: str | None = None
+
+
+class CreateCommentRequest(BaseModel):
+    author_type: str = "human"
+    author_name: str
+    body: str
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
@@ -251,3 +267,261 @@ async def intel_stats(_user: UserDep):
         "grade_c": grade_map.get("C", 0),
         "total_recommendations": total_recommendations or 0,
     }
+
+
+# ── Recommendation endpoints ────────────────────────────────────────────────
+
+
+@intel_router.get("/api/v1/intel/recommendations")
+async def list_recommendations(
+    _user: UserDep,
+    status: str | None = Query(default=None),
+    grade: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    limit: int = Query(default=20),
+    offset: int = Query(default=0),
+):
+    """List recommendations with optional filters."""
+    conditions: list[str] = []
+    values: list = []
+    idx = 1
+
+    if status is not None:
+        conditions.append(f"status = ${idx}")
+        values.append(status)
+        idx += 1
+    if grade is not None:
+        conditions.append(f"grade = ${idx}")
+        values.append(grade)
+        idx += 1
+    if category is not None:
+        conditions.append(f"category = ${idx}")
+        values.append(category)
+        idx += 1
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    values.extend([limit, offset])
+    query = (
+        f"SELECT * FROM intel_recommendations{where}"
+        f" ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
+    )
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *values)
+        results = []
+        for r in rows:
+            rec = dict(r)
+            rec["source_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM intel_recommendation_sources WHERE recommendation_id = $1",
+                r["id"],
+            )
+            rec["memory_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM intel_recommendation_engrams WHERE recommendation_id = $1",
+                r["id"],
+            )
+            rec["comment_count"] = await conn.fetchval(
+                "SELECT COUNT(*) FROM comments WHERE entity_type = 'recommendation' AND entity_id = $1",
+                r["id"],
+            )
+            results.append(rec)
+    return results
+
+
+@intel_router.get("/api/v1/intel/recommendations/{rec_id}")
+async def get_recommendation(rec_id: UUID, _user: UserDep):
+    """Get a single recommendation with sources, engrams, and comments."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM intel_recommendations WHERE id = $1", rec_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Recommendation not found")
+
+        sources = await conn.fetch(
+            """
+            SELECT rs.*, ci.title, ci.url, ci.content_hash, ci.body, ci.author, ci.score
+            FROM intel_recommendation_sources rs
+            JOIN intel_content_items ci ON ci.id = rs.content_item_id
+            WHERE rs.recommendation_id = $1
+            """,
+            rec_id,
+        )
+        engrams = await conn.fetch(
+            "SELECT * FROM intel_recommendation_engrams WHERE recommendation_id = $1",
+            rec_id,
+        )
+        comments = await conn.fetch(
+            """
+            SELECT * FROM comments
+            WHERE entity_type = 'recommendation' AND entity_id = $1
+            ORDER BY created_at ASC
+            """,
+            rec_id,
+        )
+
+    rec = dict(row)
+    rec["sources"] = [dict(s) for s in sources]
+    rec["engrams"] = [dict(e) for e in engrams]
+    rec["comments"] = [dict(c) for c in comments]
+    return rec
+
+
+@intel_router.patch("/api/v1/intel/recommendations/{rec_id}")
+async def update_recommendation(
+    rec_id: UUID, req: UpdateRecommendationRequest, _user: UserDep,
+):
+    """Update recommendation status. Approved creates a linked goal."""
+    if not req.status and not req.decided_by:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT * FROM intel_recommendations WHERE id = $1", rec_id,
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="Recommendation not found")
+
+        if req.status == "approved":
+            title = f"[Intel] {existing['title']}"
+            description = f"{existing['summary']}\n\nRationale: {existing['rationale']}"
+            goal = await conn.fetchrow(
+                """
+                INSERT INTO goals (title, description, status, priority, source_recommendation_id, created_via)
+                VALUES ($1, $2, 'active', 3, $3, 'cortex')
+                RETURNING id
+                """,
+                title, description, rec_id,
+            )
+            row = await conn.fetchrow(
+                """
+                UPDATE intel_recommendations
+                SET goal_id = $1, status = 'speccing', decided_by = $2,
+                    decided_at = NOW(), updated_at = NOW()
+                WHERE id = $3
+                RETURNING *
+                """,
+                goal["id"], req.decided_by, rec_id,
+            )
+            await emit_stimulus(
+                RECOMMENDATION_APPROVED,
+                {"recommendation_id": str(rec_id), "goal_id": str(goal["id"])},
+            )
+
+        elif req.status == "dismissed":
+            hash_rows = await conn.fetch(
+                """
+                SELECT ci.content_hash FROM intel_recommendation_sources rs
+                JOIN intel_content_items ci ON ci.id = rs.content_item_id
+                WHERE rs.recommendation_id = $1
+                """,
+                rec_id,
+            )
+            hashes = [r["content_hash"] for r in hash_rows]
+            row = await conn.fetchrow(
+                """
+                UPDATE intel_recommendations
+                SET status = 'dismissed', dismissed_hash_cluster = $1,
+                    decided_by = $2, decided_at = NOW(), updated_at = NOW()
+                WHERE id = $3
+                RETURNING *
+                """,
+                hashes, req.decided_by, rec_id,
+            )
+
+        elif req.status == "deferred":
+            row = await conn.fetchrow(
+                """
+                UPDATE intel_recommendations
+                SET status = 'deferred', decided_by = $1,
+                    decided_at = NOW(), updated_at = NOW()
+                WHERE id = $2
+                RETURNING *
+                """,
+                req.decided_by, rec_id,
+            )
+
+        else:
+            # Generic update (no special status transition)
+            updates = req.model_dump(exclude_unset=True)
+            set_parts = []
+            values = []
+            for i, (key, val) in enumerate(updates.items(), start=1):
+                set_parts.append(f"{key} = ${i}")
+                values.append(val)
+            values.append(rec_id)
+            idx = len(values)
+            row = await conn.fetchrow(
+                f"UPDATE intel_recommendations SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
+                *values,
+            )
+
+    return dict(row)
+
+
+# ── Comment endpoints ────────────────────────────────────────────────────────
+
+
+@intel_router.get("/api/v1/intel/recommendations/{rec_id}/comments")
+async def list_recommendation_comments(
+    rec_id: UUID,
+    _user: UserDep,
+    limit: int = Query(default=50),
+    offset: int = Query(default=0),
+):
+    """List comments on a recommendation."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM comments
+            WHERE entity_type = 'recommendation' AND entity_id = $1
+            ORDER BY created_at ASC
+            LIMIT $2 OFFSET $3
+            """,
+            rec_id, limit, offset,
+        )
+    return [dict(r) for r in rows]
+
+
+@intel_router.post("/api/v1/intel/recommendations/{rec_id}/comments", status_code=201)
+async def create_recommendation_comment(
+    rec_id: UUID, req: CreateCommentRequest, _user: UserDep,
+):
+    """Add a comment to a recommendation."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO comments (entity_type, entity_id, author_type, author_name, body)
+            VALUES ('recommendation', $1, $2, $3, $4)
+            RETURNING *
+            """,
+            rec_id, req.author_type, req.author_name, req.body,
+        )
+    if req.author_type == "human":
+        await emit_stimulus(
+            RECOMMENDATION_COMMENTED,
+            {"recommendation_id": str(rec_id), "comment_id": str(row["id"])},
+        )
+    return dict(row)
+
+
+@intel_router.delete(
+    "/api/v1/intel/recommendations/{rec_id}/comments/{comment_id}",
+    status_code=204,
+)
+async def delete_recommendation_comment(
+    rec_id: UUID, comment_id: UUID, _user: UserDep,
+):
+    """Delete a comment from a recommendation."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM comments WHERE id = $1 AND entity_type = 'recommendation' AND entity_id = $2",
+            comment_id, rec_id,
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Comment not found")
