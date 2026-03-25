@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Network, Brain, RefreshCw, Zap, GitMerge,
-  Activity, ChevronDown, ChevronRight, Box, LayoutList,
+  Activity, ChevronDown, ChevronRight, Box, LayoutList, Palette,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { apiFetch } from '../api'
@@ -114,6 +114,20 @@ const TYPE_DESCRIPTIONS: Record<string, string> = {
   schema:     'Patterns extracted from repeated experiences — generalized knowledge',
   goal:       'Objectives or intentions Nova is tracking',
 }
+
+// ── Graph background presets ─────────────────────────────────────────────────
+
+const GRAPH_BG_PRESETS = [
+  { color: 'galaxy', label: 'Galaxy (default)' },
+  { color: '#000000', label: 'Void' },
+  { color: '#050a18', label: 'Deep Navy' },
+  { color: '#0a0a12', label: 'Midnight' },
+  { color: '#0c0a09', label: 'Stone' },
+  { color: '#0d1117', label: 'GitHub Dark' },
+  { color: '#1a0a2e', label: 'Nebula' },
+] as const
+
+const DEFAULT_GRAPH_BG = 'galaxy'
 
 // ── Score bar helper ─────────────────────────────────────────────────────────
 
@@ -326,6 +340,11 @@ function GraphTab() {
   const [autoSpin, setAutoSpin] = useState(() => {
     try { return localStorage.getItem('nova-graph-spin') !== 'false' } catch { return true }
   })
+  const [graphBg, setGraphBg] = useState(() => {
+    try { return localStorage.getItem('nova-graph-bg') || DEFAULT_GRAPH_BG } catch { return DEFAULT_GRAPH_BG }
+  })
+  const [showBgPicker, setShowBgPicker] = useState(false)
+  const bgPickerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     try { localStorage.setItem('nova-graph-view', viewMode) } catch { /* ok */ }
@@ -334,6 +353,22 @@ function GraphTab() {
   useEffect(() => {
     try { localStorage.setItem('nova-graph-spin', String(autoSpin)) } catch { /* ok */ }
   }, [autoSpin])
+
+  useEffect(() => {
+    try { localStorage.setItem('nova-graph-bg', graphBg) } catch { /* ok */ }
+  }, [graphBg])
+
+  // Close bg picker on outside click
+  useEffect(() => {
+    if (!showBgPicker) return
+    const handleClick = (e: MouseEvent) => {
+      if (bgPickerRef.current && !bgPickerRef.current.contains(e.target as Node)) {
+        setShowBgPicker(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClick)
+    return () => document.removeEventListener('mousedown', handleClick)
+  }, [showBgPicker])
 
   const { data: graph, isLoading } = useQuery<GraphData>({
     queryKey: ['engram-graph', searchQuery],
@@ -395,14 +430,56 @@ function GraphTab() {
           </button>
         </div>
         {viewMode === 'graph3d' && (
-          <button
-            type="button"
-            onClick={() => setAutoSpin(s => !s)}
-            className={`p-1.5 rounded-sm border transition-colors ${autoSpin ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-subtle text-content-tertiary hover:text-content-secondary'}`}
-            title={autoSpin ? 'Auto-spin on (click to stop)' : 'Auto-spin off (click to start)'}
-          >
-            <RefreshCw size={14} />
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => setAutoSpin(s => !s)}
+              className={`p-1.5 rounded-sm border transition-colors ${autoSpin ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-subtle text-content-tertiary hover:text-content-secondary'}`}
+              title={autoSpin ? 'Auto-spin on (click to stop)' : 'Auto-spin off (click to start)'}
+            >
+              <RefreshCw size={14} />
+            </button>
+            <div className="relative inline-flex" ref={bgPickerRef}>
+              <button
+                type="button"
+                onClick={() => setShowBgPicker(s => !s)}
+                className={`p-1.5 rounded-sm border transition-colors ${showBgPicker ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-subtle text-content-tertiary hover:text-content-secondary'}`}
+                title="Graph background"
+              >
+                <Palette size={14} />
+              </button>
+              {showBgPicker && (
+                <div className="absolute top-full right-0 mt-1 z-50 bg-surface-elevated border border-border-default rounded-md p-2.5 shadow-xl min-w-[200px]">
+                  <div className="text-micro text-content-tertiary mb-2 px-0.5">Background</div>
+                  <div className="grid grid-cols-7 gap-1.5 mb-2.5">
+                    {GRAPH_BG_PRESETS.map(p => (
+                      <button
+                        key={p.color}
+                        type="button"
+                        onClick={() => setGraphBg(p.color)}
+                        className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${graphBg === p.color ? 'border-accent ring-1 ring-accent/40 scale-110' : 'border-white/10'}`}
+                        style={{
+                          background: p.color === 'galaxy'
+                            ? 'radial-gradient(circle at 30% 40%, #1a0a2e, #050a18 50%, #000 90%)'
+                            : p.color,
+                        }}
+                        title={p.label}
+                      />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 px-0.5">
+                    <label className="text-micro text-content-tertiary shrink-0">Custom</label>
+                    <input
+                      type="color"
+                      value={graphBg === 'galaxy' ? '#000000' : graphBg}
+                      onChange={e => setGraphBg(e.target.value)}
+                      className="w-full h-6 cursor-pointer rounded border-0 bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded [&::-webkit-color-swatch]:border-white/10 [&::-webkit-color-swatch]:border"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
         )}
       </form>
 
@@ -421,6 +498,7 @@ function GraphTab() {
                     onSelectNode={handleSelectNode}
                     onBackgroundClick={() => setSelectedNode(null)}
                     autoSpin={autoSpin}
+                    bgColor={graphBg}
                     className="w-full h-full"
                   />
                 </div>

@@ -12,6 +12,10 @@ import {
   Vector2,
   Vector3,
   Group,
+  BufferGeometry,
+  Float32BufferAttribute,
+  PointsMaterial,
+  Points,
 } from 'three'
 // @ts-expect-error — three/examples not typed
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass'
@@ -41,6 +45,7 @@ interface ForceGraph3DProps {
   onSelectNode: (id: string) => void
   onBackgroundClick?: () => void
   autoSpin?: boolean
+  bgColor?: string
   className?: string
 }
 
@@ -113,37 +118,43 @@ function makeNodeLabelTexture(text: string, color: string): CanvasTexture {
   // Truncate long text
   const label = text.length > 40 ? text.slice(0, 38) + '...' : text
 
-  ctx.font = '500 24px system-ui'
+  ctx.font = '600 24px system-ui'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
   // Measure text for background pill
   const metrics = ctx.measureText(label)
   const textW = metrics.width
-  const padX = 16
-  const padY = 8
+  const padX = 20
+  const padY = 10
   const pillW = textW + padX * 2
   const pillH = 32 + padY * 2
   const pillX = (w - pillW) / 2
   const pillY = (h - pillH) / 2
 
-  // Fully opaque dark pill — no glow bleed-through
+  // Fully opaque dark pill — blocks glow bleed-through
   ctx.fillStyle = '#09090b'
   ctx.beginPath()
   ctx.roundRect(pillX, pillY, pillW, pillH, 8)
   ctx.fill()
 
-  // Border in type color
+  // Border in type color (stronger)
   ctx.strokeStyle = color
-  ctx.globalAlpha = 0.5
+  ctx.globalAlpha = 0.7
   ctx.lineWidth = 2
   ctx.beginPath()
   ctx.roundRect(pillX, pillY, pillW, pillH, 8)
   ctx.stroke()
 
-  // Pure white text
-  ctx.fillStyle = '#ffffff'
+  // Thick dark outline — absorbs bloom bleed from nearby nodes
   ctx.globalAlpha = 1
+  ctx.strokeStyle = '#09090b'
+  ctx.lineWidth = 6
+  ctx.lineJoin = 'round'
+  ctx.strokeText(label, w / 2, h / 2)
+
+  // Muted text — bright enough to read, dim enough to dodge bloom threshold
+  ctx.fillStyle = '#a1a1aa'
   ctx.fillText(label, w / 2, h / 2)
 
   const tex = new CanvasTexture(canvas)
@@ -151,6 +162,188 @@ function makeNodeLabelTexture(text: string, color: string): CanvasTexture {
   return tex
 }
 
+
+// ── Galaxy starfield ────────────────────────────────────────────────────────
+
+function makeNebulaTexture(r: number, g: number, b: number): CanvasTexture {
+  const size = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = size; canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, size, size)
+
+  const cx = size / 2, cy = size / 2
+
+  // Main soft glow
+  const g1 = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.45)
+  g1.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0.5)`)
+  g1.addColorStop(0.4, `rgba(${r}, ${g}, ${b}, 0.15)`)
+  g1.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`)
+  ctx.fillStyle = g1
+  ctx.fillRect(0, 0, size, size)
+
+  // Asymmetric secondary highlight
+  const g2 = ctx.createRadialGradient(cx + 40, cy - 30, 0, cx + 40, cy - 30, size * 0.25)
+  const r2 = Math.min(255, r + 60), g2c = Math.min(255, g + 50), b2 = Math.min(255, b + 80)
+  g2.addColorStop(0, `rgba(${r2}, ${g2c}, ${b2}, 0.25)`)
+  g2.addColorStop(0.6, `rgba(${r}, ${g}, ${b}, 0.05)`)
+  g2.addColorStop(1, `rgba(0, 0, 0, 0)`)
+  ctx.fillStyle = g2
+  ctx.fillRect(0, 0, size, size)
+
+  return new CanvasTexture(canvas)
+}
+
+function makeGalaxyTexture(): CanvasTexture {
+  const size = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = size; canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, size, size)
+
+  // Elliptical galaxy — scale Y to flatten
+  ctx.save()
+  ctx.translate(size / 2, size / 2)
+  ctx.scale(1, 0.35)
+
+  const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, size / 3)
+  grad.addColorStop(0, 'rgba(255, 245, 230, 0.7)')
+  grad.addColorStop(0.3, 'rgba(180, 160, 220, 0.25)')
+  grad.addColorStop(0.7, 'rgba(80, 100, 180, 0.08)')
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)')
+  ctx.fillStyle = grad
+  ctx.beginPath()
+  ctx.arc(0, 0, size / 2, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+
+  return new CanvasTexture(canvas)
+}
+
+function createStarfield(): Group {
+  const group = new Group()
+  group.name = 'starfield'
+
+  // ── Dim stars — the background dust ──
+  const dimCount = 2000
+  const dimPos = new Float32Array(dimCount * 3)
+  const dimCol = new Float32Array(dimCount * 3)
+
+  for (let i = 0; i < dimCount; i++) {
+    const r = 600 + Math.random() * 900
+    const theta = Math.random() * Math.PI * 2
+    const phi = Math.acos(2 * Math.random() - 1)
+    dimPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+    dimPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+    dimPos[i * 3 + 2] = r * Math.cos(phi)
+
+    const t = Math.random()
+    if (t < 0.5) {        // cool white/blue-white
+      dimCol[i * 3] = 0.8 + Math.random() * 0.2
+      dimCol[i * 3 + 1] = 0.85 + Math.random() * 0.15
+      dimCol[i * 3 + 2] = 1.0
+    } else if (t < 0.75) { // warm yellow
+      dimCol[i * 3] = 1.0
+      dimCol[i * 3 + 1] = 0.8 + Math.random() * 0.2
+      dimCol[i * 3 + 2] = 0.5 + Math.random() * 0.2
+    } else {                // blue
+      dimCol[i * 3] = 0.5 + Math.random() * 0.2
+      dimCol[i * 3 + 1] = 0.6 + Math.random() * 0.2
+      dimCol[i * 3 + 2] = 1.0
+    }
+  }
+
+  const dimGeo = new BufferGeometry()
+  dimGeo.setAttribute('position', new Float32BufferAttribute(dimPos, 3))
+  dimGeo.setAttribute('color', new Float32BufferAttribute(dimCol, 3))
+  group.add(new Points(dimGeo, new PointsMaterial({
+    size: 0.8, vertexColors: true, transparent: true, opacity: 0.6, sizeAttenuation: true,
+  })))
+
+  // ── Bright stars — the visible ones ──
+  const brightCount = 300
+  const brightPos = new Float32Array(brightCount * 3)
+  const brightCol = new Float32Array(brightCount * 3)
+
+  for (let i = 0; i < brightCount; i++) {
+    const r = 500 + Math.random() * 1000
+    const theta = Math.random() * Math.PI * 2
+    const phi = Math.acos(2 * Math.random() - 1)
+    brightPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+    brightPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+    brightPos[i * 3 + 2] = r * Math.cos(phi)
+
+    brightCol[i * 3] = 0.9 + Math.random() * 0.1
+    brightCol[i * 3 + 1] = 0.9 + Math.random() * 0.1
+    brightCol[i * 3 + 2] = 1.0
+  }
+
+  const brightGeo = new BufferGeometry()
+  brightGeo.setAttribute('position', new Float32BufferAttribute(brightPos, 3))
+  brightGeo.setAttribute('color', new Float32BufferAttribute(brightCol, 3))
+  group.add(new Points(brightGeo, new PointsMaterial({
+    size: 2.0, vertexColors: true, transparent: true, opacity: 0.9, sizeAttenuation: true,
+  })))
+
+  // ── Nebulae — distant color clouds ──
+  const nebulae = [
+    { x: 700,  y: 300,  z: -500, s: 500, r: 100, g: 60,  b: 180, op: 0.15 },
+    { x: -500, y: -400, z: 600,  s: 400, r: 40,  g: 80,  b: 160, op: 0.12 },
+    { x: 300,  y: 700,  z: 400,  s: 350, r: 160, g: 40,  b: 80,  op: 0.08 },
+    { x: -700, y: 200,  z: -300, s: 550, r: 30,  g: 100, b: 120, op: 0.10 },
+    { x: 100,  y: -600, z: -700, s: 280, r: 140, g: 100, b: 40,  op: 0.06 },
+  ]
+
+  for (const n of nebulae) {
+    const tex = makeNebulaTexture(n.r, n.g, n.b)
+    const mat = new SpriteMaterial({
+      map: tex, transparent: true, opacity: n.op,
+      blending: AdditiveBlending, depthWrite: false,
+    })
+    const sprite = new Sprite(mat)
+    sprite.position.set(n.x, n.y, n.z)
+    sprite.scale.set(n.s, n.s, 1)
+    group.add(sprite)
+  }
+
+  // ── Distant galaxies — tiny elliptical blobs ──
+  const galaxies = [
+    { x: 900,  y: 500,  z: -400, w: 70, h: 25, rot: 0.3 },
+    { x: -800, y: -300, z: 800,  w: 50, h: 18, rot: -0.5 },
+    { x: 400,  y: -700, z: -600, w: 60, h: 22, rot: 0.8 },
+    { x: -300, y: 800,  z: -500, w: 45, h: 16, rot: -0.2 },
+  ]
+
+  for (const g of galaxies) {
+    const tex = makeGalaxyTexture()
+    const mat = new SpriteMaterial({
+      map: tex, transparent: true, opacity: 0.5,
+      blending: AdditiveBlending, depthWrite: false,
+    })
+    mat.rotation = g.rot
+    const sprite = new Sprite(mat)
+    sprite.position.set(g.x, g.y, g.z)
+    sprite.scale.set(g.w, g.h, 1)
+    group.add(sprite)
+  }
+
+  return group
+}
+
+function disposeStarfield(group: Group) {
+  group.traverse((obj) => {
+    if (obj instanceof Points || obj instanceof Mesh) {
+      obj.geometry?.dispose()
+      const mat = obj.material
+      if (Array.isArray(mat)) mat.forEach(m => m.dispose())
+      else mat?.dispose()
+    }
+    if (obj instanceof Sprite) {
+      obj.material?.map?.dispose()
+      obj.material?.dispose()
+    }
+  })
+}
 
 // ── Progressive label visibility threshold ───────────────────────────────────
 // Camera must be within this distance for node labels to appear.
@@ -167,6 +360,7 @@ export function ForceGraph3D({
   onSelectNode,
   onBackgroundClick,
   autoSpin = true,
+  bgColor = '#000000',
   className,
 }: ForceGraph3DProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -174,6 +368,9 @@ export function ForceGraph3D({
   const graphRef = useRef<any>(null)
   const initializedRef = useRef(false)
   const spinningRef = useRef(true)
+  const starfieldRef = useRef<Group | null>(null)
+  const bgColorRef = useRef(bgColor)
+  bgColorRef.current = bgColor
 
   const onSelectNodeRef = useRef(onSelectNode)
   onSelectNodeRef.current = onSelectNode
@@ -200,7 +397,7 @@ export function ForceGraph3D({
     const graph = (ForceGraph3DLib as any)()(el)
       .width(width)
       .height(height)
-      .backgroundColor(getCSSColor('--neutral-950'))
+      .backgroundColor(bgColorRef.current === 'galaxy' ? '#000000' : bgColorRef.current)
       .showNavInfo(false)
 
       // ── Node appearance ──────────────────────────────────────────────
@@ -219,7 +416,7 @@ export function ForceGraph3D({
         const importance = node.importance ?? 0
         const activation = node.activation ?? 0
         const radius = 2 + importance * 4
-        const alpha = (0.4 + activation * 0.6) * 0.7
+        const alpha = 0.7 + activation * 0.3
 
         const group = new Group()
 
@@ -233,17 +430,17 @@ export function ForceGraph3D({
         const sphere = new Mesh(geo, mat)
         group.add(sphere)
 
-        // Glow sprite
+        // Glow sprite — additive blend pushes brightness past bloom threshold
         const spriteMat = new SpriteMaterial({
           map: getGlowTexture(),
           color: new Color(color),
           transparent: true,
-          opacity: (0.3 + activation * 0.4) * 0.7,
+          opacity: 0.35 + activation * 0.25,
           blending: AdditiveBlending,
           depthWrite: false,
         })
         const sprite = new Sprite(spriteMat)
-        sprite.scale.set(radius * 3.5, radius * 3.5, 1)
+        sprite.scale.set(radius * 3, radius * 3, 1)
         group.add(sprite)
 
         // Text label — only for notable nodes, shown by proximity in render loop
@@ -357,9 +554,9 @@ export function ForceGraph3D({
     try {
       const bloomPass = new UnrealBloomPass(
         new Vector2(width, height),
-        0.8,   // strength (was 1.5 — less glow wash-out on labels)
+        0.8,   // strength — full node glow
         0.3,   // radius
-        0.25,  // threshold (higher = only bright things bloom, labels stay crisp)
+        0.5,   // threshold — glow sprites (additive) exceed this, labels (normal blend) don't
       )
       graph.postProcessingComposer().addPass(bloomPass)
     } catch (e) {
@@ -418,6 +615,13 @@ export function ForceGraph3D({
     graphRef.current = graph
     initializedRef.current = true
 
+    // Attach starfield if galaxy mode at init
+    if (bgColorRef.current === 'galaxy') {
+      const sf = createStarfield()
+      graph.scene().add(sf)
+      starfieldRef.current = sf
+    }
+
     // Load initial data
     updateGraphData(graph, nodes, edges)
 
@@ -432,6 +636,10 @@ export function ForceGraph3D({
       cancelAnimationFrame(rotationFrame)
       el.removeEventListener('pointerdown', stopSpin)
       ro.disconnect()
+      if (starfieldRef.current) {
+        disposeStarfield(starfieldRef.current)
+        starfieldRef.current = null
+      }
       initializedRef.current = false
       graphRef.current = null
       try { graph._destructor?.() } catch { /* ok */ }
@@ -443,6 +651,30 @@ export function ForceGraph3D({
   useEffect(() => {
     spinningRef.current = autoSpin
   }, [autoSpin])
+
+  // Live-update background + starfield without reinitializing graph
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph) return
+
+    const scene = graph.scene()
+
+    // Remove existing starfield
+    if (starfieldRef.current) {
+      scene.remove(starfieldRef.current)
+      disposeStarfield(starfieldRef.current)
+      starfieldRef.current = null
+    }
+
+    if (bgColor === 'galaxy') {
+      graph.backgroundColor('#000000')
+      const sf = createStarfield()
+      scene.add(sf)
+      starfieldRef.current = sf
+    } else {
+      graph.backgroundColor(bgColor)
+    }
+  }, [bgColor])
 
   // Highlight selected node
   useEffect(() => {
