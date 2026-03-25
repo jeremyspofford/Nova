@@ -87,6 +87,15 @@ async def engram_stats():
             for row in edge_rows
         }
 
+        source_rows = await session.execute(
+            text("""
+                SELECT source_type, count(*) AS cnt
+                FROM engrams
+                GROUP BY source_type ORDER BY cnt DESC
+            """)
+        )
+        by_source_type = {row.source_type: row.cnt for row in source_rows}
+
         total_engrams = (await session.execute(text("SELECT count(*) FROM engrams"))).scalar()
         total_edges = (await session.execute(text("SELECT count(*) FROM engram_edges"))).scalar()
         total_archived = (await session.execute(text("SELECT count(*) FROM engram_archive"))).scalar()
@@ -97,6 +106,7 @@ async def engram_stats():
         "total_archived": total_archived,
         "by_type": by_type,
         "by_relation": by_relation,
+        "by_source_type": by_source_type,
     }
 
 

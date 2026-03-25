@@ -52,6 +52,7 @@ interface EngramStats {
   total_archived: number
   by_type: Record<string, { total: number; superseded: number }>
   by_relation: Record<string, { count: number; avg_weight: number }>
+  by_source_type?: Record<string, number>
 }
 
 interface ConsolidationEntry {
@@ -324,6 +325,39 @@ function ExplorerTab() {
           ))}
         </div>
       </Card>
+
+      {/* Source Attribution */}
+      {stats.by_source_type && Object.keys(stats.by_source_type).length > 0 && (
+        <Card variant="default" className="p-5">
+          <h3 className="text-compact font-semibold text-content-primary mb-1">Source Attribution</h3>
+          <p className="text-caption text-content-tertiary mb-3">Where Nova's knowledge came from.</p>
+          <div className="space-y-2">
+            {Object.entries(stats.by_source_type)
+              .sort(([, a], [, b]) => b - a)
+              .map(([source, count]) => {
+                const pct = stats.total_engrams > 0
+                  ? Math.round((count / stats.total_engrams) * 100)
+                  : 0
+                return (
+                  <div key={source} className="flex items-center gap-3">
+                    <span className="text-caption text-content-secondary w-28 shrink-0 capitalize">
+                      {source.replace(/_/g, ' ')}
+                    </span>
+                    <div className="flex-1 h-1.5 rounded-full bg-surface-elevated overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-accent-500/70 transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    <span className="text-caption font-mono text-content-tertiary w-20 text-right shrink-0">
+                      {count.toLocaleString()} <span className="text-micro opacity-60">({pct}%)</span>
+                    </span>
+                  </div>
+                )
+              })}
+          </div>
+        </Card>
+      )}
     </div>
   )
 }
