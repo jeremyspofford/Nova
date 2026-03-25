@@ -6,6 +6,7 @@ import type { IntelRecommendation } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
 import { RecommendationCard } from '../components/intel/RecommendationCard'
+import { FeedManagerModal } from '../components/intel/FeedManagerModal'
 
 type StatusFilter = 'pending' | 'approved' | 'deferred' | 'implemented' | 'all'
 
@@ -169,6 +170,8 @@ export function Intelligence() {
           ))}
         </div>
       )}
+
+      <FeedManagerModal open={feedManagerOpen} onClose={() => setFeedManagerOpen(false)} />
     </div>
   )
 }
