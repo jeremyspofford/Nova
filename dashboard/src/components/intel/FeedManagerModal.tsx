@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Pencil, Check, X } from 'lucide-react'
 import { getIntelFeeds, createIntelFeed, updateIntelFeed, deleteIntelFeed, type IntelFeed } from '../../api'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
@@ -50,6 +50,12 @@ export function FeedManagerModal({ open, onClose }: Props) {
   const [showAddForm, setShowAddForm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<IntelFeed | null>(null)
 
+  // Edit state — which feed is being edited inline
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editCategory, setEditCategory] = useState('')
+  const [editInterval, setEditInterval] = useState('')
+
   // Add form state
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -96,6 +102,36 @@ export function FeedManagerModal({ open, onClose }: Props) {
       setDeleteTarget(null)
     },
   })
+
+  const editMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<IntelFeed> }) =>
+      updateIntelFeed(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['intel-feeds'] })
+      qc.invalidateQueries({ queryKey: ['intel-stats'] })
+      setEditId(null)
+    },
+  })
+
+  const startEdit = (feed: IntelFeed) => {
+    setEditId(feed.id)
+    setEditName(feed.name)
+    setEditCategory(feed.category ?? '')
+    setEditInterval(String(feed.check_interval_seconds / 3600))
+  }
+
+  const saveEdit = (feedId: string) => {
+    editMutation.mutate({
+      id: feedId,
+      data: {
+        name: editName,
+        category: editCategory || undefined,
+        check_interval_seconds: Number(editInterval) * 3600,
+      },
+    })
+  }
+
+  const cancelEdit = () => setEditId(null)
 
   const resetForm = () => {
     setName('')
@@ -213,6 +249,7 @@ export function FeedManagerModal({ open, onClose }: Props) {
               <thead>
                 <tr className="border-b border-border-subtle text-content-tertiary text-left">
                   <th className="py-2 pr-3 font-medium">Name</th>
+                  <th className="py-2 pr-3 font-medium">URL</th>
                   <th className="py-2 pr-3 font-medium">Type</th>
                   <th className="py-2 pr-3 font-medium">Category</th>
                   <th className="py-2 pr-3 font-medium">Interval</th>
@@ -222,43 +259,115 @@ export function FeedManagerModal({ open, onClose }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {feeds.map((feed: IntelFeed) => (
-                  <tr key={feed.id} className="border-b border-border-subtle/50 hover:bg-surface-elevated/50 transition-colors">
-                    <td className="py-2.5 pr-3 text-content-primary font-medium truncate max-w-[200px]" title={feed.name}>
-                      {feed.name}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <span className={`inline-flex px-1.5 py-0.5 rounded text-micro font-medium ${FEED_TYPE_COLORS[feed.feed_type] ?? 'bg-neutral-700 text-neutral-300'}`}>
-                        {feed.feed_type}
-                      </span>
-                    </td>
-                    <td className="py-2.5 pr-3 text-content-secondary">
-                      {feed.category ?? '--'}
-                    </td>
-                    <td className="py-2.5 pr-3 text-content-secondary font-mono">
-                      {formatInterval(feed.check_interval_seconds)}
-                    </td>
-                    <td className="py-2.5 pr-3 text-content-tertiary">
-                      {feed.last_checked_at ? formatRelativeTime(feed.last_checked_at) : 'never'}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      <Toggle
-                        size="sm"
-                        checked={feed.enabled}
-                        onChange={() => toggleMutation.mutate({ id: feed.id, enabled: !feed.enabled })}
-                      />
-                    </td>
-                    <td className="py-2.5">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        icon={<Trash2 size={12} />}
-                        onClick={() => setDeleteTarget(feed)}
-                        title="Delete feed"
-                      />
-                    </td>
-                  </tr>
-                ))}
+                {feeds.map((feed: IntelFeed) => {
+                  const isEditing = editId === feed.id
+                  return (
+                    <tr key={feed.id} className="border-b border-border-subtle/50 hover:bg-surface-elevated/50 transition-colors">
+                      <td className="py-2.5 pr-3 text-content-primary font-medium max-w-[200px]">
+                        {isEditing ? (
+                          <input
+                            value={editName}
+                            onChange={e => setEditName(e.target.value)}
+                            className="h-7 w-full rounded-sm border border-border bg-surface-input px-2 text-caption text-content-primary outline-none focus:border-border-focus"
+                            autoFocus
+                          />
+                        ) : (
+                          <span className="truncate block" title={feed.name}>{feed.name}</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3 max-w-[220px]">
+                        <a
+                          href={feed.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-caption text-accent hover:text-accent-hover truncate block"
+                          title={feed.url}
+                        >
+                          {feed.url.replace(/^https?:\/\/(www\.|old\.)?/, '').replace(/\/$/, '')}
+                        </a>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <span className={`inline-flex px-1.5 py-0.5 rounded text-micro font-medium ${FEED_TYPE_COLORS[feed.feed_type] ?? 'bg-neutral-700 text-neutral-300'}`}>
+                          {feed.feed_type}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {isEditing ? (
+                          <input
+                            value={editCategory}
+                            onChange={e => setEditCategory(e.target.value)}
+                            placeholder="category"
+                            className="h-7 w-full rounded-sm border border-border bg-surface-input px-2 text-caption text-content-primary outline-none focus:border-border-focus"
+                          />
+                        ) : (
+                          <span className="text-content-secondary">{feed.category ?? '--'}</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        {isEditing ? (
+                          <input
+                            type="number"
+                            value={editInterval}
+                            onChange={e => setEditInterval(e.target.value)}
+                            min="1"
+                            step="1"
+                            className="h-7 w-16 rounded-sm border border-border bg-surface-input px-2 text-caption text-content-primary font-mono outline-none focus:border-border-focus"
+                          />
+                        ) : (
+                          <span className="text-content-secondary font-mono">{formatInterval(feed.check_interval_seconds)}</span>
+                        )}
+                      </td>
+                      <td className="py-2.5 pr-3 text-content-tertiary">
+                        {feed.last_checked_at ? formatRelativeTime(feed.last_checked_at) : 'never'}
+                      </td>
+                      <td className="py-2.5 pr-3">
+                        <Toggle
+                          size="sm"
+                          checked={feed.enabled}
+                          onChange={() => toggleMutation.mutate({ id: feed.id, enabled: !feed.enabled })}
+                        />
+                      </td>
+                      <td className="py-2.5">
+                        {isEditing ? (
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon={<Check size={12} />}
+                              onClick={() => saveEdit(feed.id)}
+                              title="Save"
+                              loading={editMutation.isPending}
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon={<X size={12} />}
+                              onClick={cancelEdit}
+                              title="Cancel"
+                            />
+                          </div>
+                        ) : (
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon={<Pencil size={12} />}
+                              onClick={() => startEdit(feed)}
+                              title="Edit feed"
+                            />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              icon={<Trash2 size={12} />}
+                              onClick={() => setDeleteTarget(feed)}
+                              title="Delete feed"
+                            />
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
