@@ -17,6 +17,7 @@ from app.friction_router import router as friction_router
 from app.goals_router import goals_router
 from app.health import health_router
 from app.intel_router import intel_router
+from app.knowledge_router import knowledge_router
 from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
 from app.reaper import reaper_loop
@@ -174,3 +175,4 @@ app.include_router(pipeline_router)
 app.include_router(friction_router)
 app.include_router(goals_router)
 app.include_router(intel_router)
+app.include_router(knowledge_router)

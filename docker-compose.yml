@@ -312,6 +312,7 @@ services:
       WORKSPACE_ROOT: /workspace
       NOVA_ROOT: /nova
       SHELL_TIMEOUT_SECONDS: ${SHELL_TIMEOUT_SECONDS:-30}
+      CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-}
     # Mount the host workspace at /workspace so agents can read/write files.
     # Set NOVA_WORKSPACE in .env to point at any directory.
     # Default: ~/.nova/workspace (created by setup.sh)

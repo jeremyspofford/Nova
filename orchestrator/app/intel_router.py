@@ -29,7 +29,7 @@ intel_router = APIRouter(tags=["intel"])
 BLOCKED_HOSTS = {
     "localhost", "0.0.0.0", "redis", "postgres", "orchestrator", "memory-service",
     "llm-gateway", "cortex", "recovery", "chat-api", "chat-bridge",
-    "dashboard", "intel-worker", "metadata.google.internal",
+    "dashboard", "intel-worker", "knowledge-worker", "metadata.google.internal",
     "host.docker.internal",
 }
 
