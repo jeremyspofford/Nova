@@ -11,7 +11,7 @@ log = logging.getLogger(__name__)
 
 async def fetch_rss(feed: dict) -> list[dict]:
     """Fetch and parse an RSS/Atom feed. Returns list of content items."""
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
         resp = await client.get(feed["url"], headers={"User-Agent": "Nova-Intel/1.0"})
         resp.raise_for_status()
 

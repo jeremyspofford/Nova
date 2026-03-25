@@ -4,6 +4,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import logging
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from uuid import UUID
 
@@ -207,7 +208,8 @@ async def update_feed_status(feed_id: UUID, req: FeedStatusUpdate, _admin: Admin
             WHERE id = $4
             RETURNING *
             """,
-            req.last_checked_at, req.error_count, req.last_hash, feed_id,
+            datetime.fromisoformat(req.last_checked_at.replace("Z", "+00:00")),
+            req.error_count, req.last_hash, feed_id,
         )
     if not row:
         raise HTTPException(status_code=404, detail="Feed not found")
@@ -222,6 +224,12 @@ async def ingest_content(req: IngestContentRequest, _admin: AdminDep):
     inserted = []
     async with pool.acquire() as conn:
         for item in req.items:
+            published = None
+            if item.published_at:
+                try:
+                    published = datetime.fromisoformat(item.published_at.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    pass
             row = await conn.fetchrow(
                 """
                 INSERT INTO intel_content_items
@@ -231,7 +239,7 @@ async def ingest_content(req: IngestContentRequest, _admin: AdminDep):
                 RETURNING id, feed_id, content_hash, title, url
                 """,
                 item.feed_id, item.content_hash, item.title, item.url,
-                item.body, item.author, item.score, item.published_at,
+                item.body, item.author, item.score, published,
                 json.dumps(item.metadata),
             )
             if row:
