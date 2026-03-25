@@ -790,3 +790,122 @@ export const getGoalStats = () =>
 export const getRoutingStats = (period = '7d') =>
   apiFetch<RoutingStats>(`/api/v1/models/routing-stats?period=${period}`)
 
+// ── Intelligence types ──────────────────────────────────────────────────────
+
+export interface IntelFeed {
+  id: string
+  name: string
+  url: string
+  feed_type: string
+  category: string | null
+  check_interval_seconds: number
+  last_checked_at: string | null
+  last_hash: string | null
+  error_count: number
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface IntelContentItem {
+  id: string
+  title: string | null
+  url: string | null
+  body: string | null
+  author: string | null
+  score: number | null
+  published_at: string | null
+  content_hash: string
+  metadata: Record<string, unknown>
+}
+
+export interface IntelRecommendation {
+  id: string
+  title: string
+  summary: string
+  rationale: string | null
+  features: string[]
+  grade: string
+  confidence: number
+  category: string | null
+  status: string
+  auto_implementable: boolean
+  complexity: string | null
+  implementation_plan: string | null
+  goal_id: string | null
+  sources?: IntelContentItem[]
+  engrams?: { engram_id: string; activation_score: number }[]
+  comments?: Comment[]
+  source_count?: number
+  memory_count?: number
+  comment_count?: number
+  created_at: string
+  updated_at: string
+}
+
+export interface Comment {
+  id: string
+  entity_type: string
+  entity_id: string
+  author_type: string
+  author_name: string
+  body: string
+  created_at: string
+}
+
+export interface IntelStats {
+  items_this_week: number
+  active_feeds: number
+  grade_a: number
+  grade_b: number
+  grade_c: number
+  total_recommendations: number
+}
+
+// ── Intelligence API functions ──────────────────────────────────────────────
+
+export const getIntelFeeds = () =>
+  apiFetch<IntelFeed[]>('/api/v1/intel/feeds')
+
+export const createIntelFeed = (data: { name: string; url: string; feed_type: string; category?: string; check_interval_seconds?: number }) =>
+  apiFetch<IntelFeed>('/api/v1/intel/feeds', { method: 'POST', body: JSON.stringify(data) })
+
+export const updateIntelFeed = (id: string, data: Partial<Pick<IntelFeed, 'name' | 'category' | 'check_interval_seconds' | 'enabled'>>) =>
+  apiFetch<IntelFeed>(`/api/v1/intel/feeds/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const deleteIntelFeed = (id: string) =>
+  apiFetch<void>(`/api/v1/intel/feeds/${id}`, { method: 'DELETE' })
+
+export const getIntelRecommendations = (params?: Record<string, string>) => {
+  const qs = params ? '?' + new URLSearchParams(params).toString() : ''
+  return apiFetch<IntelRecommendation[]>(`/api/v1/intel/recommendations${qs}`)
+}
+
+export const getIntelRecommendation = (id: string) =>
+  apiFetch<IntelRecommendation>(`/api/v1/intel/recommendations/${id}`)
+
+export const updateRecommendation = (id: string, data: { status: string; decided_by?: string }) =>
+  apiFetch<IntelRecommendation>(`/api/v1/intel/recommendations/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+
+export const getIntelStats = () =>
+  apiFetch<IntelStats>('/api/v1/intel/stats')
+
+// ── Comment API functions (unified for recommendations + goals) ─────────────
+
+export const getComments = (entityType: 'recommendation' | 'goal', entityId: string) => {
+  const base = entityType === 'goal' ? 'goals' : 'intel/recommendations'
+  return apiFetch<Comment[]>(`/api/v1/${base}/${entityId}/comments`)
+}
+
+export const addComment = (entityType: 'recommendation' | 'goal', entityId: string, body: string, authorName: string) => {
+  const base = entityType === 'goal' ? 'goals' : 'intel/recommendations'
+  return apiFetch<Comment>(`/api/v1/${base}/${entityId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ body, author_name: authorName, author_type: 'human' }),
+  })
+}
+
+export const deleteComment = (entityType: 'recommendation' | 'goal', entityId: string, commentId: string) => {
+  const base = entityType === 'goal' ? 'goals' : 'intel/recommendations'
+  return apiFetch<void>(`/api/v1/${base}/${entityId}/comments/${commentId}`, { method: 'DELETE' })
+}
