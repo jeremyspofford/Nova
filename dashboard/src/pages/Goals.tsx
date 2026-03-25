@@ -1,13 +1,13 @@
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Target, Plus, Trash2, DollarSign,
   TrendingUp, Repeat, Pencil, Zap, Pause, Play,
-  ChevronDown, ChevronRight, Check, X as XIcon,
+  ChevronDown, ChevronRight, Check, X as XIcon, Lightbulb,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
-import { apiFetch, getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getPipelineTasks, getGoalStats, type Goal } from '../api'
+import { apiFetch, getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getPipelineTasks, getGoalStats, getIntelRecommendations, updateRecommendation, type Goal, type IntelRecommendation } from '../api'
 import type { PipelineTask } from '../types'
 import { TaskDetailSheet } from './Tasks'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -16,6 +16,7 @@ import {
   Metric, Modal, ProgressBar, Select, Skeleton, StatusDot, Textarea, Toast, Tooltip,
 } from '../components/ui'
 import { DiscussionThread } from '../components/DiscussionThread'
+import { RecommendationCard } from '../components/intel/RecommendationCard'
 import type { SemanticColor } from '../lib/design-tokens'
 
 const HELP_ENTRIES = [
@@ -815,9 +816,13 @@ function GoalCard({ goal }: { goal: Goal }) {
 
 // ── Main page ──────────────────────────────────────────────────────────────────
 
+type PageView = 'goals' | 'suggested'
+
 export function Goals() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [showCreate, setShowCreate] = useState(false)
+  const [pageView, setPageView] = useState<PageView>('goals')
+  const [expandedRecId, setExpandedRecId] = useState<string | null>(null)
   const qc = useQueryClient()
 
   const apiStatus = statusFilter === 'all' ? undefined : statusFilter
@@ -827,6 +832,31 @@ export function Goals() {
     queryFn: () => getGoals(apiStatus),
     refetchInterval: 10_000,
   })
+
+  const { data: pendingRecs = [], isLoading: recsLoading } = useQuery({
+    queryKey: ['intel-recs', 'pending'],
+    queryFn: () => getIntelRecommendations({ status: 'pending' }),
+    staleTime: 10_000,
+    refetchInterval: 30_000,
+  })
+
+  const recMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      updateRecommendation(id, { status }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['intel-recs'] })
+      qc.invalidateQueries({ queryKey: ['intel-stats'] })
+      // Approving a recommendation creates a goal — refresh the goals list too
+      qc.invalidateQueries({ queryKey: ['goals'] })
+      qc.invalidateQueries({ queryKey: ['goal-stats'] })
+    },
+  })
+
+  const handleRecStatusChange = (id: string) => (status: string) => {
+    recMutation.mutate({ id, status })
+  }
+
+  const pendingCount = pendingRecs.length
 
   return (
     <div className="space-y-6">
@@ -848,52 +878,122 @@ export function Goals() {
       <p className="text-caption text-content-tertiary -mb-4">Active goals, iteration throughput, and cumulative LLM spend across all autonomous objectives.</p>
       <GoalStatsRow />
 
-      {/* Status filter pills */}
-      <div className="flex items-center gap-1 flex-wrap">
-        {STATUS_FILTERS.map(f => (
-          <button
-            key={f.id}
-            onClick={() => setStatusFilter(f.id)}
-          >
-            <Badge
-              color={statusFilter === f.id ? f.color : 'neutral'}
-              size="md"
-              className={clsx(
-                'cursor-pointer transition-opacity',
-                statusFilter !== f.id && 'opacity-60 hover:opacity-100',
-              )}
-            >
-              {f.label}
-            </Badge>
-          </button>
-        ))}
-        {isFetching && (
-          <span className="text-caption text-content-tertiary animate-pulse ml-2">Updating...</span>
-        )}
+      {/* Page view tabs: Goals | Suggested */}
+      <div className="flex items-center gap-1 border-b border-border-subtle">
+        <button
+          onClick={() => setPageView('goals')}
+          className={clsx(
+            'px-4 py-2 text-compact font-medium transition-colors border-b-2 -mb-px',
+            pageView === 'goals'
+              ? 'border-accent-500 text-content-primary'
+              : 'border-transparent text-content-tertiary hover:text-content-secondary',
+          )}
+        >
+          Goals
+        </button>
+        <button
+          onClick={() => setPageView('suggested')}
+          className={clsx(
+            'flex items-center gap-1.5 px-4 py-2 text-compact font-medium transition-colors border-b-2 -mb-px',
+            pageView === 'suggested'
+              ? 'border-accent-500 text-content-primary'
+              : 'border-transparent text-content-tertiary hover:text-content-secondary',
+          )}
+        >
+          <Lightbulb size={13} />
+          Suggested
+          {pendingCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-micro font-semibold bg-accent-500/20 text-accent-400">
+              {pendingCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      {/* Goals list */}
-      {goals.length === 0 ? (
-        <EmptyState
-          icon={Target}
-          title={statusFilter === 'all' ? 'No goals yet' : `No ${statusFilter} goals`}
-          description={
-            statusFilter === 'all'
-              ? 'Create a goal to start autonomous operation.'
-              : 'Try selecting a different filter.'
-          }
-          action={
-            statusFilter === 'all'
-              ? { label: 'Create Goal', onClick: () => setShowCreate(true) }
-              : undefined
-          }
-        />
+      {pageView === 'goals' ? (
+        <>
+          {/* Status filter pills */}
+          <div className="flex items-center gap-1 flex-wrap">
+            {STATUS_FILTERS.map(f => (
+              <button
+                key={f.id}
+                onClick={() => setStatusFilter(f.id)}
+              >
+                <Badge
+                  color={statusFilter === f.id ? f.color : 'neutral'}
+                  size="md"
+                  className={clsx(
+                    'cursor-pointer transition-opacity',
+                    statusFilter !== f.id && 'opacity-60 hover:opacity-100',
+                  )}
+                >
+                  {f.label}
+                </Badge>
+              </button>
+            ))}
+            {isFetching && (
+              <span className="text-caption text-content-tertiary animate-pulse ml-2">Updating...</span>
+            )}
+          </div>
+
+          {/* Goals list */}
+          {goals.length === 0 ? (
+            <EmptyState
+              icon={Target}
+              title={statusFilter === 'all' ? 'No goals yet' : `No ${statusFilter} goals`}
+              description={
+                statusFilter === 'all'
+                  ? 'Create a goal to start autonomous operation.'
+                  : 'Try selecting a different filter.'
+              }
+              action={
+                statusFilter === 'all'
+                  ? { label: 'Create Goal', onClick: () => setShowCreate(true) }
+                  : undefined
+              }
+            />
+          ) : (
+            <div className="space-y-3">
+              {goals.map((goal: Goal) => (
+                <GoalCard key={goal.id} goal={goal} />
+              ))}
+            </div>
+          )}
+        </>
       ) : (
-        <div className="space-y-3">
-          {goals.map((goal: Goal) => (
-            <GoalCard key={goal.id} goal={goal} />
-          ))}
-        </div>
+        <>
+          {/* Suggested: pending intel recommendations */}
+          <p className="text-caption text-content-tertiary -mb-2">
+            Recommendations from intelligence feeds that Nova thinks could become goals. Approve to create a goal, defer to review later.
+          </p>
+          {recsLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Card key={i} className="p-4">
+                  <Skeleton lines={4} />
+                </Card>
+              ))}
+            </div>
+          ) : pendingRecs.length === 0 ? (
+            <EmptyState
+              icon={Lightbulb}
+              title="No pending recommendations"
+              description="Intelligence feeds haven't surfaced any new suggestions yet."
+            />
+          ) : (
+            <div className="space-y-3">
+              {pendingRecs.map((rec: IntelRecommendation) => (
+                <RecommendationCard
+                  key={rec.id}
+                  rec={rec}
+                  expanded={expandedRecId === rec.id}
+                  onToggle={() => setExpandedRecId(prev => prev === rec.id ? null : rec.id)}
+                  onStatusChange={handleRecStatusChange(rec.id)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       )}
 
       {/* Create goal modal */}
