@@ -1,6 +1,8 @@
 FROM python:3.12-slim
 RUN apt-get update && apt-get install -y curl && apt-get clean
 WORKDIR /app
+COPY nova-worker-common /nova-worker-common
+RUN pip install /nova-worker-common
 COPY intel-worker/pyproject.toml .
 RUN pip install .
 COPY intel-worker/app/ app/
