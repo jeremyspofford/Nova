@@ -24,6 +24,7 @@ BLOCKED_HOSTS = {
     "localhost", "0.0.0.0", "redis", "postgres", "orchestrator", "memory-service",
     "llm-gateway", "cortex", "recovery", "chat-api", "chat-bridge",
     "dashboard", "intel-worker", "metadata.google.internal",
+    "host.docker.internal",
 }
 
 
@@ -38,9 +39,7 @@ def _validate_feed_url(url: str) -> str | None:
     try:
         ip = ipaddress.ip_address(hostname)
         if ip.is_private or ip.is_loopback or ip.is_link_local:
-            return f"Private/loopback IP '{ip}' not allowed"
-        if ip == ipaddress.ip_address("169.254.169.254"):
-            return "Cloud metadata endpoint blocked"
+            return f"Private/loopback/link-local IP '{ip}' not allowed"
     except ValueError:
         pass
     return None
@@ -70,7 +69,7 @@ class FeedStatusUpdate(BaseModel):
 
 
 class ContentItem(BaseModel):
-    feed_id: str
+    feed_id: UUID
     content_hash: str
     title: str | None = None
     url: str | None = None
@@ -243,10 +242,12 @@ async def intel_stats(_user: UserDep):
             "SELECT COUNT(*) FROM intel_recommendations"
         )
 
-    grade_counts = {r["grade"]: r["count"] for r in grade_rows}
+    grade_map = {r["grade"]: r["count"] for r in grade_rows}
     return {
         "items_this_week": items_this_week or 0,
         "active_feeds": active_feeds or 0,
-        "grade_counts": grade_counts,
+        "grade_a": grade_map.get("A", 0),
+        "grade_b": grade_map.get("B", 0),
+        "grade_c": grade_map.get("C", 0),
         "total_recommendations": total_recommendations or 0,
     }
