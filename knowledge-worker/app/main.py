@@ -1,24 +1,46 @@
-"""Knowledge Worker -- minimal FastAPI app for health endpoints."""
+"""Knowledge Worker -- FastAPI app with autonomous crawl scheduling."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from app.client import close_clients, get_orchestrator_client, init_clients
+from app.client import close_clients, get_llm_client, get_orchestrator_client, init_clients
 from app.config import settings
-from app.queue import close_queues, init_queues
+from app.queue import close_queues, init_queues, push_to_engram
+from app.scheduler import run_scheduling_loop
 
 logging.basicConfig(level=settings.log_level)
 log = logging.getLogger(__name__)
 
+_scheduler_task: asyncio.Task | None = None
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _scheduler_task
     await init_clients()
     await init_queues()
-    log.info("Knowledge worker started")
+
+    # Start the crawl scheduling loop as a background task
+    _scheduler_task = asyncio.create_task(run_scheduling_loop(
+        config=settings,
+        get_orch_client=get_orchestrator_client,
+        get_llm_client=get_llm_client,
+        push_to_engram=push_to_engram,
+    ))
+    log.info("Knowledge worker started (scheduler running)")
+
     yield
+
+    # Shutdown: cancel scheduler, close connections
+    if _scheduler_task and not _scheduler_task.done():
+        _scheduler_task.cancel()
+        try:
+            await _scheduler_task
+        except asyncio.CancelledError:
+            pass
     await close_queues()
     await close_clients()
 

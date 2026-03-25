@@ -2,7 +2,11 @@
 import logging
 from urllib.parse import urlparse, urlunparse
 
-from nova_worker_common.queue import close_redis_client, create_redis_client
+from nova_worker_common.queue import (
+    close_redis_client,
+    create_redis_client,
+    push_to_engram_queue as _push_engram,
+)
 
 from app.config import settings
 
@@ -31,6 +35,22 @@ def get_engram_redis():
     if _redis_engram is None:
         raise RuntimeError("Engram Redis client not initialized")
     return _redis_engram
+
+
+async def push_to_engram(
+    raw_text: str,
+    source_type: str = "knowledge",
+    source_id: str | None = None,
+    metadata: dict | None = None,
+) -> None:
+    """Push content to memory-service's engram ingestion queue."""
+    await _push_engram(
+        _redis_engram,
+        raw_text=raw_text,
+        source_type=source_type,
+        source_id=source_id,
+        metadata=metadata,
+    )
 
 
 async def close_queues() -> None:
