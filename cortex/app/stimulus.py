@@ -31,6 +31,13 @@ CONSOLIDATION_COMPLETE = "consolidation.complete"
 ENGRAM_CONTRADICTION = "engram.contradiction"
 BUDGET_TIER_CHANGE = "budget.tier_change"
 
+# Intelligence & maturation stimuli
+RECOMMENDATION_APPROVED = "recommendation.approved"
+RECOMMENDATION_COMMENTED = "recommendation.commented"
+GOAL_SPEC_APPROVED = "goal.spec_approved"
+GOAL_SPEC_REJECTED = "goal.spec_rejected"
+GOAL_COMMENTED = "goal.commented"
+
 _redis: aioredis.Redis | None = None
 
 

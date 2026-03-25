@@ -27,11 +27,18 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
 
         stale_goals = await conn.fetch(
             """
-            SELECT id, title, priority, progress, check_interval_seconds, last_checked_at
+            SELECT id, title, priority, progress, check_interval_seconds, last_checked_at,
+                   maturation_status
             FROM goals
             WHERE status = 'active'
-              AND (last_checked_at IS NULL
-                   OR last_checked_at < NOW() - (check_interval_seconds || ' seconds')::interval)
+              AND (
+                -- Normal stale check
+                (last_checked_at IS NULL
+                 OR last_checked_at < NOW() - (check_interval_seconds || ' seconds')::interval)
+                -- OR has active maturation phase (not review — that waits for human)
+                OR maturation_status IN ('scoping', 'speccing', 'building', 'verifying')
+              )
+              AND (maturation_status IS NULL OR maturation_status != 'review')
             ORDER BY priority DESC
             LIMIT 5
             """,
@@ -46,7 +53,8 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
         )
 
     if active_count == 0 and (ctx is None or not ctx.stimuli_of_type(
-        "message.received", "goal.created", "goal.schedule_due"
+        "message.received", "goal.created", "goal.schedule_due",
+        "goal.spec_approved", "recommendation.approved"
     )):
         return DriveResult(
             name="serve", priority=1, urgency=0.0,
@@ -73,9 +81,15 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
         if ctx.stimuli_of_type("goal.created"):
             urgency = min(1.0, urgency + 0.2)
 
+        if ctx.stimuli_of_type("goal.spec_approved"):
+            urgency = max(urgency, 0.9)
+
+        if ctx.stimuli_of_type("recommendation.approved"):
+            urgency = min(1.0, urgency + 0.3)
+
     goal_summaries = [
         {"id": str(g["id"]), "title": g["title"], "priority": g["priority"],
-         "progress": g["progress"]}
+         "progress": g["progress"], "maturation_status": g.get("maturation_status")}
         for g in stale_goals
     ]
 
