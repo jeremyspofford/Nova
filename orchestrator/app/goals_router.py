@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 
 from app.auth import UserDep
 from app.db import get_pool
-from app.stimulus import emit_stimulus
+from app.intel_router import CreateCommentRequest
+from app.stimulus import GOAL_COMMENTED, GOAL_SPEC_APPROVED, GOAL_SPEC_REJECTED, emit_stimulus
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +55,8 @@ class UpdateGoalRequest(BaseModel):
     check_interval_seconds: int | None = None
     schedule_cron: str | None = Field(default=None, description="Cron expression or None to clear")
     max_completions: int | None = None
+    complexity: str | None = None
+    maturation_status: str | None = None
 
 
 class GoalResponse(BaseModel):
@@ -81,6 +84,13 @@ class GoalResponse(BaseModel):
     created_by: str
     created_at: datetime
     updated_at: datetime
+    maturation_status: str | None = None
+    complexity: str | None = None
+    scope_analysis: dict | None = None
+    spec: str | None = None
+    spec_approved_at: datetime | None = None
+    spec_approved_by: str | None = None
+    source_recommendation_id: UUID | None = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -244,6 +254,9 @@ async def delete_goal(goal_id: UUID, _user: UserDep):
     """Cancel and delete a goal."""
     pool = get_pool()
     async with pool.acquire() as conn:
+        created_via = await conn.fetchval("SELECT created_via FROM goals WHERE id = $1", goal_id)
+        if created_via == "system":
+            raise HTTPException(status_code=403, detail="System goals cannot be deleted")
         result = await conn.execute("DELETE FROM goals WHERE id = $1", goal_id)
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -282,4 +295,119 @@ def _row_to_goal(row) -> GoalResponse:
         created_by=row["created_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        maturation_status=row.get("maturation_status"),
+        complexity=row.get("complexity"),
+        scope_analysis=row.get("scope_analysis"),
+        spec=row.get("spec"),
+        spec_approved_at=row.get("spec_approved_at"),
+        spec_approved_by=row.get("spec_approved_by"),
+        source_recommendation_id=row.get("source_recommendation_id"),
     )
+
+
+# ── Goal Comments ─────────────────────────────────────────────────────────────
+
+@goals_router.get("/api/v1/goals/{goal_id}/comments")
+async def list_goal_comments(
+    goal_id: UUID, _user: UserDep,
+    limit: int = Query(default=50),
+    offset: int = Query(default=0),
+):
+    """List comments on a goal."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT * FROM comments
+               WHERE entity_type = 'goal' AND entity_id = $1
+               ORDER BY created_at ASC LIMIT $2 OFFSET $3""",
+            goal_id, limit, offset,
+        )
+    return [dict(r) for r in rows]
+
+
+@goals_router.post("/api/v1/goals/{goal_id}/comments", status_code=201)
+async def create_goal_comment(goal_id: UUID, req: CreateCommentRequest, _user: UserDep):
+    """Add a comment to a goal."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """INSERT INTO comments (entity_type, entity_id, author_type, author_name, body)
+               VALUES ('goal', $1, $2, $3, $4)
+               RETURNING *""",
+            goal_id, req.author_type, req.author_name, req.body,
+        )
+    if req.author_type == "human":
+        await emit_stimulus(GOAL_COMMENTED, {"goal_id": str(goal_id), "comment_id": str(row["id"])})
+    return dict(row)
+
+
+@goals_router.delete("/api/v1/goals/{goal_id}/comments/{comment_id}", status_code=204)
+async def delete_goal_comment(goal_id: UUID, comment_id: UUID, _user: UserDep):
+    """Delete a comment from a goal."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM comments WHERE id = $1 AND entity_type = 'goal' AND entity_id = $2",
+            comment_id, goal_id,
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+
+# ── Goal Maturation ──────────────────────────────────────────────────────────
+
+@goals_router.post("/api/v1/goals/{goal_id}/approve-spec")
+async def approve_spec(goal_id: UUID, _user: UserDep):
+    """Approve a goal's spec, advancing maturation to 'building'."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE goals SET maturation_status = 'building',
+                   spec_approved_at = NOW(), spec_approved_by = $1, updated_at = NOW()
+               WHERE id = $2 AND maturation_status = 'review'
+               RETURNING *""",
+            _user.email, goal_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Goal not found or not in review status")
+    await emit_stimulus(GOAL_SPEC_APPROVED, {"goal_id": str(goal_id)})
+    return _row_to_goal(row)
+
+
+class RejectSpecRequest(BaseModel):
+    feedback: str
+
+
+@goals_router.post("/api/v1/goals/{goal_id}/reject-spec")
+async def reject_spec(goal_id: UUID, req: RejectSpecRequest, _user: UserDep):
+    """Reject a goal's spec, sending it back to speccing with feedback."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """UPDATE goals SET maturation_status = 'speccing', updated_at = NOW()
+               WHERE id = $1 AND maturation_status = 'review'
+               RETURNING *""",
+            goal_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Goal not found or not in review status")
+    # Post the feedback as a comment
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """INSERT INTO comments (entity_type, entity_id, author_type, author_name, body)
+               VALUES ('goal', $1, 'human', $2, $3)""",
+            goal_id, _user.email, f"Spec rejected: {req.feedback}",
+        )
+    await emit_stimulus(GOAL_SPEC_REJECTED, {"goal_id": str(goal_id), "feedback": req.feedback})
+    return _row_to_goal(row)
+
+
+@goals_router.get("/api/v1/goals/{goal_id}/scope")
+async def get_goal_scope(goal_id: UUID, _user: UserDep):
+    """Get scope analysis for a goal."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT scope_analysis FROM goals WHERE id = $1", goal_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    return row["scope_analysis"] or {}
