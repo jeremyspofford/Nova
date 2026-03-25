@@ -482,6 +482,38 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  # ── Intel Worker ──────────────────────────────────────────────────────────────
+  intel-worker:
+    <<: *nova-common
+    container_name: nova-intel-worker
+    build:
+      context: .
+      dockerfile: intel-worker/Dockerfile
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8110", "--reload"]
+    develop:
+      watch:
+        - action: sync
+          path: ./intel-worker/app
+          target: /app/app
+          ignore:
+            - __pycache__
+            - "*.pyc"
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8000
+      REDIS_URL: redis://redis:6379/6
+      NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8110:8110"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8110/health/live', timeout=3)"]
+
   dashboard:
     <<: *nova-common
     build:
