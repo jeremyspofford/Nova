@@ -19,15 +19,16 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 - **recovery** (8888) — Backup/restore, factory reset, service management (FastAPI + asyncpg + Docker SDK). Only depends on postgres — stays alive when other services crash.
 - **cortex** (8100) — Autonomous brain: thinking loop, goals, drives, budget tracking (FastAPI + asyncpg)
 - **intel-worker** (8110) — AI ecosystem feed poller: RSS, Reddit JSON, page change detection, GitHub trending/releases. Pushes content via orchestrator HTTP API, queues to engram ingestion (FastAPI, health-only server)
+- **knowledge-worker** (8120) — Autonomous personal knowledge crawler: LLM-guided web crawling, GitHub API extraction, encrypted credential storage (FastAPI). Optional, start with `--profile knowledge`.
 - **redis** (6379) — State, task queue (BRPOP), rate limiting, session memory (data bind-mounted to `./data/redis/`)
 
-**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/engrams/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), recovery (`/recovery-api`), and cortex (`/cortex-api`). Chat-api forwards to orchestrator's streaming endpoint. Chat-bridge calls orchestrator (`/api/v1/tasks/stream`) to relay messages from external platforms. Cortex calls orchestrator (task dispatch, goal management), llm-gateway (planning, evaluation), and memory-service (read/write knowledge). Intel-worker calls orchestrator (`/api/v1/intel/feeds`, `/api/v1/intel/content`, `/api/v1/intel/feeds/{id}/status`) and pushes to Redis queues (db0 engram ingestion, db6 intel new-items). Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
+**Inter-service communication:** All HTTP. Orchestrator calls llm-gateway (`/complete`, `/stream`, `/embed`) and memory-service (`/api/v1/engrams/*`). Dashboard proxies to orchestrator (`/api`), llm-gateway (`/v1`), recovery (`/recovery-api`), and cortex (`/cortex-api`). Chat-api forwards to orchestrator's streaming endpoint. Chat-bridge calls orchestrator (`/api/v1/tasks/stream`) to relay messages from external platforms. Cortex calls orchestrator (task dispatch, goal management), llm-gateway (planning, evaluation), and memory-service (read/write knowledge). Intel-worker calls orchestrator (`/api/v1/intel/feeds`, `/api/v1/intel/content`, `/api/v1/intel/feeds/{id}/status`) and pushes to Redis queues (db0 engram ingestion, db6 intel new-items). Knowledge-worker calls orchestrator (`/api/v1/knowledge/sources`, `/api/v1/knowledge/crawl-log`), llm-gateway (`/complete` for relevance scoring), and pushes to Redis queues (db0 engram ingestion, db8 knowledge state). Dashboard depends only on recovery at startup — shows a startup screen while other services come online.
 
 **Shared contracts:** `nova-contracts/` is a Pydantic-only package defining the API contract between services (chat, llm, memory, orchestrator models). Any service satisfying these models is a drop-in replacement.
 
 **Quartet Pipeline:** 5-stage agent chain — Context → Task → Guardrail → Code Review → Decision. Runs via Redis BRPOP task queue with heartbeat (30s) and stale reaper (150s timeout). Pipeline code lives in `orchestrator/app/pipeline/`.
 
-**Redis DB allocation:** orchestrator=db2, llm-gateway=db1, chat-api=db3, memory-service=db0, chat-bridge=db4, cortex=db5, intel-worker=db6, recovery=db7.
+**Redis DB allocation:** orchestrator=db2, llm-gateway=db1, chat-api=db3, memory-service=db0, chat-bridge=db4, cortex=db5, intel-worker=db6, recovery=db7, knowledge-worker=db8.
 
 ## Build & Run Commands
 
@@ -149,7 +150,7 @@ Quick diagnostics when something is broken:
 docker compose ps
 
 # Service health (all at once)
-for p in 8000 8001 8002 8080 8100 8888; do echo -n "localhost:$p → "; curl -sf -m 2 http://localhost:$p/health/ready | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN"; done
+for p in 8000 8001 8002 8080 8100 8110 8120 8888; do echo -n "localhost:$p → "; curl -sf -m 2 http://localhost:$p/health/ready | python3 -c "import sys,json; print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "DOWN"; done
 
 # Redis config state (stale values are a common root cause)
 docker compose exec redis redis-cli -n 1 MGET nova:config:inference.backend nova:config:inference.state nova:config:llm.routing_strategy
@@ -192,6 +193,7 @@ Nova's website lives at `website/` (Astro/Starlight, arialabs.ai). The site serv
 | `recovery/` | `nova/docs/services/recovery.md` |
 | `cortex/` | (new — no docs yet) |
 | `intel-worker/`, `orchestrator/app/intel_router.py` | (new — no docs yet) |
+| `knowledge-worker/` | (new — no docs yet) |
 | `orchestrator/` (general) | `nova/docs/services/orchestrator.md` |
 | `docker-compose*.yml`, `Makefile`, `scripts/setup.sh` | `nova/docs/deployment.md`, `nova/docs/quickstart.md` |
 | GPU overlays, inference backends | `nova/docs/inference-backends.md` |
