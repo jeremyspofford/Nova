@@ -21,6 +21,7 @@ LLM_GATEWAY_URL = os.getenv("NOVA_LLM_GATEWAY_URL", "http://localhost:8001")
 MEMORY_URL = os.getenv("NOVA_MEMORY_URL", "http://localhost:8002")
 CHAT_API_URL = os.getenv("NOVA_CHAT_API_URL", "http://localhost:8080")
 RECOVERY_URL = os.getenv("NOVA_RECOVERY_URL", "http://localhost:8888")
+KNOWLEDGE_WORKER_URL = os.getenv("NOVA_KNOWLEDGE_WORKER_URL", "http://localhost:8120")
 
 ADMIN_SECRET = os.getenv("NOVA_ADMIN_SECRET", "")
 
@@ -30,6 +31,7 @@ SERVICE_URLS = {
     "memory-service": MEMORY_URL,
     "chat-api": CHAT_API_URL,
     "recovery": RECOVERY_URL,
+    "knowledge-worker": KNOWLEDGE_WORKER_URL,
 }
 
 
@@ -71,6 +73,12 @@ async def chat_api():
 @pytest_asyncio.fixture
 async def recovery():
     async with httpx.AsyncClient(base_url=RECOVERY_URL, timeout=30) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def knowledge_worker():
+    async with httpx.AsyncClient(base_url=KNOWLEDGE_WORKER_URL, timeout=30) as client:
         yield client
 
 
