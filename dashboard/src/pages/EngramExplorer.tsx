@@ -9,7 +9,7 @@ import { apiFetch } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Card, Badge, Metric, ProgressBar, Tabs, Table, Button, SearchInput,
-  EmptyState, Skeleton, Tooltip, Sheet,
+  EmptyState, Skeleton, Tooltip,
 } from '../components/ui'
 import { ForceGraph } from '../components/ForceGraph'
 import { ForceGraph3D } from '../components/ForceGraph3D'
@@ -323,10 +323,17 @@ function GraphTab() {
   const [viewMode, setViewMode] = useState<'graph3d' | 'list'>(() => {
     try { return (localStorage.getItem('nova-graph-view') as 'graph3d' | 'list') || 'graph3d' } catch { return 'graph3d' }
   })
+  const [autoSpin, setAutoSpin] = useState(() => {
+    try { return localStorage.getItem('nova-graph-spin') !== 'false' } catch { return true }
+  })
 
   useEffect(() => {
     try { localStorage.setItem('nova-graph-view', viewMode) } catch { /* ok */ }
   }, [viewMode])
+
+  useEffect(() => {
+    try { localStorage.setItem('nova-graph-spin', String(autoSpin)) } catch { /* ok */ }
+  }, [autoSpin])
 
   const { data: graph, isLoading } = useQuery<GraphData>({
     queryKey: ['engram-graph', searchQuery],
@@ -387,6 +394,16 @@ function GraphTab() {
             <LayoutList size={14} />
           </button>
         </div>
+        {viewMode === 'graph3d' && (
+          <button
+            type="button"
+            onClick={() => setAutoSpin(s => !s)}
+            className={`p-1.5 rounded-sm border transition-colors ${autoSpin ? 'border-accent/30 bg-accent-dim text-accent' : 'border-border-subtle text-content-tertiary hover:text-content-secondary'}`}
+            title={autoSpin ? 'Auto-spin on (click to stop)' : 'Auto-spin off (click to start)'}
+          >
+            <RefreshCw size={14} />
+          </button>
+        )}
       </form>
 
       {isLoading && <Skeleton lines={5} />}
@@ -403,6 +420,7 @@ function GraphTab() {
                     selectedId={selectedNode?.id ?? null}
                     onSelectNode={handleSelectNode}
                     onBackgroundClick={() => setSelectedNode(null)}
+                    autoSpin={autoSpin}
                     className="w-full h-full"
                   />
                 </div>
@@ -474,14 +492,19 @@ function GraphTab() {
             </>
           )}
 
-          {/* Detail Sheet */}
-          <Sheet
-            open={!!selectedNode}
-            onClose={() => setSelectedNode(null)}
-            title="Memory Detail"
-            width="wide"
-          >
-            {selectedNode && (
+          {/* Detail panel — inline, no backdrop dim */}
+          {selectedNode && (
+            <Card className="overflow-hidden border-border-subtle">
+              <div className="flex justify-between items-center px-5 py-3 border-b border-border-subtle">
+                <h2 className="text-compact font-semibold text-content-primary">Memory Detail</h2>
+                <button
+                  type="button"
+                  onClick={() => setSelectedNode(null)}
+                  className="text-content-tertiary hover:text-content-primary transition-colors p-1 rounded-sm hover:bg-surface-elevated"
+                >
+                  <span className="text-caption">Close</span>
+                </button>
+              </div>
               <div className="p-5 space-y-5">
                 {/* Type & status */}
                 <div className="flex gap-2 items-center flex-wrap">
@@ -581,8 +604,8 @@ function GraphTab() {
                   </div>
                 </div>
               </div>
-            )}
-          </Sheet>
+            </Card>
+          )}
         </>
       )}
 

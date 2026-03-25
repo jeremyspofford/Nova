@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle, RefreshCw, HardDrive, RotateCcw, Download,
+  AlertTriangle, RefreshCw, HardDrive, RotateCcw, Download, Trash2,
   Shield, CheckCircle2, XCircle, Loader2, Server,
   MessageCircle, Send, ChevronDown, ChevronUp, Clock,
 } from 'lucide-react'
@@ -289,12 +289,11 @@ export function BackupSection() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          icon={<RotateCcw size={11} />}
+                          icon={<Trash2 size={11} />}
                           onClick={() => setConfirmDelete(b.filename)}
                           className="text-content-tertiary hover:text-danger"
-                        >
-                          {/* Delete icon only */}
-                        </Button>
+                        />
+
                       </>
                     )}
                   </div>

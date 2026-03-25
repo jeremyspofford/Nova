@@ -54,6 +54,8 @@ async def create_backup() -> dict:
             "-d", settings.pg_database,
             "--no-owner",
             "--no-acl",
+            "--clean",
+            "--if-exists",
             "-f", str(sql_path),
             env={**os.environ, "PGPASSWORD": settings.pg_password},
             stdout=asyncio.subprocess.PIPE,
@@ -97,7 +99,35 @@ async def restore_backup(filename: str) -> dict:
         if not sql_path.exists():
             raise RuntimeError("Backup archive missing database.sql")
 
-        # Drop and recreate all tables by restoring into a clean state
+        # Strip pg17-specific directives that break restore on pg16:
+        # - \restrict / \unrestrict block \. data terminators in COPY blocks
+        # - SET transaction_timeout is unrecognized by pg16
+        strip_proc = await asyncio.create_subprocess_exec(
+            "sed", "-i",
+            r"/^\\restrict/d;/^\\unrestrict/d;/^SET transaction_timeout/d",
+            str(sql_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await strip_proc.communicate()
+
+        # Drop all existing tables so the restore can recreate them cleanly
+        drop_proc = await asyncio.create_subprocess_exec(
+            "psql",
+            "-h", settings.pg_host,
+            "-p", str(settings.pg_port),
+            "-U", settings.pg_user,
+            "-d", settings.pg_database,
+            "-c", "DROP SCHEMA public CASCADE; CREATE SCHEMA public;",
+            env={**os.environ, "PGPASSWORD": settings.pg_password},
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, drop_stderr = await drop_proc.communicate()
+        if drop_proc.returncode != 0:
+            raise RuntimeError(f"Schema reset failed: {drop_stderr.decode()}")
+
+        # Restore from dump
         proc = await asyncio.create_subprocess_exec(
             "psql",
             "-h", settings.pg_host,
@@ -163,6 +193,8 @@ async def create_checkpoint() -> dict:
             "-d", settings.pg_database,
             "--no-owner",
             "--no-acl",
+            "--clean",
+            "--if-exists",
             "-f", str(sql_path),
             env={**os.environ, "PGPASSWORD": settings.pg_password},
             stdout=asyncio.subprocess.PIPE,
