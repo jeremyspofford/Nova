@@ -22,6 +22,7 @@ import { Pods } from './pages/Pods'
 import { AgentEndpoints } from './pages/AgentEndpoints'
 import { EngramExplorer } from './pages/EngramExplorer'
 import { Goals } from './pages/Goals'
+import { Intelligence } from './pages/Intelligence'
 import { Recovery } from './pages/Recovery'
 import { About } from './pages/About'
 import { Users } from './pages/Users'
@@ -169,6 +170,7 @@ function AppShell() {
         <Route path="/agents" element={<AppLayout><AgentEndpoints /></AppLayout>} />
         <Route path="/engrams" element={<AppLayout><EngramExplorer /></AppLayout>} />
         <Route path="/goals" element={<AppLayout><Goals /></AppLayout>} />
+        <Route path="/intelligence" element={<AppLayout><Intelligence /></AppLayout>} />
         <Route path="/models" element={<AppLayout><Models /></AppLayout>} />
         <Route path="/users" element={<AppLayout><Users /></AppLayout>} />
         <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
