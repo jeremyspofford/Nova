@@ -871,10 +871,10 @@ export interface IntelStats {
 export const getIntelFeeds = () =>
   apiFetch<IntelFeed[]>('/api/v1/intel/feeds')
 
-export const createIntelFeed = (data: { name: string; url: string; feed_type: string; category?: string; check_interval_seconds?: number }) =>
+export const createIntelFeed = (data: { url: string; name?: string; check_interval_seconds?: number }) =>
   apiFetch<IntelFeed>('/api/v1/intel/feeds', { method: 'POST', body: JSON.stringify(data) })
 
-export const updateIntelFeed = (id: string, data: Partial<Pick<IntelFeed, 'name' | 'category' | 'check_interval_seconds' | 'enabled'>>) =>
+export const updateIntelFeed = (id: string, data: Partial<Pick<IntelFeed, 'url' | 'name' | 'check_interval_seconds' | 'enabled'>>) =>
   apiFetch<IntelFeed>(`/api/v1/intel/feeds/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 
 export const deleteIntelFeed = (id: string) =>

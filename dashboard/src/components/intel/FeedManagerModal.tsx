@@ -12,14 +12,6 @@ interface Props {
   onClose: () => void
 }
 
-const FEED_TYPES = [
-  { value: 'rss', label: 'RSS' },
-  { value: 'reddit_json', label: 'Reddit JSON' },
-  { value: 'page', label: 'Web Page' },
-  { value: 'github_trending', label: 'GitHub Trending' },
-  { value: 'github_releases', label: 'GitHub Releases' },
-]
-
 const FEED_TYPE_COLORS: Record<string, string> = {
   rss: 'bg-blue-900/30 text-blue-400',
   reddit_json: 'bg-orange-900/30 text-orange-400',
@@ -52,15 +44,13 @@ export function FeedManagerModal({ open, onClose }: Props) {
 
   // Edit state — which feed is being edited inline
   const [editId, setEditId] = useState<string | null>(null)
+  const [editUrl, setEditUrl] = useState('')
   const [editName, setEditName] = useState('')
-  const [editCategory, setEditCategory] = useState('')
   const [editInterval, setEditInterval] = useState('')
 
-  // Add form state
-  const [name, setName] = useState('')
+  // Add form state — simplified: just URL, optional name, interval
   const [url, setUrl] = useState('')
-  const [feedType, setFeedType] = useState('rss')
-  const [category, setCategory] = useState('')
+  const [name, setName] = useState('')
   const [intervalHours, setIntervalHours] = useState('12')
 
   const { data: feeds = [], isLoading } = useQuery({
@@ -72,10 +62,8 @@ export function FeedManagerModal({ open, onClose }: Props) {
   const createMutation = useMutation({
     mutationFn: () =>
       createIntelFeed({
-        name,
         url,
-        feed_type: feedType,
-        category: category || undefined,
+        name: name || undefined,
         check_interval_seconds: Number(intervalHours) * 3600,
       }),
     onSuccess: () => {
@@ -115,29 +103,26 @@ export function FeedManagerModal({ open, onClose }: Props) {
 
   const startEdit = (feed: IntelFeed) => {
     setEditId(feed.id)
+    setEditUrl(feed.url)
     setEditName(feed.name)
-    setEditCategory(feed.category ?? '')
     setEditInterval(String(feed.check_interval_seconds / 3600))
   }
 
-  const saveEdit = (feedId: string) => {
-    editMutation.mutate({
-      id: feedId,
-      data: {
-        name: editName,
-        category: editCategory || undefined,
-        check_interval_seconds: Number(editInterval) * 3600,
-      },
-    })
+  const saveEdit = (feed: IntelFeed) => {
+    const data: Record<string, unknown> = {}
+    if (editName !== feed.name) data.name = editName
+    if (editUrl !== feed.url) data.url = editUrl
+    const newInterval = Number(editInterval) * 3600
+    if (newInterval !== feed.check_interval_seconds) data.check_interval_seconds = newInterval
+    if (Object.keys(data).length === 0) { setEditId(null); return }
+    editMutation.mutate({ id: feed.id, data })
   }
 
   const cancelEdit = () => setEditId(null)
 
   const resetForm = () => {
-    setName('')
     setUrl('')
-    setFeedType('rss')
-    setCategory('')
+    setName('')
     setIntervalHours('12')
     setShowAddForm(false)
   }
@@ -164,72 +149,53 @@ export function FeedManagerModal({ open, onClose }: Props) {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="mb-4 p-3 rounded-sm bg-surface-elevated border border-border-subtle space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="mb-1 block text-caption font-medium text-content-secondary">Name</label>
-                <input
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  placeholder="Feed name"
-                  className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
-                  autoFocus
-                />
-              </div>
+            <div className="grid grid-cols-[1fr_auto_auto] gap-3 items-end">
               <div>
                 <label className="mb-1 block text-caption font-medium text-content-secondary">URL</label>
                 <input
                   value={url}
                   onChange={e => setUrl(e.target.value)}
-                  placeholder="https://..."
+                  placeholder="https://reddit.com/r/ClaudeAI, RSS feed, GitHub repo..."
                   className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="mb-1 block text-caption font-medium text-content-secondary">Type</label>
-                <select
-                  value={feedType}
-                  onChange={e => setFeedType(e.target.value)}
-                  className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 appearance-none"
-                >
-                  {FEED_TYPES.map(t => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-caption font-medium text-content-secondary">Category</label>
-                <input
-                  value={category}
-                  onChange={e => setCategory(e.target.value)}
-                  placeholder="Optional"
-                  className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
+                  autoFocus
                 />
               </div>
               <div>
-                <label className="mb-1 block text-caption font-medium text-content-secondary">Interval (hours)</label>
-                <input
-                  type="number"
-                  value={intervalHours}
-                  onChange={e => setIntervalHours(e.target.value)}
-                  min="1"
-                  step="1"
-                  className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
-                />
+                <label className="mb-1 block text-caption font-medium text-content-secondary">Interval</label>
+                <div className="flex items-center gap-1">
+                  <input
+                    type="number"
+                    value={intervalHours}
+                    onChange={e => setIntervalHours(e.target.value)}
+                    min="1"
+                    step="1"
+                    className="h-9 w-16 rounded-sm border border-border bg-surface-input px-2 text-compact text-content-primary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
+                  />
+                  <span className="text-caption text-content-tertiary">hrs</span>
+                </div>
               </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button variant="ghost" size="sm" type="button" onClick={resetForm}>
-                Cancel
-              </Button>
               <Button
                 size="sm"
                 type="submit"
-                disabled={!name.trim() || !url.trim()}
+                disabled={!url.trim()}
                 loading={createMutation.isPending}
               >
-                Add Feed
+                Add
+              </Button>
+            </div>
+            <div>
+              <label className="mb-1 block text-caption font-medium text-content-secondary">Name <span className="text-content-tertiary font-normal">(optional — auto-detected from URL)</span></label>
+              <input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="Leave blank to auto-detect"
+                className="h-9 w-full rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
+              />
+            </div>
+            <div className="flex justify-between items-center">
+              <p className="text-micro text-content-tertiary">Type and category are auto-detected from the URL.</p>
+              <Button variant="ghost" size="sm" type="button" onClick={resetForm}>
+                Cancel
               </Button>
             </div>
             {createMutation.isError && (
@@ -276,15 +242,23 @@ export function FeedManagerModal({ open, onClose }: Props) {
                         )}
                       </td>
                       <td className="py-2.5 pr-3 max-w-[220px]">
-                        <a
-                          href={feed.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-caption text-accent hover:text-accent-hover truncate block"
-                          title={feed.url}
-                        >
-                          {feed.url.replace(/^https?:\/\/(www\.|old\.)?/, '').replace(/\/$/, '')}
-                        </a>
+                        {isEditing ? (
+                          <input
+                            value={editUrl}
+                            onChange={e => setEditUrl(e.target.value)}
+                            className="h-7 w-full rounded-sm border border-border bg-surface-input px-2 text-caption text-content-primary outline-none focus:border-border-focus"
+                          />
+                        ) : (
+                          <a
+                            href={feed.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-caption text-accent hover:text-accent-hover truncate block"
+                            title={feed.url}
+                          >
+                            {feed.url.replace(/^https?:\/\/(www\.|old\.)?/, '').replace(/\/$/, '')}
+                          </a>
+                        )}
                       </td>
                       <td className="py-2.5 pr-3">
                         <span className={`inline-flex px-1.5 py-0.5 rounded text-micro font-medium ${FEED_TYPE_COLORS[feed.feed_type] ?? 'bg-neutral-700 text-neutral-300'}`}>
@@ -292,16 +266,7 @@ export function FeedManagerModal({ open, onClose }: Props) {
                         </span>
                       </td>
                       <td className="py-2.5 pr-3">
-                        {isEditing ? (
-                          <input
-                            value={editCategory}
-                            onChange={e => setEditCategory(e.target.value)}
-                            placeholder="category"
-                            className="h-7 w-full rounded-sm border border-border bg-surface-input px-2 text-caption text-content-primary outline-none focus:border-border-focus"
-                          />
-                        ) : (
-                          <span className="text-content-secondary">{feed.category ?? '--'}</span>
-                        )}
+                        <span className="text-content-secondary">{feed.category ?? '--'}</span>
                       </td>
                       <td className="py-2.5 pr-3">
                         {isEditing ? (
@@ -334,7 +299,7 @@ export function FeedManagerModal({ open, onClose }: Props) {
                               variant="ghost"
                               size="sm"
                               icon={<Check size={12} />}
-                              onClick={() => saveEdit(feed.id)}
+                              onClick={() => saveEdit(feed)}
                               title="Save"
                               loading={editMutation.isPending}
                             />

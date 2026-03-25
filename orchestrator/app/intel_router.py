@@ -51,17 +51,88 @@ def _validate_feed_url(url: str) -> str | None:
     return None
 
 
+# ── Feed auto-detection ──────────────────────────────────────────────────────
+
+def _detect_feed_type(url: str) -> str:
+    """Infer feed_type from URL patterns."""
+    lower = url.lower()
+    parsed = urlparse(lower)
+    host = parsed.hostname or ""
+    path = parsed.path
+
+    if "reddit.com" in host:
+        return "reddit_json"
+    if "github.com" in host:
+        if "/trending" in path:
+            return "github_trending"
+        if "/releases" in path or path.endswith(".atom"):
+            return "github_releases"
+    if path.endswith((".xml", ".atom", ".rss")) or "/rss" in path or "/feed" in path:
+        return "rss"
+    return "page"
+
+
+def _detect_category(url: str) -> str:
+    """Infer category from URL patterns."""
+    lower = url.lower()
+    host = (urlparse(lower).hostname or "")
+    if "reddit.com" in host:
+        return "reddit"
+    if "github.com" in host:
+        return "github"
+    blog_hosts = {"blog.", "news.", "openai.com", "anthropic.com"}
+    if any(h in host for h in blog_hosts):
+        return "blog"
+    blog_paths = {"/blog", "/news", "/feed", "/rss"}
+    if any(p in lower for p in blog_paths):
+        return "blog"
+    tooling_keywords = {"ollama", "vllm", "sglang", "litellm", "langchain"}
+    if any(kw in lower for kw in tooling_keywords):
+        return "tooling"
+    if "/docs" in lower or "/documentation" in lower:
+        return "docs"
+    return "other"
+
+
+def _auto_name(url: str, feed_type: str) -> str:
+    """Generate a human-readable name from URL."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    path = parsed.path.rstrip("/")
+
+    if feed_type == "reddit_json":
+        # Extract subreddit: /r/ClaudeAI/new/.json → r/ClaudeAI
+        parts = path.split("/")
+        for i, p in enumerate(parts):
+            if p == "r" and i + 1 < len(parts):
+                return f"r/{parts[i + 1]}"
+        return host
+
+    if feed_type == "github_trending":
+        return "GitHub Trending"
+
+    if feed_type == "github_releases":
+        # /owner/repo/releases.atom → owner/repo Releases
+        parts = [p for p in path.split("/") if p and p not in ("releases", "releases.atom")]
+        if len(parts) >= 2:
+            return f"{parts[0]}/{parts[1]} Releases"
+
+    # Default: clean hostname
+    return host.replace("www.", "").replace("old.", "")
+
+
 # ── Request / Response models ────────────────────────────────────────────────
 
 class CreateFeedRequest(BaseModel):
-    name: str
     url: str
-    feed_type: str
-    category: str | None = None
+    name: str | None = None                 # Auto-generated if omitted
+    feed_type: str | None = None            # Auto-detected if omitted
+    category: str | None = None             # Auto-detected if omitted
     check_interval_seconds: int = 3600
 
 
 class UpdateFeedRequest(BaseModel):
+    url: str | None = None
     name: str | None = None
     category: str | None = None
     check_interval_seconds: int | None = None
@@ -134,10 +205,14 @@ async def list_feeds(
 
 @intel_router.post("/api/v1/intel/feeds", status_code=201)
 async def create_feed(req: CreateFeedRequest, _user: UserDep):
-    """Create a new intel feed. Validates URL for SSRF."""
+    """Create a new intel feed. Auto-detects type, category, and name from URL."""
     error = _validate_feed_url(req.url)
     if error:
         raise HTTPException(status_code=400, detail=f"Invalid feed URL: {error}")
+
+    feed_type = req.feed_type or _detect_feed_type(req.url)
+    category = req.category or _detect_category(req.url)
+    name = req.name or _auto_name(req.url, feed_type)
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -147,18 +222,30 @@ async def create_feed(req: CreateFeedRequest, _user: UserDep):
             VALUES ($1, $2, $3, $4, $5)
             RETURNING *
             """,
-            req.name, req.url, req.feed_type, req.category, req.check_interval_seconds,
+            name, req.url, feed_type, category, req.check_interval_seconds,
         )
-    log.info("Intel feed created: %s — %s", row["id"], req.name)
+    log.info("Intel feed created: %s — %s", row["id"], name)
     return dict(row)
 
 
 @intel_router.patch("/api/v1/intel/feeds/{feed_id}")
 async def update_feed(feed_id: UUID, req: UpdateFeedRequest, _user: UserDep):
-    """Update feed config (name, category, check_interval_seconds, enabled)."""
+    """Update feed config. If URL changes, re-validates SSRF and re-detects type/category."""
     updates = req.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    # If URL is changing, re-validate and re-detect type/category
+    if "url" in updates:
+        error = _validate_feed_url(updates["url"])
+        if error:
+            raise HTTPException(status_code=400, detail=f"Invalid feed URL: {error}")
+        updates["feed_type"] = _detect_feed_type(updates["url"])
+        updates["category"] = _detect_category(updates["url"])
+        # Reset check state since source changed
+        updates["last_checked_at"] = None
+        updates["last_hash"] = None
+        updates["error_count"] = 0
 
     set_parts = []
     values = []
