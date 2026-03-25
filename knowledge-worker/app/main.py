@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.client import close_clients, get_llm_client, get_orchestrator_client, init_clients
 from app.config import settings
+from app.credentials.health import run_credential_health_loop
 from app.queue import close_queues, init_queues, push_to_engram
 from app.scheduler import run_scheduling_loop
 
@@ -15,11 +16,12 @@ logging.basicConfig(level=settings.log_level)
 log = logging.getLogger(__name__)
 
 _scheduler_task: asyncio.Task | None = None
+_health_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _scheduler_task
+    global _scheduler_task, _health_task
     await init_clients()
     await init_queues()
 
@@ -30,17 +32,24 @@ async def lifespan(app: FastAPI):
         get_llm_client=get_llm_client,
         push_to_engram=push_to_engram,
     ))
-    log.info("Knowledge worker started (scheduler running)")
+
+    # Start the credential health check loop as a background task
+    _health_task = asyncio.create_task(run_credential_health_loop(
+        config=settings,
+        get_orch_client=get_orchestrator_client,
+    ))
+    log.info("Knowledge worker started (scheduler and credential health check running)")
 
     yield
 
-    # Shutdown: cancel scheduler, close connections
-    if _scheduler_task and not _scheduler_task.done():
-        _scheduler_task.cancel()
-        try:
-            await _scheduler_task
-        except asyncio.CancelledError:
-            pass
+    # Shutdown: cancel background tasks, close connections
+    for task in (_scheduler_task, _health_task):
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     await close_queues()
     await close_clients()
 
