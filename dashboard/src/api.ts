@@ -913,3 +913,90 @@ export const deleteComment = (entityType: 'recommendation' | 'goal', entityId: s
   const base = entityType === 'goal' ? 'goals' : 'intel/recommendations'
   return apiFetch<void>(`/api/v1/${base}/${entityId}/comments/${commentId}`, { method: 'DELETE' })
 }
+
+// ── Knowledge Sources ────────────────────────────────────────────────────────
+
+export interface KnowledgeSource {
+  id: string
+  tenant_id: string
+  name: string
+  source_type: string
+  url: string
+  scope: string
+  crawl_config: Record<string, unknown>
+  credential_id: string | null
+  status: string
+  last_crawl_at: string | null
+  last_crawl_summary: Record<string, unknown> | null
+  error_count: number
+  created_at: string
+  updated_at: string
+}
+
+export interface KnowledgeCredential {
+  id: string
+  label: string
+  provider: string
+  scopes: Record<string, unknown> | null
+  last_validated_at: string | null
+  created_at: string
+}
+
+export interface KnowledgeStats {
+  sources_by_status: Record<string, number>
+  total_credentials: number
+  total_sources: number
+}
+
+export const getKnowledgeSources = (params?: { scope?: string; status?: string }) => {
+  const searchParams = new URLSearchParams()
+  if (params?.scope) searchParams.set('scope', params.scope)
+  if (params?.status) searchParams.set('status', params.status)
+  const query = searchParams.toString()
+  return apiFetch<KnowledgeSource[]>(`/api/v1/knowledge/sources${query ? `?${query}` : ''}`)
+}
+
+export const createKnowledgeSource = (data: { name: string; url: string; source_type: string; scope?: string; credential_id?: string }) =>
+  apiFetch<KnowledgeSource>('/api/v1/knowledge/sources', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const deleteKnowledgeSource = (id: string) =>
+  apiFetch<void>(`/api/v1/knowledge/sources/${id}`, { method: 'DELETE' })
+
+export const triggerCrawl = (id: string) =>
+  apiFetch<void>(`/api/v1/knowledge/sources/${id}/crawl`, { method: 'POST' })
+
+export const pauseKnowledgeSource = (id: string) =>
+  apiFetch<KnowledgeSource>(`/api/v1/knowledge/sources/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'paused' }),
+  })
+
+export const resumeKnowledgeSource = (id: string) =>
+  apiFetch<KnowledgeSource>(`/api/v1/knowledge/sources/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status: 'active' }),
+  })
+
+export const pasteContent = (id: string, content: string) =>
+  apiFetch<void>(`/api/v1/knowledge/sources/${id}/paste`, {
+    method: 'POST',
+    body: JSON.stringify({ content }),
+  })
+
+export const getKnowledgeCredentials = () =>
+  apiFetch<KnowledgeCredential[]>('/api/v1/knowledge/credentials')
+
+export const createKnowledgeCredential = (data: { label: string; credential_data: string; scopes?: Record<string, unknown> }) =>
+  apiFetch<KnowledgeCredential>('/api/v1/knowledge/credentials', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+
+export const deleteKnowledgeCredential = (id: string) =>
+  apiFetch<void>(`/api/v1/knowledge/credentials/${id}`, { method: 'DELETE' })
+
+export const getKnowledgeStats = () =>
+  apiFetch<KnowledgeStats>('/api/v1/knowledge/stats')
