@@ -465,6 +465,61 @@ Prerequisites: all current roadmap items complete. This is the capstone feature.
 
 ---
 
+## Platform Review Findings (2026-03-26)
+
+Comprehensive 5-discipline review (architecture, backend, frontend, security, testing). Full spec with per-finding remediation: `docs/specs/2026-03-26-platform-review-findings.md`.
+
+### P0 — Fix immediately
+| ID | Finding | Effort |
+|---|---|---|
+| SEC-2 | Reindex endpoint missing auth — unauthenticated DoS vector | 10 min |
+| SEC-3 | SSRF in `web_fetch` tool — no URL validation, follows redirects into internal network | 30 min |
+| SEC-4 | Trusted proxy header forgeable — IP spoofing bypasses auth | 1 hour |
+| ARCH-4 | Embedding cache serves stale vectors from wrong model (no model filter on L2 lookup) | 30 min |
+| BE-1 | MCP registry `_active_clients` dict mutated without lock — race on hot-reload | 30 min |
+
+### P1 — Fix this week
+| ID | Finding | Effort |
+|---|---|---|
+| SEC-1 | `REQUIRE_AUTH` defaults to false — all APIs open on fresh deploy | 15 min |
+| SEC-7 | WebSocket no connection limit — DoS via connection flood | 2 hours |
+| ARCH-1 | Dead letter queue unbounded — no TTL, cap, or alerting | 1 hour |
+| ARCH-2 | Non-atomic SADD+LPUSH in enqueue_task — duplicate queue entries | 1 hour |
+| ARCH-6 | Ingestion semaphore held over full process — effectively serial despite Semaphore(5) | 2 hours |
+| BE-2 | Dead `pass` block in validate_invite — misleading dead code | 30 min |
+| BE-3 | N+1 queries in list_recommendations — 60 queries per request | 30 min |
+| BE-4 | Auth security bypasses (deny-list/expiry) logged at nothing | 30 min |
+| FE-1 | Conversation delete fires immediately — no confirmation, permanent data loss | 30 min |
+| FE-2 | API key save failure silent — user thinks key was saved | 15 min |
+| FE-3 | Service restart failure silently swallowed — operator doesn't know it failed | 15 min |
+
+### P2 — Fix this sprint
+| ID | Finding | Effort |
+|---|---|---|
+| ARCH-3 | `working_memory_slots` never cleaned up — unbounded growth | 2 hours |
+| ARCH-5 | `intel:new_items` queue written but never consumed — dead code | 1 hour |
+| ARCH-7 | Orphaned comments/engram references after parent deletion | 2 hours |
+| SEC-5 | Google OAuth bypasses invite-only registration | 1 hour |
+| SEC-6 | No rate limiting on login/register — brute force possible | 2 hours |
+| FE-4 | Modal missing `role="dialog"`, focus trap — accessibility gap across all dialogs | 2 hours |
+| FE-6 | MCP reload spinner shared across all server cards | 15 min |
+| FE-7 | Role change fires immediately — no confirmation on privilege change | 30 min |
+| TEST-1 | No memory/engram tests — zero coverage of the central memory system | 4 hours |
+| TEST-2 | No MCP server CRUD or introspect tool tests | 2 hours |
+| TEST-3 | No JWT auth flow tests — login/register/refresh untested | 3 hours |
+
+### P3 — Next cycle
+| ID | Finding | Effort |
+|---|---|---|
+| ARCH-8 | `usage_events` and `messages` tables need partition strategy | 1 day |
+| SEC-8 | Auto-generate admin secret at setup | 2 hours |
+| FE-5 | Chat input accessibility (send button, textarea labels) | 1 hour |
+| TEST-4 | Cortex integration tests (zero coverage) | 4 hours |
+| TEST-5 | Fix weak/fake test patterns (artifacts no-op, soft asserts, hardcoded skips) | 3 hours |
+| TEST-6 | Test isolation fixes (bulk delete pollution, state leaks, hardcoded URLs) | 2 hours |
+
+---
+
 ## Known Gaps & Deferred Work
 
 ### Active Technical Debt

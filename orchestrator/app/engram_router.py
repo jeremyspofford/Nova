@@ -165,7 +165,6 @@ async def reindex_status():
     total_queued = 0
     sources: list[str] = []
     started_at: str | None = None
-    active = False
 
     if raw_job:
         try:
@@ -173,17 +172,24 @@ async def reindex_status():
             total_queued = job.get("total_queued", 0)
             sources = job.get("sources", [])
             started_at = job.get("started_at")
-            active = depth > 0
         except (json.JSONDecodeError, TypeError):
             pass
 
-        # Clean up completed job
-        if depth == 0 and total_queued > 0:
-            r2 = aioredis.from_url(_engram_redis_url(), decode_responses=True)
-            try:
-                await r2.delete("engram:reindex:job")
-            finally:
-                await r2.aclose()
+    # Active if queue has items — don't rely solely on job key existing
+    active = depth > 0
+
+    # If queue has items but no job key (e.g. triggered before tracking code),
+    # estimate total from current depth as a lower bound
+    if active and total_queued == 0:
+        total_queued = depth
+
+    # Clean up completed job
+    if depth == 0 and raw_job:
+        r2 = aioredis.from_url(_engram_redis_url(), decode_responses=True)
+        try:
+            await r2.delete("engram:reindex:job")
+        finally:
+            await r2.aclose()
 
     processed = max(0, total_queued - depth) if total_queued > 0 else 0
     progress_pct = (processed / total_queued * 100) if total_queued > 0 else 0.0

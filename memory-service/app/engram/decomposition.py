@@ -162,6 +162,38 @@ DECOMPOSITION_USER_TEMPLATE = """Decompose this into atomic engrams:
 {raw_text}"""
 
 
+# Valid enum values from nova-contracts EdgeRelation
+_VALID_RELATIONS = {
+    "caused_by", "related_to", "contradicts", "preceded",
+    "enables", "part_of", "instance_of", "analogous_to",
+}
+
+
+def _sanitize_decomposition(parsed: dict) -> None:
+    """Fix common LLM output issues before Pydantic validation.
+
+    LLMs (especially small ones) invent creative relationship types like
+    'inspired_by', 'supports', 'contrasts_with' that aren't in the enum.
+    Rather than rejecting the entire result (losing valid engrams), coerce
+    unknown relations to 'related_to' and fix malformed contradictions.
+    """
+    # Coerce invalid relation types
+    for rel in parsed.get("relationships", []):
+        if isinstance(rel, dict) and rel.get("relation") not in _VALID_RELATIONS:
+            rel["relation"] = "related_to"
+
+    # Fix malformed contradictions (LLM sometimes uses 'engram_indices' instead of
+    # the expected 'new_index' + 'existing_content_hint' fields)
+    clean_contradictions = []
+    for c in parsed.get("contradictions", []):
+        if not isinstance(c, dict):
+            continue
+        if "new_index" in c and "existing_content_hint" in c:
+            clean_contradictions.append(c)
+        # else: drop malformed contradiction rather than failing validation
+    parsed["contradictions"] = clean_contradictions
+
+
 def _get_system_prompt(source_type: str) -> str:
     """Select decomposition prompt based on content source."""
     if source_type in ("intel", "knowledge"):
@@ -210,6 +242,7 @@ async def decompose(raw_text: str, source_type: str = "chat") -> DecompositionRe
             content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
 
         parsed = json.loads(content)
+        _sanitize_decomposition(parsed)
         return DecompositionResult.model_validate(parsed)
 
     except json.JSONDecodeError:
