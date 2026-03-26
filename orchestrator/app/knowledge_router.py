@@ -1,6 +1,7 @@
 """Knowledge source and credential CRUD endpoints."""
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -463,6 +464,39 @@ async def validate_credential(credential_id: UUID, _admin: AdminDep):
 
     log.info("Credential validated: %s", credential_id)
     return dict(row)
+
+
+@knowledge_router.get("/api/v1/knowledge/credentials/{credential_id}/retrieve")
+async def retrieve_credential(credential_id: UUID, _admin: AdminDep):
+    """Retrieve encrypted credential data for service-to-service decryption.
+
+    AdminDep-only — intended for knowledge-worker to fetch and decrypt locally.
+    Returns base64-encoded encrypted bytes (JSON can't transport raw BYTEA).
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT encrypted_data, tenant_id FROM knowledge_credentials WHERE id = $1",
+            credential_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Credential not found")
+
+        # Audit trail — log every retrieval
+        await conn.execute(
+            """
+            INSERT INTO knowledge_credential_audit
+                (credential_id, tenant_id, action, actor)
+            VALUES ($1, $2, 'retrieve', 'knowledge-worker')
+            """,
+            credential_id, row["tenant_id"],
+        )
+
+    log.info("Credential retrieved (encrypted): %s", credential_id)
+    return {
+        "encrypted_data": base64.b64encode(row["encrypted_data"]).decode("ascii"),
+        "tenant_id": str(row["tenant_id"]),
+    }
 
 
 # ── Import endpoints ────────────────────────────────────────────────────────

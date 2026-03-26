@@ -106,10 +106,18 @@ async def _run_crawl(source, config, orch_client, llm_client, push_to_engram):
 
 async def _run_extractor(extractor, source, source_id, orch_client, push_to_engram):
     """Run a platform-specific extractor for a source."""
+    from .credentials import retrieve_credential
+
     credential = None
     if source.get("credential_id"):
-        # TODO: retrieve credential via orchestrator
-        pass
+        token = await retrieve_credential(orch_client, source["credential_id"])
+        if token:
+            credential = {"token": token}
+        else:
+            logger.warning(
+                "Source %s has credential_id but retrieval failed — crawling unauthenticated",
+                source_id,
+            )
 
     items = await extractor.extract(source["url"], credential)
     for item in items:
@@ -141,10 +149,24 @@ async def _run_general_crawl(
     import httpx
 
     from .crawler.engine import CrawlEngine
+    from .credentials import retrieve_credential
+
+    headers = {"User-Agent": "Nova/1.0"}
+
+    # Add auth header if source has a credential
+    if source.get("credential_id"):
+        token = await retrieve_credential(orch_client, source["credential_id"])
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        else:
+            logger.warning(
+                "Source %s has credential_id but retrieval failed — crawling unauthenticated",
+                source_id,
+            )
 
     crawl_client = httpx.AsyncClient(
         timeout=30,
-        headers={"User-Agent": "Nova/1.0"},
+        headers=headers,
         follow_redirects=False,  # engine._safe_get handles redirects with SSRF validation
     )
     try:
