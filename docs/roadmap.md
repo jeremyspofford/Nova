@@ -3254,6 +3254,37 @@ Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGra
 
 ---
 
+## Feature Completeness Audit (2026-03-25)
+
+Full audit report: [`docs/feature-audit-2026-03-25.md`](feature-audit-2026-03-25.md)
+
+**Summary:** Nova is ~85-90% feature-complete for autonomous operation. Core systems (pipeline, LLM gateway, engram memory, cortex, intel, chat, dashboard, recovery, auth) are fully implemented. Knowledge sources system is 75% complete (credential flow stubbed). Neural router is architecturally complete but needs 200+ observations to activate training.
+
+### Roadmap vs. Reality
+
+| Phase | Roadmap Says | Actual Status |
+|---|---|---|
+| 1-4, 5, 5.5, 6, 6b, 6d | Delivered | Confirmed delivered |
+| 4b (Pipeline Perf) | In Progress | Mostly delivered |
+| 5b (Dashboard Enhancement) | In Progress | Partially done (pod mgmt done, settings expansion pending) |
+| 5c (Skills & Rules) | In Progress | **Not started** -- no implementation exists |
+| 6c (SDK, CLI/TUI) | In Progress | **Not started** -- no code |
+| 7 (Self-Directed Autonomy) | In Progress | **Partially delivered** via Cortex + goals |
+| 7a (Self-Introspection) | In Progress | **Not started** |
+| 8c (Chat Integrations) | Planned | **Partially delivered** -- Telegram + Slack done via chat-bridge |
+| 13 (RBAC & Multi-Tenancy) | Planned | **Partially delivered** -- RBAC + tenant schema exist |
+| All others (7b-12, 14) | Planned | Not started |
+
+### Action Items for Discussion
+
+1. **Roadmap accuracy** -- Several phases marked "In Progress" have no implementation. Update status markers.
+2. **Priority reordering** -- Cortex + intel + knowledge delivered features that span multiple roadmap phases. The linear phase ordering doesn't reflect how work actually progressed.
+3. **Knowledge Sources** -- New feature (not in original roadmap). Needs a phase assignment and the remaining gaps tracked.
+4. **Quick wins** -- Credential wiring, health check validation, SSRF consolidation, nova-worker-common unit tests.
+5. **Strategic direction** -- Which of the unstarted phases (5c Skills, 6c SDK, 7a Self-Introspection, 7b Supernova, 9 Triggers) should be next?
+
+---
+
 ## Known Gaps & Deferred Work
 
 ### Bugs & Technical Debt
