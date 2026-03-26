@@ -1006,3 +1006,34 @@ export const deleteKnowledgeCredential = (id: string) =>
 
 export const getKnowledgeStats = () =>
   apiFetch<KnowledgeStats>('/api/v1/knowledge/stats')
+
+// ── Engram Reindex ──────────────────────────────────────────────────────────
+
+export interface ReindexResponse {
+  status: string
+  queued: Record<string, number>
+  total: number
+  dry_run: boolean
+  message: string
+}
+
+export interface ReindexStatusResponse {
+  queue_depth: number
+  total_queued: number
+  processed: number
+  progress_pct: number
+  engram_count: number | null
+  active: boolean
+  sources: string[]
+  started_at: string | null
+  message: string
+}
+
+export const reindexMemory = (sources: string[], dryRun = false, since?: string) =>
+  apiFetch<ReindexResponse>('/api/v1/engrams/reindex', {
+    method: 'POST',
+    body: JSON.stringify({ sources, dry_run: dryRun, ...(since ? { since } : {}) }),
+  })
+
+export const getReindexStatus = () =>
+  apiFetch<ReindexStatusResponse>('/api/v1/engrams/reindex/status')

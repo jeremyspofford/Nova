@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Lightbulb, Rss } from 'lucide-react'
 import { getIntelRecommendations, getIntelStats, updateRecommendation } from '../api'
+import { useTabHash } from '../hooks/useTabHash'
 import type { IntelRecommendation } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
@@ -28,7 +29,7 @@ const HELP_ENTRIES = [
 ]
 
 export function Intelligence() {
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending')
+  const [statusFilter, setStatusFilter] = useTabHash<StatusFilter>('pending', ['pending', 'approved', 'deferred', 'implemented', 'all'])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [feedManagerOpen, setFeedManagerOpen] = useState(false)
   const qc = useQueryClient()

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Globe, Plus, Rss, Users } from 'lucide-react'
 import { getKnowledgeSources, getKnowledgeStats, getIntelStats, type KnowledgeSource } from '../api'
+import { useTabHash } from '../hooks/useTabHash'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
 import { SourceCard } from '../components/sources/SourceCard'
@@ -27,7 +28,7 @@ const HELP_ENTRIES = [
 ]
 
 export function Sources() {
-  const [activeTab, setActiveTab] = useState<SourceTab>('personal')
+  const [activeTab, setActiveTab] = useTabHash<SourceTab>('personal', ['personal', 'feeds', 'shared'])
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [feedManagerOpen, setFeedManagerOpen] = useState(false)
 

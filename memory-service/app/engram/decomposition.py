@@ -16,17 +16,53 @@ from app.config import settings
 
 log = logging.getLogger(__name__)
 
-# Cache the resolved model so we don't probe every call
+# Cache the resolved model so we don't probe every call.
+# Set to None to force re-resolution (e.g. after config change via dashboard).
 _resolved_model: str | None = None
+_resolved_model_source: str | None = None  # "redis", "env", "probe" — for logging
+
+
+def clear_model_cache() -> None:
+    """Force re-resolution on next decompose() call. Called when config changes."""
+    global _resolved_model, _resolved_model_source
+    _resolved_model = None
+    _resolved_model_source = None
 
 
 async def resolve_model(model: str) -> str:
-    """Resolve 'auto' to a concrete model by asking the gateway what's available."""
+    """Resolve 'auto' to a concrete model by asking the gateway what's available.
+
+    Resolution order:
+      1. Redis nova:config:engram.decomposition_model (set via dashboard Settings)
+      2. Env var ENGRAM_DECOMPOSITION_MODEL (bootstrap fallback)
+      3. Gateway model resolution endpoint
+      4. Probe common local models
+    """
     global _resolved_model
     if model != "auto":
         return model
     if _resolved_model:
         return _resolved_model
+
+    # Check Redis for dashboard-configured model (db1 = config DB)
+    try:
+        import json as _json
+        import redis.asyncio as aioredis
+        from app.config import settings as _settings
+        config_redis_url = _settings.redis_url.rsplit("/", 1)[0] + "/1"
+        r = aioredis.from_url(config_redis_url, decode_responses=True)
+        try:
+            raw = await r.get("nova:config:engram.decomposition_model")
+            if raw:
+                val = _json.loads(raw) if raw.startswith('"') else raw
+                if val and val != "auto":
+                    _resolved_model = val
+                    log.info("Decomposition model from platform config: %s", val)
+                    return _resolved_model
+        finally:
+            await r.aclose()
+    except Exception:
+        pass  # Redis unavailable — continue to other resolution methods
 
     # Try the gateway's model resolution endpoint
     try:

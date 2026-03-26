@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { Plus, Trash2, Users as UsersIcon } from 'lucide-react'
 import { fetchUsers, updateUser, deactivateUser, createInvite, fetchInvites, revokeInvite, type InviteCreateRequest } from '../api/users'
+import { useTabHash } from '../hooks/useTabHash'
 import { ROLE_HIERARCHY, ROLE_LABELS, canAssignRole, type Role } from '../lib/roles'
 import type { SemanticColor } from '../lib/design-tokens'
 import { useAuth } from '../stores/auth-store'
@@ -38,7 +39,7 @@ const ACCOUNT_EXPIRY_OPTIONS = [
 ]
 
 export function Users() {
-  const [tab, setTab] = useState<Tab>('users')
+  const [tab, setTab] = useTabHash<Tab>('users', ['users', 'invitations'])
   const { user: currentUser } = useAuth()
   const currentRole = (currentUser?.role ?? 'viewer') as Role
 

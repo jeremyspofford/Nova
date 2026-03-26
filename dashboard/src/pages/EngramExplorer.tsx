@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import {
   Network, Brain, RefreshCw, Zap, GitMerge,
   Activity, ChevronDown, ChevronRight, Box, LayoutList, Palette,
+  Wrench, Database, MessageSquare, Newspaper, ClipboardList, Globe,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
-import { apiFetch } from '../api'
+import { apiFetch, reindexMemory, getReindexStatus } from '../api'
+import { useTabHash } from '../hooks/useTabHash'
+import type { ReindexResponse, ReindexStatusResponse } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Card, Badge, Metric, ProgressBar, Tabs, Table, Button, SearchInput,
@@ -162,6 +165,7 @@ const TABS = [
   { id: 'explorer', label: 'Explorer', icon: Activity },
   { id: 'self-model', label: 'Self-Model', icon: Brain },
   { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
+  { id: 'maintenance', label: 'Maintenance', icon: Wrench },
 ]
 
 // ── Explorer Tab ─────────────────────────────────────────────────────────────
@@ -984,6 +988,219 @@ function StatPill({ label, value }: { label: string; value: number | string }) {
   )
 }
 
+// ── Maintenance Tab ─────────────────────────────────────────────────────────
+
+const REINDEX_SOURCES = [
+  { id: 'chat', label: 'Conversations', icon: MessageSquare, description: 'Re-process all chat history into memory nodes' },
+  { id: 'tasks', label: 'Pipeline Tasks', icon: ClipboardList, description: 'Ingest completed task inputs and outputs' },
+  { id: 'intel', label: 'Intelligence Feeds', icon: Newspaper, description: 'Re-process RSS/Reddit content with corrected attribution' },
+  { id: 'knowledge', label: 'Knowledge Sources', icon: Globe, description: 'Re-crawl configured knowledge sources' },
+] as const
+
+function MaintenanceTab() {
+  const [selectedSources, setSelectedSources] = useState<Set<string>>(new Set())
+  const [lastResult, setLastResult] = useState<ReindexResponse | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Poll status — detects in-progress reindex even after page refresh
+  const { data: status, refetch: refetchStatus } = useQuery<ReindexStatusResponse>({
+    queryKey: ['reindex-status'],
+    queryFn: getReindexStatus,
+    refetchInterval: (query) => query.state.data?.active ? 2000 : 15000,
+  })
+
+  const { data: stats } = useQuery<EngramStats>({
+    queryKey: ['engram-stats'],
+    queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
+    refetchInterval: status?.active ? 5000 : 30000,
+  })
+
+  const isRunning = status?.active ?? false
+
+  const toggleSource = (id: string) => {
+    setSelectedSources(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAll = () => setSelectedSources(new Set(['chat', 'tasks', 'intel', 'knowledge']))
+  const selectNone = () => setSelectedSources(new Set())
+
+  const handleDryRun = async () => {
+    if (selectedSources.size === 0) return
+    setError(null)
+    try {
+      const result = await reindexMemory([...selectedSources], true)
+      setLastResult(result)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to estimate reindex')
+    }
+  }
+
+  const handleReindex = async () => {
+    if (selectedSources.size === 0) return
+    setError(null)
+    try {
+      const result = await reindexMemory([...selectedSources], false)
+      setLastResult(result)
+      refetchStatus()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start reindex')
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Reindex card */}
+      <Card>
+        <div className="p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-subtitle font-medium text-content-primary">Reindex Memory</h3>
+              <p className="text-caption text-content-tertiary mt-0.5">
+                Re-process historical content through the memory pipeline. Useful after changing the
+                decomposition model or to catch up on missed context. Existing memories are deduplicated automatically.
+              </p>
+            </div>
+            <Database size={20} className="text-content-quaternary" />
+          </div>
+
+          {/* Source selection */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-caption font-medium text-content-secondary">Sources to reindex</span>
+              <div className="flex gap-2">
+                <button onClick={selectAll} className="text-xs text-accent-primary hover:underline">Select all</button>
+                <button onClick={selectNone} className="text-xs text-content-tertiary hover:underline">Clear</button>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {REINDEX_SOURCES.map(source => {
+                const Icon = source.icon
+                const selected = selectedSources.has(source.id)
+                return (
+                  <button
+                    key={source.id}
+                    onClick={() => toggleSource(source.id)}
+                    className={`flex items-start gap-3 p-3 rounded-sm border text-left transition-colors ${
+                      selected
+                        ? 'border-accent-primary bg-accent-primary/5'
+                        : 'border-border-subtle hover:border-border-default'
+                    }`}
+                  >
+                    <Icon size={16} className={selected ? 'text-accent-primary mt-0.5' : 'text-content-quaternary mt-0.5'} />
+                    <div>
+                      <span className={`text-sm font-medium ${selected ? 'text-content-primary' : 'text-content-secondary'}`}>
+                        {source.label}
+                      </span>
+                      <p className="text-xs text-content-tertiary mt-0.5">{source.description}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 pt-2">
+            <Button
+              onClick={handleDryRun}
+              disabled={selectedSources.size === 0 || isRunning}
+              variant="secondary"
+            >
+              Preview Counts
+            </Button>
+            <Button
+              onClick={handleReindex}
+              disabled={selectedSources.size === 0 || isRunning}
+              icon={isRunning ? <RefreshCw size={14} className="animate-spin" /> : <Zap size={14} />}
+            >
+              {isRunning ? 'Reindexing...' : 'Reindex Now'}
+            </Button>
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div className="p-3 rounded-sm bg-red-500/10 border border-red-500/20 text-sm text-red-400">
+              {error}
+            </div>
+          )}
+
+          {/* Results */}
+          {lastResult && (
+            <div className="p-3 rounded-sm bg-surface-elevated border border-border-subtle space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge color={lastResult.dry_run ? 'neutral' : 'success'}>
+                  {lastResult.dry_run ? 'Preview' : 'Queued'}
+                </Badge>
+                <span className="text-sm text-content-secondary">{lastResult.message}</span>
+              </div>
+              <div className="flex gap-4">
+                {Object.entries(lastResult.queued).map(([source, count]) => (
+                  <div key={source} className="text-center">
+                    <div className="text-lg font-mono font-medium text-content-primary">{count}</div>
+                    <div className="text-xs text-content-tertiary">{source}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Queue status card */}
+      <Card>
+        <div className="p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-subtitle font-medium text-content-primary">Ingestion Queue</h3>
+            {isRunning && (
+              <Badge color="accent">
+                <RefreshCw size={10} className="animate-spin mr-1 inline" />
+                Reindexing
+              </Badge>
+            )}
+          </div>
+          <div className="flex gap-6">
+            <Metric label="Queue depth" value={status?.queue_depth ?? '...'} />
+            <Metric label="Total engrams" value={stats?.total_engrams ?? '...'} />
+            <Metric label="Total edges" value={stats?.total_edges ?? '...'} />
+          </div>
+          {status && status.total_queued > 0 && status.queue_depth > 0 && (
+            <div className="space-y-1.5">
+              <div className="flex justify-between text-xs text-content-tertiary">
+                <span>
+                  {status.sources.length > 0 && `Sources: ${status.sources.join(', ')}`}
+                </span>
+                <span>{status.processed} / {status.total_queued} processed</span>
+              </div>
+              <ProgressBar value={status.progress_pct} size="sm" />
+              <div className="text-xs text-content-quaternary">
+                {status.queue_depth} remaining in queue
+                {status.started_at && ` — started ${formatDistanceToNow(new Date(status.started_at), { addSuffix: true })}`}
+              </div>
+            </div>
+          )}
+          {!isRunning && status?.queue_depth === 0 && status?.total_queued === 0 && (
+            <p className="text-xs text-content-quaternary">Queue idle — no active reindex job.</p>
+          )}
+          {stats?.by_source_type && (
+            <div className="flex gap-4 pt-1">
+              {Object.entries(stats.by_source_type).map(([source, count]) => (
+                <span key={source} className="inline-flex items-center gap-1.5 text-xs text-content-tertiary">
+                  <span className="font-medium text-content-secondary">{count}</span> from {source}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+    </div>
+  )
+}
+
 // ── Help entries per tab ─────────────────────────────────────────────────────
 
 const HELP_ENTRIES: Record<string, { term: string; definition: string }[]> = {
@@ -1015,12 +1232,22 @@ const HELP_ENTRIES: Record<string, { term: string; definition: string }[]> = {
     { term: 'Contradictions', definition: 'Conflicting memories that were identified and resolved — e.g. two facts that can\'t both be true.' },
     { term: 'Maturity', definition: 'The current growth stage of Nova\'s memory system — progresses from nascent through developing to mature.' },
   ],
+  maintenance: [
+    { term: 'Reindex', definition: 'Re-processes historical content through the memory pipeline using the current decomposition model and prompts. Existing memories are deduplicated.' },
+    { term: 'Preview Counts', definition: 'Dry-run mode — shows how many items would be queued per source without actually reindexing.' },
+    { term: 'Conversations', definition: 'User/assistant chat exchanges from the messages table. Each exchange pair is decomposed into memory nodes.' },
+    { term: 'Pipeline Tasks', definition: 'Completed task inputs and outputs from the Quartet pipeline. Ingested as episodic context.' },
+    { term: 'Intelligence Feeds', definition: 'RSS, Reddit, and other external content from the intel system. Re-ingested with corrected source attribution.' },
+    { term: 'Deduplication', definition: 'Entity resolution prevents duplicate memories — if a reindexed item matches an existing engram (>92% similarity), the existing one is updated instead.' },
+  ],
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
+const TAB_IDS = TABS.map(t => t.id)
+
 export function EngramExplorer() {
-  const [activeTab, setActiveTab] = useState('graph')
+  const [activeTab, setActiveTab] = useTabHash('graph', TAB_IDS)
 
   return (
     <div className="px-4 py-6 sm:px-6 space-y-6">
@@ -1036,6 +1263,7 @@ export function EngramExplorer() {
       {activeTab === 'graph' && <GraphTab />}
       {activeTab === 'self-model' && <SelfModelTab />}
       {activeTab === 'consolidation' && <ConsolidationTab />}
+      {activeTab === 'maintenance' && <MaintenanceTab />}
     </div>
   )
 }
