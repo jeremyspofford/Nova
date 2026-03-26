@@ -326,15 +326,15 @@ Ordered by dependency and impact on the autonomy vision. Detailed design specs f
 | Prompt security — XML boundaries | Wrap user input in `<USER_REQUEST>` tags, escape code review feedback | Not yet |
 | Checkpoint save retry | 3x retry with backoff before giving up | Not yet |
 
-### 🔄 P0: Platform Self-Introspection `[spec]` — Partially Delivered 2026-03-25
+### 🔄 P0: Platform Self-Introspection `[spec]` — Partially Delivered 2026-03-26
 
-**Core diagnosis tools and self-knowledge delivered. Write tools and proactive behaviors remain.**
+**Diagnosis tools, self-knowledge, and read-only introspection delivered. Write tools and proactive behaviors remain.**
 
 | Component | Description | Status |
 |---|---|---|
 | **Architecture context block** | `_build_self_knowledge()` in `runner.py` — services, ports, pipeline stages, memory, cortex, diagnostic tool usage instructions injected into chat system prompt. Gated on `NOVA_SELF_KNOWLEDGE` env var. | ✅ Delivered |
 | **Task diagnosis tools** | `diagnosis_tools.py` — 5 tools: `diagnose_task`, `check_service_health`, `get_recent_errors`, `get_stage_output`, `get_task_timeline`. Registered in tool catalog under "Diagnosis" group. | ✅ Delivered |
-| **Read-only platform tools** | `platform_info`, `get_config`, `health_check`, `get_capabilities` | Not yet |
+| **Read-only platform tools** | `introspect_tools.py` — 4 tools: `get_platform_config` (namespace filter, secret masking), `list_knowledge_sources` (URLs/status/credentials), `list_mcp_servers` (connection status + tool catalogs), `get_user_profile`. Registered under "Introspect" group. | ✅ Delivered |
 | **Write tools with confirmation** | `update_config`, `manage_providers`, `manage_mcp_servers` — preview + "Apply?" prompt | Not yet |
 | **Proactive behaviors** | Health monitoring, config suggestions, capability discovery, self-diagnosis on error | Not yet |
 
@@ -450,6 +450,18 @@ Distributed Nova instances sharing one memory backend via Tailscale. Per-device 
 
 ### Hierarchical Memory Transformer
 Small fine-tuned transformer (~7B) that learns to BE the memory system — compression, storage, retrieval, reconstruction end-to-end. Replaces template reconstruction and potentially the Neural Router. High risk, high reward. Requires months of Engram Network operation for training data.
+
+### Nova Browser — AI-Native Browsing
+Privacy-first, AI-native browser experience integrated into Nova. Not a browser with AI bolted on — an AI platform where browsing is a first-class capability. Zero telemetry, no logging. Nova's agents can navigate sites, click, inspect network traffic, debug frontend, screenshot, and record sessions natively.
+
+**Open architectural question (revisit post-platform-completion):**
+- **Desktop app + embedded browser pane** — Electron/Tauri, browser as a tab/pane within Nova. Lightest lift, but users still need a separate daily browser.
+- **Full Chromium shell** — Nova IS the browser (like Arc/Brave). Most ambitious, most differentiated, highest maintenance burden.
+- **Split-pane hybrid** — Nova panels + browser side by side in one window. AI sees what you see in real time. No context switching.
+
+Key capabilities: page annotation/highlighting, network inspector with AI analysis, DOM-aware AI assistance, session recording/replay, agent-driven browsing (user watches or takes over), built-in tracker/ad blocking. Supersedes the P2 Browser Automation (Computer Use) roadmap item — that becomes a subset of this vision.
+
+Prerequisites: all current roadmap items complete. This is the capstone feature.
 
 ---
 

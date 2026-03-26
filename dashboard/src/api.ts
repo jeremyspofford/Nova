@@ -178,6 +178,12 @@ export const bulkDeletePipelineTasks = (statuses = 'complete,failed,cancelled,pe
     { method: 'DELETE' },
   )
 
+export const bulkDeletePipelineTasksByIds = (ids: string[]) =>
+  apiFetch<{ deleted: number; ids: string[] }>(
+    `/api/v1/pipeline/tasks?ids=${encodeURIComponent(ids.join(','))}`,
+    { method: 'DELETE' },
+  )
+
 export const clarifyPipelineTask = (task_id: string, answers: string[]) =>
   apiFetch<{ task_id: string; status: string }>(
     `/api/v1/pipeline/tasks/${task_id}/clarify`,

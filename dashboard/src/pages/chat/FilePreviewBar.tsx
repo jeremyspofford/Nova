@@ -10,7 +10,7 @@ export function FilePreviewBar({ files, onRemove }: Props) {
   if (files.length === 0) return null
 
   return (
-    <div className="flex gap-2 px-1 pb-2 overflow-x-auto">
+    <div className="flex gap-2 px-1 pb-2 overflow-x-auto no-scrollbar">
       {files.map(f => (
         <div
           key={f.id}

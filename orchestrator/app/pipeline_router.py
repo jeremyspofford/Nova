@@ -330,17 +330,44 @@ async def delete_pipeline_task(task_id: str, _admin: AdminDep) -> None:
 async def bulk_delete_pipeline_tasks(
     _admin: AdminDep,
     status: str = Query(
-        default="complete,failed,cancelled",
+        default="",
         description="Comma-separated terminal statuses to delete",
+    ),
+    ids: str = Query(
+        default="",
+        description="Comma-separated task UUIDs to delete (only terminal tasks)",
     ),
 ) -> dict:
     """
-    Bulk delete terminal tasks matching the given statuses.
-    Only allows terminal statuses (complete, failed, cancelled).
-    Admin-only.
+    Bulk delete terminal tasks — by status filter or by specific IDs.
+    Only tasks in terminal states can be deleted. Admin-only.
     """
     ALLOWED = {"complete", "failed", "cancelled", "pending_human_review", "clarification_needed"}
-    requested = {s.strip() for s in status.split(",")}
+    pool = get_pool()
+
+    # Mode 1: delete by specific IDs
+    if ids:
+        task_ids = [i.strip() for i in ids.split(",") if i.strip()]
+        if not task_ids:
+            raise HTTPException(status_code=400, detail="No valid IDs provided")
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                """
+                DELETE FROM tasks
+                WHERE id = ANY($1::uuid[])
+                  AND status = ANY($2::text[])
+                """,
+                task_ids,
+                list(ALLOWED),
+            )
+        deleted = int(result.split()[-1])
+        log.info("Bulk deleted %d tasks by IDs (%d requested)", deleted, len(task_ids))
+        return {"deleted": deleted, "ids": task_ids}
+
+    # Mode 2: delete by status filter (original behavior)
+    requested = {s.strip() for s in status.split(",") if s.strip()}
+    if not requested:
+        requested = {"complete", "failed", "cancelled"}
     invalid = requested - ALLOWED
     if invalid:
         raise HTTPException(
@@ -348,7 +375,6 @@ async def bulk_delete_pipeline_tasks(
             detail=f"Can only bulk-delete terminal statuses. Invalid: {invalid}",
         )
 
-    pool = get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
             """

@@ -221,12 +221,17 @@ async def execute_mcp_tool(name: str, arguments: dict) -> str:
         )
 
     try:
-        return await client.call_tool(tool_name, arguments)
+        log.info("Executing MCP tool: %s (server=%s)  args=%s", tool_name, server_name, arguments)
+        result = await client.call_tool(tool_name, arguments)
+        log.debug("MCP tool %s returned %d chars", tool_name, len(result))
+        await _log_mcp_activity(server_name, tool_name, arguments, len(result))
+        return result
     except Exception as e:
         log.error(
             "MCP tool '%s' on server '%s' failed: %s",
             tool_name, server_name, e,
         )
+        await _log_mcp_activity(server_name, tool_name, arguments, error=str(e))
         return f"MCP tool error: {e}"
 
 
@@ -247,6 +252,52 @@ def get_tools_by_server() -> list[dict]:
             ],
         })
     return result
+
+
+# ── Activity logging ──────────────────────────────────────────────────────────
+
+async def _log_mcp_activity(
+    server: str,
+    tool: str,
+    arguments: dict,
+    result_len: int = 0,
+    error: str | None = None,
+) -> None:
+    """Write MCP tool execution to activity_events. Never raises."""
+    try:
+        from app.db import get_pool
+        from app.activity import emit_activity
+
+        pool = get_pool()
+        if pool is None:
+            return
+
+        if error:
+            summary = f"[{server}] {tool} failed: {error[:120]}"
+            severity = "warning"
+        else:
+            # Build a concise summary from the args
+            url = arguments.get("url", "")
+            query = arguments.get("query", "")
+            detail = url or query or ""
+            if len(detail) > 80:
+                detail = detail[:77] + "..."
+            summary = f"[{server}] {tool}"
+            if detail:
+                summary += f" — {detail}"
+            summary += f" ({result_len:,} chars)"
+            severity = "info"
+
+        await emit_activity(
+            pool,
+            event_type="mcp_tool_call",
+            service=f"mcp:{server}",
+            summary=summary,
+            severity=severity,
+            metadata={"server": server, "tool": tool, "args": arguments, "result_len": result_len, "error": error},
+        )
+    except Exception:
+        log.debug("Failed to log MCP activity for %s.%s", server, tool, exc_info=True)
 
 
 # ── Status / health ───────────────────────────────────────────────────────────

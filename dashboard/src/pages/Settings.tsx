@@ -57,6 +57,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'users', label: 'Users', icon: Users },
       { id: 'trusted-networks', label: 'Trusted Networks', icon: Lock },
       { id: 'guest-access', label: 'Guest Access', icon: Shield },
+      { id: 'sandbox', label: 'Agent Sandbox', icon: Shield },
     ],
   },
   {
@@ -67,7 +68,6 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'pipeline-models', label: 'Pipeline Models', icon: Layers },
       { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'tool-permissions', label: 'Tool Permissions', icon: Wrench },
-      { id: 'sandbox', label: 'Sandbox', icon: Shield },
     ],
   },
   {
@@ -432,6 +432,10 @@ export function Settings() {
             <GuestAccessSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
 
+          <div id="sandbox">
+            <SandboxSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+          </div>
+
           {/* ── AI & Pipeline ─────────────────────────────────────────── */}
 
           <div id="llm-routing">
@@ -452,10 +456,6 @@ export function Settings() {
 
           <div id="tool-permissions">
             <ToolPermissionsSection />
-          </div>
-
-          <div id="sandbox">
-            <SandboxSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
 
           {/* ── Connections ──────────────────────────────────────────── */}

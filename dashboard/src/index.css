@@ -211,6 +211,15 @@ html.dark {
   background: rgb(var(--neutral-500));
 }
 
+/* Hidden scrollbar (scroll works, no visible track) */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* Thin scrollbar for textarea (legacy) */
 textarea::-webkit-scrollbar { width: 4px; }
 textarea::-webkit-scrollbar-thumb { background: rgb(var(--neutral-300)); border-radius: 2px; }

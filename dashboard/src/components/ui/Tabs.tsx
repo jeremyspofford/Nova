@@ -17,7 +17,7 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
   return (
     <div
       className={clsx(
-        'flex overflow-x-auto border-b border-border-subtle',
+        'flex overflow-x-auto no-scrollbar border-b border-border-subtle',
         className,
       )}
     >

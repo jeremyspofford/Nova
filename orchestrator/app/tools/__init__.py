@@ -28,6 +28,8 @@ from app.tools.web_tools import WEB_TOOLS
 from app.tools.web_tools import execute_tool as _exec_web
 from app.tools.diagnosis_tools import DIAGNOSIS_TOOLS
 from app.tools.diagnosis_tools import execute_tool as _exec_diagnosis
+from app.tools.introspect_tools import INTROSPECT_TOOLS
+from app.tools.introspect_tools import execute_tool as _exec_introspect
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -46,6 +48,7 @@ _REGISTRY: list[ToolGroup] = [
     ToolGroup("Git",      "Version Control",   "View status, diffs, logs, and create commits",   GIT_TOOLS,      _exec_git),
     ToolGroup("Web",      "Internet Access",   "Search the internet and fetch web pages",        WEB_TOOLS,      _exec_web),
     ToolGroup("Diagnosis", "Self-Diagnosis",  "Diagnose task failures, check service health, analyse errors", DIAGNOSIS_TOOLS, _exec_diagnosis),
+    ToolGroup("Introspect", "Platform Awareness", "Query platform config, knowledge sources, MCP servers, user profiles", INTROSPECT_TOOLS, _exec_introspect),
 ]
 
 # Derived from registry — same shapes the rest of the codebase expects

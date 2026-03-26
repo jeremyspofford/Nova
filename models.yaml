@@ -25,6 +25,11 @@ ollama:
       required: false
       description: "3.8B params, ~2.0 GB — fast, good quality, good default"
 
+    # ── Recommended for engram decomposition (structured JSON extraction) ────
+    - name: qwen2.5:7b
+      required: false
+      description: "7B, ~4.4 GB — best structured output quality, ideal for engram decomposition"
+
     # Uncomment to pull additional models:
     # - name: llama3.2:3b
     #   required: false
@@ -33,10 +38,6 @@ ollama:
     # - name: mistral
     #   required: false
     #   description: "7B, ~4.1 GB — strong reasoning, good for code"
-
-    # - name: qwen2.5
-    #   required: false
-    #   description: "7B, ~4.4 GB — excellent multilingual support"
 
     # - name: phi4
     #   required: false

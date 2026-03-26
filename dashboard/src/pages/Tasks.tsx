@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -16,7 +16,7 @@ import { useTheme } from '../stores/theme-store'
 import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
   reviewPipelineTask, getQueueStats, getPods, discoverModels,
-  deletePipelineTask, bulkDeletePipelineTasks,
+  deletePipelineTask, bulkDeletePipelineTasks, bulkDeletePipelineTasksByIds,
   getTaskFindings, getTaskReviews,
   getPipelineStats, getPipelineLatency,
   clarifyPipelineTask,
@@ -26,7 +26,7 @@ import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import { useChatStore } from '../stores/chat-store'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
-  Badge, Button, Card, CopyableId, ConfirmDialog, EmptyState,
+  Badge, Button, Card, Checkbox, CopyableId, ConfirmDialog, EmptyState,
   Metric, Modal, PipelineStages, SearchInput, Select, Skeleton,
   Tabs, Textarea, StatusDot, DataList, Tooltip,
 } from '../components/ui'
@@ -691,9 +691,13 @@ function SubmitForm() {
 function TaskRow({
   task,
   onSelect,
+  selected,
+  onToggleSelect,
 }: {
   task: PipelineTask
   onSelect: (task: PipelineTask) => void
+  selected: boolean
+  onToggleSelect: (taskId: string, shiftKey: boolean) => void
 }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -729,13 +733,32 @@ function TaskRow({
 
   return (
     <div
-      onClick={() => onSelect(task)}
+      onClick={(e) => {
+        if (isTerminal && e.shiftKey) {
+          e.preventDefault()
+          onToggleSelect(task.id, true)
+        } else {
+          onSelect(task)
+        }
+      }}
       className={clsx(
         'flex items-center gap-3 px-4 py-3 border-b border-border-subtle cursor-pointer transition-colors',
         'hover:bg-surface-card-hover',
-        (needsReview || needsClarification) && 'bg-info-dim/30',
+        selected && 'bg-accent/10',
+        (needsReview || needsClarification) && !selected && 'bg-info-dim/30',
       )}
     >
+      {/* Selection checkbox */}
+      {isTerminal && (
+        <div onClick={e => e.stopPropagation()}>
+          <Checkbox
+            checked={selected}
+            onChange={() => onToggleSelect(task.id, false)}
+            className="mr-0"
+          />
+        </div>
+      )}
+
       {/* Status dot */}
       <StatusDot
         status={statusToStatusDot(task.status)}
@@ -887,6 +910,9 @@ export function Tasks() {
   const [podFilter, setPodFilter] = useState('')
   const [selectedTask, setSelectedTask] = useState<PipelineTask | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const lastClickedRef = useRef<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const qc = useQueryClient()
 
@@ -927,12 +953,50 @@ export function Tasks() {
     },
   })
 
+  const bulkDeleteByIds = useMutation({
+    mutationFn: (ids: string[]) => bulkDeletePipelineTasksByIds(ids),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+      setSelectedIds(new Set())
+      setConfirmBulkDelete(false)
+    },
+  })
+
   // Filter tasks
   const filteredTasks = tasks
     .filter(t => matchesFilter(t, statusFilter))
     .filter(t => matchesSourceFilter(t, sourceFilter))
     .filter(t => !search || t.user_input.toLowerCase().includes(search.toLowerCase()) || t.id.includes(search))
     .filter(t => !podFilter || t.pod_name === podFilter)
+
+  const handleToggleSelect = useCallback((taskId: string, shiftKey: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+
+      if (shiftKey && lastClickedRef.current) {
+        // Shift-click: select range between last clicked and current
+        const ids = filteredTasks.map(t => t.id)
+        const lastIdx = ids.indexOf(lastClickedRef.current)
+        const curIdx = ids.indexOf(taskId)
+        if (lastIdx !== -1 && curIdx !== -1) {
+          const [start, end] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx]
+          for (let i = start; i <= end; i++) {
+            const t = filteredTasks[i]
+            if (['complete', 'failed', 'cancelled'].includes(t.status)) {
+              next.add(ids[i])
+            }
+          }
+        }
+      } else {
+        // Normal click: toggle single
+        if (next.has(taskId)) next.delete(taskId)
+        else next.add(taskId)
+      }
+
+      lastClickedRef.current = taskId
+      return next
+    })
+  }, [filteredTasks])
 
   // Count review/clarification tasks for alert badge
   const reviewCount = tasks.filter(t => t.status === 'pending_human_review' || t.status === 'clarification_needed').length
@@ -1047,6 +1111,41 @@ export function Tasks() {
         )}
       </div>
 
+      {/* Selection action bar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-surface-elevated border border-border-subtle">
+          <Checkbox
+            checked={selectedIds.size === filteredTasks.filter(t => ['complete', 'failed', 'cancelled'].includes(t.status)).length}
+            indeterminate={selectedIds.size > 0 && selectedIds.size < filteredTasks.filter(t => ['complete', 'failed', 'cancelled'].includes(t.status)).length}
+            onChange={(checked) => {
+              if (checked) {
+                setSelectedIds(new Set(filteredTasks.filter(t => ['complete', 'failed', 'cancelled'].includes(t.status)).map(t => t.id)))
+              } else {
+                setSelectedIds(new Set())
+              }
+            }}
+          />
+          <span className="text-compact text-content-secondary">
+            {selectedIds.size} selected
+          </span>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={<Trash2 size={12} />}
+            onClick={() => setConfirmBulkDelete(true)}
+          >
+            Delete Selected
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => { setSelectedIds(new Set()); lastClickedRef.current = null }}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+
       {/* Task list */}
       {filteredTasks.length === 0 ? (
         <EmptyState
@@ -1065,6 +1164,8 @@ export function Tasks() {
               key={task.id}
               task={task}
               onSelect={setSelectedTask}
+              selected={selectedIds.has(task.id)}
+              onToggleSelect={handleToggleSelect}
             />
           ))}
         </Card>
@@ -1085,6 +1186,17 @@ export function Tasks() {
         description="This will permanently delete all non-running tasks — completed, failed, cancelled, and tasks waiting for review or clarification. Only actively running tasks are kept."
         confirmLabel={bulkDelete.isPending ? 'Deleting...' : 'Delete All'}
         onConfirm={() => bulkDelete.mutate()}
+        destructive
+      />
+
+      {/* Confirm bulk delete selected */}
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onClose={() => setConfirmBulkDelete(false)}
+        title={`Delete ${selectedIds.size} task${selectedIds.size === 1 ? '' : 's'}?`}
+        description={`${selectedIds.size} selected task${selectedIds.size === 1 ? '' : 's'} will be permanently deleted.`}
+        confirmLabel={bulkDeleteByIds.isPending ? 'Deleting...' : `Delete ${selectedIds.size}`}
+        onConfirm={() => bulkDeleteByIds.mutate([...selectedIds])}
         destructive
       />
     </div>

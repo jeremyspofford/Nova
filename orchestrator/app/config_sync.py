@@ -54,7 +54,12 @@ async def sync_llm_config_to_redis() -> None:
 
 
 async def sync_inference_config_to_redis() -> None:
-    """Push all inference.* config from DB to Redis so LLM gateway has correct values on boot."""
+    """Push inference.* defaults from DB to Redis, preserving runtime overrides.
+
+    The recovery service writes backend choices directly to Redis (not DB),
+    so existing Redis values take precedence over DB defaults.  DB values
+    only fill in keys that are missing from Redis.
+    """
     try:
         pool = get_pool()
         async with pool.acquire() as conn:
@@ -66,14 +71,23 @@ async def sync_inference_config_to_redis() -> None:
 
         r = aioredis.from_url(_gateway_redis_url(), decode_responses=True)
         try:
+            seeded = 0
             for row in rows:
                 val = row["value"]
-                if val is not None:
-                    raw = json.dumps(val) if not isinstance(val, str) else val
-                    await r.set(f"nova:config:{row['key']}", raw)
+                if val is None:
+                    continue
+                redis_key = f"nova:config:{row['key']}"
+                existing = await r.get(redis_key)
+                if existing is not None:
+                    log.debug("Keeping runtime value for %s", row["key"])
+                    continue
+                raw = json.dumps(val) if not isinstance(val, str) else val
+                await r.set(redis_key, raw)
+                seeded += 1
         finally:
             await r.aclose()
 
-        log.info("Synced %d inference config keys to Redis", len(rows))
+        log.info("Inference config: seeded %d keys, %d already set at runtime",
+                 seeded, len(rows) - seeded)
     except Exception as e:
         log.warning("Inference config sync to Redis failed (non-fatal): %s", e)

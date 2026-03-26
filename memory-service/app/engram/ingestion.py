@@ -125,7 +125,7 @@ async def _process_event(raw_payload: str) -> dict:
         return {"engrams_created": 0, "engrams_updated": 0, "edges_created": 0, "engram_ids": []}
 
     # Step 1: Decompose raw text into structured engrams
-    decomposition = await decompose(raw_text)
+    decomposition = await decompose(raw_text, source_type=source_type)
 
     if not decomposition.engrams:
         log.debug("Decomposition produced no engrams for: %s", raw_text[:100])

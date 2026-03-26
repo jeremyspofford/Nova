@@ -490,7 +490,6 @@ export function MCP() {
   const [showForm, setShowForm] = useState(false)
   const [prefill, setPrefill] = useState<PrefillValues | null>(null)
   const [formKey, setFormKey] = useState(0)
-  const [catalogOpen, setCatalogOpen] = useState(false)
   const [tagFilter, setTagFilter] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<MCPServer | null>(null)
@@ -545,8 +544,6 @@ export function MCP() {
     setShowForm(true)
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50)
   }
-
-  const effectiveCatalogOpen = catalogOpen || (servers.length === 0 && !isLoading)
 
   const installedNames = new Set(servers.map(s => s.name.toLowerCase()))
 
@@ -621,18 +618,13 @@ export function MCP() {
 
       {/* MCP Catalog */}
       <Card className="overflow-hidden">
-        <button
-          className="w-full flex items-center justify-between px-5 py-3 hover:bg-surface-card-hover transition-colors"
-          onClick={() => setCatalogOpen(v => !v)}
-        >
+        <div className="px-5 py-3">
           <p className="text-caption font-medium text-content-tertiary uppercase tracking-wider">
             Browse MCP Catalog
           </p>
-          {effectiveCatalogOpen ? <ChevronDown size={14} className="text-content-tertiary" /> : <ChevronRight size={14} className="text-content-tertiary" />}
-        </button>
+        </div>
 
-        {effectiveCatalogOpen && (
-          <div className="border-t border-border-subtle p-4 space-y-4">
+        <div className="border-t border-border-subtle p-4 space-y-4">
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1">
                 <SearchInput
@@ -682,7 +674,6 @@ export function MCP() {
               </div>
             )}
           </div>
-        )}
       </Card>
 
       {/* Delete confirmation */}

@@ -982,4 +982,4 @@ async def _emit_to_engram_queue(
         })
         await redis.lpush("engram:ingestion:queue", payload)
     except Exception as e:
-        log.debug("Failed to emit to engram queue: %s", e)
+        log.warning("Failed to emit to engram queue: %s", e)
