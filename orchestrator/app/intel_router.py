@@ -1,7 +1,6 @@
 """Intel feed CRUD and content ingestion endpoints."""
 from __future__ import annotations
 
-import ipaddress
 import json
 import logging
 from datetime import datetime, timezone
@@ -18,37 +17,11 @@ from app.stimulus import (
     RECOMMENDATION_COMMENTED,
     emit_stimulus,
 )
+from nova_worker_common.url_validator import validate_url
 
 log = logging.getLogger(__name__)
 
 intel_router = APIRouter(tags=["intel"])
-
-
-# ── SSRF validation ──────────────────────────────────────────────────────────
-
-BLOCKED_HOSTS = {
-    "localhost", "0.0.0.0", "redis", "postgres", "orchestrator", "memory-service",
-    "llm-gateway", "cortex", "recovery", "chat-api", "chat-bridge",
-    "dashboard", "intel-worker", "knowledge-worker", "metadata.google.internal",
-    "host.docker.internal",
-}
-
-
-def _validate_feed_url(url: str) -> str | None:
-    """Return error message if URL is unsafe, None if OK."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return f"Scheme '{parsed.scheme}' not allowed"
-    hostname = parsed.hostname or ""
-    if hostname.lower() in BLOCKED_HOSTS:
-        return f"Host '{hostname}' is blocked"
-    try:
-        ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            return f"Private/loopback/link-local IP '{ip}' not allowed"
-    except ValueError:
-        pass
-    return None
 
 
 # ── Feed auto-detection ──────────────────────────────────────────────────────
@@ -206,7 +179,7 @@ async def list_feeds(
 @intel_router.post("/api/v1/intel/feeds", status_code=201)
 async def create_feed(req: CreateFeedRequest, _user: UserDep):
     """Create a new intel feed. Auto-detects type, category, and name from URL."""
-    error = _validate_feed_url(req.url)
+    error = validate_url(req.url)
     if error:
         raise HTTPException(status_code=400, detail=f"Invalid feed URL: {error}")
 
@@ -237,7 +210,7 @@ async def update_feed(feed_id: UUID, req: UpdateFeedRequest, _user: UserDep):
 
     # If URL is changing, re-validate and re-detect type/category
     if "url" in updates:
-        error = _validate_feed_url(updates["url"])
+        error = validate_url(updates["url"])
         if error:
             raise HTTPException(status_code=400, detail=f"Invalid feed URL: {error}")
         updates["feed_type"] = _detect_feed_type(updates["url"])
