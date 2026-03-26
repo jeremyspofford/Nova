@@ -132,6 +132,9 @@ class TestFrictionCRUD:
         assert "blocker_count" in data
 
     async def test_requires_admin_auth(self, orchestrator: httpx.AsyncClient):
+        from conftest import REQUIRE_AUTH
+        if not REQUIRE_AUTH:
+            pytest.skip("REQUIRE_AUTH=false — auth enforcement not active")
         resp = await orchestrator.get("/api/v1/friction")
         assert resp.status_code in (401, 403)
 

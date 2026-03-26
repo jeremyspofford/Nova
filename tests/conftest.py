@@ -24,6 +24,7 @@ RECOVERY_URL = os.getenv("NOVA_RECOVERY_URL", "http://localhost:8888")
 KNOWLEDGE_WORKER_URL = os.getenv("NOVA_KNOWLEDGE_WORKER_URL", "http://localhost:8120")
 
 ADMIN_SECRET = os.getenv("NOVA_ADMIN_SECRET", "")
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
 
 SERVICE_URLS = {
     "orchestrator": ORCHESTRATOR_URL,
