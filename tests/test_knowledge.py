@@ -212,7 +212,8 @@ class TestKnowledgeStats:
         resp = await orchestrator.get("/api/v1/knowledge/stats", headers=admin_headers)
         assert resp.status_code == 200
         stats = resp.json()
-        assert "total_sources" in stats or "sources_by_status" in stats
+        assert "sources_total" in stats
+        assert "total_credentials" in stats
 
 
 class TestKnowledgeWorkerHealth:
