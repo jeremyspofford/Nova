@@ -46,6 +46,14 @@ def _get_engram_redis() -> aioredis.Redis:
     return _engram_redis
 
 
+async def close_engram_redis() -> None:
+    """Close the engram Redis client. Call from orchestrator lifespan shutdown."""
+    global _engram_redis
+    if _engram_redis is not None:
+        await _engram_redis.aclose()
+        _engram_redis = None
+
+
 # ── Request / Response models ────────────────────────────────────────────────
 
 

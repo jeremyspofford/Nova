@@ -144,6 +144,8 @@ async def lifespan(app: FastAPI):
 
     await close_clients()
     await close_redis()
+    from app.knowledge_router import close_engram_redis
+    await close_engram_redis()
     await close_db()
 
 

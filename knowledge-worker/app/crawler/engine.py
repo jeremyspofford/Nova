@@ -22,6 +22,27 @@ logger = logging.getLogger(__name__)
 # Type alias for the queue push callback
 PushFn = Callable[..., Coroutine[Any, Any, None]]
 
+MAX_REDIRECTS = 5
+
+
+async def _safe_get(client, url: str, timeout: int = 15):
+    """GET with manual redirect following and SSRF validation at each hop."""
+    resp = await client.get(url, timeout=timeout, follow_redirects=False)
+    redirects = 0
+    while resp.is_redirect and redirects < MAX_REDIRECTS:
+        from urllib.parse import urljoin
+        location = resp.headers.get("location", "")
+        if not location:
+            break
+        location = urljoin(str(resp.url), location)
+        ssrf_err = validate_url(location)
+        if ssrf_err:
+            logger.warning("Redirect blocked by SSRF: %s -> %s (%s)", url, location, ssrf_err)
+            return None
+        resp = await client.get(location, timeout=timeout, follow_redirects=False)
+        redirects += 1
+    return resp
+
 
 @dataclass
 class CrawlResult:
@@ -124,8 +145,8 @@ class CrawlEngine:
     ) -> bool:
         """Fetch a single page, extract content, discover links. Returns True on success."""
         try:
-            resp = await self._http.get(url, timeout=15, follow_redirects=True)
-            if resp.status_code != 200:
+            resp = await _safe_get(self._http, url, timeout=15)
+            if resp is None or resp.status_code != 200:
                 result.pages_skipped += 1
                 return False
         except Exception as e:
@@ -205,8 +226,8 @@ class CrawlEngine:
             domain = urlparse(url).netloc
             async with self._rate_limiter.acquire(domain):
                 try:
-                    resp = await self._http.get(url, timeout=15, follow_redirects=True)
-                    if resp.status_code != 200:
+                    resp = await _safe_get(self._http, url, timeout=15)
+                    if resp is None or resp.status_code != 200:
                         result.pages_skipped += 1
                         continue
                 except Exception:

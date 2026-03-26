@@ -145,7 +145,7 @@ async def _run_general_crawl(
     crawl_client = httpx.AsyncClient(
         timeout=30,
         headers={"User-Agent": "Nova/1.0"},
-        follow_redirects=True,
+        follow_redirects=False,  # engine._safe_get handles redirects with SSRF validation
     )
     try:
         engine = CrawlEngine(

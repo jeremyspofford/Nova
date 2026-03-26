@@ -5,6 +5,12 @@ from abc import ABC, abstractmethod
 class BaseExtractor(ABC):
     """Base class for platform extractors (GitHub, Notion, etc.)."""
 
+    @staticmethod
+    @abstractmethod
+    def matches(url: str) -> bool:
+        """Return True if this extractor handles the given URL."""
+        ...
+
     @abstractmethod
     async def extract(
         self,
