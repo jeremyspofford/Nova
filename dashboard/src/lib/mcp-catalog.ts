@@ -122,6 +122,33 @@ export const MCP_CATALOG: CatalogEntry[] = [
     docs: 'https://github.com/modelcontextprotocol/servers/tree/main/src/fetch',
   },
   {
+    id: 'firecrawl',
+    name: 'firecrawl',
+    displayName: 'Firecrawl',
+    description: 'Web scraping, crawling, and search with JavaScript rendering — returns clean LLM-optimized Markdown.',
+    command: 'npx',
+    args: ['-y', 'firecrawl-mcp'],
+    env: [
+      {
+        key: 'FIRECRAWL_API_KEY',
+        label: 'Firecrawl API Key',
+        description: 'Get a key at https://firecrawl.dev — or leave empty when using a self-hosted instance.',
+        placeholder: 'fc-...',
+        required: false,
+      },
+      {
+        key: 'FIRECRAWL_API_URL',
+        label: 'Firecrawl API URL (self-hosted)',
+        description: 'Point to your own Firecrawl instance for fully local, private operation. Leave empty to use the cloud API.',
+        placeholder: 'http://localhost:3002',
+        required: false,
+      },
+    ],
+    tags: ['web', 'search'],
+    docs: 'https://github.com/mendableai/firecrawl/tree/main/apps/mcp-server',
+    note: 'For private/local use, deploy Firecrawl self-hosted and set FIRECRAWL_API_URL. No API key needed in self-hosted mode.',
+  },
+  {
     id: 'puppeteer',
     name: 'puppeteer',
     displayName: 'Puppeteer',

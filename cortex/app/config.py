@@ -39,6 +39,10 @@ class Settings:
     idle_consolidation: bool = os.getenv("CORTEX_IDLE_CONSOLIDATION", "true").lower() == "true"
     consolidation_cooldown: int = int(os.getenv("CORTEX_CONSOLIDATION_COOLDOWN", "1800"))
 
+    # Task feedback loop
+    task_poll_interval: int = int(os.getenv("CORTEX_TASK_POLL_INTERVAL", "10"))  # seconds between polls
+    task_poll_max_wait: int = int(os.getenv("CORTEX_TASK_POLL_MAX_WAIT", "300"))  # max seconds to wait for task
+
     # Budget
     daily_budget_usd: float = float(os.getenv("CORTEX_DAILY_BUDGET_USD", "5.00"))
 

@@ -20,7 +20,10 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +125,8 @@ class BaseAgent:
         self._usage = {"input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0, "llm_calls": 0}
         # Training data log — populated by _call_llm_full() when training logging is enabled
         self._training_log: list[dict] = []
+        # Last raw LLM output — set by think_json on parse failure for post-mortem
+        self._last_raw_output: str | None = None
 
     # ── LLM call ──────────────────────────────────────────────────────────────
 
@@ -205,7 +210,12 @@ class BaseAgent:
 
     # ── think_json ────────────────────────────────────────────────────────────
 
-    async def think_json(self, messages: list[dict], purpose: str = "") -> dict:
+    async def think_json(
+        self,
+        messages: list[dict],
+        purpose: str = "",
+        output_schema: type[BaseModel] | None = None,
+    ) -> dict:
         """
         Call the LLM and parse the response as JSON.
 
@@ -213,6 +223,10 @@ class BaseAgent:
         corrective user turn and retries once. The model sees its own mistake
         and the explicit correction instruction — much more effective than
         blind retry.
+
+        If output_schema is provided, the parsed dict is validated against the
+        Pydantic model. On validation failure, coercion is attempted (strict=False).
+        If coercion fails, the LLM is retried with the schema appended to the prompt.
         """
         for attempt in range(THINK_JSON_MAX_ATTEMPTS):
             raw = await self._call_llm(messages)
@@ -227,13 +241,15 @@ class BaseAgent:
                 ).strip()
 
             try:
-                return json.loads(cleaned)
+                parsed = json.loads(cleaned)
             except json.JSONDecodeError as exc:
                 if attempt + 1 >= THINK_JSON_MAX_ATTEMPTS:
                     logger.error(
                         f"[{self.ROLE}] think_json failed after {THINK_JSON_MAX_ATTEMPTS} "
                         f"attempts{' ('+purpose+')' if purpose else ''}: {exc}"
                     )
+                    # Store raw LLM output for post-mortem debugging
+                    self._last_raw_output = raw
                     raise ValueError(
                         f"Agent {self.ROLE} could not produce valid JSON: {exc}"
                     ) from exc
@@ -253,8 +269,86 @@ class BaseAgent:
                         ),
                     },
                 ]
+                continue
+
+            # ── Schema validation (if provided) ──────────────────────────
+            if output_schema is None:
+                return parsed
+
+            return await self._validate_schema(
+                parsed, raw, messages, output_schema, purpose,
+            )
 
         raise RuntimeError("think_json: unreachable")   # satisfies type checker
+
+    async def _validate_schema(
+        self,
+        parsed: dict,
+        raw_response: str,
+        messages: list[dict],
+        output_schema: type[BaseModel],
+        purpose: str,
+    ) -> dict:
+        """
+        Validate parsed JSON against a Pydantic schema.
+
+        1. Try model_validate (non-strict — allows coercion).
+        2. On failure, retry the LLM once with the schema definition appended.
+        3. If the retry also fails validation, return best-effort parsed dict.
+        """
+        from pydantic import ValidationError
+
+        # Attempt 1: validate/coerce the parsed dict
+        try:
+            validated = output_schema.model_validate(parsed)
+            return validated.model_dump()
+        except ValidationError as exc:
+            logger.warning(
+                "[%s] Schema validation failed%s: %s",
+                self.ROLE,
+                f" ({purpose})" if purpose else "",
+                exc,
+            )
+
+        # Attempt 2: retry LLM with schema definition appended
+        schema_json = json.dumps(output_schema.model_json_schema(), indent=2)
+        retry_messages = messages + [
+            {"role": "assistant", "content": raw_response},
+            {
+                "role": "user",
+                "content": (
+                    "Your previous response did not match the required schema. "
+                    f"Please respond with valid JSON matching this exact schema:\n\n"
+                    f"```json\n{schema_json}\n```\n\n"
+                    "Respond ONLY with the JSON object — no markdown fences, "
+                    "no preamble, no explanation."
+                ),
+            },
+        ]
+
+        try:
+            retry_raw = await self._call_llm(retry_messages)
+            retry_cleaned = retry_raw.strip()
+            if retry_cleaned.startswith("```"):
+                lines = retry_cleaned.splitlines()
+                retry_cleaned = "\n".join(
+                    l for l in lines
+                    if not l.strip().startswith("```")
+                ).strip()
+
+            retry_parsed = json.loads(retry_cleaned)
+            validated = output_schema.model_validate(retry_parsed)
+            return validated.model_dump()
+        except (json.JSONDecodeError, ValidationError) as exc:
+            logger.warning(
+                "[%s] Schema validation retry also failed%s: %s — returning raw parsed dict",
+                self.ROLE,
+                f" ({purpose})" if purpose else "",
+                exc,
+            )
+            # Best-effort: return the original parsed dict so the pipeline
+            # doesn't crash. The data is valid JSON, just not schema-conformant.
+            return parsed
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

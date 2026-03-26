@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 
 from .base import BaseAgent, PipelineState
+from ..schemas import CodeReviewOutput
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,7 @@ fundamentally broken or a security risk."""
             self._system_message(),
             self._user_message(f"Review this output:\n\n{review_content}"),
         ]
-        result = await self.think_json(messages, purpose="code_review")
+        result = await self.think_json(messages, purpose="code_review", output_schema=CodeReviewOutput)
 
         result.setdefault("verdict", "pass")
         result.setdefault("issues", [])

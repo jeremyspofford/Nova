@@ -60,3 +60,24 @@ def get_memory() -> httpx.AsyncClient:
     if _memory is None:
         raise RuntimeError("Memory client not initialized")
     return _memory
+
+
+async def get_task_status(task_id: str) -> dict | None:
+    """Poll orchestrator for task status. Returns task dict or None on error."""
+    try:
+        orch = get_orchestrator()
+        resp = await orch.get(
+            f"/api/v1/pipeline/tasks/{task_id}",
+            headers={"Authorization": f"Bearer {settings.cortex_api_key}"},
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        elif resp.status_code == 404:
+            log.warning("Task %s not found in orchestrator", task_id)
+            return None
+        else:
+            log.warning("Failed to get task %s: HTTP %d", task_id, resp.status_code)
+            return None
+    except Exception as e:
+        log.warning("Error polling task %s: %s", task_id, e)
+        return None

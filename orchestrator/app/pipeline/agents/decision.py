@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 
 from .base import BaseAgent, PipelineState
+from ..schemas import DecisionOutput
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ Return ONLY valid JSON:
             self._system_message(),
             self._user_message(f"Review this conflicted pipeline result:\n\n{content}"),
         ]
-        result = await self.think_json(messages, purpose="decision")
+        result = await self.think_json(messages, purpose="decision", output_schema=DecisionOutput)
 
         result.setdefault("action", "escalate")
         result.setdefault("reasoning", "")

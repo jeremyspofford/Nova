@@ -23,6 +23,7 @@ from .db import get_pool
 from .drives import DriveContext, DriveResult, DriveWinner, evaluate
 from .drives import serve, maintain, improve, learn, reflect
 from .journal import read_user_replies_since, write_entry
+from .task_tracker import TaskOutcome, await_task
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ class CycleState:
     error: str | None = None
     resolved_model: str | None = None
     goal_id: str | None = None
+    dispatched_task_id: str | None = None
+    task_outcome: TaskOutcome | None = None
 
 
 async def _report_outcome(
@@ -169,6 +172,11 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         state.action_taken = drive.name
         state.outcome = await _execute_action(drive, plan, state)
 
+        # ── TRACK ────────────────────────────────────────────────────────
+        # If a pipeline task was dispatched, poll for completion and update goal
+        if state.dispatched_task_id:
+            state.task_outcome = await _track_dispatched_task(state)
+
         # ── REFLECT ──────────────────────────────────────────────────────
         await _reflect(state)
 
@@ -194,8 +202,15 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         if state.resolved_model:
             if state.error:
                 await _report_outcome(state, state.resolved_model, 0.2, 0.9)
+            elif state.task_outcome:
+                # Use actual task result instead of hardcoded score
+                await _report_outcome(
+                    state, state.resolved_model,
+                    state.task_outcome.score, state.task_outcome.confidence,
+                )
             else:
-                await _report_outcome(state, state.resolved_model, 0.7, 0.7)
+                # Non-serve drives or serve without a dispatched task
+                await _report_outcome(state, state.resolved_model, 0.7, 0.5)
 
     except Exception as e:
         state.error = str(e)
@@ -319,18 +334,18 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
         if resp.status_code in (200, 201, 202):
             data = resp.json()
             task_id = data.get("task_id", "unknown")
+            state.dispatched_task_id = task_id
 
-            # Only mark checked and persist plan AFTER successful dispatch
+            # Persist plan AFTER successful dispatch (iteration/progress updated after task completes)
             pool = get_pool()
             async with pool.acquire() as conn:
                 await conn.execute(
                     """UPDATE goals
                        SET last_checked_at = NOW(),
-                           iteration = iteration + 1,
                            current_plan = $1::jsonb,
                            updated_at = NOW()
                        WHERE id = $2::uuid""",
-                    json.dumps({"plan": plan, "cycle": state.cycle_number}),
+                    json.dumps({"plan": plan, "cycle": state.cycle_number, "task_id": task_id}),
                     goal_id,
                 )
 
@@ -389,6 +404,169 @@ async def _execute_learn(drive: DriveResult, plan: str, state: CycleState) -> st
     return f"Learning action: {plan[:200]}"
 
 
+async def _track_dispatched_task(state: CycleState) -> TaskOutcome | None:
+    """Poll a dispatched task to completion and update goal progress accordingly."""
+    task_id = state.dispatched_task_id
+    if not task_id or task_id == "unknown":
+        return None
+
+    try:
+        outcome = await await_task(task_id)
+    except Exception as e:
+        log.warning("Task tracking failed for %s: %s", task_id, e)
+        return None
+
+    # Update the outcome description with the actual result
+    if outcome.timed_out:
+        state.outcome += f" | Task {task_id} still running after {settings.task_poll_max_wait}s"
+    elif outcome.status == "complete":
+        summary = (outcome.output or "")[:200]
+        state.outcome += f" | Task completed: {summary}"
+    elif outcome.status == "failed":
+        err = (outcome.error or "unknown error")[:200]
+        state.outcome += f" | Task FAILED: {err}"
+    elif outcome.status == "cancelled":
+        state.outcome += f" | Task cancelled"
+
+    # Update goal progress based on task result
+    if state.goal_id:
+        try:
+            await _update_goal_progress(state.goal_id, outcome, state.cycle_number)
+        except Exception as e:
+            log.warning("Failed to update goal progress for %s: %s", state.goal_id, e)
+
+    # Journal notable task outcomes
+    if outcome.status == "failed":
+        try:
+            await write_entry(
+                f"**Task failure** — task {task_id} for goal {state.goal_id}: "
+                f"{(outcome.error or 'unknown')[:300]}",
+                entry_type="escalation",
+                metadata={
+                    "cycle": state.cycle_number,
+                    "task_id": task_id,
+                    "goal_id": state.goal_id,
+                    "task_status": outcome.status,
+                },
+            )
+        except Exception as e:
+            log.debug("Failed to journal task failure: %s", e)
+
+    return outcome
+
+
+async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) -> None:
+    """Update goal iteration count and progress estimate based on task outcome."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        # Read current goal state
+        row = await conn.fetchrow(
+            "SELECT iteration, max_iterations, progress, current_plan FROM goals WHERE id = $1::uuid",
+            goal_id,
+        )
+        if not row:
+            log.warning("Goal %s not found for progress update", goal_id)
+            return
+
+        iteration = row["iteration"]
+        max_iterations = row["max_iterations"] or 50
+        current_plan = row["current_plan"] or {}
+
+        if outcome.status == "complete":
+            # Successful task — increment iteration, estimate progress from iteration ratio
+            new_iteration = iteration + 1
+            # Progress: blend iteration ratio with a completion boost
+            iter_ratio = min(new_iteration / max_iterations, 1.0)
+            new_progress = min(round(iter_ratio * 100, 1), 100.0)
+
+            plan_update = {
+                **current_plan,
+                "last_task_id": outcome.task_id,
+                "last_task_status": outcome.status,
+                "last_task_output": (outcome.output or "")[:500],
+                "cycle": cycle,
+            }
+            if outcome.findings_count > 0:
+                plan_update["last_findings_count"] = outcome.findings_count
+
+            await conn.execute(
+                """UPDATE goals
+                   SET iteration = $1,
+                       progress = $2,
+                       current_plan = $3::jsonb,
+                       updated_at = NOW()
+                   WHERE id = $4::uuid""",
+                new_iteration,
+                new_progress,
+                json.dumps(plan_update),
+                goal_id,
+            )
+            log.info(
+                "Goal %s: iteration %d/%d, progress %.1f%% (task %s complete)",
+                goal_id, new_iteration, max_iterations, new_progress, outcome.task_id,
+            )
+
+        elif outcome.status == "failed":
+            # Failed task — store error context for next cycle's planning, don't advance iteration
+            plan_update = {
+                **current_plan,
+                "last_task_id": outcome.task_id,
+                "last_task_status": "failed",
+                "last_task_error": (outcome.error or "unknown")[:500],
+                "cycle": cycle,
+            }
+            await conn.execute(
+                """UPDATE goals
+                   SET current_plan = $1::jsonb,
+                       updated_at = NOW()
+                   WHERE id = $2::uuid""",
+                json.dumps(plan_update),
+                goal_id,
+            )
+            log.info(
+                "Goal %s: task %s failed — error stored for re-planning",
+                goal_id, outcome.task_id,
+            )
+
+        elif outcome.status == "cancelled":
+            # Cancelled — just note it, don't advance
+            plan_update = {
+                **current_plan,
+                "last_task_id": outcome.task_id,
+                "last_task_status": "cancelled",
+                "cycle": cycle,
+            }
+            await conn.execute(
+                """UPDATE goals
+                   SET current_plan = $1::jsonb,
+                       updated_at = NOW()
+                   WHERE id = $2::uuid""",
+                json.dumps(plan_update),
+                goal_id,
+            )
+
+        elif outcome.timed_out:
+            # Still running — store task_id so next cycle can check again
+            plan_update = {
+                **current_plan,
+                "last_task_id": outcome.task_id,
+                "last_task_status": "running",
+                "cycle": cycle,
+            }
+            await conn.execute(
+                """UPDATE goals
+                   SET current_plan = $1::jsonb,
+                       updated_at = NOW()
+                   WHERE id = $2::uuid""",
+                json.dumps(plan_update),
+                goal_id,
+            )
+            log.info(
+                "Goal %s: task %s still running — noted for next cycle",
+                goal_id, outcome.task_id,
+            )
+
+
 async def _reflect(state: CycleState) -> None:
     """Write a journal entry summarizing this cycle."""
     drive_summary = ", ".join(
@@ -411,6 +589,16 @@ async def _reflect(state: CycleState) -> None:
             f"Budget: {state.budget_pct:.0f}% ({state.budget_tier})"
         )
 
+    if state.task_outcome:
+        to = state.task_outcome
+        content += (
+            f"\nTask: {to.task_id} — {to.status} (score={to.score:.1f})"
+        )
+        if to.findings_count > 0:
+            content += f" [{to.findings_count} guardrail findings]"
+        if to.timed_out:
+            content += " [timed out]"
+
     if state.user_messages:
         content += f"\n\nUser messages: {len(state.user_messages)}"
 
@@ -426,6 +614,10 @@ async def _reflect(state: CycleState) -> None:
     }
     if state.goal_id:
         metadata["goal_id"] = state.goal_id
+    if state.task_outcome:
+        metadata["task_id"] = state.task_outcome.task_id
+        metadata["task_status"] = state.task_outcome.status
+        metadata["task_score"] = state.task_outcome.score
     await write_entry(content, entry_type=entry_type, metadata=metadata)
 
 

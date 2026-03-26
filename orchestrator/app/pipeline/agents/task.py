@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 
 from .base import BaseAgent, PipelineState
+from ..schemas import TaskAgentOutput
 
 logger = logging.getLogger(__name__)
 
@@ -120,4 +121,4 @@ After completing your work, return ONLY valid JSON matching this exact schema:
                 "Return your structured JSON result as described in your instructions."
             ),
         ]
-        return await self.think_json(messages, purpose="task_output")
+        return await self.think_json(messages, purpose="task_output", output_schema=TaskAgentOutput)

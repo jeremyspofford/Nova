@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 
 from .base import BaseAgent, PipelineState
+from ..schemas import ContextAgentOutput
 
 logger = logging.getLogger(__name__)
 
@@ -97,4 +98,4 @@ Return ONLY valid JSON matching this exact schema — no markdown, no preamble:
                 "Now return your structured JSON context package as described in your instructions."
             ),
         ]
-        return await self.think_json(messages, purpose="context_package")
+        return await self.think_json(messages, purpose="context_package", output_schema=ContextAgentOutput)

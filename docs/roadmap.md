@@ -2,7 +2,7 @@
 
 > Living document. Keep up to date as work progresses.
 >
-> **Last updated:** 2026-03-19
+> **Last updated:** 2026-03-25
 >
 > **Vision:** A self-directed autonomous AI platform. You define a goal. Nova breaks it into
 > subtasks, executes them through a coordinated pipeline of specialized agents with built-in
@@ -289,6 +289,99 @@ Provider priority order: `claude_code → anthropic → openai → ollama`
 | **Long-context detection** | Route large context windows to models with higher token limits |
 | **Separate chat vs pipeline defaults** | Different auto-resolution for interactive chat vs pipeline agents |
 | **Chat onboarding** | First-run greeting that helps users configure providers through conversation |
+
+---
+
+## 🔜 Phase 4c — Pipeline Reliability Hardening
+
+> **Priority: CRITICAL.** Full-stack audit (2026-03-25) revealed structural reliability issues in the
+> pipeline that allow garbage results to pass through, lose error context at failure points, and leave
+> tasks in invalid states. These must be fixed before self-directed autonomy (Phase 7) is viable —
+> an autonomous agent that can't trust its own pipeline output will produce cascading failures.
+
+### A. Agent Output Schema Validation
+
+**Problem:** Each pipeline agent has a documented JSON output schema, but there is zero runtime validation. Agents can return wrong keys, wrong types, or garbage — downstream stages silently get empty strings and the task "succeeds" with unusable output.
+
+| Fix | Description | Severity |
+|---|---|---|
+| **Pydantic output models** | Define `ContextAgentOutput`, `TaskAgentOutput`, `GuardrailOutput`, `CodeReviewOutput`, `DecisionOutput` with typed fields | Critical |
+| **Post-parse validation** | Validate JSON dict against Pydantic model after `think_json()` parse. On failure, retry with schema definition in prompt | Critical |
+| **Schema in retry prompt** | When `think_json()` retries, include the expected JSON schema (not just "fix your JSON") | High |
+| **Verdict enum enforcement** | Code Review verdict must be `pass\|needs_refactor\|reject`. String comparisons against free-form text are fragile | High |
+
+### B. Error Context Preservation
+
+**Problem:** When agents fail, only `str(exc)` is stored (truncated ~500 chars). No stack traces in DB, no intermediate outputs, no LLM conversation history. Post-mortem debugging is impossible.
+
+| Fix | Description | Severity |
+|---|---|---|
+| **Full stack traces** | Store `traceback.format_exc()` in new `agent_sessions.traceback` TEXT column | Critical |
+| **Structured error objects** | Replace string error with JSONB: `{type, message, stage, context_tokens, model, elapsed_ms}` | High |
+| **Always store agent output** | Write `agent_sessions.output` JSONB even when parsing fails — capture what the LLM actually returned | High |
+| **LLM messages on failure** | Add `agent_sessions.messages` JSONB — store full prompt + response on error for replay | High |
+| **Remove 500-char truncation** | `tasks.error` column should store the full error, not truncated | Medium |
+
+### C. Task State Machine Validation
+
+**Problem:** Task status transitions are not validated. Tasks can move from `complete` back to `queued` if the reaper races with the executor. No transition table enforced.
+
+| Fix | Description | Severity |
+|---|---|---|
+| **Transition table** | Define valid `(current_status, new_status)` pairs. Reject invalid transitions with ERROR log | High |
+| **Terminal state protection** | Once in `complete`, `failed`, or `cancelled` — no further transitions allowed | High |
+| **CAS status updates** | `UPDATE tasks SET status = $2 WHERE id = $1 AND status = $3` — compare-and-swap prevents races | High |
+
+### D. Recovery Strategy Improvements
+
+**Problem:** Recovery decisions use substring matching on truncated error strings. `"not found"` in any error triggers escalation — even `ConnectionRefusedError: not found [Errno 111]`.
+
+| Fix | Description | Severity |
+|---|---|---|
+| **Structured error classification** | Classify errors by type (timeout, auth, validation, connection, resource) not by substring | High |
+| **Exponential backoff for transient errors** | Connection/timeout errors retry with increasing delay, not immediate | High |
+| **Terminal error fast-fail** | Auth/permission/validation errors escalate immediately, no retry | Medium |
+
+### E. Heartbeat & Concurrency Fixes
+
+**Problem:** Heartbeat loop swallows all exceptions silently. If Redis drops, the loop continues but the reaper sees no heartbeat and retries the task — causing duplicate work.
+
+| Fix | Description | Severity |
+|---|---|---|
+| **Heartbeat failure counter** | After 3 consecutive heartbeat failures, cancel the pipeline and mark task failed | High |
+| **Parallel group exception handling** | If a critical agent (guardrail) crashes in a parallel group, fail the pipeline instead of continuing | High |
+| **Atomic task enqueue** | Lua script for atomic SADD + LPUSH to prevent dedup race | Medium |
+| **Dead letter TTL** | Auto-expire dead letter entries after 30 days to prevent unbounded growth | Low |
+
+### F. Prompt Security
+
+**Problem:** User input is interpolated directly into agent prompts without escaping. Code Review feedback is injected without sanitization.
+
+| Fix | Description | Severity |
+|---|---|---|
+| **XML tag boundaries** | Wrap user input in `<USER_REQUEST>...</USER_REQUEST>` tags | Medium |
+| **Escape feedback injection** | Code Review issues wrapped in code fences, not raw interpolation | Medium |
+| **Context compaction preserves structure** | Compacted state keeps structured fields, not just plain text summary | Medium |
+
+### G. Observability
+
+| Fix | Description | Severity |
+|---|---|---|
+| **Checkpoint save retry** | Retry checkpoint saves 3× with backoff before giving up | Medium |
+| **Read-after-write verification** | After agent completes, verify checkpoint was persisted | Low |
+| **Clarification timeout per-cycle** | Check stale clarifications every reaper cycle, not every 60 cycles | Low |
+
+### Implementation Order
+
+| Step | Deliverable | Effort |
+|---|---|---|
+| **1** | Pydantic output models + validation in `think_json()` | 2 days |
+| **2** | Error context: stack traces, structured errors, messages JSONB | 2 days |
+| **3** | Task state machine with CAS transitions | 1 day |
+| **4** | Recovery strategy with structured error classification | 1 day |
+| **5** | Heartbeat failure counter + parallel group fix | 1 day |
+| **6** | Prompt security (XML boundaries, escaped feedback) | 1 day |
+| **7** | Observability (checkpoint retry, clarification timeout) | 1 day |
 
 ---
 
@@ -1398,6 +1491,22 @@ Nova agent
     │                                                     │
     └─────────────────────────────────────────────────────┘
     │
+    ├─── Task Diagnosis Tools (NEW — audit-critical) ────┐
+    │                                                     │
+    │  diagnose_task()     → full error context, stack    │
+    │                        trace, stage outputs,        │
+    │                        checkpoint data, LLM msgs    │
+    │  get_stage_output()  → what a specific pipeline     │
+    │                        stage produced for a task     │
+    │  get_recent_errors() → error patterns across tasks  │
+    │                        (frequency, stage, type)      │
+    │  get_task_timeline() → full lifecycle with events,  │
+    │                        durations, retries            │
+    │  analyze_failure()   → LLM-assisted root cause      │
+    │                        analysis of a failed task     │
+    │                                                     │
+    └─────────────────────────────────────────────────────┘
+    │
     ├─── Self-Modification (guarded) ────────────────────┐
     │                                                     │
     │  update_config()     → change routing, models,      │
@@ -1426,6 +1535,11 @@ Nova agent
 | **`health_check`** | Service health, provider availability, model discovery, queue depth |
 | **`get_capabilities`** | Enabled features, installed MCP servers, available tools, active integrations |
 | **`get_own_logs`** | Read recent orchestrator/gateway/memory-service logs (filtered, not raw) |
+| **`diagnose_task`** | Full task post-mortem: error context, stack trace, all stage outputs, checkpoint data, LLM messages, guardrail findings, code review verdicts. This is the core tool that enables "why did this task fail?" |
+| **`get_stage_output`** | Retrieve what a specific pipeline stage produced for a given task — context agent findings, task agent output, guardrail results, code review verdict |
+| **`get_recent_errors`** | Error pattern analysis across recent tasks — frequency, which stages fail, common error types, systemic vs one-off |
+| **`get_task_timeline`** | Full task lifecycle: creation, queue time, each stage start/end, retries, heartbeat gaps, final resolution |
+| **`analyze_failure`** | LLM-assisted root cause analysis — given a failed task, read all context and generate a diagnosis with recommended next steps |
 
 ### C. Self-Modification Tools (write, guarded)
 
@@ -3252,36 +3366,95 @@ Sourced from analysis of OpenClaw, IronClaw, PicoClaw, NanoClaw, CrewAI, LangGra
 | **Priority queue** | LangGraph | Redis sorted set for task priority levels; high-priority tasks shouldn't wait behind batch jobs | Phase 5.5 or 6 |
 | **OpenTelemetry tracing** | LangGraph, CrewAI | Distributed tracing across all 5 services for task lifecycle observability | Phase 5.5 |
 
+### OpenClaw Parity — Capabilities Gap (2026-03-25 Audit)
+
+> OpenClaw (335K stars, MIT, TypeScript) is a different *category* of product — a personal agent runtime
+> focused on interfaces and execution, while Nova is a cognitive architecture focused on thinking, memory,
+> and planning. Nova's engram memory, spreading activation, and cortex are genuinely ahead. But OpenClaw
+> is more *helpful* because it meets users where they are. These are the capabilities worth adopting.
+
+| Feature | OpenClaw Has | Nova Status | Target Phase | Priority |
+|---|---|---|---|---|
+| **CDP browser automation** | Dedicated Chromium via CDP. Navigate, click, type, screenshot, extract data. Agent can browse the web and interact with web UIs autonomously. | Spec written (Phase 9 Computer Use). Not implemented. Playwright MCP available but not integrated as native tool. | Phase 9 | High |
+| **Multi-platform messaging** | 20+ platforms: WhatsApp, Discord, Signal, iMessage, Google Chat, IRC, Teams, Matrix, LINE, etc. | Telegram + Slack via chat-bridge. | Phase 8c+ | High |
+| **Skill/plugin ecosystem** | ClawHub: 13,700+ community skills. Markdown-based skill format with frontmatter. Agent can write and deploy its own skills. | Skills table designed (Phase 5c) but not implemented. No marketplace, no community skills. | Phase 5c → Phase 15 | High |
+| **Mobile/device integration** | iOS, Android, macOS native apps. Camera, location, notifications, SMS, contacts, calendar exposed to agent. | None. Dashboard is web-only. | Phase 15+ | Medium |
+| **Voice I/O** | Wake words on macOS/iOS. Continuous voice on Android. ElevenLabs + system TTS. | None. Text-only. | Phase 15+ | Medium |
+| **Agent-rendered UI (A2UI)** | Live Canvas — agent generates interactive visual workspaces. | None. Chat + static dashboard. | Phase 15+ | Low |
+| **Self-extension** | Agent can create/modify its own skills and plugins through conversation. Writes SKILL.md files, deploys them. | Partial via Cortex improve drive, but no skill authoring mechanism. | Phase 5c + 7a | Medium |
+| **Onboarding simplicity** | `openclaw onboard --install-daemon`. Single command, guided setup. | Docker Compose stack + `./scripts/setup.sh`. Higher barrier. | Phase 6c (CLI) | Medium |
+
+**What Nova has that OpenClaw doesn't:**
+- Engram Network (graph-based cognitive memory with spreading activation, consolidation, neural re-ranker)
+- Quartet Pipeline (5-stage safety chain with guardrails on every task)
+- Cortex (autonomous brain with goals, drives, budget tracking)
+- Knowledge acquisition (intel-worker + knowledge-worker autonomous information gathering)
+- Recovery service (backup/restore, factory reset, service management)
+- Multi-provider LLM routing with local/cloud strategies
+
+**Key takeaway:** Nova doesn't need to replicate OpenClaw's breadth. Focus on: (1) CDP browser control (already spec'd), (2) more messaging platforms, (3) skill ecosystem. Those three close the biggest utility gap.
+
 ---
 
-## Feature Completeness Audit (2026-03-25)
+## Feature Completeness Audit (2026-03-25, revised)
 
-Full audit report: [`docs/feature-audit-2026-03-25.md`](feature-audit-2026-03-25.md)
+> Updated by full-stack audit on 2026-03-25 using 7 parallel analysis agents covering roadmap,
+> self-awareness, pipeline, memory, cortex, dashboard, and competitive landscape.
 
-**Summary:** Nova is ~85-90% feature-complete for autonomous operation. Core systems (pipeline, LLM gateway, engram memory, cortex, intel, chat, dashboard, recovery, auth) are fully implemented. Knowledge sources system is 75% complete (credential flow stubbed). Neural router is architecturally complete but needs 200+ observations to activate training.
+**Summary:** Nova is ~70% complete as an autonomous platform. Core infrastructure (services, auth, memory, pipeline, dashboard) is solid. The 30% that's missing is the part that makes Nova *actually useful*: self-awareness, pipeline reliability, cortex feedback loops, and user-facing utility features. The platform can't yet diagnose its own failures, and the autonomous brain dispatches tasks without checking if they succeeded.
 
-### Roadmap vs. Reality
+### Roadmap vs. Reality (Corrected)
 
-| Phase | Roadmap Says | Actual Status |
+| Phase | Status | % Done | Key Finding |
+|---|---|---|---|
+| 1-3 (Core, Auth, Tools) | ✅ Delivered | 100% | Solid foundation |
+| 4 (Quartet Pipeline + Queue) | ✅ Delivered | 95% | Works but has reliability gaps (see Phase 4c) |
+| **4c (Pipeline Reliability)** | **NEW** | 0% | **Critical** — agent output validation missing, error context destroyed, state machine unvalidated |
+| 4b (Pipeline Perf) | 🔄 Partial | 50% | Tier 1 quick wins done; Tier 2-3 (prompt caching, speculative execution, streaming-first) not started |
+| 5 (Dashboard MVP) | ✅ Delivered | 85% | Chat production-grade; task error visibility poor; goal editing missing |
+| 5b (Dashboard Enhancement) | 🔄 Partial | 40% | Pod config done, settings expansion done; pipeline editor, session replay, activity feed not built |
+| 5c (Skills & Rules) | ❌ Not started | 0% | Detailed spec exists, zero code |
+| 5.5 (Hardening) | ✅ Delivered | 100% | |
+| 6 (Engram Memory) | ✅ Delivered | 70% | Ingestion, activation, reconstruction, working memory, consolidation all working. Neural router training not auto-triggered. |
+| 6b (Code Quality) | ✅ Delivered | 100% | |
+| 6c (SDK, CLI/TUI) | ❌ Not started | 0% | 375-line spec, zero code. Blocks CI/CD and scripting. |
+| 6d (Platform Hardening) | ✅ Delivered | 100% | |
+| 7 (Self-Directed Autonomy) | 🔄 Partial | 60% | Cortex brain loop works; goal decomposition missing; **no task feedback loop** — dispatches then forgets |
+| **7a (Self-Introspection)** | ❌ Not started | 0% | **Most critical gap.** Nova has zero tools to introspect its own state. Diagnostic endpoints exist for dashboard but agents can't call them. When tasks fail, Nova asks the *user* what happened. |
+| 7b (Supernova) | ❌ Not started | 0% | Investigation phase — evaluate structured workflows |
+| 8b (MCP Hub) | 🔄 Scaffolding | 10% | Framework built, catalog not populated |
+| 8c (Chat Integrations) | 🔄 Partial | 30% | Telegram + Slack done. 18+ platforms missing vs OpenClaw. |
+| 9 (Triggers + Computer Use) | 🔄 Partial | 40% | Intel/knowledge workers do autonomous polling. CDP browser spec written, not implemented. Webhooks/cron not built. |
+| 12 (Inference Backends) | 🔄 Partial | 60% | Ollama works; multi-backend orchestration not built |
+| 13 (Multi-Tenancy) | 🔄 Schema only | 5% | Tables exist, enforcement missing, queries don't filter by tenant |
+| 14+ (SaaS, Edge, Multi-Cloud) | ❌ Not started | 0% | |
+
+### Current Priority Stack
+
+Based on this audit, the recommended execution order:
+
+| Priority | Phase | Effort | Why |
+|---|---|---|---|
+| **P0** | **4c** Pipeline Reliability | 1-2 weeks | Pipeline must be trustworthy before autonomy is viable |
+| **P0** | **7a** Self-Introspection (diagnosis tools) | 3 days | Core user complaint — Nova can't diagnose its own failures |
+| **P1** | **7** Cortex feedback loop | 2 days | Brain must know if tasks succeeded before it can plan |
+| **P1** | **5c** Skills & Rules | 2 weeks | Enables agent customization without code changes |
+| **P2** | **6c** SDK + CLI | 6-7 weeks | Blocks CI/CD, scripting, all external integration |
+| **P2** | **9** CDP Browser Control | 2-3 weeks | Biggest utility gap vs OpenClaw |
+| **P3** | **8c** More messaging platforms | 3-4 weeks | WhatsApp, Discord, Signal via chat-bridge |
+| **P3** | **5c+** Skill ecosystem | 4-6 weeks | Community extensibility |
+
+### Cortex-Specific Gaps (from audit)
+
+| Gap | Impact | Fix Effort |
 |---|---|---|
-| 1-4, 5, 5.5, 6, 6b, 6d | Delivered | Confirmed delivered |
-| 4b (Pipeline Perf) | In Progress | Mostly delivered |
-| 5b (Dashboard Enhancement) | In Progress | Partially done (pod mgmt done, settings expansion pending) |
-| 5c (Skills & Rules) | In Progress | **Not started** -- no implementation exists |
-| 6c (SDK, CLI/TUI) | In Progress | **Not started** -- no code |
-| 7 (Self-Directed Autonomy) | In Progress | **Partially delivered** via Cortex + goals |
-| 7a (Self-Introspection) | In Progress | **Not started** |
-| 8c (Chat Integrations) | Planned | **Partially delivered** -- Telegram + Slack done via chat-bridge |
-| 13 (RBAC & Multi-Tenancy) | Planned | **Partially delivered** -- RBAC + tenant schema exist |
-| All others (7b-12, 14) | Planned | Not started |
-
-### Action Items for Discussion
-
-1. **Roadmap accuracy** -- Several phases marked "In Progress" have no implementation. Update status markers.
-2. **Priority reordering** -- Cortex + intel + knowledge delivered features that span multiple roadmap phases. The linear phase ordering doesn't reflect how work actually progressed.
-3. **Knowledge Sources** -- New feature (not in original roadmap). Needs a phase assignment and the remaining gaps tracked.
-4. **Quick wins** -- Credential wiring, health check validation, SSRF consolidation, nova-worker-common unit tests.
-5. **Strategic direction** -- Which of the unstarted phases (5c Skills, 6c SDK, 7a Self-Introspection, 7b Supernova, 9 Triggers) should be next?
+| **No task completion feedback** | Cortex dispatches tasks then never checks results. If task fails, cortex doesn't know. | 1-2 days |
+| **Hardcoded outcome scores** | Reports 0.2 (failure) or 0.7 (success) — no actual measurement | 1 day |
+| **No goal progress tracking** | `progress` field never updated, always 0.0 | 1 day |
+| **No goal decomposition** | Can't break "build a feature" into subtask DAG. One blob per cycle. | 2-3 weeks |
+| **Maturation pipeline stub** | Status columns exist but no executor transitions goals through phases | 2-3 days |
+| **No learning from failures** | Writes reflections but never reads them back. No "that approach failed, try differently." | 1 week |
+| **Zero test coverage** | No cortex-specific integration tests | 2 days |
 
 ---
 
@@ -3289,15 +3462,29 @@ Full audit report: [`docs/feature-audit-2026-03-25.md`](feature-audit-2026-03-25
 
 ### Bugs & Technical Debt
 
-- **MCP tools invisible to agents** — pipeline agents and interactive runner import static `ALL_TOOLS` (built-ins only); `get_all_tools()` exists but nothing calls it. Tracked in Phase 5.5 and Phase 6b.
-- **Streaming token counts broken** — `orchestrator/app/agents/runner.py` returns 0 tokens for streaming responses; usage tracking is broken for the primary interaction mode
-- **Reaper race condition** — `orchestrator/app/reaper.py` TOCTOU between UPDATE and enqueue_task can cause double-queuing
+**Resolved:**
+- ~~MCP tools invisible to agents~~ — fixed in Phase 5.5 (`get_all_tools()` now called)
+- ~~Streaming token counts broken~~ — fixed (`stream_options={"include_usage": True}`)
+- ~~Reaper race condition~~ — fixed (Redis SET dedup gate, CAS UPDATE)
+- ~~Embedding cache broken~~ — fixed (`CAST(x AS type)` syntax)
+- ~~`parallel_group` ignored~~ — fixed (migration 026, parallel Guardrail + Code Review)
+
+**Active (tracked in Phase 4c):**
+- **Agent output schemas not validated** — `nova-contracts` Pydantic models exist but aren't validated at service boundaries; agents can return wrong keys and garbage passes through pipeline silently
+- **Error context destroyed on failure** — only `str(exc)` stored, no stack traces, no intermediate outputs, no LLM messages. Post-mortem debugging impossible.
+- **Task state machine unvalidated** — tasks can transition from `complete` back to `queued` in race conditions
+- **Recovery strategy uses substring matching** — `"not found"` in any error triggers escalation, even connection errors
+- **Heartbeat loop swallows exceptions** — Redis failures cause silent duplicate work
+- **Parallel group exceptions silently dropped** — if guardrail crashes in parallel group, pipeline continues
+- **Prompt injection in pipeline** — user input interpolated directly into agent prompts without XML boundaries
+
+**Active (other):**
 - **No circuit breaker for LLM providers** — if a provider is down, requests fail immediately instead of routing to fallback
 - **DB connection pool has no idle validation** — stale connections after Postgres restarts aren't detected
 - **Admin secret default not rejected in production** — `nova-admin-secret-change-me` is accepted without warning
-- **`parallel_group` field exists but is ignored** — pipeline executor runs stages sequentially within a task. Note: multiple *tasks* already run in parallel via Redis BRPOP; the bottleneck is Ollama serializing inference requests (addressed in Phase 12)
-- **Contracts not enforced** — `nova-contracts` Pydantic models exist but aren't validated at service boundaries; agent responses are unchecked dicts
-- **Embedding cache fixed** — `embedding_cache` write-through was broken by SQLAlchemy `::cast` syntax; fixed with `CAST(x AS type)` syntax (2026-03-06)
+- **Dead letter queue grows unbounded** — no TTL, no cleanup, no archival
+- **Cortex has zero test coverage** — no integration tests for goals, drives, or thinking loop
+- **Cortex dispatches tasks without feedback** — never checks if task succeeded, hardcodes outcome scores
 
 ### Phase 3 — End-to-End Tool Testing (partially addressed)
 
@@ -3321,24 +3508,28 @@ Four named access levels (isolated → nova → workspace → host). Only `works
 
 ---
 
-## Competitive Landscape Summary
+## Competitive Landscape Summary (Updated 2026-03-25)
 
 ### What Nova Has That Others Don't
 
-- **Quartet pipeline with safety rails on every task** — most platforms have no built-in guardrail or code review step
-- **9-provider LLM routing** including subscription-based (Claude Max, ChatGPT) for zero API cost
-- **Full admin dashboard** — most open-source platforms are CLI-only
-- **Hybrid RRF retrieval** — more sophisticated than the pure-vector approach used by competitors
-- **4-tier memory schema** — working/episodic/semantic/procedural with proper indexes
-- **MCP integration** — ahead of most; only NanoClaw and OpenAI Agents SDK have this
+- **Engram Network** — Graph-based cognitive memory with spreading activation, consolidation cycles, entity resolution, contradiction detection, and neural re-ranker. Far ahead of any competitor's memory system.
+- **Quartet pipeline with safety rails** — 5-stage chain (Context → Task → Guardrail → Code Review → Decision) on every task. Most platforms have no built-in guardrail or code review.
+- **Cortex autonomous brain** — Thinking loop with goals, 5 drives, budget tracking, stimulus processing. No competitor has a comparable self-directed planning layer.
+- **Multi-provider LLM routing** — 9+ providers including subscription-based (Claude Max, ChatGPT) for zero API cost. Local/cloud routing strategies.
+- **Knowledge acquisition** — Intel-worker (RSS, Reddit, GitHub trending) + knowledge-worker (LLM-guided web crawling) for autonomous information gathering. Unique capability.
+- **Full admin dashboard** — Production-grade React UI with chat, task tracking, memory graph, goal management, recovery tools.
+- **Recovery service** — Dedicated backup/restore, factory reset, service management. Stays alive when other services crash.
+- **MCP integration** — HTTP MCP client for external tool servers.
 
 ### Where Nova Lags
 
-- **Testing** — integration test suite exists (35 tests across all services) but no unit tests, property tests, or CI pipeline yet
-- **Observability** — no structured logging, tracing, or metrics vs. LangGraph's built-in tracing
-- **Tool sandboxing** — host execution vs. IronClaw's WASM and NanoClaw's container isolation
-- **Dynamic agent composition** — fixed pipeline vs. NanoClaw's Agent Swarms and CrewAI's dynamic crews
-- **Edge deployment** — Docker-only vs. PicoClaw's 10MB footprint on RISC-V
+- **Self-awareness** — Nova can't diagnose its own failures, inspect its own state, or explain what went wrong. OpenClaw has `openclaw doctor` and operational self-inspection. **Phase 7a addresses this.**
+- **User-facing utility** — OpenClaw connects to 20+ messaging platforms, has browser automation, voice, mobile apps. Nova has Telegram + Slack + web dashboard. **Phases 8c, 9, 15 address this.**
+- **Skill ecosystem** — OpenClaw has 13,700+ community skills with ClawHub registry. Nova has no plugin/skill system. **Phase 5c addresses this.**
+- **Pipeline reliability** — Agent outputs aren't validated, error context is lost, tasks can enter invalid states. **Phase 4c addresses this.**
+- **Testing** — 35 integration tests across all services but no unit tests, no cortex tests, no CI pipeline.
+- **Tool sandboxing** — Host execution vs. IronClaw's WASM and NanoClaw's container isolation.
+- **Onboarding** — Docker Compose + setup script vs. OpenClaw's single-command install.
 
 ---
 

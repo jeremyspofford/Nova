@@ -20,6 +20,7 @@ import asyncio
 import hashlib
 import logging
 import time
+import traceback as tb_module
 from dataclasses import dataclass
 from typing import Any
 
@@ -126,7 +127,19 @@ async def execute_pipeline(task_id: str) -> None:
         await _run_pipeline(task_id)
     except Exception as exc:
         logger.exception(f"Pipeline error for task {task_id}: {exc}")
-        await mark_task_failed(task_id, error=str(exc))
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        error_context = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+            "stage": "pipeline",
+            "elapsed_ms": elapsed_ms,
+            "retryable": not isinstance(exc, (ValueError, TypeError, KeyError)),
+        }
+        await mark_task_failed(
+            task_id,
+            error=str(exc),
+            error_context=error_context,
+        )
     finally:
         heartbeat_task.cancel()
         await asyncio.gather(heartbeat_task, return_exceptions=True)
@@ -136,17 +149,25 @@ async def execute_pipeline(task_id: str) -> None:
         clear_context()
 
 
-async def mark_task_failed(task_id: str, error: str) -> None:
+async def mark_task_failed(
+    task_id: str,
+    error: str,
+    error_context: dict | None = None,
+) -> None:
     """Mark a task as failed. Called by queue._run_with_error_guard on crash."""
+    import json as _json
+
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE tasks
-            SET status = 'failed', error = $2, completed_at = now()
+            SET status = 'failed', error = $2, error_context = $3::jsonb,
+                completed_at = now()
             WHERE id = $1 AND status NOT IN ('complete','failed','cancelled')
             """,
             task_id, error,
+            _json.dumps(error_context) if error_context else None,
         )
     await _backfill_training_success(task_id, success=False)
     await _audit(task_id, "task_failed", "error", {"error": error})
@@ -738,8 +759,55 @@ async def _run_agent(
 
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - start) * 1000)
+        traceback_str = tb_module.format_exc()
         logger.error(f"Agent '{agent.role}' error on task {task_id}: {exc}")
-        await _fail_session(session_id, str(exc), elapsed_ms)
+
+        # Collect LLM conversation history from training log if available
+        llm_messages = None
+        if instance._training_log:
+            llm_messages = [
+                {"messages": entry["messages"], "response": entry["response"]}
+                for entry in instance._training_log
+            ]
+
+        total_tokens = (
+            instance._usage.get("input_tokens", 0)
+            + instance._usage.get("output_tokens", 0)
+        )
+        used_model = instance._usage.get("model") or model
+
+        await _fail_session(
+            session_id, str(exc), elapsed_ms,
+            traceback_str=traceback_str,
+            messages=llm_messages,
+            token_count=total_tokens or None,
+            model_used=used_model,
+        )
+
+        # Store raw LLM output in session when JSON parsing failed (post-mortem)
+        if getattr(instance, "_last_raw_output", None):
+            try:
+                pool = get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        "UPDATE agent_sessions SET output = $2::jsonb WHERE id = $1",
+                        session_id,
+                        {"_raw_llm_output": instance._last_raw_output},
+                    )
+            except Exception:
+                logger.debug("Failed to store raw LLM output for session %s", session_id)
+
+        # Build structured error_context for the task
+        import json as _json
+        error_context = {
+            "type": type(exc).__name__,
+            "message": str(exc),
+            "stage": agent.role,
+            "model": used_model,
+            "tokens": total_tokens,
+            "elapsed_ms": elapsed_ms,
+            "retryable": not isinstance(exc, (ValueError, TypeError, KeyError)),
+        }
 
         if agent.on_failure == "skip":
             logger.info(f"Agent '{agent.role}' failed with on_failure=skip — continuing")
@@ -747,7 +815,12 @@ async def _run_agent(
         if agent.on_failure == "escalate":
             await _pause_for_human_review(task_id, f"Agent '{agent.role}' failed: {exc}", state)
             return None, session_id
-        # on_failure == "abort" (default)
+        # on_failure == "abort" (default) — propagate error_context to task
+        await mark_task_failed(
+            task_id,
+            error=f"Agent '{agent.role}' failed: {exc}",
+            error_context=error_context,
+        )
         return None, session_id
     finally:
         reset_sandbox(sandbox_token)
@@ -1139,17 +1212,33 @@ async def _complete_session(
             )
 
 
-async def _fail_session(session_id: str, error: str, elapsed_ms: int) -> None:
+async def _fail_session(
+    session_id: str,
+    error: str,
+    elapsed_ms: int,
+    traceback_str: str | None = None,
+    messages: list[dict] | None = None,
+    token_count: int | None = None,
+    model_used: str | None = None,
+) -> None:
+    import json as _json
+
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
             UPDATE agent_sessions
             SET status = 'failed', error = $2,
-                completed_at = now(), duration_ms = $3
+                completed_at = now(), duration_ms = $3,
+                traceback = $4, messages = $5::jsonb,
+                token_count = $6, model_used = $7
             WHERE id = $1
             """,
             session_id, error, elapsed_ms,
+            traceback_str,
+            _json.dumps(messages) if messages else None,
+            token_count,
+            model_used,
         )
 
 

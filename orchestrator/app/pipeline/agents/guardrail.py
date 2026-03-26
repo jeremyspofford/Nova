@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 
 from .base import BaseAgent, PipelineState
+from ..schemas import GuardrailOutput
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +121,7 @@ class GuardrailAgent(BaseAgent):
             {"role": "system", "content": TIER1_SYSTEM},
             self._user_message(f"Review this task output:\n\n{output_text}"),
         ]
-        tier1_result = await self.think_json(tier1_messages, purpose="guardrail_tier1")
+        tier1_result = await self.think_json(tier1_messages, purpose="guardrail_tier1", output_schema=GuardrailOutput)
 
         # Normalise
         tier1_result.setdefault("blocked", False)
@@ -150,7 +151,7 @@ class GuardrailAgent(BaseAgent):
                 ),
             ]
             tier2_result = await tier2_agent.think_json(
-                tier2_messages, purpose="guardrail_tier2"
+                tier2_messages, purpose="guardrail_tier2", output_schema=GuardrailOutput,
             )
             # Merge Tier 2 usage into self so executor can capture it
             for key in ("input_tokens", "output_tokens", "llm_calls"):
