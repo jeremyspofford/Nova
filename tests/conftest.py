@@ -32,6 +32,10 @@ SERVICE_URLS = {
     "memory-service": MEMORY_URL,
     "chat-api": CHAT_API_URL,
     "recovery": RECOVERY_URL,
+}
+
+# Optional services started via --profile flags; excluded from parametrized health tests
+OPTIONAL_SERVICE_URLS = {
     "knowledge-worker": KNOWLEDGE_WORKER_URL,
 }
 
