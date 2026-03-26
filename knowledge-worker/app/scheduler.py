@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 # Max 3 concurrent crawls
 _crawl_semaphore = asyncio.Semaphore(3)
 
+# Source IDs currently being crawled — prevents duplicate concurrent crawls
+# of the same source if the scheduling loop fires before a crawl finishes.
+_active_crawls: set[str] = set()
+
 
 async def run_scheduling_loop(config, get_orch_client, get_llm_client, push_to_engram):
     """Main scheduling loop. Fetches active sources, runs due crawls."""
@@ -37,7 +41,12 @@ async def run_scheduling_loop(config, get_orch_client, get_llm_client, push_to_e
             sources = resp.json()
 
             for source in sources:
+                sid = source["id"]
+                if sid in _active_crawls:
+                    logger.debug("Skipping source %s — crawl already in progress", sid)
+                    continue
                 if _is_due(source, config.poll_interval):
+                    _active_crawls.add(sid)
                     # Fire and forget -- semaphore limits concurrency
                     asyncio.create_task(
                         _run_crawl(source, config, orch, llm, push_to_engram)
@@ -69,39 +78,42 @@ def _is_due(source: dict, default_interval: int) -> bool:
 
 async def _run_crawl(source, config, orch_client, llm_client, push_to_engram):
     """Run a single crawl within the concurrency semaphore."""
-    async with _crawl_semaphore:
-        source_id = source["id"]
-        source_name = source.get("name", source_id)
-        logger.info("Starting crawl for source %s", source_name)
+    source_id = source["id"]
+    source_name = source.get("name", source_id)
+    try:
+        async with _crawl_semaphore:
+            logger.info("Starting crawl for source %s", source_name)
 
-        from .extractors import get_extractor
+            from .extractors import get_extractor
 
-        extractor = get_extractor(source["url"])
+            extractor = get_extractor(source["url"])
 
-        try:
-            if extractor:
-                await _run_extractor(
-                    extractor, source, source_id, orch_client, push_to_engram,
-                )
-            else:
-                await _run_general_crawl(
-                    source, source_id, config, orch_client, llm_client, push_to_engram,
-                )
-
-            logger.info("Crawl complete for source %s", source_name)
-
-        except Exception as e:
-            logger.error("Crawl failed for source %s: %s", source_id, e)
             try:
-                await orch_client.patch(
-                    f"/api/v1/knowledge/sources/{source_id}/status",
-                    json={
-                        "status": "error",
-                        "error_count": source.get("error_count", 0) + 1,
-                    },
-                )
-            except Exception:
-                pass
+                if extractor:
+                    await _run_extractor(
+                        extractor, source, source_id, orch_client, push_to_engram,
+                    )
+                else:
+                    await _run_general_crawl(
+                        source, source_id, config, orch_client, llm_client, push_to_engram,
+                    )
+
+                logger.info("Crawl complete for source %s", source_name)
+
+            except Exception as e:
+                logger.error("Crawl failed for source %s: %s", source_id, e)
+                try:
+                    await orch_client.patch(
+                        f"/api/v1/knowledge/sources/{source_id}/status",
+                        json={
+                            "status": "error",
+                            "error_count": source.get("error_count", 0) + 1,
+                        },
+                    )
+                except Exception:
+                    pass
+    finally:
+        _active_crawls.discard(source_id)
 
 
 async def _run_extractor(extractor, source, source_id, orch_client, push_to_engram):
