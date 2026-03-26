@@ -15,7 +15,16 @@ from cryptography.hazmat.primitives import hashes
 
 
 class BuiltinCredentialProvider:
-    """Sync-only envelope encryption using AES-256-GCM + HKDF tenant subkeys.
+    """Low-level crypto operations for credential envelope encryption.
+
+    Provides sync-only AES-256-GCM + HKDF tenant subkey encryption/decryption.
+    This class is intentionally NOT a subclass of ``CredentialProvider`` from
+    ``nova_worker_common.credentials.provider``.  The abstract interface requires
+    async database I/O (store, retrieve, rotate, delete, validate) that has no
+    place in a pure-crypto layer.  Services build full async ``CredentialProvider``
+    implementations on top of this class — ``BuiltinCredentialProvider`` handles
+    the "how to encrypt bytes" problem; the service layer handles persistence and
+    retrieval.
 
     Args:
         master_key_hex: 64-character hex string (32 bytes).
