@@ -1,3 +1,4 @@
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -76,6 +77,12 @@ class Settings(BaseSettings):
     # Header containing the real client IP when behind a trusted reverse proxy
     # e.g. CF-Connecting-IP (Cloudflare), X-Real-IP (nginx), X-Forwarded-For
     trusted_proxy_header: str = ""
+
+    # Self-knowledge: inject platform architecture/diagnostic guidance into chat prompts
+    self_knowledge_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("NOVA_SELF_KNOWLEDGE", "SELF_KNOWLEDGE_ENABLED"),
+    )
 
     # Clarification loop
     clarification_max_rounds: int = 2

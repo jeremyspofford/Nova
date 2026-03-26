@@ -35,6 +35,7 @@ from .checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+from .state_machine import transition_task_status
 
 logger = logging.getLogger(__name__)
 
@@ -118,13 +119,18 @@ async def execute_pipeline(task_id: str) -> None:
     logger.info(f"Pipeline starting for task {task_id}")
     start = time.monotonic()
 
+    # Cancellation signal — heartbeat loop sets this if it fails repeatedly,
+    # so the pipeline can abort instead of running unprotected.
+    heartbeat_cancel_event = asyncio.Event()
+
     # Start heartbeat loop in background — keeps task alive in Reaper's eyes
     heartbeat_task = asyncio.create_task(
-        _heartbeat_loop(task_id), name=f"heartbeat:{task_id}"
+        _heartbeat_loop(task_id, heartbeat_cancel_event),
+        name=f"heartbeat:{task_id}",
     )
 
     try:
-        await _run_pipeline(task_id)
+        await _run_pipeline(task_id, heartbeat_cancel_event)
     except Exception as exc:
         logger.exception(f"Pipeline error for task {task_id}: {exc}")
         elapsed_ms = int((time.monotonic() - start) * 1000)
@@ -157,18 +163,19 @@ async def mark_task_failed(
     """Mark a task as failed. Called by queue._run_with_error_guard on crash."""
     import json as _json
 
+    error_ctx_json = _json.dumps(error_context) if error_context else None
+
+    ok = await transition_task_status(
+        task_id, "failed",
+        extra_sets=", error = $4, error_context = $5::jsonb, completed_at = now()",
+        extra_args=[error, error_ctx_json],
+    )
+    if not ok:
+        logger.warning("mark_task_failed: transition to 'failed' rejected for task %s", task_id)
+        return
+
     pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE tasks
-            SET status = 'failed', error = $2, error_context = $3::jsonb,
-                completed_at = now()
-            WHERE id = $1 AND status NOT IN ('complete','failed','cancelled')
-            """,
-            task_id, error,
-            _json.dumps(error_context) if error_context else None,
-        )
+
     await _backfill_training_success(task_id, success=False)
     await _audit(task_id, "task_failed", "error", {"error": error})
     # Emit activity event for dashboard feed
@@ -182,7 +189,7 @@ async def mark_task_failed(
 
 # ── Core pipeline logic ────────────────────────────────────────────────────────
 
-async def _run_pipeline(task_id: str) -> None:
+async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | None = None) -> None:
     task = await _load_task(task_id)
     if not task:
         logger.error(f"Task {task_id} not found in DB — skipping")
@@ -208,8 +215,13 @@ async def _run_pipeline(task_id: str) -> None:
     if complexity:
         logger.info(f"Task {task_id}: complexity classified as '{complexity}'")
 
-    # Mark task as started
-    await _set_task_status(task_id, "queued")
+    # Touch heartbeat and mark task as started (pod_id, started_at)
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE tasks SET last_heartbeat_at = now() WHERE id = $1",
+            task_id,
+        )
     await _touch_task_started(task_id, pod.id)
 
     # Restore pipeline state from checkpoint (for retry resume)
@@ -247,6 +259,27 @@ async def _run_pipeline(task_id: str) -> None:
     i = 0
 
     while i < len(agents):
+        # ── Heartbeat cancellation check ──────────────────────────────
+        # If the heartbeat loop lost connectivity to Redis, abort early
+        # rather than continuing without reaper protection.
+        if heartbeat_cancel_event and heartbeat_cancel_event.is_set():
+            logger.error(
+                "Task %s: heartbeat lost — aborting pipeline to allow reaper recovery",
+                task_id,
+            )
+            await mark_task_failed(
+                task_id,
+                error="Pipeline aborted: heartbeat lost (Redis connectivity failure)",
+                error_context={
+                    "type": "HeartbeatLostError",
+                    "message": "Consecutive heartbeat write failures exceeded threshold",
+                    "stage": agents[i].role if i < len(agents) else "unknown",
+                    "retryable": True,
+                    "elapsed_ms": 0,
+                },
+            )
+            return
+
         agent = agents[i]
 
         # ── Parallel group detection ──────────────────────────────────
@@ -543,11 +576,28 @@ async def _run_parallel_group(
         return_exceptions=True,
     )
 
+    # Critical agent roles — if these crash, the pipeline cannot safely continue.
+    # Guardrail and code_review are safety gates; silently skipping them
+    # defeats their purpose.
+    CRITICAL_ROLES = frozenset({"guardrail", "code_review"})
+
     # Process results — merge into state
     abort = False
-    for outcome in results:
+    for i_result, outcome in enumerate(results):
         if isinstance(outcome, Exception):
-            logger.error(f"Task {task_id}: Parallel agent raised exception: {outcome}")
+            # Identify which agent this exception belongs to
+            failed_agent = eligible[i_result]
+            logger.error(
+                "Task %s: Parallel agent '%s' raised exception: %s",
+                task_id, failed_agent.role, outcome,
+            )
+            if failed_agent.role in CRITICAL_ROLES:
+                logger.error(
+                    "Task %s: Critical agent '%s' crashed — aborting pipeline",
+                    task_id, failed_agent.role,
+                )
+                raise outcome
+            # Non-critical agents can fail silently
             continue
 
         agent, result, session_id = outcome
@@ -1037,16 +1087,13 @@ async def _set_task_status(
     status: str,
     current_stage: str | None = None,
 ) -> None:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE tasks
-            SET status = $2, current_stage = COALESCE($3, current_stage),
-                last_heartbeat_at = now()
-            WHERE id = $1
-            """,
-            task_id, status, current_stage,
+    ok = await transition_task_status(
+        task_id, status, current_stage=current_stage,
+    )
+    if not ok:
+        logger.warning(
+            "_set_task_status: transition to '%s' failed for task %s — state machine rejected or CAS lost",
+            status, task_id,
         )
 
 
@@ -1060,16 +1107,22 @@ async def _touch_task_started(task_id: str, pod_id: str) -> None:
 
 
 async def _complete_task(task_id: str, output: str, state: PipelineState) -> None:
+    # Transition to 'completing' first, then to 'complete'
+    ok = await transition_task_status(task_id, "completing")
+    if not ok:
+        logger.error("_complete_task: failed to transition task %s to 'completing'", task_id)
+        return
+
+    ok = await transition_task_status(
+        task_id, "complete",
+        extra_sets=", output = $4, completed_at = now(), current_stage = NULL",
+        extra_args=[output],
+    )
+    if not ok:
+        logger.error("_complete_task: CAS failed transitioning task %s to 'complete'", task_id)
+        return
+
     pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE tasks
-            SET status = 'complete', output = $2, completed_at = now(), current_stage = NULL
-            WHERE id = $1
-            """,
-            task_id, output,
-        )
     await _audit(task_id, "task_complete", "info", {"flags": list(state.flags)})
     logger.info(f"Task {task_id} complete")
     # Emit activity event for dashboard feed
@@ -1119,18 +1172,14 @@ async def _pause_for_human_review(
         if parts:
             preview_output = "\n\n".join(parts)
 
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE tasks
-            SET status = 'pending_human_review',
-                output = COALESCE($3, output),
-                metadata = metadata || jsonb_build_object('escalation_message', $2::text),
-                current_stage = NULL
-            WHERE id = $1
-            """,
-            task_id, escalation_message, preview_output,
-        )
+    ok = await transition_task_status(
+        task_id, "pending_human_review",
+        extra_sets=", output = COALESCE($4, output), metadata = metadata || jsonb_build_object('escalation_message', $5::text), current_stage = NULL",
+        extra_args=[preview_output, escalation_message],
+    )
+    if not ok:
+        logger.warning("_pause_for_human_review: transition failed for task %s", task_id)
+        return
     await _audit(task_id, "task_escalated", "warning", {"message": escalation_message})
     logger.warning(f"Task {task_id} paused for human review: {escalation_message}")
     await _publish_notification("pending_human_review", task_id, "Task needs review", escalation_message)
@@ -1140,25 +1189,15 @@ async def _pause_for_clarification(task_id: str, questions: list[str]) -> None:
     """Pause pipeline for user clarification."""
     import json as _json
     from datetime import datetime, timezone
-    from uuid import UUID as _UUID
 
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            """
-            UPDATE tasks
-            SET status = 'clarification_needed',
-                metadata = COALESCE(metadata, '{}'::jsonb)
-                    || jsonb_build_object(
-                        'clarification_questions', $2::jsonb,
-                        'clarification_requested_at', $3::text
-                    )
-            WHERE id = $1
-            """,
-            _UUID(task_id) if not isinstance(task_id, _UUID) else task_id,
-            _json.dumps(questions),
-            datetime.now(timezone.utc).isoformat(),
-        )
+    ok = await transition_task_status(
+        task_id, "clarification_needed",
+        extra_sets=", metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('clarification_questions', $4::jsonb, 'clarification_requested_at', $5::text)",
+        extra_args=[_json.dumps(questions), datetime.now(timezone.utc).isoformat()],
+    )
+    if not ok:
+        logger.warning("_pause_for_clarification: transition failed for task %s", task_id)
+        return
     logger.info(f"Task {task_id}: paused for clarification ({len(questions)} questions)")
     await _publish_notification("clarification_needed", task_id, "Task needs clarification")
 
@@ -1355,17 +1394,41 @@ def _should_pause_for_review(
     return False
 
 
-async def _heartbeat_loop(task_id: str) -> None:
-    """Write a heartbeat every task_heartbeat_interval_seconds while the pipeline runs."""
+async def _heartbeat_loop(
+    task_id: str,
+    cancel_event: asyncio.Event,
+    max_consecutive_failures: int = 3,
+) -> None:
+    """
+    Write a heartbeat every task_heartbeat_interval_seconds while the pipeline runs.
+
+    Tracks consecutive failures. After max_consecutive_failures, sets cancel_event
+    so the main pipeline loop can detect the loss and abort cleanly instead of
+    running indefinitely without heartbeat protection.
+    """
     interval = settings.task_heartbeat_interval_seconds
+    consecutive_failures = 0
     while True:
         try:
             await write_heartbeat(task_id)
+            consecutive_failures = 0
             await asyncio.sleep(interval)
         except asyncio.CancelledError:
             break
         except Exception:
-            logger.exception(f"Heartbeat error for task {task_id}")
+            consecutive_failures += 1
+            logger.exception(
+                "Heartbeat error for task %s (consecutive failure %d/%d)",
+                task_id, consecutive_failures, max_consecutive_failures,
+            )
+            if consecutive_failures >= max_consecutive_failures:
+                logger.error(
+                    "Heartbeat for task %s failed %d times consecutively — "
+                    "signalling pipeline cancellation",
+                    task_id, consecutive_failures,
+                )
+                cancel_event.set()
+                break
             await asyncio.sleep(interval)
 
 

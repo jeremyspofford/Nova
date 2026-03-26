@@ -62,8 +62,12 @@ async def _reap_stale_running_tasks() -> None:
       - retry_count < max_retries → re-queue (checkpoint allows resuming from
         last completed stage rather than starting over)
       - retry_count >= max_retries → mark failed + dead letter
+
+    All status transitions go through the state machine to prevent
+    invalid transitions (e.g. a completed task being re-queued).
     """
     from .pipeline.checkpoint import load_checkpoint
+    from .pipeline.state_machine import transition_task_status
     from .queue import enqueue_task, move_to_dead_letter
     from .db import get_pool
 
@@ -90,51 +94,41 @@ async def _reap_stale_running_tasks() -> None:
             str(settings.task_stale_seconds),
         )
 
-        for task in stale_tasks:
-            task_id     = str(task["id"])
-            retry_count = task["retry_count"]
-            max_retries = task["max_retries"]
+    for task in stale_tasks:
+        task_id     = str(task["id"])
+        retry_count = task["retry_count"]
+        max_retries = task["max_retries"]
 
-            if retry_count < max_retries:
-                logger.warning(
-                    "Reaper: task %s stale in state '%s' (attempt %d/%d) — re-queuing",
-                    task_id, task["status"], retry_count + 1, max_retries,
-                )
-                updated = await conn.fetchval(
-                    """
-                    UPDATE tasks
-                    SET status = 'queued',
-                        retry_count = retry_count + 1,
-                        queued_at = now(),
-                        current_stage = NULL,
-                        error = NULL
-                    WHERE id = $1 AND status = ANY($2::text[])
-                    RETURNING id
-                    """,
-                    task["id"],
-                    list(ACTIVE_STATES),
-                )
-                if not updated:
-                    logger.info("Reaper: task %s already handled by another process — skipping", task_id)
-                    continue
-                await enqueue_task(task_id)
+        if retry_count < max_retries:
+            logger.warning(
+                "Reaper: task %s stale in state '%s' (attempt %d/%d) — re-queuing",
+                task_id, task["status"], retry_count + 1, max_retries,
+            )
+            ok = await transition_task_status(
+                task_id, "queued",
+                extra_sets=", retry_count = retry_count + 1, queued_at = now(), current_stage = NULL, error = NULL",
+            )
+            if not ok:
+                logger.info("Reaper: task %s transition to queued rejected — skipping", task_id)
+                continue
+            await enqueue_task(task_id)
+            async with pool.acquire() as conn:
                 await _audit(conn, "task_requeued", "warning", task_id=task_id,
                              data={"retry_count": retry_count + 1, "reason": "heartbeat_timeout"})
-            else:
-                logger.error(
-                    "Reaper: task %s exhausted %d retries — failing", task_id, max_retries,
-                )
-                await conn.execute(
-                    """
-                    UPDATE tasks
-                    SET status = 'failed',
-                        error = 'Exhausted retries after heartbeat timeouts',
-                        completed_at = now()
-                    WHERE id = $1
-                    """,
-                    task["id"],
-                )
-                await move_to_dead_letter(task_id, reason="heartbeat_timeout_max_retries")
+        else:
+            logger.error(
+                "Reaper: task %s exhausted %d retries — failing", task_id, max_retries,
+            )
+            ok = await transition_task_status(
+                task_id, "failed",
+                extra_sets=", error = $4, completed_at = now()",
+                extra_args=["Exhausted retries after heartbeat timeouts"],
+            )
+            if not ok:
+                logger.info("Reaper: task %s transition to failed rejected — skipping", task_id)
+                continue
+            await move_to_dead_letter(task_id, reason="heartbeat_timeout_max_retries")
+            async with pool.acquire() as conn:
                 await _audit(conn, "task_failed", "error", task_id=task_id,
                              data={"reason": "heartbeat_timeout_max_retries"})
 
@@ -242,23 +236,24 @@ async def _reap_stale_clarifications() -> None:
             """,
             str(timeout_hours),
         )
-        for task in stale:
-            task_id = str(task["id"])
-            logger.warning(
-                "Reaper: task %s clarification timed out after %dh — cancelling",
-                task_id, timeout_hours,
-            )
-            await conn.execute(
-                """
-                UPDATE tasks
-                SET status = 'cancelled',
-                    error = 'Timed out waiting for clarification',
-                    completed_at = now()
-                WHERE id = $1
-                """,
-                task["id"],
-            )
-            await _audit(conn, "task_cancelled", "warning", task_id=task_id,
+    from .pipeline.state_machine import transition_task_status
+
+    for task in stale:
+        task_id = str(task["id"])
+        logger.warning(
+            "Reaper: task %s clarification timed out after %dh — cancelling",
+            task_id, timeout_hours,
+        )
+        ok = await transition_task_status(
+            task_id, "cancelled",
+            extra_sets=", error = $4, completed_at = now()",
+            extra_args=["Timed out waiting for clarification"],
+        )
+        if not ok:
+            logger.info("Reaper: task %s cancellation rejected by state machine — skipping", task_id)
+            continue
+        async with pool.acquire() as audit_conn:
+            await _audit(audit_conn, "task_cancelled", "warning", task_id=task_id,
                          data={"reason": "clarification_timeout"})
 
 

@@ -237,18 +237,13 @@ async def get_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
 @router.post("/api/v1/pipeline/tasks/{task_id}/cancel", status_code=200)
 async def cancel_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
     """Cancel a task. Only effective if still queued or pending human review."""
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        result = await conn.execute(
-            """
-            UPDATE tasks
-            SET status = 'cancelled', completed_at = now()
-            WHERE id = $1::uuid
-              AND status IN ('queued', 'pending_human_review', 'clarification_needed')
-            """,
-            task_id,
-        )
-    if result == "UPDATE 0":
+    from .pipeline.state_machine import transition_task_status
+
+    ok = await transition_task_status(
+        task_id, "cancelled",
+        extra_sets=", completed_at = now()",
+    )
+    if not ok:
         raise HTTPException(
             status_code=409,
             detail="Task cannot be cancelled in its current state",
@@ -270,6 +265,9 @@ async def clarify_pipeline_task(
     if not req.answers:
         raise HTTPException(status_code=400, detail="answers list required")
 
+    import json as _json
+    from .pipeline.state_machine import transition_task_status
+
     pool = get_pool()
     async with pool.acquire() as conn:
         task = await conn.fetchrow(
@@ -288,16 +286,15 @@ async def clarify_pipeline_task(
         metadata["clarification_answers"] = req.answers
         metadata["clarification_round"] = metadata.get("clarification_round", 0) + 1
 
-        await conn.execute(
-            """
-            UPDATE tasks
-            SET status = 'queued',
-                metadata = $2::jsonb,
-                queued_at = now()
-            WHERE id = $1::uuid
-            """,
-            task_id,
-            metadata,
+    ok = await transition_task_status(
+        task_id, "queued",
+        extra_sets=", metadata = $4::jsonb, queued_at = now()",
+        extra_args=[_json.dumps(metadata)],
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail="Task status changed before clarification could be applied",
         )
 
     await enqueue_task(task_id)

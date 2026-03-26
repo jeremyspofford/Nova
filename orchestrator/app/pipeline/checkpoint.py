@@ -23,6 +23,51 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# ── Error classification ──────────────────────────────────────────────────────
+#
+# Structured error types from the error_context JSONB column (migration 044).
+# Grouped by recovery behavior rather than matching on fragile substrings.
+
+# Transient errors — worth retrying with standard backoff
+_TRANSIENT_ERROR_TYPES = frozenset({
+    "TimeoutError",
+    "asyncio.TimeoutError",
+    "ConnectionError",
+    "ConnectionRefusedError",
+    "ConnectionResetError",
+    "OSError",
+    "httpx.ConnectError",
+    "httpx.ReadTimeout",
+    "httpx.ConnectTimeout",
+})
+
+# Terminal errors — retrying won't fix the underlying cause
+_TERMINAL_ERROR_TYPES = frozenset({
+    "AuthenticationError",
+    "PermissionError",
+    "Forbidden",
+    "Unauthorized",
+    "ValidationError",
+    "ValueError",
+    "TypeError",
+    "KeyError",
+    "SchemaError",
+    "pydantic.ValidationError",
+    "InvalidAPIKeyError",
+})
+
+# Resource exhaustion — retry with longer backoff
+_RESOURCE_ERROR_TYPES = frozenset({
+    "MemoryError",
+    "RateLimitError",
+    "ResourceExhaustedError",
+    "QuotaExceededError",
+    "httpx.PoolTimeout",
+})
+
+# Maximum backoff cap in seconds
+_MAX_BACKOFF_SECONDS = 120
+
 # Stage roles in execution order — used to determine resume point
 PIPELINE_STAGE_ORDER = [
     "context",
@@ -133,13 +178,48 @@ def first_incomplete_stage(
 #   4. A task in pending_human_review should never be auto-recovered.
 #
 # Parameters:
-#   checkpoint    — output of load_checkpoint() — {stage: data} for completed stages
-#   retry_count   — how many times this task has already been retried
-#   max_retries   — configured limit
+#   checkpoint     — output of load_checkpoint() — {stage: data} for completed stages
+#   retry_count    — how many times this task has already been retried
+#   max_retries    — configured limit
 #   current_status — the task's status at time of failure
-#   error         — the error message from the failed run (if any)
+#   error          — the error message from the failed run (if any)
+#   error_context  — structured JSONB from migration 044 (optional, for backward compat)
 #
-# Return one of: "resume" | "restart" | "escalate" | "abandon"
+# Returns a dict: {"action": "resume"|"restart"|"escalate"|"abandon",
+#                   "delay_s": float, "reason": str}
+
+def _classify_error_context(error_context: dict[str, Any]) -> str:
+    """
+    Classify an error by its structured error_context JSONB.
+
+    Returns one of: "transient", "terminal", "resource", "unknown"
+    """
+    error_type = error_context.get("type", "")
+
+    # Explicit retryable flag from the executor takes priority
+    retryable = error_context.get("retryable")
+    if retryable is False:
+        return "terminal"
+
+    if error_type in _TERMINAL_ERROR_TYPES:
+        return "terminal"
+    if error_type in _RESOURCE_ERROR_TYPES:
+        return "resource"
+    if error_type in _TRANSIENT_ERROR_TYPES:
+        return "transient"
+
+    return "unknown"
+
+
+def backoff_delay(retry_count: int, base_delay: float = 5.0) -> float:
+    """
+    Exponential backoff: base_delay * 2^retry_count, capped at _MAX_BACKOFF_SECONDS.
+
+    This does NOT block — it returns metadata for the reaper to use when
+    scheduling the next retry.
+    """
+    return min(base_delay * (2 ** retry_count), _MAX_BACKOFF_SECONDS)
+
 
 def recovery_strategy(
     checkpoint: dict[str, Any],
@@ -147,21 +227,85 @@ def recovery_strategy(
     max_retries: int,
     current_status: str,
     error: str | None,
-) -> str:
+    error_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Decide how to recover a failed or stale task.
 
+    Returns a dict with:
+      action   — "resume" | "restart" | "escalate" | "abandon"
+      delay_s  — suggested delay before retry (0 for non-retry actions)
+      reason   — human-readable explanation for logging/audit
+
     Decision ladder (evaluated top-to-bottom, first match wins):
-      1. Human review state       → escalate  (never auto-recover)
-      2. Retries exhausted        → abandon   (dead-letter for inspection)
-      3. Terminal error pattern   → escalate  (retrying won't help; surface to human)
-      4. First retry, checkpoint  → resume    (optimistic: skip completed stages)
-      5. First retry, no ckpt     → restart   (nothing to resume from)
-      6. Subsequent retry, 2+ckpts→ resume    (expensive work worth preserving)
-      7. Subsequent retry, <2ckpts→ restart   (not much done; start clean)
+      1. Human review state           → escalate  (never auto-recover)
+      2. Retries exhausted            → abandon   (dead-letter for inspection)
+      3. Structured error_context     → classify by error type (new path)
+      4. Substring fallback           → legacy pattern matching (backward compat)
+      5. First retry, checkpoint      → resume    (optimistic)
+      6. First retry, no ckpt         → restart   (nothing to resume from)
+      7. Subsequent retry, 2+ ckpts   → resume    (expensive work worth preserving)
+      8. Subsequent retry, <2 ckpts   → restart   (not much done; start clean)
     """
-    # Errors that indicate a permanent condition — retrying is pointless
-    TERMINAL_PATTERNS = (
+
+    def _result(action: str, reason: str, delay_s: float = 0.0) -> dict[str, Any]:
+        return {"action": action, "delay_s": delay_s, "reason": reason}
+
+    # 1. Never auto-recover tasks waiting on a human decision
+    if current_status == "pending_human_review":
+        return _result("escalate", "task is in pending_human_review")
+
+    # 2. Exhausted all configured retries — give up cleanly
+    if retry_count >= max_retries:
+        return _result("abandon", f"retry limit reached ({retry_count}/{max_retries})")
+
+    # 3. Structured error classification (new path — requires error_context JSONB)
+    if error_context and isinstance(error_context, dict) and error_context.get("type"):
+        classification = _classify_error_context(error_context)
+
+        if classification == "terminal":
+            logger.warning(
+                "Terminal error type '%s', escalating task: %s",
+                error_context.get("type"),
+                error_context.get("message", "")[:200],
+            )
+            return _result(
+                "escalate",
+                f"terminal error type: {error_context.get('type')}",
+            )
+
+        if classification == "resource":
+            delay = backoff_delay(retry_count, base_delay=15.0)
+            logger.info(
+                "Resource error '%s', retrying with extended backoff (%.1fs)",
+                error_context.get("type"),
+                delay,
+            )
+            action = "resume" if checkpoint else "restart"
+            return _result(action, f"resource error: {error_context.get('type')}", delay)
+
+        if classification == "transient":
+            delay = backoff_delay(retry_count, base_delay=5.0)
+            action = "resume" if checkpoint else "restart"
+            return _result(action, f"transient error: {error_context.get('type')}", delay)
+
+        # Unknown error type — retry for first 2 attempts, then escalate
+        if retry_count >= 2:
+            logger.warning(
+                "Unknown error type '%s' after %d retries, escalating",
+                error_context.get("type"),
+                retry_count,
+            )
+            return _result(
+                "escalate",
+                f"unknown error type '{error_context.get('type')}' after {retry_count} retries",
+            )
+        delay = backoff_delay(retry_count)
+        action = "resume" if checkpoint else "restart"
+        return _result(action, f"unknown error type: {error_context.get('type')}", delay)
+
+    # 4. Fallback: substring matching for tasks without error_context (backward compat)
+    _TERMINAL_PATTERNS = (
         "permission denied",
         "forbidden",
         "unauthorized",
@@ -171,24 +315,16 @@ def recovery_strategy(
         "invalid api key",
         "quota exceeded",
     )
+    if error and any(p in error.lower() for p in _TERMINAL_PATTERNS):
+        logger.warning("Terminal error detected (substring fallback), escalating: %s", error[:200])
+        return _result("escalate", f"terminal error pattern in message: {error[:100]}")
 
-    # 1. Never auto-recover tasks waiting on a human decision
-    if current_status == "pending_human_review":
-        return "escalate"
-
-    # 2. Exhausted all configured retries — give up cleanly
-    if retry_count >= max_retries:
-        return "abandon"
-
-    # 3. Terminal errors won't be fixed by retrying — escalate immediately
-    if error and any(p in error.lower() for p in TERMINAL_PATTERNS):
-        logger.warning("Terminal error detected, escalating task: %s", error)
-        return "escalate"
-
-    # 4 & 5. First retry: be optimistic
+    # 5 & 6. First retry: be optimistic
     if retry_count == 0:
-        return "resume" if checkpoint else "restart"
+        action = "resume" if checkpoint else "restart"
+        return _result(action, "first retry attempt")
 
-    # 6 & 7. Subsequent retries: preserve expensive checkpoint work (context + task
-    # together represent the majority of LLM cost); restart if little was saved
-    return "resume" if len(checkpoint) >= 2 else "restart"
+    # 7 & 8. Subsequent retries: preserve expensive checkpoint work
+    action = "resume" if len(checkpoint) >= 2 else "restart"
+    delay = backoff_delay(retry_count)
+    return _result(action, f"retry {retry_count}, checkpoints={len(checkpoint)}", delay)

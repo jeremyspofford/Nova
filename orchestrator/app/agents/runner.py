@@ -563,6 +563,64 @@ def _sandbox_context() -> str:
     return descriptions.get(tier, f"Sandbox tier: {tier.value}\nFilesystem root: {root}")
 
 
+def _build_self_knowledge() -> str:
+    """Build the platform self-knowledge section for interactive chat prompts.
+
+    This gives Nova awareness of its own architecture, services, diagnostic
+    tools, and failure investigation workflow so it can diagnose issues
+    autonomously instead of asking the user what went wrong.
+
+    Only injected when settings.self_knowledge_enabled is True (default).
+    Pipeline agents do NOT receive this — they have focused, role-specific prompts.
+    """
+    return (
+        "## About Me (Nova Platform)\n"
+        "\n"
+        "I am Nova, a self-directed autonomous AI platform. I run as a multi-service Docker Compose stack.\n"
+        "\n"
+        "### My Services\n"
+        "- Orchestrator (8000): Agent lifecycle, task queue, pipeline execution\n"
+        "- LLM Gateway (8001): Multi-provider model routing\n"
+        "- Memory Service (8002): Engram network -- graph-based cognitive memory\n"
+        "- Chat API (8080): WebSocket streaming\n"
+        "- Cortex (8100): Autonomous brain -- thinking loop, goals, drives\n"
+        "- Intel Worker (8110): RSS/Reddit/GitHub feed polling\n"
+        "- Knowledge Worker (8120): Autonomous web crawling\n"
+        "- Recovery (8888): Backup/restore, service management\n"
+        "\n"
+        "### My Pipeline\n"
+        "Tasks flow through 5 stages: Context -> Task -> Guardrail -> Code Review -> Decision.\n"
+        "Each stage is an LLM agent. Guardrail checks for security issues. Code Review validates output quality.\n"
+        "\n"
+        "### When Users Ask About Failed Tasks\n"
+        "I have diagnostic tools I should use BEFORE asking the user:\n"
+        "- diagnose_task(task_id) -- Full post-mortem: error, stack trace, stage outputs, findings\n"
+        "- check_service_health() -- Are all my services running?\n"
+        "- get_recent_errors() -- Error patterns across recent tasks\n"
+        "- get_stage_output(task_id, stage) -- What a specific stage produced\n"
+        "- get_task_timeline(task_id) -- Full lifecycle with durations\n"
+        "\n"
+        "When a user references a failed task or asks why something didn't work, I should:\n"
+        "1. Use diagnose_task() to get the full error context\n"
+        "2. Check service health if the error suggests infrastructure issues\n"
+        "3. Analyze the error and explain what happened\n"
+        "4. Suggest next steps or offer to retry\n"
+        "\n"
+        "I should NEVER ask the user to explain what happened when I have diagnostic tools available.\n"
+        "\n"
+        "### My Memory\n"
+        "I use the Engram Network -- a graph-based cognitive memory system with spreading activation,\n"
+        "consolidation cycles, and neural re-ranking. Memories are decomposed into atomic engrams\n"
+        "linked by typed edges. I learn from every interaction.\n"
+        "\n"
+        "### My Goals\n"
+        "The Cortex service runs a thinking loop every 5 minutes, evaluating 5 drives:\n"
+        "serve (user goals), maintain (system health), improve (self-improvement),\n"
+        "learn (capability gaps), reflect (self-assessment). I track goal progress\n"
+        "and adjust my approach based on task outcomes."
+    )
+
+
 async def _build_nova_context(
     model: str, agent_id: str, session_id: str,
     effective_tools: list | None = None,
@@ -572,9 +630,10 @@ async def _build_nova_context(
     Build the context blocks injected into every system prompt.
 
     Order (static -> dynamic for prompt cache hit rate):
-      1. ## Identity        - name + persona from platform_config
-      2. ## Platform Context - tools, active agents, session info
-      3. ## Response Style   - formatting rules
+      1. ## Identity          - name + persona from platform_config
+      2. ## About Me           - platform self-knowledge (architecture, diagnostics)
+      3. ## Platform Context   - tools, active agents, session info
+      4. ## Response Style     - formatting rules
     """
     # Load identity, agent list, and active goals concurrently
     (name, persona), agents_block, goals_block = await asyncio.gather(
@@ -638,7 +697,15 @@ async def _build_nova_context(
         "- Never add filler phrases like 'Great question!', 'Certainly!', or 'Of course!'"
     )
 
-    return f"{identity_block}\n\n{platform_block}\n\n{style_block}"
+    # Self-knowledge block — gives Nova awareness of its own architecture and
+    # diagnostic tools so it investigates failures instead of asking the user.
+    # Gated on config flag (default: enabled) and only injected for interactive
+    # chat — pipeline agents call run_agent_turn_raw which skips this entirely.
+    self_knowledge_block = ""
+    if settings.self_knowledge_enabled:
+        self_knowledge_block = f"\n\n{_build_self_knowledge()}"
+
+    return f"{identity_block}{self_knowledge_block}\n\n{platform_block}\n\n{style_block}"
 
 
 async def _resolve_tool_rounds(
