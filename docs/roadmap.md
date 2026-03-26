@@ -469,14 +469,14 @@ Prerequisites: all current roadmap items complete. This is the capstone feature.
 
 Comprehensive 5-discipline review (architecture, backend, frontend, security, testing). Full spec with per-finding remediation: `docs/specs/2026-03-26-platform-review-findings.md`.
 
-### P0 — Fix immediately
-| ID | Finding | Effort |
+### ✅ P0 — Delivered 2026-03-26
+| ID | Finding | Status |
 |---|---|---|
-| SEC-2 | Reindex endpoint missing auth — unauthenticated DoS vector | 10 min |
-| SEC-3 | SSRF in `web_fetch` tool — no URL validation, follows redirects into internal network | 30 min |
-| SEC-4 | Trusted proxy header forgeable — IP spoofing bypasses auth | 1 hour |
-| ARCH-4 | Embedding cache serves stale vectors from wrong model (no model filter on L2 lookup) | 30 min |
-| BE-1 | MCP registry `_active_clients` dict mutated without lock — race on hot-reload | 30 min |
+| SEC-2 | Reindex endpoint missing auth — added `AdminDep` to both handlers | ✅ |
+| SEC-3 | SSRF in `web_fetch` — added `validate_url()` + per-hop redirect validation | ✅ |
+| SEC-4 | Trusted proxy header — only trust header when direct IP is in trusted CIDRs | ✅ |
+| ARCH-4 | Embedding cache L2 — added `AND model = :m` to both lookups | ✅ |
+| BE-1 | MCP registry — added `asyncio.Lock` on mutations, `list()` snapshots on reads | ✅ |
 
 ### P1 — Fix this week
 | ID | Finding | Effort |

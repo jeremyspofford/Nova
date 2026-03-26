@@ -14,6 +14,7 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
+from app.auth import AdminDep
 from app.config import settings
 from app.db import get_pool
 
@@ -80,7 +81,7 @@ class ReindexStatusResponse(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @router.post("/reindex", response_model=ReindexResponse)
-async def reindex_memory(req: ReindexRequest):
+async def reindex_memory(req: ReindexRequest, _admin: AdminDep):
     """Re-process historical content through the engram ingestion pipeline.
 
     This pushes past conversations, task outputs, intel content, and/or
@@ -152,7 +153,7 @@ async def reindex_memory(req: ReindexRequest):
 
 
 @router.get("/reindex/status", response_model=ReindexStatusResponse)
-async def reindex_status():
+async def reindex_status(_admin: AdminDep):
     """Check the current state of the engram ingestion queue and any active reindex job."""
     r = aioredis.from_url(_engram_redis_url(), decode_responses=True)
     try:

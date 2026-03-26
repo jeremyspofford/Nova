@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import logging
 import re
+
+from nova_worker_common.url_validator import validate_url
 from html.parser import HTMLParser
 from urllib.parse import quote_plus, unquote
 
@@ -212,13 +214,35 @@ async def _execute_web_fetch(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
 
+    # SSRF validation — block internal IPs, cloud metadata, non-HTTP schemes
+    ssrf_error = validate_url(url)
+    if ssrf_error:
+        return f"Blocked: {ssrf_error}"
+
     try:
         async with httpx.AsyncClient(
             timeout=_TIMEOUT,
-            follow_redirects=True,
+            follow_redirects=False,
             headers={"User-Agent": _USER_AGENT},
         ) as client:
             resp = await client.get(url)
+
+            # Manual redirect following with SSRF validation per hop (max 5)
+            for _ in range(5):
+                if resp.status_code not in (301, 302, 303, 307, 308):
+                    break
+                redirect_url = resp.headers.get("location", "")
+                if not redirect_url:
+                    break
+                # Resolve relative redirects
+                if redirect_url.startswith("/"):
+                    from urllib.parse import urlparse
+                    parsed = urlparse(str(resp.url))
+                    redirect_url = f"{parsed.scheme}://{parsed.netloc}{redirect_url}"
+                redirect_err = validate_url(redirect_url)
+                if redirect_err:
+                    return f"Blocked redirect to {redirect_url}: {redirect_err}"
+                resp = await client.get(redirect_url)
             resp.raise_for_status()
     except httpx.TimeoutException:
         return f"Request timed out fetching {url}"

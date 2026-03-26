@@ -17,6 +17,7 @@ Tool naming convention (avoids collisions across servers):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -31,6 +32,13 @@ log = logging.getLogger(__name__)
 # name → connected client (populated by load_mcp_servers at startup)
 # Values are StdioMCPClient or HTTPMCPClient — both share the same public interface
 _active_clients: dict[str, "StdioMCPClient | HTTPMCPClient"] = {}
+
+# Protects _active_clients against concurrent mutation (reload/disconnect racing
+# with tool execution and discovery). Acquire around all dict mutations.
+# Sync functions (get_mcp_tool_definitions, get_tools_by_server, list_connected_servers)
+# use list() snapshots and are safe without the lock because they never yield to
+# the event loop — no concurrent coroutine can mutate the dict mid-execution.
+_registry_lock = asyncio.Lock()
 
 
 # ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -70,13 +78,14 @@ async def stop_all_servers() -> None:
     Gracefully stop all connected MCP server subprocesses.
     Called in the orchestrator lifespan shutdown.
     """
-    for name, client in list(_active_clients.items()):
-        try:
-            await client.stop()
-        except Exception as e:
-            log.warning("Error stopping MCP server '%s': %s", name, e)
-    _active_clients.clear()
-    log.info("All MCP servers stopped")
+    async with _registry_lock:
+        for name, client in list(_active_clients.items()):
+            try:
+                await client.stop()
+            except Exception as e:
+                log.warning("Error stopping MCP server '%s': %s", name, e)
+        _active_clients.clear()
+        log.info("All MCP servers stopped")
 
 
 # ── Server management ─────────────────────────────────────────────────────────
@@ -106,7 +115,8 @@ async def reload_mcp_server(name: str) -> bool:
 
 async def disconnect_server(name: str) -> None:
     """Disconnect and remove a specific MCP server from the active registry."""
-    client = _active_clients.pop(name, None)
+    async with _registry_lock:
+        client = _active_clients.pop(name, None)
     if client:
         try:
             await client.stop()
@@ -124,9 +134,16 @@ async def _connect_server(cfg: dict) -> bool:
     name = cfg["name"]
     transport = cfg.get("transport", "stdio")
 
-    # Cleanly disconnect any existing connection first
-    if name in _active_clients:
-        await disconnect_server(name)
+    # Atomically pop any existing connection under the lock (fixes TOCTOU race
+    # where two concurrent _connect_server calls both see the key and race to
+    # disconnect, potentially leaking the first client).
+    async with _registry_lock:
+        old_client = _active_clients.pop(name, None)
+    if old_client:
+        try:
+            await old_client.stop()
+        except Exception as e:
+            log.warning("Error disconnecting MCP server '%s': %s", name, e)
 
     try:
         if transport == "http":
@@ -158,7 +175,8 @@ async def _connect_server(cfg: dict) -> bool:
 
         await client.start()
         await client.list_tools()
-        _active_clients[name] = client
+        async with _registry_lock:
+            _active_clients[name] = client
         log.info(
             "MCP server '%s' connected via %s (%d tools)",
             name, transport, len(client.tools),
@@ -181,7 +199,8 @@ def get_mcp_tool_definitions() -> list[ToolDefinition]:
     tool list.
     """
     tools: list[ToolDefinition] = []
-    for client in _active_clients.values():
+    # Snapshot to avoid iteration during concurrent mutation
+    for client in list(_active_clients.values()):
         if not client.connected:
             continue
         for tool in client.tools:
@@ -212,12 +231,18 @@ async def execute_mcp_tool(name: str, arguments: dict) -> str:
         )
 
     _, server_name, tool_name = parts
-    client = _active_clients.get(server_name)
+
+    # Snapshot under lock so a concurrent reload can't yank the client between
+    # lookup and the await call_tool() below.
+    async with _registry_lock:
+        client = _active_clients.get(server_name)
+        if client is None:
+            connected = list(_active_clients.keys())
 
     if client is None:
         return (
             f"MCP server '{server_name}' is not connected. "
-            f"Connected servers: {list(_active_clients.keys())}"
+            f"Connected servers: {connected}"
         )
 
     try:
@@ -240,7 +265,7 @@ async def execute_mcp_tool(name: str, arguments: dict) -> str:
 def get_tools_by_server() -> list[dict]:
     """Tool details grouped by MCP server, for the dashboard tool picker."""
     result = []
-    for name, client in _active_clients.items():
+    for name, client in list(_active_clients.items()):
         if not client.connected:
             continue
         result.append({
@@ -314,5 +339,5 @@ def list_connected_servers() -> list[dict]:
             "tool_count": len(client.tools),
             "tools": [t.name for t in client.tools],
         }
-        for name, client in _active_clients.items()
+        for name, client in list(_active_clients.items())
     ]

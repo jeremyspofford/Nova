@@ -54,8 +54,8 @@ async def get_embedding(
 
     # L2: PostgreSQL embedding cache
     row = await session.execute(
-        text("SELECT embedding FROM embedding_cache WHERE content_hash = :h"),
-        {"h": text_hash},
+        text("SELECT embedding FROM embedding_cache WHERE content_hash = :h AND model = :m"),
+        {"h": text_hash, "m": model},
     )
     db_row = row.fetchone()
     if db_row:
@@ -103,8 +103,8 @@ async def get_embeddings_batch(
 
         # L2: PostgreSQL embedding_cache
         row = await session.execute(
-            text("SELECT embedding FROM embedding_cache WHERE content_hash = :h"),
-            {"h": text_hash},
+            text("SELECT embedding FROM embedding_cache WHERE content_hash = :h AND model = :m"),
+            {"h": text_hash, "m": model},
         )
         db_row = row.fetchone()
         if db_row:

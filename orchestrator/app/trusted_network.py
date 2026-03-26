@@ -117,15 +117,20 @@ class TrustedNetworkMiddleware(BaseHTTPMiddleware):
     def _get_client_ip(self, request: Request, proxy_header: str) -> str:
         """Determine the real client IP.
 
-        If a proxy header is configured, use the leftmost (client) value.
-        Otherwise fall back to the direct connection IP.
+        If a proxy header is configured AND the direct connection comes from
+        a trusted proxy IP, use the leftmost (client) value from the header.
+        Otherwise fall back to the direct connection IP. This prevents
+        untrusted clients from forging the proxy header to spoof their IP.
         """
+        direct_ip = request.client.host if request.client else "127.0.0.1"
         if proxy_header:
-            header_val = request.headers.get(proxy_header, "")
-            if header_val:
-                # X-Forwarded-For can be comma-separated; leftmost is the client
-                return header_val.split(",")[0].strip()
-        return request.client.host if request.client else "127.0.0.1"
+            # Only trust the header if the direct connection is from a trusted proxy
+            if self._is_trusted(direct_ip, self._cached_cidrs or self._fallback_cidrs):
+                header_val = request.headers.get(proxy_header, "")
+                if header_val:
+                    # X-Forwarded-For can be comma-separated; leftmost is the client
+                    return header_val.split(",")[0].strip()
+        return direct_ip
 
     def _is_trusted(self, ip_str: str, cidrs: list[NetworkType]) -> bool:
         """Check if an IP falls within any trusted CIDR."""
