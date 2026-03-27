@@ -221,6 +221,7 @@ Push-to-talk voice interaction for the Brain page.
 - Docker Compose, Vite proxy, nginx proxy, integration tests
 
 **Remaining:**
+- **Node highlighting during retrieval** — infrastructure exists (orchestrator emits `engram_ids` in memory activity step, Brain.tsx calls `highlightNodes`), but highlighting not visually confirmed. Likely a timing issue (nodes may not match graph data IDs) or the Three.js opacity/scale boost in the tick loop isn't visible enough. Needs debugging.
 - Redis sliding window rate limiting for TTS requests
 - Cost tracking (per-request STT/TTS cost to Redis, dashboard display)
 - Speaker identification via voiceprint enrollment (v2)
