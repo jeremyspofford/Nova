@@ -70,16 +70,20 @@ git commit -m "feat(contracts): add topic engram type, clustering config, and de
 
 ---
 
-### Task 2: Database Migration
+### Task 2: Schema Updates (memory-service)
 
 **Files:**
-- Create: `orchestrator/app/migrations/046_topic_clustering.sql`
+- Modify: `memory-service/app/db/schema.sql` (append idempotent ALTER + indexes)
 
-- [ ] **Step 1: Write migration SQL**
+Note: The `consolidation_log`, `engrams`, and `engram_edges` tables all live in memory-service's schema, NOT orchestrator migrations. Memory-service runs `schema.sql` idempotently at startup.
 
-Create `orchestrator/app/migrations/046_topic_clustering.sql`:
+- [ ] **Step 1: Add schema changes to schema.sql**
+
+Append to `memory-service/app/db/schema.sql` (at the end, using the same idempotent DO-block pattern as the existing `source_ref_id` addition):
 
 ```sql
+-- ── Topic clustering support ────────────────────────────────────────────────
+
 -- Add topics_created column to consolidation_log
 DO $$ BEGIN
     ALTER TABLE consolidation_log ADD COLUMN topics_created INTEGER NOT NULL DEFAULT 0;
@@ -98,8 +102,8 @@ CREATE INDEX IF NOT EXISTS idx_edges_structural
 - [ ] **Step 2: Commit**
 
 ```bash
-git add orchestrator/app/migrations/046_topic_clustering.sql
-git commit -m "feat(migrations): add topics_created to consolidation_log and structural edge indexes"
+git add memory-service/app/db/schema.sql
+git commit -m "feat(schema): add topics_created column and structural edge indexes"
 ```
 
 ---
@@ -492,7 +496,7 @@ async def _validate_with_entities(
                 FROM engram_edges ee
                 JOIN engrams e ON e.id = ee.target_id AND e.type = 'entity'
                 WHERE ee.source_id = ANY(CAST(:ids AS uuid[]))
-                  AND ee.relation IN ('related_to', 'instance_of', 'part_of')
+                  AND ee.relation = 'related_to'  -- only entity-linking edges use related_to
             """),
             {"ids": ids},
         )
@@ -640,19 +644,34 @@ async def _create_topic_engram(
     # Create topic engram
     topic_embedding = await get_embedding(topic_content, session)
 
-    # Compute centroid (mean of member embeddings) for future assignment
-    centroid_result = await session.execute(
+    # Compute centroid (mean of member embeddings) in Python
+    # NOTE: pgvector avg() does not support halfvec, so compute in numpy
+    member_embeddings = await session.execute(
         text("""
-            SELECT avg_embedding::text FROM (
-                SELECT avg(embedding) AS avg_embedding
-                FROM engrams
-                WHERE id = ANY(CAST(:ids AS uuid[]))
-                  AND embedding IS NOT NULL
-            ) sub
+            SELECT embedding::text FROM engrams
+            WHERE id = ANY(CAST(:ids AS uuid[]))
+              AND embedding IS NOT NULL
         """),
         {"ids": ids},
     )
-    centroid_text = centroid_result.scalar()
+    emb_rows = member_embeddings.fetchall()
+    if emb_rows:
+        emb_arrays = []
+        for r in emb_rows:
+            vec_str = r.embedding.strip("[]")
+            emb_arrays.append([float(x) for x in vec_str.split(",")])
+        centroid = np.mean(emb_arrays, axis=0).tolist()
+        centroid_str = to_pg_vector(centroid)
+    else:
+        centroid_str = to_pg_vector(topic_embedding)
+
+    import json as _json
+    meta = {
+        "member_count": len(ids),
+        "entity_anchors": anchors[:10],
+        "cluster_method": "hdbscan+entity+llm",
+        "centroid": centroid_str,
+    }
 
     topic_row = await session.execute(
         text("""
@@ -667,7 +686,7 @@ async def _create_topic_engram(
             "content": topic_content,
             "embedding": to_pg_vector(topic_embedding),
             "model": settings.embedding_model,
-            "meta": f'{{"member_count": {len(ids)}, "entity_anchors": {anchors[:10]!r}, "cluster_method": "hdbscan+entity+llm", "centroid": "{centroid_text}"}}',
+            "meta": _json.dumps(meta),
         },
     )
     topic_id = topic_row.scalar()
@@ -800,35 +819,47 @@ async def assign_new_engrams_to_topics(session: AsyncSession) -> int:
     if not unassigned_rows:
         return 0
 
-    # Get existing topics
+    # Get existing topics with stored centroids
     topics = await session.execute(
         text("""
-            SELECT id, content, embedding::text
+            SELECT id, content, source_meta
             FROM engrams
-            WHERE type = 'topic' AND NOT superseded AND embedding IS NOT NULL
+            WHERE type = 'topic' AND NOT superseded
         """)
     )
     topic_rows = topics.fetchall()
     if not topic_rows:
         return 0
 
+    # Parse centroids from source_meta (computed during topic creation)
+    import json as _json
+    topic_centroids = []
+    for t in topic_rows:
+        meta = t.source_meta if isinstance(t.source_meta, dict) else _json.loads(t.source_meta or "{}")
+        centroid_str = meta.get("centroid")
+        if centroid_str:
+            topic_centroids.append((t.id, centroid_str))
+
+    if not topic_centroids:
+        return 0
+
     assigned = 0
     for engram_row in unassigned_rows:
-        # Find best matching topic by embedding similarity
+        # Find best matching topic by centroid similarity (not content embedding)
         best_topic_id = None
         best_sim = 0.0
 
-        for topic in topic_rows:
+        for topic_id, centroid_str in topic_centroids:
             sim_result = await session.execute(
                 text("""
-                    SELECT 1 - (CAST(:e_emb AS halfvec) <=> CAST(:t_emb AS halfvec)) AS sim
+                    SELECT 1 - (CAST(:e_emb AS halfvec) <=> CAST(:centroid AS halfvec)) AS sim
                 """),
-                {"e_emb": engram_row.embedding, "t_emb": topic.embedding},
+                {"e_emb": engram_row.embedding, "centroid": centroid_str},
             )
             sim = sim_result.scalar() or 0.0
             if sim > best_sim:
                 best_sim = sim
-                best_topic_id = topic.id
+                best_topic_id = topic_id
 
         if best_topic_id and best_sim > settings.engram_topic_assignment_threshold:
             try:
@@ -840,7 +871,97 @@ async def assign_new_engrams_to_topics(session: AsyncSession) -> int:
     return assigned
 ```
 
-- [ ] **Step 2: Commit**
+- [ ] **Step 2: Add topic maintenance functions (dissolution, re-summarization)**
+
+Add these functions to the end of `clustering.py`:
+
+```python
+async def maintain_topics(session: AsyncSession) -> dict:
+    """Maintain existing topics: dissolve small ones, regenerate stale summaries.
+
+    Called during consolidation after topic discovery and assignment.
+    Returns stats dict.
+    """
+    stats = {"dissolved": 0, "regenerated": 0}
+
+    # Dissolve topics that have lost too many members
+    topics = await session.execute(
+        text("""
+            SELECT e.id, e.content, e.source_meta,
+                   (SELECT count(*) FROM engram_edges ee
+                    WHERE ee.target_id = e.id AND ee.relation = 'part_of') AS member_count
+            FROM engrams e
+            WHERE e.type = 'topic' AND NOT e.superseded
+        """)
+    )
+
+    import json as _json
+    for topic in topics.fetchall():
+        if topic.member_count < settings.engram_cluster_min_size:
+            # Dissolve: supersede topic, delete its edges (members become unaffiliated)
+            await session.execute(
+                text("""
+                    UPDATE engrams SET superseded = TRUE, updated_at = NOW()
+                    WHERE id = CAST(:id AS uuid)
+                """),
+                {"id": str(topic.id)},
+            )
+            # part_of edges will cascade or become dead edges pointing to superseded topic
+            # They'll be cleaned up by Hebbian pruning (non-structural edges)
+            stats["dissolved"] += 1
+            log.info("Dissolved topic '%s' (only %d members)", topic.content[:40], topic.member_count)
+            continue
+
+        # Check if summary needs regeneration (>30% new members since creation)
+        meta = topic.source_meta if isinstance(topic.source_meta, dict) else _json.loads(topic.source_meta or "{}")
+        original_count = meta.get("member_count", topic.member_count)
+        if original_count > 0:
+            change_pct = abs(topic.member_count - original_count) / original_count
+            if change_pct > settings.engram_topic_regeneration_pct:
+                # Regenerate summary
+                members = await session.execute(
+                    text("""
+                        SELECT e.content FROM engram_edges ee
+                        JOIN engrams e ON e.id = ee.source_id
+                        WHERE ee.target_id = CAST(:tid AS uuid)
+                          AND ee.relation = 'part_of'
+                          AND NOT e.superseded
+                        ORDER BY e.importance DESC
+                        LIMIT 10
+                    """),
+                    {"tid": str(topic.id)},
+                )
+                sample_contents = [r.content for r in members.fetchall()]
+                anchors = meta.get("entity_anchors", [])
+
+                new_content = await _name_topic(anchors, sample_contents, len(anchors) < 2)
+                if new_content:
+                    # Update topic content and embedding
+                    new_embedding = await get_embedding(new_content, session)
+                    meta["member_count"] = topic.member_count
+                    await session.execute(
+                        text("""
+                            UPDATE engrams
+                            SET content = :content,
+                                embedding = CAST(:emb AS halfvec),
+                                source_meta = CAST(:meta AS jsonb),
+                                updated_at = NOW()
+                            WHERE id = CAST(:id AS uuid)
+                        """),
+                        {
+                            "id": str(topic.id),
+                            "content": new_content,
+                            "emb": to_pg_vector(new_embedding),
+                            "meta": _json.dumps(meta),
+                        },
+                    )
+                    stats["regenerated"] += 1
+                    log.info("Regenerated topic summary: '%s'", new_content[:60])
+
+    return stats
+```
+
+- [ ] **Step 3: Commit**
 
 ```bash
 git add memory-service/app/engram/clustering.py
@@ -877,24 +998,25 @@ After Phase 2 (after line 129), add Phase 2.5:
 ```python
             # Phase 2.5: Topic Discovery — cluster engrams into topics
             try:
-                from .clustering import discover_topics, assign_new_engrams_to_topics
+                from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
                 topics_created = await discover_topics(session)
                 topics_assigned = await assign_new_engrams_to_topics(session)
+                maintenance = await maintain_topics(session)
                 stats["topics_created"] = topics_created
-                log.info("Phase 2.5: %d topics created, %d engrams assigned", topics_created, topics_assigned)
+                log.info(
+                    "Phase 2.5: %d topics created, %d engrams assigned, %d dissolved, %d regenerated",
+                    topics_created, topics_assigned,
+                    maintenance.get("dissolved", 0), maintenance.get("regenerated", 0),
+                )
             except Exception:
                 log.warning("Consolidation Phase 2.5 (topic discovery) failed", exc_info=True)
 ```
 
-- [ ] **Step 2: Exempt structural edges from Hebbian decay in `_hebbian_update`**
+- [ ] **Step 2: Exempt structural edges from Hebbian decay and pruning in `_hebbian_update`**
 
-In `_hebbian_update` (lines 316-364), add `AND relation NOT IN ('instance_of', 'part_of')` to all three SQL statements:
+In `_hebbian_update` (lines 316-364), add `AND relation NOT IN ('instance_of', 'part_of')` to the **decay and prune** queries only. Do NOT add this to the strengthen query — structural edges should still benefit from co-activation strengthening.
 
-Strengthen query (line 326) — add before `RETURNING`:
-```sql
-WHERE co_activations > 1
-  AND relation NOT IN ('instance_of', 'part_of')
-```
+Strengthen query (line 326) — **leave unchanged**. If a schema and its source fact are co-activated, strengthening the `instance_of` edge is useful signal.
 
 Decay query (line 339) — add to WHERE:
 ```sql
@@ -925,7 +1047,7 @@ Replace the Phase 5 block (lines 146-153) — remove the `_prune_dead_engrams` c
                 log.warning("Consolidation Phase 5 (merging) failed", exc_info=True)
 ```
 
-Either delete the `_prune_dead_engrams` function entirely or leave it as dead code (preference: delete it).
+Delete the `_prune_dead_engrams` function entirely. Dead code is a maintenance burden.
 
 - [ ] **Step 4: Update consolidation_log INSERT to include topics_created**
 
@@ -1052,6 +1174,7 @@ After the existing query result processing but before the final sort, add the de
 ```python
     # Deep mode: follow all instance_of/part_of edges from activated nodes
     if depth == "deep" and activated:
+        pre_deep_count = len(activated)
         activated_ids = {a.id for a in activated}
         structural_result = await session.execute(
             text("""
@@ -1100,8 +1223,8 @@ After the existing query result processing but before the final sort, add the de
                 ))
                 activated_ids.add(str(row.id))
 
-        # Touch the newly added engrams too
-        new_ids = [a.id for a in activated if a.id not in {a2.id for a2 in activated[:len(activated)]}]
+        # Touch the newly added structural neighbors
+        new_ids = [a.id for a in activated[pre_deep_count:]]
         if new_ids:
             await _touch_accessed(session, new_ids)
 ```
@@ -1162,7 +1285,46 @@ async def get_engram_context(
 
 Pass `depth` through to `assemble_context`. This requires `assemble_context` in working_memory.py to accept and forward it — handle in Task 9.
 
-- [ ] **Step 3: Add `topics_created` to /consolidation-log response**
+- [ ] **Step 3: Add `/topics` endpoint for direct topic listing**
+
+Add a new endpoint to `router.py` (after the consolidation-log endpoint) for `what_do_i_know` to query directly:
+
+```python
+@engram_router.get("/topics")
+async def list_topics():
+    """List all active topic engrams with member counts."""
+    async with get_db() as session:
+        result = await session.execute(
+            text("""
+                SELECT e.id::text, e.content, e.importance, e.source_meta,
+                       e.created_at,
+                       (SELECT count(*) FROM engram_edges ee
+                        WHERE ee.target_id = e.id AND ee.relation = 'part_of') AS member_count
+                FROM engrams e
+                WHERE e.type = 'topic' AND NOT e.superseded
+                ORDER BY importance DESC
+            """)
+        )
+        rows = result.fetchall()
+
+    import json
+    return {
+        "count": len(rows),
+        "topics": [
+            {
+                "id": row.id,
+                "content": row.content,
+                "importance": round(float(row.importance), 3),
+                "member_count": row.member_count,
+                "entity_anchors": json.loads(row.source_meta or "{}").get("entity_anchors", []),
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
+    }
+```
+
+- [ ] **Step 4: Add `topics_created` to /consolidation-log response**
 
 In the consolidation-log endpoint (line 262), add `topics_created` to the response dict:
 
@@ -1179,11 +1341,11 @@ SELECT id, trigger_type, engrams_reviewed, schemas_created,
        ...
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add memory-service/app/engram/router.py
-git commit -m "feat(router): add depth parameter to /activate and /context endpoints"
+git commit -m "feat(router): add depth parameter, /topics endpoint, topics_created in consolidation-log"
 ```
 
 ---
@@ -1268,21 +1430,18 @@ async def _what_do_i_know(args: dict) -> str:
     depth = args.get("depth", "shallow")
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
-        # Try topic-based overview first
-        topics_resp = await c.post(
-            f"{MEMORY_BASE}/activate",
-            params={"query": "knowledge overview", "max_results": 50, "depth": "shallow"},
-        )
-        topics_resp.raise_for_status()
-        topics_data = topics_resp.json()
+        # Try topic-based overview first (direct query, not semantic search)
+        topics_resp = await c.get(f"{MEMORY_BASE}/topics")
+        if topics_resp.status_code == 200:
+            topics_data = topics_resp.json()
+            topic_list = topics_data.get("topics", [])
 
-        topic_engrams = [e for e in topics_data.get("engrams", []) if e.get("type") == "topic"]
-
-        if topic_engrams:
-            lines = [f"Knowledge domains ({len(topic_engrams)} topics):"]
-            for t in topic_engrams:
-                lines.append(f"\n- {t['content'][:200]}")
-            return "\n".join(lines)
+            if topic_list:
+                lines = [f"Knowledge domains ({len(topic_list)} topics):"]
+                for t in topic_list:
+                    member_note = f" ({t.get('member_count', '?')} items)" if t.get("member_count") else ""
+                    lines.append(f"\n- {t['content'][:200]}{member_note}")
+                return "\n".join(lines)
 
         # Fall back to source-based domain summary
         resp = await c.get(f"{MEMORY_BASE}/sources/domain-summary")
