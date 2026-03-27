@@ -120,6 +120,24 @@ The old 4-tier memory (working/episodic/semantic/procedural) has been replaced b
 
 **LLM models default to "auto"** — decomposition, reconstruction, and consolidation models auto-resolve by probing the gateway for available models. Override via `ENGRAM_DECOMPOSITION_MODEL` etc. in `.env`.
 
+### Source Provenance
+
+Every engram links back to a `sources` table tracking where knowledge came from. Sources store metadata (URI, title, author, trust score) and optionally full content (hybrid: DB for small <100KB, filesystem for large at `data/sources/`, URI for re-fetchable). Dedup by content hash and URI.
+
+**Trust defaults by source kind:** chat=0.95, manual_paste=0.90, task_output=0.85, knowledge_crawl=0.70, intel_feed=0.70, pipeline_extraction=0.80, consolidation=0.85, api_response=0.50.
+
+**API:** `POST /sources` (create/dedup), `GET /sources` (list), `GET /sources/{id}` (detail), `GET /sources/{id}/content` (full content), `DELETE /sources/{id}`, `GET /sources/domain-summary` (knowledge overview), `POST /sources/{id}/redecompose` (re-ingest from stored content).
+
+### Memory Tools
+
+Agents can access memory via tools instead of pre-injected context:
+- `what_do_i_know` — lightweight domain overview (~200 tokens)
+- `search_memory` — semantic search across engrams
+- `recall_topic` — graph traversal from an entity
+- `read_source` — full source content retrieval
+
+Controlled by `memory_retrieval_mode` in `.env` (`inject` for legacy 40% pre-injection, `tools` for agent-driven). Default: `inject`.
+
 ## Runtime Configuration (Redis)
 
 Several settings are runtime-configurable via Redis (db 1, prefix `nova:config:`), overridable from the Dashboard UI:

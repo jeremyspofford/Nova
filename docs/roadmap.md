@@ -301,6 +301,29 @@ Service is functional. Credential flow and dedup need finishing.
 - Connect BuiltinCredentialProvider to the CredentialProvider ABC (make pluggable interface real)
 - Future: GitLab, Bitbucket, social media extractors
 
+### Source Provenance & Memory Tools
+
+Source tracking, richer decomposition, and agent-driven memory retrieval. Delivered across 16 implementation tasks.
+
+**Delivered:**
+- Sources table with hybrid storage (DB/filesystem/URI), content-hash dedup, trust scoring
+- Source provenance linkage on all engrams (source_ref_id, source_meta)
+- Paragraph-level decomposition prompts (replacing atomic fact extraction)
+- Fact-level dedup during ingestion (0.90 cosine threshold)
+- Temporal validity tracking on engrams (permanent/dated/unknown)
+- 4 agent-callable memory tools: what_do_i_know, search_memory, recall_topic, read_source
+- Domain awareness priming mode (alternative to 40% context pre-injection)
+- Hierarchical source summarization at ingestion time
+- Knowledge gap and staleness detection in domain summary
+- Re-decomposition endpoint for stored sources
+- Dashboard Sources tab in Memory Explorer
+- Fixed broken post-pipeline memory extraction payload
+
+**Remaining:**
+- Memory tool retrieval feedback loop (tracking which engrams agents actually use)
+- Dashboard toggle for memory_retrieval_mode (currently .env only)
+- Runtime-configurable memory_retrieval_mode via Redis config
+
 ---
 
 ## Priority Backlog
