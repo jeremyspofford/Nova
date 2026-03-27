@@ -312,7 +312,7 @@ async def list_topics():
                 "content": row.content,
                 "importance": round(float(row.importance), 3),
                 "member_count": row.member_count,
-                "entity_anchors": json.loads(row.source_meta or "{}").get("entity_anchors", []) if row.source_meta else [],
+                "entity_anchors": (row.source_meta if isinstance(row.source_meta, dict) else json.loads(row.source_meta or "{}")).get("entity_anchors", []) if row.source_meta else [],
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
