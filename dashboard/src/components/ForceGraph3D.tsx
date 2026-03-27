@@ -773,21 +773,21 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       const data = graph.graphData()
       if (!data?.nodes?.length) return
 
-      // Compute centroid per cluster
+      // Compute centroid per cluster (skip uncategorized — let those float freely)
       const centroids = new Map<number, { x: number; y: number; z: number; count: number }>()
       for (const node of data.nodes) {
         if (node.x == null || node.cluster_id == null) continue
+        if (node.cluster_label === 'Uncategorized') continue
         const c = centroids.get(node.cluster_id) ?? { x: 0, y: 0, z: 0, count: 0 }
         c.x += node.x; c.y += node.y; c.z += node.z; c.count++
         centroids.set(node.cluster_id, c)
       }
 
-      // Apply clustering force: pull toward cluster centroid
-      // Stronger force (0.008) than the old type-centroid (0.003)
-      // to create visible spatial separation between topics
+      // Apply clustering force only to nodes in real topics
       const strength = 0.008
       for (const node of data.nodes) {
         if (node.x == null || node.cluster_id == null) continue
+        if (node.cluster_label === 'Uncategorized') continue
         const c = centroids.get(node.cluster_id)
         if (!c || c.count < 2) continue
         const cx = c.x / c.count, cy = c.y / c.count, cz = c.z / c.count
