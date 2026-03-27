@@ -104,6 +104,23 @@ async def ingest_direct(
     return await _process_event(json.dumps(event))
 
 
+def _map_source_type_to_kind(source_type: str) -> str:
+    """Map IngestionSourceType values to SourceKind values."""
+    mapping = {
+        "chat": "chat",
+        "intel": "intel_feed",
+        "knowledge": "knowledge_crawl",
+        "pipeline": "pipeline_extraction",
+        "tool": "task_output",
+        "consolidation": "consolidation",
+        "cortex": "task_output",
+        "journal": "manual_paste",
+        "external": "knowledge_crawl",
+        "self_reflection": "consolidation",
+    }
+    return mapping.get(source_type, "manual_paste")
+
+
 async def _process_event(raw_payload: str) -> dict:
     """Process a single ingestion event: decompose → resolve → store → link."""
     event = json.loads(raw_payload)
@@ -139,6 +156,41 @@ async def _process_event(raw_payload: str) -> dict:
     index_to_id: dict[int, UUID] = {}
 
     async with AsyncSessionLocal() as session:
+        # ── Source provenance ─────────────────────────────────────────────────
+        source_ref_id = None
+        source_meta = {}
+        trust = 0.7
+        try:
+            from .sources import find_or_create_source, DEFAULT_TRUST
+            source_kind = _map_source_type_to_kind(source_type)
+            source_uri = event.get("source_uri") or metadata.get("url")
+            source_title = event.get("source_title") or metadata.get("feed_name")
+            source_author = event.get("source_author") or metadata.get("author")
+            trust_override = event.get("source_trust")
+
+            source_ref_id = await find_or_create_source(
+                session,
+                source_kind=source_kind,
+                title=source_title,
+                uri=source_uri,
+                content=raw_text,
+                trust_score=trust_override if trust_override is not None else None,
+                author=source_author,
+                metadata=metadata,
+            )
+            source_meta = {
+                k: v for k, v in {
+                    "url": source_uri,
+                    "title": source_title,
+                    "author": source_author,
+                    "feed_name": metadata.get("feed_name"),
+                    "session_id": event.get("session_id"),
+                }.items() if v
+            }
+            trust = trust_override if trust_override is not None else DEFAULT_TRUST.get(source_kind, 0.7)
+        except Exception as exc:
+            log.warning("Source creation failed (non-fatal): %s", exc)
+
         # Step 2: For each decomposed engram, resolve entities and store
         for i, decomposed in enumerate(decomposition.engrams):
             try:
@@ -153,6 +205,9 @@ async def _process_event(raw_payload: str) -> dict:
                     source_id=source_id,
                     occurred_at=occurred_at,
                     metadata=metadata,
+                    source_ref_id=source_ref_id,
+                    source_meta=source_meta,
+                    trust=trust,
                 )
                 index_to_id[i] = engram_id
                 engram_ids.append(engram_id)
@@ -256,6 +311,9 @@ async def _store_or_update_engram(
     source_id: str | None,
     occurred_at: str | None,
     metadata: dict,
+    source_ref_id=None,
+    source_meta=None,
+    trust=0.8,
 ) -> tuple[UUID, bool]:
     """Store a new engram or update an existing one after entity resolution.
 
@@ -303,13 +361,14 @@ async def _store_or_update_engram(
             INSERT INTO engrams (
                 type, content, fragments, embedding, embedding_model,
                 occurred_at, importance, source_type, source_id,
-                confidence, tenant_id
+                confidence, tenant_id, source_ref_id, source_meta
             ) VALUES (
                 :type, :content, CAST(:fragments AS jsonb),
                 CAST(:embedding AS halfvec), :embedding_model,
                 CAST(:occurred_at AS timestamptz), :importance,
                 :source_type, CAST(:source_id AS uuid),
-                :confidence, CAST(:tenant_id AS uuid)
+                :confidence, CAST(:tenant_id AS uuid),
+                :source_ref_id, CAST(:source_meta AS jsonb)
             )
             RETURNING id
         """),
@@ -323,8 +382,10 @@ async def _store_or_update_engram(
             "importance": importance,
             "source_type": source_type,
             "source_id": valid_source_id,
-            "confidence": 0.8,
+            "confidence": trust,
             "tenant_id": DEFAULT_TENANT,
+            "source_ref_id": source_ref_id,
+            "source_meta": json.dumps(source_meta or {}),
         },
     )
     row = result.fetchone()
