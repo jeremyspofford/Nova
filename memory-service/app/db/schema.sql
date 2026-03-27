@@ -22,6 +22,83 @@ CREATE TABLE IF NOT EXISTS embedding_cache (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- ── Sources ─────────────────────────────────────────────────────────────────
+-- Provenance backbone: every engram traces back to a source.
+-- Sources are the raw material — books, articles, conversations, crawls.
+-- Hybrid storage: content in DB (small), filesystem (large), or URI-only (re-fetchable).
+
+CREATE TABLE IF NOT EXISTS sources (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    -- Classification
+    source_kind     TEXT NOT NULL,
+    title           TEXT,
+    uri             TEXT,
+
+    -- Content storage (hybrid: pick one or more)
+    content         TEXT,
+    content_path    TEXT,
+    content_hash    TEXT,
+
+    -- Hierarchical summarization
+    summary         TEXT,
+    section_summaries JSONB,
+
+    -- Trust & freshness
+    trust_score     REAL NOT NULL DEFAULT 0.7,
+    verified_at     TIMESTAMPTZ,
+    stale           BOOLEAN NOT NULL DEFAULT FALSE,
+
+    -- Completeness tracking
+    completeness    TEXT DEFAULT 'complete',
+    coverage_notes  TEXT,
+
+    -- Metadata
+    author          TEXT,
+    published_at    TIMESTAMPTZ,
+    ingested_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata        JSONB DEFAULT '{}',
+
+    -- Multi-tenancy
+    tenant_id       UUID NOT NULL DEFAULT '00000000-0000-0000-0000-000000000001',
+
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sources_kind ON sources(source_kind);
+CREATE INDEX IF NOT EXISTS idx_sources_uri ON sources(uri) WHERE uri IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sources_hash ON sources(content_hash) WHERE content_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_sources_tenant ON sources(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_sources_trust ON sources(trust_score);
+
+-- Link engrams to their provenance source
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN source_ref_id UUID REFERENCES sources(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN source_meta JSONB DEFAULT '{}';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN temporal_validity TEXT DEFAULT 'unknown';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN valid_as_of TIMESTAMPTZ;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_engrams_source_ref ON engrams(source_ref_id) WHERE source_ref_id IS NOT NULL;
+
+-- NOTE: The engram_archive table mirrors engrams but does NOT get these new columns.
+-- Archived engrams will lose provenance linkage. This is acceptable — archived engrams
+-- are cold storage and rarely queried. If needed, add matching ALTER TABLE statements
+-- for engram_archive in a follow-up.
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Engram Network: graph-based cognitive memory
 -- Engrams are atomic memory nodes; engram_edges are weighted typed associations.
