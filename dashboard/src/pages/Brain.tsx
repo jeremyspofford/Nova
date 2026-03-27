@@ -47,7 +47,7 @@ interface GraphData {
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-const LAYOUT_PRESETS = ['compact', 'spread', 'galaxy', 'constellation'] as const
+// Single clustered layout — topic clustering force handles spatial grouping
 
 const TYPE_COLORS: Record<string, string> = {
   fact:       '#60a5fa',
@@ -116,7 +116,7 @@ export default function Brain() {
   // UI state
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
-  const [layout, setLayout] = useState<string>('spread')
+  const layout = 'clustered'
   const [searchQuery, setSearchQuery] = useState('')
   const [searchActive, setSearchActive] = useState(false)
   const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
@@ -277,23 +277,6 @@ export default function Brain() {
             </button>
           )}
         </form>
-
-        {/* Layout presets */}
-        <div className="flex gap-1 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-1">
-          {LAYOUT_PRESETS.map(preset => (
-            <button
-              key={preset}
-              onClick={() => setLayout(preset)}
-              className={`text-xs px-2 py-0.5 rounded transition-colors ${
-                layout === preset
-                  ? 'bg-teal-500/20 text-teal-400'
-                  : 'text-stone-500 hover:text-stone-300'
-              }`}
-            >
-              {preset}
-            </button>
-          ))}
-        </div>
 
         {/* Stats badge */}
         {activeGraph && (

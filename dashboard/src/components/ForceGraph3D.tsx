@@ -58,13 +58,10 @@ export interface LayoutConfig {
 }
 
 export const LAYOUT_PRESETS: Record<string, LayoutConfig & { label: string; description: string }> = {
-  compact:       { label: 'Compact',       sphereRadius: 0, homeForce: 0, charge: -25, linkDist: 12, linkDistSpread: 20, description: 'Dense — tight clusters, more connections visible' },
-  spread:        { label: 'Spread',        sphereRadius: 0, homeForce: 0, charge: -40, linkDist: 20, linkDistSpread: 30, description: 'Balanced — clear clusters with visible structure' },
-  galaxy:        { label: 'Galaxy',        sphereRadius: 0, homeForce: 0, charge: -60, linkDist: 30, linkDistSpread: 40, description: 'Airy — more space between nodes' },
-  constellation: { label: 'Constellation', sphereRadius: 0, homeForce: 0, charge: -80, linkDist: 40, linkDistSpread: 50, description: 'Maximum spread — each node clearly separate' },
+  clustered: { label: 'Clustered', sphereRadius: 0, homeForce: 0, charge: -50, linkDist: 20, linkDistSpread: 35, description: 'Topic-clustered layout with spatial grouping' },
 }
 
-export const DEFAULT_LAYOUT = 'spread'
+export const DEFAULT_LAYOUT = 'clustered'
 
 export interface NeuralModeConfig {
   enabled: boolean
@@ -768,34 +765,37 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       }
     } catch { /* force config may fail silently */ }
 
-    // ── Clustering force ──────────────────────────────────────────────
-    // For non-cluster mode (BFS/type view): gentle nudge toward type centroid.
-    // For cluster mode: not needed — the organic force-directed layout
-    // creates natural clusters from edge topology + charge repulsion.
-    if (!useClusterColors) {
-      graph.onEngineTick(() => {
-        const data = graph.graphData()
-        if (!data?.nodes?.length) return
-        const centroids = new Map<string, { x: number; y: number; z: number; count: number }>()
-        for (const node of data.nodes) {
-          if (node.x == null) continue
-          const key = String(node.type ?? 'unknown')
-          const c = centroids.get(key) ?? { x: 0, y: 0, z: 0, count: 0 }
-          c.x += node.x; c.y += node.y; c.z += node.z; c.count++
-          centroids.set(key, c)
-        }
-        const strength = 0.003
-        for (const node of data.nodes) {
-          if (node.x == null) continue
-          const c = centroids.get(String(node.type ?? 'unknown'))
-          if (!c || c.count < 2) continue
-          const cx = c.x / c.count, cy = c.y / c.count, cz = c.z / c.count
-          node.vx = (node.vx ?? 0) + (cx - node.x) * strength
-          node.vy = (node.vy ?? 0) + (cy - node.y) * strength
-          node.vz = (node.vz ?? 0) + (cz - node.z) * strength
-        }
-      })
-    }
+    // ── Topic clustering force ─────────────────────────────────────────
+    // Nudge nodes toward their topic cluster centroid each tick.
+    // This creates visible spatial groupings by topic while still
+    // letting the force simulation handle fine positioning.
+    graph.onEngineTick(() => {
+      const data = graph.graphData()
+      if (!data?.nodes?.length) return
+
+      // Compute centroid per cluster
+      const centroids = new Map<number, { x: number; y: number; z: number; count: number }>()
+      for (const node of data.nodes) {
+        if (node.x == null || node.cluster_id == null) continue
+        const c = centroids.get(node.cluster_id) ?? { x: 0, y: 0, z: 0, count: 0 }
+        c.x += node.x; c.y += node.y; c.z += node.z; c.count++
+        centroids.set(node.cluster_id, c)
+      }
+
+      // Apply clustering force: pull toward cluster centroid
+      // Stronger force (0.008) than the old type-centroid (0.003)
+      // to create visible spatial separation between topics
+      const strength = 0.008
+      for (const node of data.nodes) {
+        if (node.x == null || node.cluster_id == null) continue
+        const c = centroids.get(node.cluster_id)
+        if (!c || c.count < 2) continue
+        const cx = c.x / c.count, cy = c.y / c.count, cz = c.z / c.count
+        node.vx = (node.vx ?? 0) + (cx - node.x) * strength
+        node.vy = (node.vy ?? 0) + (cy - node.y) * strength
+        node.vz = (node.vz ?? 0) + (cz - node.z) * strength
+      }
+    })
 
     // ── Bloom post-processing ──────────────────────────────────────────
     try {
@@ -1012,27 +1012,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     }
   }, [bgColor])
 
-  // Live-reconfigure layout when preset changes — no full teardown
-  useEffect(() => {
-    const graph = graphRef.current
-    if (!graph || !initializedRef.current) return
-
-    const cfg = LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT]
-    layoutRef.current = cfg
-
-    // Reconfigure d3 forces from preset
-    try {
-      if (isLargeGraph) {
-        graph.d3Force('charge')?.strength(cfg.charge).distanceMax(250)
-        graph.d3Force('link')
-          ?.distance((link: any) => cfg.linkDist + (1 - (link.weight ?? 0.3)) * cfg.linkDistSpread)
-          .strength((link: any) => 0.02 + (link.weight ?? 0.3) * 0.3)
-      }
-    } catch { /* ok */ }
-
-    // Re-energize the simulation so nodes rearrange
-    try { graph.numDimensions(3) } catch { /* triggers simulation restart */ }
-  }, [layoutPreset])
+  // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 
   // Highlight selected node
   useEffect(() => {
