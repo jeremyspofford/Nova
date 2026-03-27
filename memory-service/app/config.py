@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     engram_decomposition_model: str = "auto"
     engram_entity_similarity_threshold: float = 0.92  # embedding cosine threshold for dedup
     engram_contradiction_similarity_threshold: float = 0.85
+    engram_fact_dedup_threshold: float = 0.90  # cosine similarity for fact-level dedup
 
     # Engram Network (Phase 2: Spreading Activation)
     engram_seed_count: int = 10

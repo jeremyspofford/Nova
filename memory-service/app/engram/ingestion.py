@@ -328,12 +328,13 @@ async def _store_or_update_engram(
         # Strategy 1: exact name match for entities
         existing = await find_existing_entity(session, content)
 
+    # Always compute embedding — needed for dedup and INSERT
+    embedding = await get_embedding(content, session)
+
     if not existing:
-        # Strategy 2: embedding similarity for same-type engrams
-        embedding = await get_embedding(content, session)
-        existing = await find_similar_engram(session, embedding, decomposed_type)
-    else:
-        embedding = await get_embedding(content, session)
+        # Strategy 2: embedding similarity for entity-type engrams
+        if decomposed_type == "entity":
+            existing = await find_similar_engram(session, embedding, decomposed_type)
 
     if existing:
         # Update existing engram instead of creating duplicate
@@ -342,6 +343,20 @@ async def _store_or_update_engram(
             importance_boost=max(0, importance - existing["importance"]) * 0.5,
         )
         return existing["id"], False
+
+    # Fact-level dedup: merge near-duplicate facts instead of creating duplicates
+    if decomposed_type in ("fact", "episode", "procedure", "preference"):
+        similar = await find_similar_engram(
+            session, embedding, decomposed_type,
+            threshold=settings.engram_fact_dedup_threshold,
+        )
+        if similar:
+            await update_existing_engram(session, similar["id"], importance)
+            log.debug("Fact dedup: merged into existing engram %s", similar["id"])
+            # Preserve source linkage on the existing engram
+            if source_ref_id:
+                await _append_source_ref(session, similar["id"], source_ref_id)
+            return similar["id"], False
 
     # Create new engram
     fragments = {
@@ -405,6 +420,22 @@ async def _store_or_update_engram(
             pass  # entity linking is best-effort
 
     return row.id, True
+
+
+async def _append_source_ref(session, engram_id, source_ref_id) -> None:
+    """Append a source reference to an existing engram's source_meta."""
+    await session.execute(
+        text("""
+            UPDATE engrams
+            SET source_meta = jsonb_set(
+                COALESCE(source_meta, '{}'),
+                '{additional_sources}',
+                COALESCE(source_meta->'additional_sources', '[]'::jsonb) || to_jsonb(:ref::text)
+            )
+            WHERE id = CAST(:id AS uuid)
+        """),
+        {"id": str(engram_id), "ref": str(source_ref_id)},
+    )
 
 
 async def _create_edge(
