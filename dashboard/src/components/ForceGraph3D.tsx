@@ -702,15 +702,20 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       // ── Interaction ──────────────────────────────────────────────────
       .onNodeClick((node: any) => {
         onSelectNodeRef.current(node.id)
-        // Freeze node position so it doesn't drift during camera animation
+        // Stop auto-spin — scene rotation fights camera animation
+        spinningRef.current = false
+        // Freeze node so it doesn't drift during camera fly-in
         node.fx = node.x
         node.fy = node.y
         node.fz = node.z
-        // Zoom to clicked node using current coordinates
+        // Compensate for accumulated scene rotation
+        const scene = graph.scene()
+        const pos = new Vector3(node.x, node.y, node.z)
+        pos.applyEuler(scene.rotation)
         const distance = 80
         graph.cameraPosition(
-          { x: node.x, y: node.y, z: node.z + distance },
-          { x: node.x, y: node.y, z: node.z },
+          { x: pos.x, y: pos.y, z: pos.z + distance },
+          { x: pos.x, y: pos.y, z: pos.z },
           800,
         )
         // Unfreeze after camera arrives
@@ -1042,9 +1047,12 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     const distance = Math.max(maxDist * 2.5, 60)
 
     spinningRef.current = false
+    // Compensate for accumulated scene rotation
+    const pos = new Vector3(cx, cy, cz)
+    pos.applyEuler(graph.scene().rotation)
     graph.cameraPosition(
-      { x: cx, y: cy, z: cz + distance },
-      { x: cx, y: cy, z: cz },
+      { x: pos.x, y: pos.y, z: pos.z + distance },
+      { x: pos.x, y: pos.y, z: pos.z },
       1000,
     )
   }, [focusClusterId, focusClusterTs])
@@ -1058,9 +1066,12 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     if (!node || node.x == null) return
 
     spinningRef.current = false
+    // Compensate for accumulated scene rotation
+    const pos = new Vector3(node.x, node.y, node.z)
+    pos.applyEuler(graph.scene().rotation)
     graph.cameraPosition(
-      { x: node.x, y: node.y, z: node.z + 60 },
-      { x: node.x, y: node.y, z: node.z },
+      { x: pos.x, y: pos.y, z: pos.z + 60 },
+      { x: pos.x, y: pos.y, z: pos.z },
       800,
     )
   }, [focusNodeId, focusNodeTs])
