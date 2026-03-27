@@ -400,6 +400,9 @@ function GraphTab() {
   })
   const [showBgPicker, setShowBgPicker] = useState(false)
   const bgPickerRef = useRef<HTMLDivElement>(null)
+  const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
+  const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
+  const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
 
   useEffect(() => {
     try { localStorage.setItem('nova-graph-view', viewMode) } catch { /* ok */ }
@@ -562,27 +565,89 @@ function GraphTab() {
                     onBackgroundClick={() => setSelectedNode(null)}
                     autoSpin={autoSpin}
                     bgColor={graphBg}
+                    focusClusterId={focusCluster?.id ?? null}
+                    focusClusterTs={focusCluster?.ts}
+                    focusNodeId={focusNode?.id ?? null}
+                    focusNodeTs={focusNode?.ts}
                     className="w-full h-full"
                   />
                 </div>
-                {/* Legend — clusters when in full mode, types otherwise */}
-                <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1 max-h-[300px] overflow-y-auto">
+                {/* Interactive cluster legend */}
+                <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm border border-white/5 rounded-md px-2 py-2 max-h-[600px] overflow-y-auto w-[220px] scrollbar-thin">
                   {graph.clusters && graph.clusters.length > 0 ? (
-                    graph.clusters.slice(0, 20).map(cluster => (
-                      <div key={cluster.id} className="flex items-center gap-2 text-micro">
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length], boxShadow: `0 0 6px ${CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]}` }}
-                        />
-                        <span className="text-neutral-400 truncate max-w-[140px]">
-                          {cluster.label}
-                        </span>
-                        <span className="text-neutral-600 text-[10px]">{cluster.count}</span>
+                    <>
+                      <div className="text-[10px] text-neutral-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                        {graph.clusters.length} domains
                       </div>
-                    ))
+                      {graph.clusters.slice(0, 30).map(cluster => {
+                        const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
+                        const isExpanded = expandedClusterId === cluster.id
+                        const isFocused = focusCluster?.id === cluster.id
+                        return (
+                          <div key={cluster.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFocusCluster({ id: cluster.id, ts: Date.now() })
+                                setExpandedClusterId(isExpanded ? null : cluster.id)
+                              }}
+                              className={`flex items-center gap-1.5 w-full text-left text-micro rounded px-1.5 py-1 transition-colors ${
+                                isFocused ? 'bg-white/10' : 'hover:bg-white/5'
+                              }`}
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                              />
+                              <span className="text-neutral-300 truncate flex-1" title={cluster.label}>
+                                {cluster.label}
+                              </span>
+                              <span className="text-neutral-600 text-[10px] shrink-0">{cluster.count}</span>
+                              <ChevronRight
+                                size={10}
+                                className={`text-neutral-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                              />
+                            </button>
+                            {isExpanded && (
+                              <div className="pl-5 pr-1 py-0.5 space-y-px">
+                                {graph.nodes
+                                  .filter(n => n.cluster_id === cluster.id)
+                                  .sort((a, b) => b.importance - a.importance)
+                                  .slice(0, 12)
+                                  .map(node => (
+                                    <button
+                                      key={node.id}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleSelectNode(node.id)
+                                        setFocusNode({ id: node.id, ts: Date.now() })
+                                      }}
+                                      className="block w-full text-left text-[10px] text-neutral-500 hover:text-neutral-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                                      title={node.content}
+                                    >
+                                      {node.content}
+                                    </button>
+                                  ))}
+                                {graph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
+                                  <div className="text-[10px] text-neutral-600 px-1 pt-0.5">
+                                    +{graph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {graph.clusters.length > 30 && (
+                        <div className="text-[10px] text-neutral-600 px-1.5 pt-1 border-t border-white/5 mt-1">
+                          +{graph.clusters.length - 30} smaller clusters
+                        </div>
+                      )}
+                    </>
                   ) : (
                     Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
-                      <div key={type} className="flex items-center gap-2 text-micro">
+                      <div key={type} className="flex items-center gap-2 text-micro px-1.5 py-0.5">
                         <span
                           className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}

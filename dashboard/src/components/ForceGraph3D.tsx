@@ -56,7 +56,29 @@ interface ForceGraph3DProps {
   autoSpin?: boolean
   bgColor?: string
   className?: string
+  focusClusterId?: number | null
+  focusClusterTs?: number
+  focusNodeId?: string | null
+  focusNodeTs?: number
 }
+
+// ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
+
+function fibonacciSphere(index: number, total: number, radius: number) {
+  if (total <= 1) return { x: 0, y: 0, z: 0 }
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+  const y = 1 - (index / (total - 1)) * 2
+  const radiusAtY = Math.sqrt(1 - y * y)
+  const theta = goldenAngle * index
+  return {
+    x: Math.cos(theta) * radiusAtY * radius,
+    y: y * radius,
+    z: Math.sin(theta) * radiusAtY * radius,
+  }
+}
+
+// Module-level storage for cluster home positions (survives re-renders)
+const clusterHomePositions = new Map<string, { x: number; y: number; z: number }>()
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
@@ -387,6 +409,10 @@ export function ForceGraph3D({
   autoSpin = true,
   bgColor = '#000000',
   className,
+  focusClusterId,
+  focusClusterTs,
+  focusNodeId,
+  focusNodeTs,
 }: ForceGraph3DProps) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
@@ -559,45 +585,47 @@ export function ForceGraph3D({
       }
     } catch { /* force config may fail silently */ }
 
-    // ── Clustering force — cluster-aware when available, type-based fallback ──
-    // Gentle attraction between same-cluster nodes so they organically group.
-    // Preserves graph topology — connected nodes of different clusters stay
-    // close, but same-cluster nodes drift toward their siblings.
+    // ── Clustering force ──────────────────────────────────────────────
+    // Two modes:
+    // 1. Home-position mode (cluster view): each cluster has a fixed "home"
+    //    on a Fibonacci sphere. Nodes are pulled toward their home so clusters
+    //    stay spatially separated instead of blobbing together.
+    // 2. Centroid mode (BFS/type view): nodes drift toward their type centroid.
     graph.onEngineTick(() => {
       const data = graph.graphData()
       if (!data?.nodes?.length) return
 
-      // Group key: use cluster_id if available, otherwise fall back to type
-      const getGroup = useClusterColors
-        ? (node: any) => String(node.cluster_id ?? 'none')
-        : (node: any) => String(node.type ?? 'unknown')
-
-      // Compute centroids per group
-      const centroids = new Map<string, { x: number; y: number; z: number; count: number }>()
-      for (const node of data.nodes) {
-        if (node.x == null) continue
-        const key = getGroup(node)
-        const c = centroids.get(key) ?? { x: 0, y: 0, z: 0, count: 0 }
-        c.x += node.x
-        c.y += node.y
-        c.z += node.z
-        c.count++
-        centroids.set(key, c)
-      }
-
-      // Nudge each node gently toward its group centroid
-      // Stronger for cluster mode to keep distinct domains separated
-      const strength = useClusterColors ? 0.006 : 0.003
-      for (const node of data.nodes) {
-        if (node.x == null) continue
-        const c = centroids.get(getGroup(node))
-        if (!c || c.count < 2) continue
-        const cx = c.x / c.count
-        const cy = c.y / c.count
-        const cz = c.z / c.count
-        node.vx = (node.vx ?? 0) + (cx - node.x) * strength
-        node.vy = (node.vy ?? 0) + (cy - node.y) * strength
-        node.vz = (node.vz ?? 0) + (cz - node.z) * strength
+      if (useClusterColors && clusterHomePositions.size > 0) {
+        // Home-position mode — pull toward cluster's fixed spot on the sphere
+        const strength = 0.006
+        for (const node of data.nodes) {
+          if (node.x == null) continue
+          const home = clusterHomePositions.get(String(node.cluster_id ?? 0))
+          if (!home) continue
+          node.vx = (node.vx ?? 0) + (home.x - node.x) * strength
+          node.vy = (node.vy ?? 0) + (home.y - node.y) * strength
+          node.vz = (node.vz ?? 0) + (home.z - node.z) * strength
+        }
+      } else {
+        // Centroid mode (original) — nudge toward type centroid
+        const centroids = new Map<string, { x: number; y: number; z: number; count: number }>()
+        for (const node of data.nodes) {
+          if (node.x == null) continue
+          const key = String(node.type ?? 'unknown')
+          const c = centroids.get(key) ?? { x: 0, y: 0, z: 0, count: 0 }
+          c.x += node.x; c.y += node.y; c.z += node.z; c.count++
+          centroids.set(key, c)
+        }
+        const strength = 0.003
+        for (const node of data.nodes) {
+          if (node.x == null) continue
+          const c = centroids.get(String(node.type ?? 'unknown'))
+          if (!c || c.count < 2) continue
+          const cx = c.x / c.count, cy = c.y / c.count, cz = c.z / c.count
+          node.vx = (node.vx ?? 0) + (cx - node.x) * strength
+          node.vy = (node.vy ?? 0) + (cy - node.y) * strength
+          node.vz = (node.vz ?? 0) + (cz - node.z) * strength
+        }
       }
     })
 
@@ -737,6 +765,47 @@ export function ForceGraph3D({
     })
   }, [selectedId, useClusterColors])
 
+  // Navigate camera to a cluster's centroid
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph || focusClusterId == null) return
+    const data = graph.graphData()
+    const clusterNodes = data.nodes.filter((n: any) => n.cluster_id === focusClusterId)
+    if (!clusterNodes.length) return
+
+    const cx = clusterNodes.reduce((s: number, n: any) => s + (n.x ?? 0), 0) / clusterNodes.length
+    const cy = clusterNodes.reduce((s: number, n: any) => s + (n.y ?? 0), 0) / clusterNodes.length
+    const cz = clusterNodes.reduce((s: number, n: any) => s + (n.z ?? 0), 0) / clusterNodes.length
+
+    const maxDist = Math.max(...clusterNodes.map((n: any) =>
+      Math.sqrt(((n.x ?? 0) - cx) ** 2 + ((n.y ?? 0) - cy) ** 2 + ((n.z ?? 0) - cz) ** 2)
+    ))
+    const distance = Math.max(maxDist * 2.5, 60)
+
+    spinningRef.current = false
+    graph.cameraPosition(
+      { x: cx, y: cy, z: cz + distance },
+      { x: cx, y: cy, z: cz },
+      1000,
+    )
+  }, [focusClusterId, focusClusterTs])
+
+  // Navigate camera to a specific node
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph || !focusNodeId) return
+    const data = graph.graphData()
+    const node = data.nodes.find((n: any) => n.id === focusNodeId)
+    if (!node || node.x == null) return
+
+    spinningRef.current = false
+    graph.cameraPosition(
+      { x: node.x, y: node.y, z: node.z + 60 },
+      { x: node.x, y: node.y, z: node.z },
+      800,
+    )
+  }, [focusNodeId, focusNodeTs])
+
   return (
     <div
       ref={containerRef}
@@ -800,7 +869,7 @@ function makeDomainLabel(text: string, count: number, color: string): Sprite {
 const clusterVisuals: (Sprite | Mesh)[] = []
 
 function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], useClusterMode: boolean) {
-  const graphNodes = nodes.map(n => ({ ...n }))
+  const graphNodes = nodes.map(n => ({ ...n })) as any[]
   const nodeIds = new Set(nodes.map(n => n.id))
   const graphLinks = edges
     .filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
@@ -810,6 +879,38 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
       relation: e.relation,
       weight: e.weight,
     }))
+
+  // ── Fibonacci sphere initial positioning for cluster mode ──────────
+  // Each cluster gets a fixed "home" on a sphere so they start separated
+  // instead of all spawning at the origin and blobbing together.
+  if (useClusterMode && graphNodes.length > 0) {
+    const byCluster = new Map<number, typeof graphNodes>()
+    for (const n of graphNodes) {
+      const cid = n.cluster_id ?? 0
+      const list = byCluster.get(cid) ?? []
+      list.push(n)
+      byCluster.set(cid, list)
+    }
+
+    // Sphere radius scales with cluster count — more clusters = wider spread
+    const sphereRadius = Math.max(250, byCluster.size * 2)
+    clusterHomePositions.clear()
+
+    let idx = 0
+    for (const [cid, members] of byCluster) {
+      const home = fibonacciSphere(idx, byCluster.size, sphereRadius)
+      clusterHomePositions.set(String(cid), home)
+
+      // Spread within cluster scales with member count
+      const spread = Math.max(10, Math.sqrt(members.length) * 5)
+      for (const node of members) {
+        node.x = home.x + (Math.random() - 0.5) * spread
+        node.y = home.y + (Math.random() - 0.5) * spread
+        node.z = home.z + (Math.random() - 0.5) * spread
+      }
+      idx++
+    }
+  }
 
   graph.graphData({ nodes: graphNodes, links: graphLinks })
 
