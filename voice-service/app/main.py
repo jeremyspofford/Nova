@@ -76,3 +76,7 @@ async def health_ready():
         "tts_provider": settings.tts_provider,
         "tts_available": tts_available,
     }
+
+
+from app.routes import router as voice_router
+app.include_router(voice_router)
