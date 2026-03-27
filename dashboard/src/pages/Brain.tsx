@@ -111,6 +111,22 @@ export default function Brain() {
     queryClient.invalidateQueries({ queryKey: ['brain-graph'] })
   }, [queryClient])
 
+  // Track previous node IDs for fade-in animation on new engrams
+  const prevNodeIdsRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!activeGraph?.nodes) return
+    const currentIds = new Set(activeGraph.nodes.map(n => n.id))
+    if (prevNodeIdsRef.current.size > 0) {
+      const newIds = activeGraph.nodes
+        .filter(n => !prevNodeIdsRef.current.has(n.id))
+        .map(n => n.id)
+      if (newIds.length > 0) {
+        graphRef.current?.fadeInNodes(newIds, 1000)
+      }
+    }
+    prevNodeIdsRef.current = currentIds
+  }, [activeGraph])
+
   // Selected node data
   const selectedNodeData = selectedNode
     ? activeGraph?.nodes.find(n => n.id === selectedNode)
