@@ -47,6 +47,7 @@ async def spreading_activation(
     decay_factor: float | None = None,
     activation_threshold: float | None = None,
     max_results: int | None = None,
+    depth: str = "standard",  # shallow, standard, deep
     tenant_id: str = "00000000-0000-0000-0000-000000000001",
 ) -> list[ActivatedEngram]:
     """Run spreading activation over the engram graph.
@@ -185,10 +186,69 @@ async def spreading_activation(
             source_type=row.source_type,
         ))
 
+    # Shallow mode: only return topic and schema engrams
+    if depth == "shallow":
+        activated = [a for a in activated if a.type in ("topic", "schema")]
+
     # Update last_accessed and access_count for retrieved engrams
     if activated:
         ids = [a.id for a in activated]
         await _touch_accessed(session, ids)
+
+    # Deep mode: follow all instance_of/part_of edges from activated nodes
+    if depth == "deep" and activated:
+        pre_deep_count = len(activated)
+        activated_ids = {a.id for a in activated}
+        structural_result = await session.execute(
+            text("""
+                SELECT DISTINCT e.id::text, e.type, e.content, e.importance,
+                       e.confidence, e.access_count, e.last_accessed, e.created_at,
+                       e.fragments::text, e.source_type
+                FROM engram_edges ee
+                JOIN engrams e ON e.id = CASE
+                    WHEN ee.source_id = ANY(CAST(:ids AS uuid[])) THEN ee.target_id
+                    ELSE ee.source_id
+                END
+                WHERE (ee.source_id = ANY(CAST(:ids AS uuid[]))
+                    OR ee.target_id = ANY(CAST(:ids AS uuid[])))
+                  AND ee.relation IN ('instance_of', 'part_of')
+                  AND NOT e.superseded
+                  AND e.id != ALL(CAST(:ids AS uuid[]))
+            """),
+            {"ids": list(activated_ids)},
+        )
+
+        for row in structural_result:
+            if str(row.id) not in activated_ids:
+                import json as _json
+                fragments = None
+                if row.fragments:
+                    try:
+                        fragments = _json.loads(row.fragments)
+                    except Exception:
+                        pass
+
+                activated.append(ActivatedEngram(
+                    id=str(row.id),
+                    type=row.type,
+                    content=row.content,
+                    activation=0.5,
+                    importance=row.importance,
+                    confidence=row.confidence,
+                    convergence_paths=1,
+                    final_score=0.5 * row.importance,
+                    access_count=row.access_count,
+                    last_accessed=row.last_accessed,
+                    created_at=row.created_at,
+                    fragments=fragments,
+                    source_type=row.source_type,
+                ))
+                activated_ids.add(str(row.id))
+
+        # Touch the newly added structural neighbors
+        new_ids = [a.id for a in activated[pre_deep_count:]]
+        if new_ids:
+            await _touch_accessed(session, new_ids)
 
     activated.sort(key=lambda a: a.final_score, reverse=True)
     return activated
