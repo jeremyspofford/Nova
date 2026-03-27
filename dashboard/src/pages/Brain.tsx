@@ -213,11 +213,27 @@ export default function Brain() {
     ? { ...selectedNodeBasic, content: selectedNodeFull?.content ?? selectedNodeBasic.content }
     : null
 
+  // Auto-zoom when drilling into a cluster
+  useEffect(() => {
+    if (expandedCluster != null) {
+      setFocusCluster({ id: expandedCluster, ts: Date.now() })
+    }
+  }, [expandedCluster])
+
+  // Fall back to Full Graph when clusters drop below 3
+  useEffect(() => {
+    if (graphMode === 'topic-map' && (!activeGraph?.clusters || activeGraph.clusters.length < 3)) {
+      setGraphMode('full')
+      setExpandedCluster(null)
+    }
+  }, [activeGraph?.clusters, graphMode])
+
   // Handle search submit
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (searchQuery.trim().length > 2) {
       setSearchActive(true)
+      setExpandedCluster(null)
     }
   }
 
@@ -452,7 +468,7 @@ export default function Brain() {
       </div>
 
       {/* ── Top Left: Topic Sidebar ──────────────────────────────────────── */}
-      {activeGraph && activeGraph.nodes.length > 0 && (
+      {(graphMode !== 'topic-map' || expandedCluster != null) && activeGraph && activeGraph.nodes.length > 0 && (
         <div className="absolute top-28 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-10rem)] overflow-y-auto w-[200px] scrollbar-thin">
           {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
             <>
