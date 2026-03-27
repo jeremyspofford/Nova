@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import ForceGraph3DLib from '3d-force-graph'
 import {
   Mesh,
@@ -65,6 +65,20 @@ export const LAYOUT_PRESETS: Record<string, LayoutConfig & { label: string; desc
 
 export const DEFAULT_LAYOUT = 'spread'
 
+export interface NeuralModeConfig {
+  enabled: boolean
+  breathingRate?: number      // Hz, default 0.02
+  breathingAmplitude?: number // 0-1, default 0.05
+  bloomStrength?: number      // default 1.2 (current default is 0.8)
+  particlesAlways?: boolean   // override large-graph particle disable
+}
+
+export interface ForceGraph3DHandle {
+  highlightNodes: (ids: string[], durationMs: number) => void
+  pulseAll: (durationMs: number) => void
+  fadeInNodes: (ids: string[], durationMs: number) => void
+}
+
 interface ForceGraph3DProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
@@ -80,6 +94,7 @@ interface ForceGraph3DProps {
   focusNodeId?: string | null
   focusNodeTs?: number
   layoutPreset?: string
+  neuralMode?: NeuralModeConfig
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -128,6 +143,18 @@ const TYPE_COLORS: Record<string, string> = {
 }
 const DEFAULT_COLOR = '#71717a'
 
+const NEURAL_TYPE_COLORS: Record<string, string> = {
+  fact:       '#3b82f6',
+  entity:     '#14b8a6',
+  preference: '#10b981',
+  procedure:  '#a1a1aa',
+  self_model: '#6366f1',
+  episode:    '#f59e0b',
+  schema:     '#ef4444',
+  goal:       '#a855f7',
+  topic:      '#06b6d4',
+}
+
 // Distinct cluster colors for full-graph mode
 const CLUSTER_COLORS = [
   '#818cf8', '#60a5fa', '#2dd4bf', '#34d399', '#fbbf24',
@@ -136,9 +163,12 @@ const CLUSTER_COLORS = [
   '#a78bfa', '#67e8f9', '#fca5a5', '#86efac', '#fde68a',
 ]
 
-function getNodeColor(node: GraphNode, useCluster: boolean): string {
+function getNodeColor(node: GraphNode, useCluster: boolean, neural?: boolean): string {
   if (useCluster && node.cluster_id != null) {
     return CLUSTER_COLORS[node.cluster_id % CLUSTER_COLORS.length]
+  }
+  if (neural) {
+    return NEURAL_TYPE_COLORS[node.type] ?? TYPE_COLORS[node.type] ?? DEFAULT_COLOR
   }
   return TYPE_COLORS[node.type] ?? DEFAULT_COLOR
 }
@@ -419,7 +449,7 @@ const LABEL_MIN_IMPORTANCE = 0.3
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function ForceGraph3D({
+export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(function ForceGraph3D({
   nodes,
   edges,
   clusters,
@@ -434,7 +464,8 @@ export function ForceGraph3D({
   focusNodeId,
   focusNodeTs,
   layoutPreset = DEFAULT_LAYOUT,
-}: ForceGraph3DProps) {
+  neuralMode,
+}: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
   const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
@@ -446,6 +477,34 @@ export function ForceGraph3D({
   const starfieldRef = useRef<Group | null>(null)
   const bgColorRef = useRef(bgColor)
   bgColorRef.current = bgColor
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const bloomPassRef = useRef<any>(null)
+  const neuralModeRef = useRef(neuralMode)
+  neuralModeRef.current = neuralMode
+
+  // Activity visualization refs (imperative handle)
+  const highlightedNodesRef = useRef<Set<string>>(new Set())
+  const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
+  const fadeInNodesRef = useRef<Map<string, number>>(new Map()) // id -> birthTime
+
+  useImperativeHandle(ref, () => ({
+    highlightNodes(ids: string[], durationMs: number) {
+      ids.forEach(id => highlightedNodesRef.current.add(id))
+      setTimeout(() => {
+        ids.forEach(id => highlightedNodesRef.current.delete(id))
+      }, durationMs)
+    },
+    pulseAll(durationMs: number) {
+      globalPulseRef.current = { active: true, startTime: Date.now(), duration: durationMs }
+    },
+    fadeInNodes(ids: string[], durationMs: number) {
+      const now = Date.now()
+      ids.forEach(id => fadeInNodesRef.current.set(id, now))
+      setTimeout(() => {
+        ids.forEach(id => fadeInNodesRef.current.delete(id))
+      }, durationMs)
+    },
+  }))
 
   const onSelectNodeRef = useRef(onSelectNode)
   onSelectNodeRef.current = onSelectNode
@@ -479,7 +538,7 @@ export function ForceGraph3D({
       .nodeVal((node: any) => 1 + (node.importance ?? 0) * 8)
       .nodeLabel((node: any) => {
         const type = node.type === 'self_model' ? 'self model' : (node.type ?? '')
-        const color = getNodeColor(node, useClusterColors)
+        const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
         const clusterLine = node.cluster_label
           ? `<div style="color:${color};font-weight:600;margin-bottom:2px;font-size:10px;letter-spacing:0.5px;">${node.cluster_label}</div>`
           : ''
@@ -491,7 +550,7 @@ export function ForceGraph3D({
         </div>`
       })
       .nodeThreeObject((node: any) => {
-        const color = getNodeColor(node, useClusterColors)
+        const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
         const importance = node.importance ?? 0
         const activation = node.activation ?? 0
         // Smaller base radius for large graphs so clusters don't overlap
@@ -556,11 +615,16 @@ export function ForceGraph3D({
       .linkColor((link: any) => {
         const sourceNode = typeof link.source === 'object' ? link.source : null
         if (!sourceNode) return '#60a5fa'
-        return getNodeColor(sourceNode, useClusterColors)
+        return getNodeColor(sourceNode, useClusterColors, neuralModeRef.current?.enabled)
       })
       .linkOpacity(isLargeGraph ? 0.15 : 0.4)
       .linkWidth((link: any) => isLargeGraph ? 0.3 + (link.weight ?? 0) * 0.8 : 0.6 + (link.weight ?? 0) * 1.8)
-      .linkDirectionalParticles((link: any) => isLargeGraph ? 0 : Math.ceil((link.weight ?? 0.5) * 3))
+      .linkDirectionalParticles((link: any) => {
+        if (neuralModeRef.current?.particlesAlways) {
+          return Math.max(1, Math.ceil((link.weight ?? 0.5) * 2))
+        }
+        return isLargeGraph ? 0 : Math.ceil((link.weight ?? 0.5) * 3)
+      })
       .linkDirectionalParticleWidth(1.2)
       .linkDirectionalParticleSpeed(0.005)
       .linkDirectionalParticleColor(() => getAccentColor())
@@ -652,12 +716,16 @@ export function ForceGraph3D({
 
     // ── Bloom post-processing ──────────────────────────────────────────
     try {
+      const bloomStrength = neuralModeRef.current?.enabled
+        ? (neuralModeRef.current.bloomStrength ?? 1.2)
+        : 0.8
       const bloomPass = new UnrealBloomPass(
         new Vector2(width, height),
-        0.8,   // strength — full node glow
+        bloomStrength,   // strength — full node glow
         0.3,   // radius
         0.5,   // threshold — glow sprites (additive) exceed this, labels (normal blend) don't
       )
+      bloomPassRef.current = bloomPass
       graph.postProcessingComposer().addPass(bloomPass)
     } catch (e) {
       console.warn('Bloom pass failed, continuing without glow:', e)
@@ -703,6 +771,91 @@ export function ForceGraph3D({
           }
         }
       } catch { /* ok during init */ }
+
+      // ── Neural mode pulsation + bloom breathing ─────────────────────
+      try {
+        const neuralCfg = neuralModeRef.current
+        if (neuralCfg?.enabled) {
+          const time = Date.now() * 0.001
+          const rate = neuralCfg.breathingRate ?? 0.02
+          const amp = neuralCfg.breathingAmplitude ?? 0.05
+
+          // Per-node pulsation
+          const graphData = graph.graphData()
+          graphData.nodes.forEach((node: any, i: number) => {
+            const obj = node.__threeObj
+            if (!obj) return
+            const phase = i * 0.7
+            const scale = 1 + Math.sin(time * rate * Math.PI * 2 + phase) * amp
+            obj.children.forEach((child: any) => {
+              if (child.geometry) { // sphere
+                child.scale.setScalar(scale)
+              }
+            })
+          })
+
+          // Global bloom breathing
+          if (bloomPassRef.current) {
+            const baseStrength = neuralCfg.bloomStrength ?? 1.2
+            const breathe = 1 + Math.sin(time * 0.02 * Math.PI * 2) * 0.05
+            bloomPassRef.current.strength = baseStrength * breathe
+          }
+        }
+      } catch { /* ok during init */ }
+
+      // ── Activity visualization: highlighted nodes ───────────────────
+      try {
+        if (highlightedNodesRef.current.size > 0) {
+          const graphData = graph.graphData()
+          graphData.nodes.forEach((node: any) => {
+            if (!highlightedNodesRef.current.has(node.id)) return
+            const obj = node.__threeObj
+            if (!obj) return
+            obj.children.forEach((child: any) => {
+              if (child.material?.opacity !== undefined) {
+                child.material.opacity = Math.min(1, child.material.opacity + 0.3)
+              }
+              if (child.isSprite) {
+                child.scale.multiplyScalar(1.5)
+              }
+            })
+          })
+        }
+      } catch { /* ok */ }
+
+      // ── Activity visualization: global pulse ────────────────────────
+      try {
+        if (globalPulseRef.current.active && bloomPassRef.current) {
+          const elapsed = Date.now() - globalPulseRef.current.startTime
+          if (elapsed > globalPulseRef.current.duration) {
+            globalPulseRef.current.active = false
+          } else {
+            const t = elapsed / globalPulseRef.current.duration
+            bloomPassRef.current.strength += Math.sin(t * Math.PI) * 0.3
+          }
+        }
+      } catch { /* ok */ }
+
+      // ── Activity visualization: fade-in nodes ──────────────────────
+      try {
+        if (fadeInNodesRef.current.size > 0) {
+          const now = Date.now()
+          const graphData = graph.graphData()
+          graphData.nodes.forEach((node: any) => {
+            const birthTime = fadeInNodesRef.current.get(node.id)
+            if (birthTime === undefined) return
+            const obj = node.__threeObj
+            if (!obj) return
+            const elapsed = now - birthTime
+            const alpha = Math.min(1, elapsed / 1000)
+            obj.children.forEach((child: any) => {
+              if (child.material?.opacity !== undefined) {
+                child.material.opacity *= alpha
+              }
+            })
+          })
+        }
+      } catch { /* ok */ }
 
       rotationFrame = requestAnimationFrame(tick)
     }
@@ -804,7 +957,7 @@ export function ForceGraph3D({
     if (!graph) return
     graph.nodeColor((node: any) => {
       if (node.id === selectedId) return getCSSColor('--accent-300')
-      return getNodeColor(node, useClusterColors)
+      return getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
     })
   }, [selectedId, useClusterColors])
 
@@ -856,7 +1009,7 @@ export function ForceGraph3D({
       style={{ width: '100%', height: '100%' }}
     />
   )
-}
+})
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
