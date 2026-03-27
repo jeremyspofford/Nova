@@ -8,9 +8,10 @@ interface Props {
   open: boolean
   onAttach: () => void
   onTranscript: (text: string) => void
+  onLiveState?: (state: { isListening: boolean; transcript: string }) => void
 }
 
-export function InputDrawer({ open, onAttach, onTranscript }: Props) {
+export function InputDrawer({ open, onAttach, onTranscript, onLiveState }: Props) {
   return (
     <div
       className="overflow-hidden transition-all duration-normal ease-out"
@@ -28,7 +29,7 @@ export function InputDrawer({ open, onAttach, onTranscript }: Props) {
               <Paperclip size={16} />
             </button>
           </Tooltip>
-          <VoiceButton onTranscript={onTranscript} />
+          <VoiceButton onTranscript={onTranscript} onLiveState={onLiveState} />
         </div>
 
         {/* Right: style + research */}

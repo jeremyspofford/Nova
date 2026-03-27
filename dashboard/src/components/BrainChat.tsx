@@ -1,12 +1,17 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { X, Send, Loader2, Mic, Volume2, VolumeX } from 'lucide-react'
-import { streamChat, resolveModel, type ChatMessage } from '../api'
+import { streamChat, resolveModel, discoverModels, type ChatMessage } from '../api'
 import { cleanToolArtifacts } from '../utils/cleanToolArtifacts'
 import { useVoiceChat } from '../hooks/useVoiceChat'
+import { useAudioLevel } from '../hooks/useAudioLevel'
+import { useSpeechToText } from '../hooks/useSpeechToText'
+import { AudioLevelIndicator } from './ui/AudioLevelIndicator'
 import { MessageBubble } from '../pages/chat/MessageBubble'
 import { useChatStore } from '../stores/chat-store'
 import type { Message, ActivityStep } from '../stores/chat-store'
+import { ModelPicker } from './ui/ModelPicker'
+import { getHiddenModels } from './ModelManagerModal'
 
 interface BrainChatProps {
   onClose: () => void
@@ -23,7 +28,19 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   const pendingTranscriptRef = useRef<string | null>(null)
 
   // Use shared model from chat store (syncs with main Chat page)
-  const { modelId: sharedModelId } = useChatStore()
+  const { modelId: sharedModelId, setModelId } = useChatStore()
+
+  // Model catalog for picker
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
+    staleTime: 60_000,
+  })
+  const hiddenModels = getHiddenModels()
+  const models = (providers ?? [])
+    .filter(p => p.available)
+    .flatMap(p => p.models.filter(m => m.registered).map(m => ({ id: m.id, provider: p.name })))
+    .filter(m => !hiddenModels.has(m.id))
 
   // Fallback to resolved model if chat store has no selection
   const { data: resolved } = useQuery({
@@ -60,6 +77,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     isRecording, isTranscribing, recordingDuration,
     toggleRecording, isSpeaking, muted, setMuted,
     feedText, flushBuffer, stopAllPlayback, voiceAvailable,
+    mediaStream,
   } = useVoiceChat({
     onTranscript: (text) => {
       if (isStreaming) {
@@ -77,6 +95,19 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
       }])
     },
   })
+
+  // Audio level visualization from recording stream
+  const audioLevel = useAudioLevel(mediaStream)
+
+  // Parallel Web Speech API for live transcript display during recording
+  const { isListening: sttListening, transcript: liveTranscript, start: sttStart, stop: sttStop, isSupported: sttSupported } = useSpeechToText()
+
+  // Start/stop Web Speech API in sync with recording for live transcript
+  useEffect(() => {
+    if (!sttSupported) return
+    if (isRecording && !sttListening) sttStart()
+    if (!isRecording && sttListening) sttStop()
+  }, [isRecording, sttListening, sttSupported, sttStart, sttStop])
 
   const handleSubmit = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? input).trim()
@@ -193,11 +224,14 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     <div className="absolute top-0 right-0 h-full w-[380px] z-20 flex flex-col bg-black/70 backdrop-blur-xl border-l border-white/[0.06] animate-slide-in-right">
       {/* Header */}
       <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-stone-200">Chat</span>
-          {modelId && (
-            <span className="text-xs text-stone-600 truncate max-w-[180px]">{modelId}</span>
-          )}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-medium text-stone-200 shrink-0">Chat</span>
+          <ModelPicker
+            value={modelId}
+            onChange={setModelId}
+            models={models}
+            className="w-48"
+          />
         </div>
         <div className="flex items-center gap-2">
           {voiceAvailable && (
@@ -230,6 +264,17 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
 
       {/* Input */}
       <div className="shrink-0 px-3 pb-3 pt-2 border-t border-white/[0.06]">
+        {/* Live transcription while recording */}
+        {isRecording && (
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md bg-red-950/40 border border-red-500/20 text-xs">
+            <Mic size={12} className="text-red-400 shrink-0 animate-pulse" />
+            <AudioLevelIndicator level={audioLevel} bars={4} className="h-3 shrink-0" />
+            <span className="text-stone-400 truncate">
+              {liveTranscript || 'Listening...'}
+            </span>
+            <span className="text-stone-600 shrink-0 ml-auto">{Math.floor(recordingDuration / 1000)}s</span>
+          </div>
+        )}
         <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
@@ -245,14 +290,14 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
             <button
               onClick={toggleRecording}
               disabled={isTranscribing}
-              className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+              className={`shrink-0 flex items-center justify-center rounded-lg transition-colors ${
                 isRecording
-                  ? 'bg-red-600 hover:bg-red-500 animate-pulse'
+                  ? 'bg-red-600 hover:bg-red-500 w-8 h-8'
                   : isTranscribing
-                    ? 'bg-stone-700 cursor-wait'
-                    : 'bg-stone-700 hover:bg-stone-600'
+                    ? 'bg-stone-700 cursor-wait w-8 h-8'
+                    : 'bg-stone-700 hover:bg-stone-600 w-8 h-8'
               } text-white`}
-              title={isRecording ? `Recording (${Math.floor(recordingDuration / 1000)}s)` : 'Push to talk'}
+              title={isRecording ? 'Stop recording' : 'Push to talk'}
             >
               {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
             </button>

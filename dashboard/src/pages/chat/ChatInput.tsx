@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Plus, RefreshCw, SlidersHorizontal } from 'lucide-react'
+import { Send, Plus, RefreshCw, SlidersHorizontal, Mic } from 'lucide-react'
 import clsx from 'clsx'
 import { useChatStore } from '../../stores/chat-store'
 import { useFileAttach } from '../../hooks/useFileAttach'
@@ -69,6 +69,12 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
   const handleTranscript = useCallback((text: string) => {
     setInput(prev => prev + (prev ? ' ' : '') + text)
     setTimeout(resizeTextarea, 0)
+  }, [])
+
+  // Live voice transcript state
+  const [voiceLive, setVoiceLive] = useState<{ isListening: boolean; transcript: string }>({ isListening: false, transcript: '' })
+  const handleLiveState = useCallback((state: { isListening: boolean; transcript: string }) => {
+    setVoiceLive(state)
   }, [])
 
   // Clipboard paste for images
@@ -173,7 +179,18 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
         open={drawerOpen}
         onAttach={openFilePicker}
         onTranscript={handleTranscript}
+        onLiveState={handleLiveState}
       />
+
+      {/* Live transcription overlay while recording */}
+      {voiceLive.isListening && (
+        <div className="flex items-center gap-2 px-3 py-2 mb-1 rounded-lg bg-danger-dim/50 border border-danger/20 text-sm">
+          <Mic size={14} className="text-danger shrink-0 animate-pulse" />
+          <span className="text-content-secondary truncate">
+            {voiceLive.transcript || 'Listening...'}
+          </span>
+        </div>
+      )}
 
       <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
 

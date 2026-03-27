@@ -232,15 +232,21 @@ async def require_user(
                 redis = get_redis()
                 denied = await redis.get(f"nova:auth:denied:{user_id}")
                 if denied:
+                    ip = request.client.host if request.client else "unknown"
+                    reason = "unknown"
+                    try:
+                        reason = json.loads(denied).get("reason", "unknown")
+                    except Exception:
+                        pass
+                    log.warning("Access denied: token on deny-list (user=%s, reason=%s, ip=%s)", user_id, reason, ip)
                     # Fire-and-forget audit
                     try:
                         from app.db import get_pool
                         from app.audit import audit_rbac
                         pool = get_pool()
-                        ip = request.client.host if request.client else None
                         asyncio.create_task(audit_rbac(
                             pool, user_id, "token_denied",
-                            details={"reason": json.loads(denied).get("reason", "unknown") if denied else "unknown"},
+                            details={"reason": reason},
                             ip=ip, tenant_id=tenant_id,
                         ))
                     except Exception:
@@ -264,12 +270,14 @@ async def require_user(
                 )
                 if row:
                     if row["status"] != "active":
+                        log.warning("Access denied: account deactivated (user=%s, status=%s, ip=%s)", user_id, row["status"], request.client.host if request.client else "unknown")
                         raise HTTPException(status_code=403, detail="Account deactivated")
                     if row["expires_at"] and row["expires_at"] < datetime.now(timezone.utc):
+                        ip = request.client.host if request.client else "unknown"
+                        log.warning("Access denied: account expired (user=%s, expired=%s, ip=%s)", user_id, row["expires_at"].isoformat(), ip)
                         # Audit the expiry
                         try:
                             from app.audit import audit_rbac
-                            ip = request.client.host if request.client else None
                             asyncio.create_task(audit_rbac(
                                 pool, user_id, "account_expired",
                                 ip=ip, tenant_id=tenant_id,
@@ -356,5 +364,6 @@ async def deny_user_token(user_id: str, reason: str = "access_updated") -> None:
         redis = get_redis()
         payload = json.dumps({"reason": reason, "at": _time.time()})
         await redis.set(f"nova:auth:denied:{user_id}", payload, ex=_DENY_TTL)
+        log.warning("Token deny-list: added user %s (reason=%s, ttl=%ds)", user_id, reason, _DENY_TTL)
     except Exception:
         log.warning("Failed to set deny-list for user %s", user_id)

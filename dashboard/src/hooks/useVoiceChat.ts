@@ -26,6 +26,7 @@ export function useVoiceChat({
   const [recordingDuration, setRecordingDuration] = useState(0)
   const [voiceAvailable, setVoiceAvailable] = useState(false)
   const [muted, setMuted] = useState(() => localStorage.getItem('nova_voice_muted') === 'true')
+  const [mediaStream, setMediaStream] = useState<MediaStream | null>(null)
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -59,11 +60,10 @@ export function useVoiceChat({
     return () => clearInterval(interval)
   }, [])
 
-  // Persist mute state + immediately stop playback when muted
+  // Persist mute state
   useEffect(() => {
     localStorage.setItem('nova_voice_muted', String(muted))
-    if (muted) stopAllPlayback()
-  }, [muted, stopAllPlayback])
+  }, [muted])
 
   // Detect supported MIME type
   useEffect(() => {
@@ -92,6 +92,11 @@ export function useVoiceChat({
     setIsSpeaking(false)
   }, [])
 
+  // Immediately stop playback when muted
+  useEffect(() => {
+    if (muted) stopAllPlayback()
+  }, [muted, stopAllPlayback])
+
   const startRecording = useCallback(async () => {
     // Interrupt any playing audio first
     stopAllPlayback()
@@ -101,6 +106,7 @@ export function useVoiceChat({
         audio: { echoCancellation: true, noiseSuppression: true },
       })
 
+      setMediaStream(stream)  // expose for audio level visualization
       const recorder = new MediaRecorder(stream, { mimeType: mimeTypeRef.current })
       chunksRef.current = []
 
@@ -110,6 +116,7 @@ export function useVoiceChat({
 
       recorder.onstop = async () => {
         stream.getTracks().forEach(t => t.stop())
+        setMediaStream(null)
         clearInterval(durationIntervalRef.current)
         clearTimeout(maxDurationTimerRef.current)
 
@@ -373,5 +380,6 @@ export function useVoiceChat({
     stopAllPlayback,
     // State
     voiceAvailable,
+    mediaStream,   // Live MediaStream during recording (for audio level visualization)
   }
 }

@@ -533,20 +533,23 @@ Comprehensive 5-discipline review (architecture, backend, frontend, security, te
 | ARCH-4 | Embedding cache L2 — added `AND model = :m` to both lookups | ✅ |
 | BE-1 | MCP registry — added `asyncio.Lock` on mutations, `list()` snapshots on reads | ✅ |
 
-### P1 — Fix this week
-| ID | Finding | Effort |
+### ✅ P1 — Delivered 2026-03-27
+
+**Delivered in commits `4c52e28` (bulk P1 fixes) and follow-up BE-4 security logging.**
+
+| ID | Finding | Status |
 |---|---|---|
-| SEC-1 | `REQUIRE_AUTH` defaults to false — all APIs open on fresh deploy | 15 min |
-| SEC-7 | WebSocket no connection limit — DoS via connection flood | 2 hours |
-| ARCH-1 | Dead letter queue unbounded — no TTL, cap, or alerting | 1 hour |
-| ARCH-2 | Non-atomic SADD+LPUSH in enqueue_task — duplicate queue entries | 1 hour |
-| ARCH-6 | Ingestion semaphore held over full process — effectively serial despite Semaphore(5) | 2 hours |
-| BE-2 | Dead `pass` block in validate_invite — misleading dead code | 30 min |
-| BE-3 | N+1 queries in list_recommendations — 60 queries per request | 30 min |
-| BE-4 | Auth security bypasses (deny-list/expiry) logged at nothing | 30 min |
-| FE-1 | Conversation delete fires immediately — no confirmation, permanent data loss | 30 min |
-| FE-2 | API key save failure silent — user thinks key was saved | 15 min |
-| FE-3 | Service restart failure silently swallowed — operator doesn't know it failed | 15 min |
+| SEC-1 | `REQUIRE_AUTH` defaults to false — `.env.example`, docker-compose defaults, and `.env` all set to `true` | ✅ |
+| SEC-7 | WebSocket no connection limit — added global (100) + per-IP (10) limits, history cap (200) | ✅ |
+| ARCH-1 | Dead letter queue unbounded — capped at 10k | ✅ |
+| ARCH-2 | Non-atomic SADD+LPUSH in enqueue_task — replaced with atomic Lua script | ✅ |
+| ARCH-6 | Ingestion semaphore held over full process — switched to `create_task` for concurrency | ✅ |
+| BE-2 | Dead `pass` block in validate_invite — removed | ✅ |
+| BE-3 | N+1 queries in list_recommendations — single query | ✅ |
+| BE-4 | Auth security bypasses logged at nothing — WARNING logs on deny-list hits, deactivated/expired accounts, deny-list additions | ✅ |
+| FE-1 | Conversation delete fires immediately — added confirmation dialog | ✅ |
+| FE-2 | API key save failure silent — errors surfaced to UI | ✅ |
+| FE-3 | Service restart failure silently swallowed — errors surfaced to UI | ✅ |
 
 ### P2 — Fix this sprint
 | ID | Finding | Effort |

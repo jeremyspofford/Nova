@@ -122,6 +122,8 @@ export default function Brain() {
   const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
   const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
   const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
+  const [showBgStars, setShowBgStars] = useState(true)
+  const [showInnerStars, setShowInnerStars] = useState(false)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -260,6 +262,8 @@ export default function Brain() {
           bloomStrength: 1.2,
           particlesAlways: true,
         }}
+        showBackgroundStars={showBgStars}
+        showInnerStars={showInnerStars}
         className="w-full h-full"
       />
 
@@ -289,6 +293,30 @@ export default function Brain() {
             {activeGraph.clusters && ` · ${activeGraph.clusters.length} topics`}
           </div>
         )}
+
+        {/* Display toggles */}
+        <div className="flex items-center gap-2 px-1">
+          <button
+            onClick={() => setShowBgStars(v => !v)}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              showBgStars
+                ? 'border-teal-500/30 text-teal-400 bg-teal-500/10'
+                : 'border-white/10 text-stone-600 hover:text-stone-400'
+            }`}
+          >
+            Stars
+          </button>
+          <button
+            onClick={() => setShowInnerStars(v => !v)}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              showInnerStars
+                ? 'border-teal-500/30 text-teal-400 bg-teal-500/10'
+                : 'border-white/10 text-stone-600 hover:text-stone-400'
+            }`}
+          >
+            Inner Stars
+          </button>
+        </div>
       </div>
 
       {/* ── Top Left: Topic Sidebar ──────────────────────────────────────── */}
