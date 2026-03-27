@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from .base import BaseAgent, PipelineState
@@ -92,8 +93,12 @@ class MemoryExtractionAgent(BaseAgent):
             from app.store import get_redis
             redis = get_redis()
             payload = json.dumps({
-                "text": f"Task: {state.task_input}\n\nExtraction: {json.dumps(result)}",
-                "source": "pipeline_memory_extraction",
+                "raw_text": f"Task: {state.task_input}\n\nExtraction: {json.dumps(result)}",
+                "source_type": "pipeline",
+                "source_id": task_id or None,
+                "occurred_at": datetime.now(timezone.utc).isoformat(),
+                "source_title": f"Pipeline extraction: {state.task_input[:80]}",
+                "metadata": {"extraction_type": "pipeline_memory"},
             })
             await redis.lpush("engram:ingestion:queue", payload)
         except Exception as e:

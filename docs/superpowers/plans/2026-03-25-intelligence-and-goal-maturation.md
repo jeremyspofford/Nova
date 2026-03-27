@@ -2,6 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Implementation Status (updated 2026-03-27):**
+> - **Done:** Intel worker feed polling, orchestrator CRUD endpoints (feeds, content, recommendations, comments), database schema (migrations 038-040), dashboard UI (feeds tab, recommendations tab, suggested goals), system goal seeding.
+> - **NOT Done:** Recommendation generation (Cortex synthesis goals have no task execution logic), goal maturation drive logic (scoping/speccing/review/building/verifying phases), stimulus wiring for `RECOMMENDATION_CREATED`.
+> - The plumbing is complete — feeds flow in, endpoints work, UI is ready. The brain that connects "content in" to "suggestions out" needs to be built.
+
 **Goal:** Build a self-improving intelligence system where Nova monitors the AI ecosystem, accumulates knowledge, surfaces graded recommendations, and engineers approved improvements through a structured goal maturation pipeline.
 
 **Architecture:** Thin intel-worker polls feeds and pushes content via orchestrator HTTP API into the engram memory network. Cortex scheduled goals synthesize knowledge into graded recommendations. A unified comment system enables discussion on both recommendations and goals. Complex goals mature through triage → scope → spec → review → build → verify.

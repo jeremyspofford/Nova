@@ -30,6 +30,8 @@ from app.tools.diagnosis_tools import DIAGNOSIS_TOOLS
 from app.tools.diagnosis_tools import execute_tool as _exec_diagnosis
 from app.tools.introspect_tools import INTROSPECT_TOOLS
 from app.tools.introspect_tools import execute_tool as _exec_introspect
+from app.tools.memory_tools import MEMORY_TOOLS
+from app.tools.memory_tools import execute_tool as _exec_memory
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -49,6 +51,7 @@ _REGISTRY: list[ToolGroup] = [
     ToolGroup("Web",      "Internet Access",   "Search the internet and fetch web pages",        WEB_TOOLS,      _exec_web),
     ToolGroup("Diagnosis", "Self-Diagnosis",  "Diagnose task failures, check service health, analyse errors", DIAGNOSIS_TOOLS, _exec_diagnosis),
     ToolGroup("Introspect", "Platform Awareness", "Query platform config, knowledge sources, MCP servers, user profiles", INTROSPECT_TOOLS, _exec_introspect),
+    ToolGroup("Memory", "Knowledge Retrieval", "Search, recall, and read from Nova's memory system", MEMORY_TOOLS, _exec_memory),
 ]
 
 # Derived from registry — same shapes the rest of the codebase expects

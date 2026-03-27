@@ -104,6 +104,23 @@ async def ingest_direct(
     return await _process_event(json.dumps(event))
 
 
+def _map_source_type_to_kind(source_type: str) -> str:
+    """Map IngestionSourceType values to SourceKind values."""
+    mapping = {
+        "chat": "chat",
+        "intel": "intel_feed",
+        "knowledge": "knowledge_crawl",
+        "pipeline": "pipeline_extraction",
+        "tool": "task_output",
+        "consolidation": "consolidation",
+        "cortex": "task_output",
+        "journal": "manual_paste",
+        "external": "knowledge_crawl",
+        "self_reflection": "consolidation",
+    }
+    return mapping.get(source_type, "manual_paste")
+
+
 async def _process_event(raw_payload: str) -> dict:
     """Process a single ingestion event: decompose → resolve → store → link."""
     event = json.loads(raw_payload)
@@ -139,6 +156,41 @@ async def _process_event(raw_payload: str) -> dict:
     index_to_id: dict[int, UUID] = {}
 
     async with AsyncSessionLocal() as session:
+        # ── Source provenance ─────────────────────────────────────────────────
+        source_ref_id = None
+        source_meta = {}
+        trust = 0.7
+        try:
+            from .sources import find_or_create_source, DEFAULT_TRUST
+            source_kind = _map_source_type_to_kind(source_type)
+            source_uri = event.get("source_uri") or metadata.get("url")
+            source_title = event.get("source_title") or metadata.get("feed_name")
+            source_author = event.get("source_author") or metadata.get("author")
+            trust_override = event.get("source_trust")
+
+            source_ref_id = await find_or_create_source(
+                session,
+                source_kind=source_kind,
+                title=source_title,
+                uri=source_uri,
+                content=raw_text,
+                trust_score=trust_override if trust_override is not None else None,
+                author=source_author,
+                metadata=metadata,
+            )
+            source_meta = {
+                k: v for k, v in {
+                    "url": source_uri,
+                    "title": source_title,
+                    "author": source_author,
+                    "feed_name": metadata.get("feed_name"),
+                    "session_id": event.get("session_id"),
+                }.items() if v
+            }
+            trust = trust_override if trust_override is not None else DEFAULT_TRUST.get(source_kind, 0.7)
+        except Exception as exc:
+            log.warning("Source creation failed (non-fatal): %s", exc)
+
         # Step 2: For each decomposed engram, resolve entities and store
         for i, decomposed in enumerate(decomposition.engrams):
             try:
@@ -153,6 +205,10 @@ async def _process_event(raw_payload: str) -> dict:
                     source_id=source_id,
                     occurred_at=occurred_at,
                     metadata=metadata,
+                    source_ref_id=source_ref_id,
+                    source_meta=source_meta,
+                    trust=trust,
+                    temporal_validity=getattr(decomposed, 'temporal_validity', 'unknown'),
                 )
                 index_to_id[i] = engram_id
                 engram_ids.append(engram_id)
@@ -225,6 +281,16 @@ async def _process_event(raw_payload: str) -> dict:
             except Exception:
                 log.warning("Failed to process contradiction", exc_info=True)
 
+        # Generate source summary (non-fatal)
+        if source_ref_id and len(raw_text) > 200:
+            try:
+                from .sources import generate_source_summary, update_source_summary
+                summary = await generate_source_summary(raw_text)
+                if summary:
+                    await update_source_summary(session, source_ref_id, summary)
+            except Exception as exc:
+                log.warning("Source summarization failed (non-fatal): %s", exc)
+
         await session.commit()
 
     summary = {
@@ -256,6 +322,10 @@ async def _store_or_update_engram(
     source_id: str | None,
     occurred_at: str | None,
     metadata: dict,
+    source_ref_id=None,
+    source_meta=None,
+    trust=0.8,
+    temporal_validity: str = "unknown",
 ) -> tuple[UUID, bool]:
     """Store a new engram or update an existing one after entity resolution.
 
@@ -268,12 +338,13 @@ async def _store_or_update_engram(
         # Strategy 1: exact name match for entities
         existing = await find_existing_entity(session, content)
 
+    # Always compute embedding — needed for dedup and INSERT
+    embedding = await get_embedding(content, session)
+
     if not existing:
-        # Strategy 2: embedding similarity for same-type engrams
-        embedding = await get_embedding(content, session)
-        existing = await find_similar_engram(session, embedding, decomposed_type)
-    else:
-        embedding = await get_embedding(content, session)
+        # Strategy 2: embedding similarity for entity-type engrams
+        if decomposed_type == "entity":
+            existing = await find_similar_engram(session, embedding, decomposed_type)
 
     if existing:
         # Update existing engram instead of creating duplicate
@@ -282,6 +353,20 @@ async def _store_or_update_engram(
             importance_boost=max(0, importance - existing["importance"]) * 0.5,
         )
         return existing["id"], False
+
+    # Fact-level dedup: merge near-duplicate facts instead of creating duplicates
+    if decomposed_type in ("fact", "episode", "procedure", "preference"):
+        similar = await find_similar_engram(
+            session, embedding, decomposed_type,
+            threshold=settings.engram_fact_dedup_threshold,
+        )
+        if similar:
+            await update_existing_engram(session, similar["id"], importance)
+            log.debug("Fact dedup: merged into existing engram %s", similar["id"])
+            # Preserve source linkage on the existing engram
+            if source_ref_id:
+                await _append_source_ref(session, similar["id"], source_ref_id)
+            return similar["id"], False
 
     # Create new engram
     fragments = {
@@ -303,13 +388,16 @@ async def _store_or_update_engram(
             INSERT INTO engrams (
                 type, content, fragments, embedding, embedding_model,
                 occurred_at, importance, source_type, source_id,
-                confidence, tenant_id
+                confidence, tenant_id, source_ref_id, source_meta,
+                temporal_validity
             ) VALUES (
                 :type, :content, CAST(:fragments AS jsonb),
                 CAST(:embedding AS halfvec), :embedding_model,
                 CAST(:occurred_at AS timestamptz), :importance,
                 :source_type, CAST(:source_id AS uuid),
-                :confidence, CAST(:tenant_id AS uuid)
+                :confidence, CAST(:tenant_id AS uuid),
+                :source_ref_id, CAST(:source_meta AS jsonb),
+                :temporal_validity
             )
             RETURNING id
         """),
@@ -323,8 +411,11 @@ async def _store_or_update_engram(
             "importance": importance,
             "source_type": source_type,
             "source_id": valid_source_id,
-            "confidence": 0.8,
+            "confidence": trust,
             "tenant_id": DEFAULT_TENANT,
+            "source_ref_id": source_ref_id,
+            "source_meta": json.dumps(source_meta or {}),
+            "temporal_validity": temporal_validity,
         },
     )
     row = result.fetchone()
@@ -339,6 +430,22 @@ async def _store_or_update_engram(
             pass  # entity linking is best-effort
 
     return row.id, True
+
+
+async def _append_source_ref(session, engram_id, source_ref_id) -> None:
+    """Append a source reference to an existing engram's source_meta."""
+    await session.execute(
+        text("""
+            UPDATE engrams
+            SET source_meta = jsonb_set(
+                COALESCE(source_meta, '{}'),
+                '{additional_sources}',
+                COALESCE(source_meta->'additional_sources', '[]'::jsonb) || to_jsonb(:ref::text)
+            )
+            WHERE id = CAST(:id AS uuid)
+        """),
+        {"id": str(engram_id), "ref": str(source_ref_id)},
+    )
 
 
 async def _create_edge(

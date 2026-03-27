@@ -47,6 +47,68 @@ class IngestionSourceType(str, Enum):
     self_reflection = "self_reflection"
 
 
+class SourceKind(str, Enum):
+    chat = "chat"
+    intel_feed = "intel_feed"
+    knowledge_crawl = "knowledge_crawl"
+    manual_paste = "manual_paste"
+    task_output = "task_output"
+    pipeline_extraction = "pipeline_extraction"
+    consolidation = "consolidation"
+    api_response = "api_response"
+
+class TemporalValidity(str, Enum):
+    permanent = "permanent"
+    dated = "dated"
+    seasonal = "seasonal"
+    unknown = "unknown"
+
+
+class SourceCreate(BaseModel):
+    """Payload for creating a new source record."""
+    source_kind: SourceKind
+    title: str | None = None
+    uri: str | None = None
+    content: str | None = None
+    content_hash: str | None = None
+    trust_score: float = 0.7
+    author: str | None = None
+    published_at: datetime | None = None
+    completeness: str = "complete"
+    coverage_notes: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceDetail(BaseModel):
+    """Full source record returned by API."""
+    id: UUID
+    source_kind: SourceKind
+    title: str | None = None
+    uri: str | None = None
+    summary: str | None = None
+    section_summaries: list[dict[str, str]] | None = None
+    trust_score: float
+    verified_at: datetime | None = None
+    stale: bool = False
+    completeness: str = "complete"
+    coverage_notes: str | None = None
+    author: str | None = None
+    published_at: datetime | None = None
+    ingested_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    engram_count: int = 0
+
+
+class SourceSummary(BaseModel):
+    """Lightweight source reference for domain awareness."""
+    id: UUID
+    source_kind: SourceKind
+    title: str | None = None
+    summary: str | None = None
+    trust_score: float
+    engram_count: int = 0
+
+
 # ── Queue payload ────────────────────────────────────────────────────────────
 
 
@@ -58,6 +120,11 @@ class IngestionEvent(BaseModel):
     session_id: UUID | None = None
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Source provenance (new)
+    source_uri: str | None = None
+    source_title: str | None = None
+    source_author: str | None = None
+    source_trust: float | None = None
 
 
 # ── Decomposition output (structured LLM response) ──────────────────────────
@@ -70,6 +137,7 @@ class DecomposedEngram(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     entities_referenced: list[str] = Field(default_factory=list)
     temporal: dict[str, Any] = Field(default_factory=dict)
+    temporal_validity: str = "unknown"  # permanent, dated, unknown
 
 
 class DecomposedRelationship(BaseModel):
@@ -127,3 +195,7 @@ class EngramDetail(BaseModel):
     superseded: bool = False
     created_at: datetime
     updated_at: datetime
+    source_ref_id: UUID | None = None
+    source_meta: dict[str, Any] = Field(default_factory=dict)
+    temporal_validity: str = "unknown"
+    valid_as_of: datetime | None = None

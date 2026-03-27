@@ -76,11 +76,21 @@ async def run_agent_turn(
 
         classify_coro = classify_and_resolve(query) if (not explicit_model and query) else _noop_classify()
 
-        nova_ctx, (memory_ctx, _mem_count, _engram_ids, _retrieval_log_id), (category, classified_model) = await asyncio.gather(
+        nova_ctx, (category, classified_model) = await asyncio.gather(
             _build_nova_context(model, agent_id, session_id, effective_tools, disabled_groups),
-            _get_memory_context(agent_id, query, session_id),
             classify_coro,
         )
+
+        # Memory fetch — mode-dependent (outside gather so we can branch)
+        if settings.memory_retrieval_mode == "tools":
+            # Lightweight priming — agent uses memory tools for depth
+            memory_ctx = await _get_domain_priming(session_id)
+            _mem_count, _engram_ids, _retrieval_log_id = 0, [], None
+        else:
+            # Legacy: full 40% context injection
+            memory_ctx, _mem_count, _engram_ids, _retrieval_log_id = await _get_memory_context(
+                agent_id, query, session_id
+            )
 
         if classified_model:
             model = classified_model
@@ -225,11 +235,23 @@ async def run_agent_turn_streaming(
             result = await coro
             return result, int((time.monotonic() - t) * 1000)
 
-        (nova_ctx, _ctx_ms), ((memory_ctx, memory_count, _engram_ids, _retrieval_log_id), mem_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
+        (nova_ctx, _ctx_ms), ((category, classified_model), cls_ms) = await asyncio.gather(
             _timed(_build_nova_context(model, agent_id, session_id, effective_tools, disabled_groups)),
-            _timed(_get_memory_context(agent_id, query, session_id)),
             _timed(classify_coro),
         )
+
+        # Memory fetch — mode-dependent (outside gather so we can branch)
+        if settings.memory_retrieval_mode == "tools":
+            _mem_t = time.monotonic()
+            memory_ctx = await _get_domain_priming(session_id)
+            mem_ms = int((time.monotonic() - _mem_t) * 1000)
+            memory_count, _engram_ids, _retrieval_log_id = 0, [], None
+        else:
+            _mem_t = time.monotonic()
+            memory_ctx, memory_count, _engram_ids, _retrieval_log_id = await _get_memory_context(
+                agent_id, query, session_id
+            )
+            mem_ms = int((time.monotonic() - _mem_t) * 1000)
 
         # Emit "done" status with per-step timings
         if will_classify:
@@ -327,6 +349,49 @@ async def run_agent_turn_streaming(
     # Phase 4b: Pre-warm memory cache for the next message in this session
     if settings.memory_prewarm_enabled and not guest_mode and query:
         asyncio.create_task(_prewarm_memory(session_id, query))
+
+
+async def _get_domain_priming(session_id: str) -> str:
+    """Fetch lightweight domain awareness for agent priming.
+
+    Returns a ~200-token summary of what Nova knows (topics, source titles,
+    counts) — enough for the agent to know what to look up via memory tools,
+    without consuming significant context.
+    """
+    try:
+        memory_client = get_memory_client()
+
+        lines = []
+
+        # Always include self-model (pinned context)
+        self_model_resp = await memory_client.get("/api/v1/engrams/self-model")
+        if self_model_resp.status_code == 200:
+            sm = self_model_resp.json().get("self_model", "")
+            if sm:
+                lines.append(f"## About Me\n{sm}")
+
+        # Domain awareness summary
+        resp = await memory_client.get("/api/v1/engrams/sources/domain-summary")
+        if resp.status_code == 200:
+            data = resp.json()
+            lines.append("## Your Knowledge")
+            lines.append(f"You have {data.get('engram_count', 0)} memories from {data.get('source_count', 0)} sources.")
+
+            domains = data.get("domains", [])
+            if domains:
+                lines.append(f"Topics: {', '.join(domains[:10])}")
+
+            sources = data.get("recent_sources", [])
+            if sources:
+                titles = [s["title"] for s in sources[:5] if s.get("title")]
+                if titles:
+                    lines.append(f"Recent sources: {', '.join(titles)}")
+
+        lines.append("Use your memory tools (search_memory, recall_topic, read_source) to retrieve details.")
+        return "\n".join(lines)
+    except Exception as e:
+        log.warning("Domain priming fetch failed: %s", e)
+        return ""
 
 
 async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str], str | None]:
@@ -903,6 +968,9 @@ def _build_prompt(
     return result
 
 
+# TODO: When memory_retrieval_mode == "tools", extract engram IDs from
+# search_memory/recall_topic tool results and call _mark_engrams_used()
+# for the feedback loop. Requires parsing tool_results for memory tool calls.
 async def _store_exchange(
     agent_id: str,
     session_id: str,

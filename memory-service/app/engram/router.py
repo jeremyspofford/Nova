@@ -14,7 +14,10 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 
+from uuid import UUID
+
 from fastapi import APIRouter, Body, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from nova_contracts.engram import (
@@ -330,32 +333,138 @@ async def mark_used(
 # ── Phase 6: Graph Visualization ───────────────────────────────────────
 
 
-def _extract_cluster_label(members: list[dict]) -> str:
-    """Pick the best domain label for a connected component."""
-    # Priority 1: self_model engrams → "Nova"
-    if any(m["type"] == "self_model" for m in members):
-        return "Nova"
+# ── Semantic domain classification ───────────────────────────────────────────
+# Maps keyword patterns to high-level knowledge domains.
+# Each connected component is classified by keyword matching on its content,
+# then components sharing a domain are merged into one visual cluster.
 
-    # Priority 2: entity engrams → most important entity's content
-    entities = sorted(
-        [m for m in members if m["type"] == "entity"],
-        key=lambda m: m["importance"],
-        reverse=True,
-    )
-    if entities:
-        # Entity content is usually a clean name like "Jeremy", "AWS"
-        return entities[0]["content"][:40].split(".")[0].strip()
+DOMAIN_KEYWORDS: dict[str, list[str]] = {
+    "AI Models & LLMs": [
+        "llm", "language model", "gpt", "claude", "gemini", "qwen", "llama",
+        "mistral", "ollama", "vllm", "sglang", "inference", "fine-tun",
+        "quantiz", "gguf", "lora", "transformer", "token limit", "context window",
+        "deepseek", "phi-", "mixtral", "moe", "mixture of expert",
+    ],
+    "AI Agents & Products": [
+        "agent", "agentic", "autonomous", "copilot", "cursor", "aider",
+        "claude code", "skills hub", "chatbot", "assistant", "multi-agent",
+        "tool use", "function call", "mcp server", "mcp tool",
+    ],
+    "AI Research & Papers": [
+        "paper", "arxiv", "research", "benchmark", "eval", "alignment",
+        "interpretab", "theorem", "proof", "study", "experiment", "finding",
+        "methodology", "dataset", "leaderboard", "arc-agi", "mmlu",
+    ],
+    "AI Safety & Ethics": [
+        "anthropomorph", "consciousness", "sentien", "bias", "fairness",
+        "harm", "responsible", "guardrail", "red team", "jailbreak",
+        "deception", "oversight", "control problem",
+    ],
+    "Machine Learning": [
+        "training", "embedding", "vector", "neural", "gradient", "loss",
+        "epoch", "batch", "optimizer", "attention", "diffusion", "gan",
+        "reinforcement learn", "reward model", "classification", "regression",
+    ],
+    "Software Tools": [
+        "tool", "library", "framework", "sdk", "cli", "package", "npm",
+        "pip", "toolkit", "utility", "plugin", "extension", "crate",
+    ],
+    "Open Source Projects": [
+        "github", "repository", "open-source", "open source", "repo",
+        "contributor", "release", "changelog", "license", "fork",
+    ],
+    "Cloud & Infrastructure": [
+        "docker", "kubernetes", "aws", "cloud", "server", "deploy", "gpu",
+        "hosting", "terraform", "ansible", "ci/cd", "pipeline", "container",
+        "vpc", "ec2", "lambda", "s3",
+    ],
+    "Hardware & Compute": [
+        "chip", "memristor", "semiconductor", "transistor", "quantum",
+        "tpu", "gpu", "cuda", "rocm", "mac mini", "apple silicon",
+        "compute", "fpga", "asic",
+    ],
+    "Programming": [
+        "python", "javascript", "typescript", "rust", "golang", "java",
+        "algorithm", "data structure", "design pattern", "refactor",
+        "debugging", "compiler", "syntax",
+    ],
+    "Web & APIs": [
+        "web app", "frontend", "backend", "api", "rest", "graphql",
+        "react", "vue", "html", "css", "http", "websocket", "endpoint",
+    ],
+    "Data & Databases": [
+        "database", "sql", "postgres", "redis", "mongodb", "data",
+        "schema", "migration", "query", "index", "cache", "storage",
+    ],
+    "Security": [
+        "security", "auth", "encrypt", "vulnerab", "attack", "credential",
+        "secret", "permission", "oauth", "jwt", "tls", "ssl", "cve",
+    ],
+    "People & Organizations": [
+        "founder", "ceo", "author", "researcher", "engineer", "company",
+        "anthropic", "openai", "google", "meta", "microsoft", "startup",
+        "team", "hired", "acquired",
+    ],
+    "Nova Self-Knowledge": [
+        "nova", "self-model", "self model", "identity", "self-knowledge",
+        "engram", "consolidat", "cortex", "working memory", "my purpose",
+    ],
+    "User & Preferences": [
+        "user prefer", "user wants", "user like", "user needs",
+        "communication style", "greeting", "the user",
+    ],
+    "Workflow & Automation": [
+        "workflow", "automat", "cron", "schedule", "batch", "scraping",
+        "crawler", "rss", "feed", "polling", "ingestion",
+    ],
+    "Documentation & Learning": [
+        "document", "readme", "wiki", "guide", "tutorial", "reference",
+        "learning", "course", "certification", "study note",
+    ],
+    "News & Commentary": [
+        "news", "article", "blog", "podcast", "reddit", "hacker news",
+        "opinion", "commentary", "trend", "announcement",
+    ],
+}
 
-    # Priority 3: most important node — first meaningful phrase
-    top = max(members, key=lambda m: m["importance"])
-    content = top["content"]
-    # Strip common prefixes that aren't informative
-    for prefix in ("The user ", "Nova ", "The ", "A ", "An "):
-        if content.startswith(prefix):
-            content = content[len(prefix):]
-            break
-    words = content.split()[:5]
-    return " ".join(words)
+
+def _classify_domain(content_blob: str) -> str:
+    """Classify a text blob into a high-level domain by keyword matching."""
+    lower = content_blob.lower()
+    scores: dict[str, int] = {}
+    for domain, keywords in DOMAIN_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in lower)
+        if score > 0:
+            scores[domain] = score
+    if not scores:
+        return "Miscellaneous"
+    return max(scores, key=scores.get)
+
+
+def _merge_into_domains(
+    components: list[list[dict]],
+) -> tuple[list[dict], dict[str, int]]:
+    """Merge connected components into semantic domains.
+
+    Returns (clusters_list, engram_id_to_cluster_id_map).
+    """
+    domain_groups: dict[str, list[dict]] = defaultdict(list)
+    for members in components:
+        content_blob = " ".join(m["content"] or "" for m in members)
+        domain = _classify_domain(content_blob)
+        domain_groups[domain].extend(members)
+
+    # Sort domains by size (largest first)
+    sorted_domains = sorted(domain_groups.items(), key=lambda x: -len(x[1]))
+
+    clusters: list[dict] = []
+    engram_cluster: dict[str, int] = {}
+    for idx, (domain, members) in enumerate(sorted_domains):
+        clusters.append({"id": idx, "label": domain, "count": len(members)})
+        for m in members:
+            engram_cluster[m["id"]] = idx
+
+    return clusters, engram_cluster
 
 
 @engram_router.get("/graph")
@@ -457,22 +566,9 @@ async def get_graph(
                 root = find(engram["id"])
                 components[root].append(engram)
 
-            # Sort components: largest first
+            # Merge connected components into semantic domains
             sorted_comps = sorted(components.values(), key=len, reverse=True)
-
-            # Label each component and assign cluster IDs
-            clusters: list[dict] = []
-            engram_cluster: dict[str, int] = {}
-
-            for idx, members in enumerate(sorted_comps):
-                label = _extract_cluster_label(members)
-                clusters.append({
-                    "id": idx,
-                    "label": label,
-                    "count": len(members),
-                })
-                for m in members:
-                    engram_cluster[m["id"]] = idx
+            clusters, engram_cluster = _merge_into_domains(sorted_comps)
 
             # Build response
             nodes = [
@@ -627,10 +723,7 @@ async def get_graph(
 # ── Phase 7: Outcome Feedback ───────────────────────────────────────────
 
 
-from pydantic import BaseModel as _BaseModel
-
-
-class OutcomeFeedbackEntry(_BaseModel):
+class OutcomeFeedbackEntry(BaseModel):
     engram_id: str
     outcome_score: float
     task_type: str = "unknown"
@@ -642,3 +735,90 @@ async def receive_outcome_feedback(feedback: list[OutcomeFeedbackEntry]):
     async with get_db() as session:
         stats = await process_feedback(session, [e.model_dump() for e in feedback])
     return {"status": "ok", **stats}
+
+
+# ── Source Provenance ─────────────────────────────────────────────────────────
+
+class CreateSourceRequest(BaseModel):
+    source_kind: str
+    title: str | None = None
+    uri: str | None = None
+    content: str | None = None
+    trust_score: float | None = None
+    author: str | None = None
+    completeness: str = "complete"
+    coverage_notes: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+
+@engram_router.post("/sources")
+async def create_source(req: CreateSourceRequest):
+    """Create or find-by-dedup a source record."""
+    from .sources import find_or_create_source, get_source
+    async with get_db() as session:
+        source_id = await find_or_create_source(
+            session,
+            source_kind=req.source_kind,
+            title=req.title,
+            uri=req.uri,
+            content=req.content,
+            trust_score=req.trust_score,
+            author=req.author,
+            completeness=req.completeness,
+            coverage_notes=req.coverage_notes,
+            metadata=req.metadata,
+        )
+        return await get_source(session, source_id)
+
+
+@engram_router.get("/sources")
+async def list_sources_endpoint(
+    source_kind: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
+    """List all sources with engram counts."""
+    from .sources import list_sources
+    async with get_db() as session:
+        return await list_sources(session, source_kind=source_kind, limit=limit, offset=offset)
+
+
+@engram_router.get("/sources/domain-summary")
+async def domain_summary():
+    """Lightweight knowledge domain overview for agent priming."""
+    from .sources import get_domain_summary
+    async with get_db() as session:
+        return await get_domain_summary(session)
+
+
+@engram_router.get("/sources/{source_id}")
+async def get_source_endpoint(source_id: UUID):
+    """Get full source detail with engram count."""
+    from .sources import get_source
+    async with get_db() as session:
+        result = await get_source(session, source_id)
+        if not result:
+            from fastapi import HTTPException
+            raise HTTPException(404, "Source not found")
+        return result
+
+
+@engram_router.get("/sources/{source_id}/content")
+async def get_source_content_endpoint(source_id: UUID):
+    """Retrieve full source content (from DB or filesystem)."""
+    from .sources import get_source_content
+    async with get_db() as session:
+        content = await get_source_content(session, source_id)
+        if content is None:
+            from fastapi import HTTPException
+            raise HTTPException(404, "Source content not available")
+        return {"content": content}
+
+
+@engram_router.delete("/sources/{source_id}")
+async def delete_source_endpoint(source_id: UUID):
+    """Delete a source record."""
+    from .sources import delete_source
+    async with get_db() as session:
+        deleted = await delete_source(session, source_id)
+        return {"deleted": deleted}

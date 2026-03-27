@@ -15,7 +15,7 @@ import {
   EmptyState, Skeleton, Tooltip,
 } from '../components/ui'
 import { ForceGraph } from '../components/ForceGraph'
-import { ForceGraph3D } from '../components/ForceGraph3D'
+import { ForceGraph3D, LAYOUT_PRESETS, DEFAULT_LAYOUT } from '../components/ForceGraph3D'
 import type { SemanticColor } from '../lib/design-tokens'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -183,6 +183,7 @@ const TABS = [
   { id: 'self-model', label: 'Self-Model', icon: Brain },
   { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
   { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+  { id: 'sources', label: 'Sources', icon: Database },
 ]
 
 // ── Explorer Tab ─────────────────────────────────────────────────────────────
@@ -293,6 +294,11 @@ function ExplorerTab() {
                 {typeDesc ? <Tooltip content={typeDesc}>{badge}</Tooltip> : badge}
                 <div className="flex-1 min-w-0">
                   <p className="text-compact text-content-primary line-clamp-2">{node.content}</p>
+                  {node.source_type && (
+                    <span className="text-xs text-stone-500">
+                      from: {node.source_type}
+                    </span>
+                  )}
                   <div className="flex gap-4 mt-2">
                     <ScoreBar value={node.importance} label="Importance" compact />
                     <ScoreBar value={node.activation} label="Activation" compact />
@@ -389,8 +395,8 @@ function GraphTab() {
   const [query, setQuery] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedNode, setSelectedNode] = useState<EngramNode | null>(null)
-  const [viewMode, setViewMode] = useState<'graph3d' | 'list'>(() => {
-    try { return (localStorage.getItem('nova-graph-view') as 'graph3d' | 'list') || 'graph3d' } catch { return 'graph3d' }
+  const [viewMode, setViewMode] = useState<'graph3d' | 'graph2d' | 'list'>(() => {
+    try { return (localStorage.getItem('nova-graph-view') as 'graph3d' | 'graph2d' | 'list') || 'graph3d' } catch { return 'graph3d' }
   })
   const [autoSpin, setAutoSpin] = useState(() => {
     try { return localStorage.getItem('nova-graph-spin') !== 'false' } catch { return true }
@@ -400,6 +406,12 @@ function GraphTab() {
   })
   const [showBgPicker, setShowBgPicker] = useState(false)
   const bgPickerRef = useRef<HTMLDivElement>(null)
+  const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
+  const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
+  const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
+  const [graphLayout, setGraphLayout] = useState(() => {
+    try { return localStorage.getItem('nova-graph-layout') || DEFAULT_LAYOUT } catch { return DEFAULT_LAYOUT }
+  })
 
   useEffect(() => {
     try { localStorage.setItem('nova-graph-view', viewMode) } catch { /* ok */ }
@@ -412,6 +424,10 @@ function GraphTab() {
   useEffect(() => {
     try { localStorage.setItem('nova-graph-bg', graphBg) } catch { /* ok */ }
   }, [graphBg])
+
+  useEffect(() => {
+    try { localStorage.setItem('nova-graph-layout', graphLayout) } catch { /* ok */ }
+  }, [graphLayout])
 
   // Close bg picker on outside click
   useEffect(() => {
@@ -484,6 +500,14 @@ function GraphTab() {
           </button>
           <button
             type="button"
+            onClick={() => setViewMode('graph2d')}
+            className={`p-1.5 transition-colors ${viewMode === 'graph2d' ? 'bg-accent-dim text-accent' : 'text-content-tertiary hover:text-content-secondary'}`}
+            title="2D Graph"
+          >
+            <Network size={14} />
+          </button>
+          <button
+            type="button"
             onClick={() => setViewMode('list')}
             className={`p-1.5 transition-colors ${viewMode === 'list' ? 'bg-accent-dim text-accent' : 'text-content-tertiary hover:text-content-secondary'}`}
             title="List View"
@@ -543,6 +567,25 @@ function GraphTab() {
             </div>
           </>
         )}
+        {(viewMode === 'graph3d' || viewMode === 'graph2d') && graph?.clusters && graph.clusters.length > 0 && (
+          <div className="flex border border-border-subtle rounded-sm overflow-hidden">
+            {Object.entries(LAYOUT_PRESETS).map(([key, preset]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setGraphLayout(key)}
+                className={`px-2 py-1 text-micro transition-colors ${
+                  graphLayout === key
+                    ? 'bg-accent-dim text-accent'
+                    : 'text-content-tertiary hover:text-content-secondary'
+                }`}
+                title={preset.description}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+        )}
       </form>
 
       {isLoading && <Skeleton lines={5} />}
@@ -562,27 +605,90 @@ function GraphTab() {
                     onBackgroundClick={() => setSelectedNode(null)}
                     autoSpin={autoSpin}
                     bgColor={graphBg}
+                    focusClusterId={focusCluster?.id ?? null}
+                    focusClusterTs={focusCluster?.ts}
+                    focusNodeId={focusNode?.id ?? null}
+                    focusNodeTs={focusNode?.ts}
+                    layoutPreset={graphLayout}
                     className="w-full h-full"
                   />
                 </div>
-                {/* Legend — clusters when in full mode, types otherwise */}
-                <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1 max-h-[300px] overflow-y-auto">
+                {/* Interactive cluster legend */}
+                <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm border border-white/5 rounded-md px-2 py-2 max-h-[600px] overflow-y-auto w-[220px] scrollbar-thin">
                   {graph.clusters && graph.clusters.length > 0 ? (
-                    graph.clusters.slice(0, 20).map(cluster => (
-                      <div key={cluster.id} className="flex items-center gap-2 text-micro">
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length], boxShadow: `0 0 6px ${CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]}` }}
-                        />
-                        <span className="text-neutral-400 truncate max-w-[140px]">
-                          {cluster.label}
-                        </span>
-                        <span className="text-neutral-600 text-[10px]">{cluster.count}</span>
+                    <>
+                      <div className="text-[10px] text-neutral-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                        {graph.clusters.length} domains
                       </div>
-                    ))
+                      {graph.clusters.slice(0, 30).map(cluster => {
+                        const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
+                        const isExpanded = expandedClusterId === cluster.id
+                        const isFocused = focusCluster?.id === cluster.id
+                        return (
+                          <div key={cluster.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFocusCluster({ id: cluster.id, ts: Date.now() })
+                                setExpandedClusterId(isExpanded ? null : cluster.id)
+                              }}
+                              className={`flex items-center gap-1.5 w-full text-left text-micro rounded px-1.5 py-1 transition-colors ${
+                                isFocused ? 'bg-white/10' : 'hover:bg-white/5'
+                              }`}
+                            >
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                              />
+                              <span className="text-neutral-300 truncate flex-1" title={cluster.label}>
+                                {cluster.label}
+                              </span>
+                              <span className="text-neutral-600 text-[10px] shrink-0">{cluster.count}</span>
+                              <ChevronRight
+                                size={10}
+                                className={`text-neutral-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                              />
+                            </button>
+                            {isExpanded && (
+                              <div className="pl-5 pr-1 py-0.5 space-y-px">
+                                {graph.nodes
+                                  .filter(n => n.cluster_id === cluster.id)
+                                  .sort((a, b) => b.importance - a.importance)
+                                  .slice(0, 12)
+                                  .map(node => (
+                                    <button
+                                      key={node.id}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        handleSelectNode(node.id)
+                                        setFocusNode({ id: node.id, ts: Date.now() })
+                                      }}
+                                      className="block w-full text-left text-[10px] text-neutral-500 hover:text-neutral-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                                      title={node.content}
+                                    >
+                                      {node.content}
+                                    </button>
+                                  ))}
+                                {graph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
+                                  <div className="text-[10px] text-neutral-600 px-1 pt-0.5">
+                                    +{graph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                      {graph.clusters.length > 30 && (
+                        <div className="text-[10px] text-neutral-600 px-1.5 pt-1 border-t border-white/5 mt-1">
+                          +{graph.clusters.length - 30} smaller clusters
+                        </div>
+                      )}
+                    </>
                   ) : (
                     Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
-                      <div key={type} className="flex items-center gap-2 text-micro">
+                      <div key={type} className="flex items-center gap-2 text-micro px-1.5 py-0.5">
                         <span
                           className="w-2 h-2 rounded-full shrink-0"
                           style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}
@@ -596,11 +702,128 @@ function GraphTab() {
                     ))
                   )}
                 </div>
+                {/* Help key — explains what visual elements mean */}
+                <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-sm border border-white/5 rounded-md px-3 py-2.5 max-w-[240px]">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1.5">Graph Key</div>
+                  <div className="space-y-1.5 text-[11px] text-neutral-400">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-teal-400 shrink-0" />
+                      <span><strong className="text-neutral-300">Node</strong> = a single memory</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-5 h-px bg-neutral-500 shrink-0" />
+                      <span><strong className="text-neutral-300">Edge</strong> = relationship</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-0.5 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                      </div>
+                      <span><strong className="text-neutral-300">Color</strong> = knowledge domain</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-px shrink-0">
+                        <span className="w-1 h-1 rounded-full bg-neutral-500" />
+                        <span className="w-2 h-2 rounded-full bg-neutral-400" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-neutral-300" />
+                      </div>
+                      <span><strong className="text-neutral-300">Size</strong> = importance</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-teal-400/30 ring-1 ring-teal-400/50 shrink-0" />
+                      <span><strong className="text-neutral-300">Glow</strong> = recently accessed</span>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-neutral-600 border-t border-white/5 mt-2 pt-1.5">
+                    Click node for details &middot; Drag to orbit &middot; Scroll to zoom
+                  </div>
+                </div>
               </div>
               <div className="text-caption text-content-tertiary">
                 {graph.node_count} memories &middot; {graph.edge_count} connections
-                {graph.clusters && graph.clusters.length > 0 && <> &middot; {graph.clusters.length} cluster{graph.clusters.length !== 1 ? 's' : ''}</>}
+                {graph.clusters && graph.clusters.length > 0 && <> &middot; {graph.clusters.length} domain{graph.clusters.length !== 1 ? 's' : ''}</>}
                 {' '}&mdash; orbit to rotate, scroll to zoom, click a node for details
+              </div>
+            </>
+          ) : viewMode === 'graph2d' ? (
+            <>
+              <div className="rounded-md overflow-hidden border border-border-subtle relative">
+                <div className="h-[700px]">
+                  <ForceGraph
+                    nodes={graph.nodes}
+                    edges={graph.edges}
+                    selectedId={selectedNode?.id ?? null}
+                    onSelectNode={handleSelectNode}
+                    focusClusterId={focusCluster?.id ?? null}
+                    focusNodeId={focusNode?.id ?? null}
+                    className="w-full h-full"
+                  />
+                </div>
+                {/* Same interactive legend + graph key for 2D */}
+                <div className="absolute top-3 right-3 bg-black/70 backdrop-blur-sm border border-white/5 rounded-md px-2 py-2 max-h-[600px] overflow-y-auto w-[220px] scrollbar-thin">
+                  {graph.clusters && graph.clusters.length > 0 ? (
+                    <>
+                      <div className="text-[10px] text-neutral-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                        {graph.clusters.length} domains
+                      </div>
+                      {graph.clusters.slice(0, 30).map(cluster => {
+                        const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
+                        const isExpanded = expandedClusterId === cluster.id
+                        const isFocused = focusCluster?.id === cluster.id
+                        return (
+                          <div key={cluster.id}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFocusCluster({ id: cluster.id, ts: Date.now() })
+                                setExpandedClusterId(isExpanded ? null : cluster.id)
+                              }}
+                              className={`flex items-center gap-1.5 w-full text-left text-micro rounded px-1.5 py-1 transition-colors ${
+                                isFocused ? 'bg-white/10' : 'hover:bg-white/5'
+                              }`}
+                            >
+                              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }} />
+                              <span className="text-neutral-300 truncate flex-1" title={cluster.label}>{cluster.label}</span>
+                              <span className="text-neutral-600 text-[10px] shrink-0">{cluster.count}</span>
+                              <ChevronRight size={10} className={`text-neutral-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                            </button>
+                            {isExpanded && (
+                              <div className="pl-5 pr-1 py-0.5 space-y-px">
+                                {graph.nodes
+                                  .filter(n => n.cluster_id === cluster.id)
+                                  .sort((a, b) => b.importance - a.importance)
+                                  .slice(0, 12)
+                                  .map(node => (
+                                    <button key={node.id} type="button"
+                                      onClick={(e) => { e.stopPropagation(); handleSelectNode(node.id); setFocusNode({ id: node.id, ts: Date.now() }) }}
+                                      className="block w-full text-left text-[10px] text-neutral-500 hover:text-neutral-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                                      title={node.content}
+                                    >{node.content}</button>
+                                  ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </>
+                  ) : null}
+                </div>
+                <div className="absolute bottom-3 left-3 bg-black/75 backdrop-blur-sm border border-white/5 rounded-md px-3 py-2.5 max-w-[240px]">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider mb-1.5">Graph Key</div>
+                  <div className="space-y-1.5 text-[11px] text-neutral-400">
+                    <div className="flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full bg-teal-400 shrink-0" /><span><strong className="text-neutral-300">Node</strong> = a single memory</span></div>
+                    <div className="flex items-center gap-2"><span className="w-5 h-px bg-neutral-500 shrink-0" /><span><strong className="text-neutral-300">Edge</strong> = relationship</span></div>
+                    <div className="flex items-center gap-2"><div className="flex gap-0.5 shrink-0"><span className="w-1.5 h-1.5 rounded-full bg-indigo-400" /><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="w-1.5 h-1.5 rounded-full bg-rose-400" /></div><span><strong className="text-neutral-300">Color</strong> = knowledge domain</span></div>
+                    <div className="flex items-center gap-2"><div className="flex items-center gap-px shrink-0"><span className="w-1 h-1 rounded-full bg-neutral-500" /><span className="w-2 h-2 rounded-full bg-neutral-400" /><span className="w-2.5 h-2.5 rounded-full bg-neutral-300" /></div><span><strong className="text-neutral-300">Size</strong> = importance</span></div>
+                  </div>
+                  <div className="text-[10px] text-neutral-600 border-t border-white/5 mt-2 pt-1.5">Click node for details &middot; Drag to pan &middot; Scroll to zoom</div>
+                </div>
+              </div>
+              <div className="text-caption text-content-tertiary">
+                {graph.node_count} memories &middot; {graph.edge_count} connections
+                {graph.clusters && graph.clusters.length > 0 && <> &middot; {graph.clusters.length} domain{graph.clusters.length !== 1 ? 's' : ''}</>}
+                {' '}&mdash; drag to pan, scroll to zoom, click a node for details
               </div>
             </>
           ) : (
@@ -626,6 +849,11 @@ function GraphTab() {
                         {typeDesc ? <Tooltip content={typeDesc}>{badge}</Tooltip> : badge}
                         <div className="flex-1 min-w-0">
                           <p className="text-compact text-content-primary line-clamp-2">{node.content}</p>
+                          {node.source_type && (
+                            <span className="text-xs text-stone-500">
+                              from: {node.source_type}
+                            </span>
+                          )}
                           <div className="flex gap-4 mt-2">
                             <ScoreBar value={node.importance} label="Importance" compact />
                             <ScoreBar value={node.activation} label="Activation" compact />
@@ -1243,6 +1471,59 @@ function MaintenanceTab() {
   )
 }
 
+// ── Sources Tab ──────────────────────────────────────────────────────────────
+
+function SourcesTab() {
+  const [sources, setSources] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    fetch('/mem/api/v1/engrams/sources')
+      .then(r => r.json())
+      .then(data => setSources(Array.isArray(data) ? data : []))
+      .catch(() => setSources([]))
+      .finally(() => setLoading(false))
+  }, [])
+
+  if (loading) return <Skeleton lines={5} />
+
+  return (
+    <div className="space-y-3">
+      {sources.length === 0 ? (
+        <EmptyState
+          icon={Database}
+          title="No sources yet"
+          description="Sources are created when content is ingested through conversations, feeds, or crawls."
+        />
+      ) : (
+        sources.map((s: any) => (
+          <div key={s.id} className="bg-stone-800 rounded-lg p-3">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-sm font-medium text-stone-200">{s.title || 'Untitled'}</span>
+                <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-stone-700 text-stone-400">
+                  {s.source_kind}
+                </span>
+              </div>
+              <span className="text-xs text-stone-500">{s.engram_count} engrams</span>
+            </div>
+            {s.summary && <p className="text-xs text-stone-400 mt-1 line-clamp-2">{s.summary}</p>}
+            <div className="flex gap-3 mt-2 text-xs text-stone-500">
+              <span>Trust: {(s.trust_score * 100).toFixed(0)}%</span>
+              {s.stale && <span className="text-amber-500">stale</span>}
+              {s.completeness !== 'complete' && (
+                <span className="text-amber-500">{s.completeness}: {s.coverage_notes}</span>
+              )}
+              {s.uri && <a href={s.uri} target="_blank" rel="noopener noreferrer" className="text-teal-400 hover:underline truncate max-w-[200px]">{s.uri}</a>}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
 // ── Help entries per tab ─────────────────────────────────────────────────────
 
 const HELP_ENTRIES: Record<string, { term: string; definition: string }[]> = {
@@ -1282,6 +1563,13 @@ const HELP_ENTRIES: Record<string, { term: string; definition: string }[]> = {
     { term: 'Intelligence Feeds', definition: 'RSS, Reddit, and other external content from the intel system. Re-ingested with corrected source attribution.' },
     { term: 'Deduplication', definition: 'Entity resolution prevents duplicate memories — if a reindexed item matches an existing engram (>92% similarity), the existing one is updated instead.' },
   ],
+  sources: [
+    { term: 'Source', definition: 'A tracked origin for ingested content — a conversation, feed item, crawled page, or document that Nova has processed into memories.' },
+    { term: 'Trust Score', definition: 'How reliable this source is considered to be — affects how strongly its engrams are weighted during retrieval.' },
+    { term: 'Engram Count', definition: 'The number of individual memories that were extracted from this source.' },
+    { term: 'Stale', definition: 'The source content may have changed since it was last ingested and could benefit from re-ingestion.' },
+    { term: 'Completeness', definition: 'Whether the source has been fully processed — partial sources may have coverage gaps noted.' },
+  ],
 }
 
 // ── Main Component ───────────────────────────────────────────────────────────
@@ -1306,6 +1594,7 @@ export function EngramExplorer() {
       {activeTab === 'self-model' && <SelfModelTab />}
       {activeTab === 'consolidation' && <ConsolidationTab />}
       {activeTab === 'maintenance' && <MaintenanceTab />}
+      {activeTab === 'sources' && <SourcesTab />}
     </div>
   )
 }

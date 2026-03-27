@@ -92,14 +92,22 @@ Thinking loop with cognitive drives, goal management, and budget tracking.
 
 ### Intel System (Port 8110)
 
-Autonomous AI ecosystem feed poller.
+Autonomous AI ecosystem feed poller. Feed ingestion is operational; recommendation generation is not yet implemented.
 
+**Shipped:**
 - 5 fetcher types: RSS, Reddit JSON, page change detection, GitHub trending, GitHub releases
 - Configurable polling intervals per feed, exponential error backoff (capped 24h)
 - Content dedup via hash, SSRF validation on all URLs
 - Pushes to engram ingestion queue + intel notification queue
 - 14 default feeds seeded by migration
-- Orchestrator endpoints: feed CRUD, content ingestion, recommendations
+- Orchestrator endpoints: feed CRUD, content ingestion, recommendation CRUD, comments
+- Dashboard: feed management, recommendation browsing, suggested goals tab
+- Database schema: intel_feeds, intel_content_items, intel_recommendations, linkage tables
+
+**Not yet implemented:**
+- Recommendation generation — no Cortex goal or background task analyzes intel content and creates recommendations. The CRUD endpoints exist but nothing populates the `intel_recommendations` table.
+- Goal maturation pipeline — maturation stages defined in schema but Cortex drive logic to execute them is not built.
+- See spec: `docs/superpowers/specs/2026-03-25-intelligence-and-goal-maturation-design.md`
 
 ### Knowledge Sources (Port 8120)
 
@@ -300,6 +308,29 @@ Service is functional. Credential flow and dedup need finishing.
 - Per-source crawl dedup (track active crawl tasks to prevent duplicate concurrent crawls)
 - Connect BuiltinCredentialProvider to the CredentialProvider ABC (make pluggable interface real)
 - Future: GitLab, Bitbucket, social media extractors
+
+### Source Provenance & Memory Tools
+
+Source tracking, richer decomposition, and agent-driven memory retrieval. Delivered across 16 implementation tasks.
+
+**Delivered:**
+- Sources table with hybrid storage (DB/filesystem/URI), content-hash dedup, trust scoring
+- Source provenance linkage on all engrams (source_ref_id, source_meta)
+- Paragraph-level decomposition prompts (replacing atomic fact extraction)
+- Fact-level dedup during ingestion (0.90 cosine threshold)
+- Temporal validity tracking on engrams (permanent/dated/unknown)
+- 4 agent-callable memory tools: what_do_i_know, search_memory, recall_topic, read_source
+- Domain awareness priming mode (alternative to 40% context pre-injection)
+- Hierarchical source summarization at ingestion time
+- Knowledge gap and staleness detection in domain summary
+- Re-decomposition endpoint for stored sources
+- Dashboard Sources tab in Memory Explorer
+- Fixed broken post-pipeline memory extraction payload
+
+**Remaining:**
+- Memory tool retrieval feedback loop (tracking which engrams agents actually use)
+- Dashboard toggle for memory_retrieval_mode (currently .env only)
+- Runtime-configurable memory_retrieval_mode via Redis config
 
 ---
 
