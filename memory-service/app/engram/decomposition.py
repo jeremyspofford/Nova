@@ -168,6 +168,14 @@ DECOMPOSITION_USER_TEMPLATE = (
     "temporal_validity field ('permanent', 'dated', or 'unknown').\n\n{raw_text}"
 )
 
+SOURCE_SUMMARY_PROMPT = """Summarize this content in exactly ONE paragraph (3-5 sentences).
+Focus on: what this content IS (article, conversation, documentation), its main topic,
+key takeaways, and any important names/dates/facts. This summary will be used to help
+decide whether this source is relevant to a future question.
+
+Content to summarize:
+{content}"""
+
 
 # Valid enum values from nova-contracts EdgeRelation
 _VALID_RELATIONS = {

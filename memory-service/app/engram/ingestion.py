@@ -281,6 +281,16 @@ async def _process_event(raw_payload: str) -> dict:
             except Exception:
                 log.warning("Failed to process contradiction", exc_info=True)
 
+        # Generate source summary (non-fatal)
+        if source_ref_id and len(raw_text) > 200:
+            try:
+                from .sources import generate_source_summary, update_source_summary
+                summary = await generate_source_summary(raw_text)
+                if summary:
+                    await update_source_summary(session, source_ref_id, summary)
+            except Exception as exc:
+                log.warning("Source summarization failed (non-fatal): %s", exc)
+
         await session.commit()
 
     summary = {
