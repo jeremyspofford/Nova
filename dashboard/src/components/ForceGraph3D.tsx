@@ -95,6 +95,7 @@ interface ForceGraph3DProps {
   neuralMode?: NeuralModeConfig
   showBackgroundStars?: boolean
   showInnerStars?: boolean
+  graphMode?: 'full' | 'topic-map' | 'topic-drill'
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -594,6 +595,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   neuralMode,
   showBackgroundStars = true,
   showInnerStars = false,
+  graphMode = 'full',
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
@@ -614,6 +616,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showBgStarsRef.current = showBackgroundStars
   const showInnerStarsRef = useRef(showInnerStars)
   showInnerStarsRef.current = showInnerStars
+  const graphModeRef = useRef(graphMode)
+  graphModeRef.current = graphMode
 
   // Activity visualization refs (imperative handle)
   const highlightedNodesRef = useRef<Set<string>>(new Set())
@@ -683,6 +687,61 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         </div>`
       })
       .nodeThreeObject((node: any) => {
+        const isSuperNode = node.type === 'cluster'
+
+        if (isSuperNode) {
+          const count = node.access_count ?? 0
+          // Get max count from all super-nodes in the graph for normalization
+          const allNodes = graphRef.current?.graphData?.()?.nodes ?? [node]
+          const maxCount = Math.max(...allNodes
+            .filter((n: any) => n.type === 'cluster')
+            .map((n: any) => n.access_count ?? 1), 1)
+          const normSize = count / maxCount
+          const radius = 4 + normSize * 12  // super-nodes are 4-16 units radius
+
+          const clusterId = node.cluster_id ?? -1
+          const color = clusterId >= 0
+            ? CLUSTER_COLORS[clusterId % CLUSTER_COLORS.length]
+            : '#71717a'
+
+          const group = new Group()
+
+          // Main orb — use existing makeOrbMaterial
+          const alpha = 0.6 + (node.activation ?? 0) * 0.3
+          const mat = makeOrbMaterial(color, alpha, node.activation ?? 0)
+          const mesh = new Mesh(new SphereGeometry(radius, 24, 24), mat)
+          group.add(mesh)
+
+          // Label sprite — count + topic name
+          const canvas = document.createElement('canvas')
+          canvas.width = 256; canvas.height = 128
+          const ctx = canvas.getContext('2d')!
+          ctx.clearRect(0, 0, 256, 128)
+
+          // Count number
+          ctx.font = '700 48px system-ui'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillStyle = 'rgba(255,255,255,0.85)'
+          ctx.fillText(String(count), 128, 45)
+
+          // Topic label
+          ctx.font = '400 22px system-ui'
+          ctx.fillStyle = color
+          const labelText = (node.content ?? '').length > 22 ? (node.content ?? '').slice(0, 20) + '...' : (node.content ?? '')
+          ctx.fillText(labelText, 128, 90)
+
+          const tex = new CanvasTexture(canvas)
+          const spriteMat = new SpriteMaterial({ map: tex, transparent: true, depthWrite: false })
+          const sprite = new Sprite(spriteMat)
+          sprite.position.set(0, -radius - 6, 0)
+          sprite.scale.set(30, 15, 1)
+          sprite.name = 'superNodeLabel'
+          group.add(sprite)
+
+          return group
+        }
+
         const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
         const importance = node.importance ?? 0
         const activation = node.activation ?? 0

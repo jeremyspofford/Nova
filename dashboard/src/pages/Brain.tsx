@@ -377,6 +377,7 @@ export default function Brain() {
         }}
         showBackgroundStars={showBgStars}
         showInnerStars={showInnerStars}
+        graphMode={graphMode === 'topic-map' ? (expandedCluster != null ? 'topic-drill' : 'topic-map') : 'full'}
         className="w-full h-full"
       />
 
