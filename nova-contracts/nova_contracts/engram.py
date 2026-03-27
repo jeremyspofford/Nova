@@ -23,6 +23,7 @@ class EngramType(str, Enum):
     schema_ = "schema"
     goal = "goal"
     self_model = "self_model"
+    topic = "topic"
 
 
 class EdgeRelation(str, Enum):

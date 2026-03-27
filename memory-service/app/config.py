@@ -60,6 +60,16 @@ class Settings(BaseSettings):
     engram_prune_activation_floor: float = 0.01
     engram_merge_similarity_threshold: float = 0.95
 
+    # Engram Network (Topic Clustering)
+    engram_cluster_min_size: int = 5            # HDBSCAN min_cluster_size
+    engram_cluster_umap_dims: int = 30          # UMAP target dimensions
+    engram_cluster_umap_neighbors: int = 15     # UMAP n_neighbors
+    engram_topic_assignment_threshold: float = 0.5  # cosine sim for new engram -> topic
+    engram_topic_regeneration_pct: float = 0.3  # % membership change to trigger re-summary
+    engram_schema_coherence_threshold: float = 0.5  # min embedding coherence for schemas
+    engram_schema_max_tokens: int = 800         # max_tokens for schema synthesis
+    engram_schema_dedup_threshold: float = 0.85 # embedding sim for schema dedup
+
     # Engram Network (Phase 5: Neural Router)
     neural_router_enabled: bool = True
     neural_router_min_observations: int = 200
