@@ -308,7 +308,7 @@ services:
       # Phase 2: auth + cost tracking
       DATABASE_URL: postgresql+asyncpg://nova:${POSTGRES_PASSWORD:-nova_dev_password}@postgres:5432/nova
       NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
-      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3001,http://localhost:5173,http://localhost:8080}
       # Phase 3: workspace + self-modification paths inside the container
       WORKSPACE_ROOT: /workspace
@@ -354,7 +354,7 @@ services:
       REDIS_URL: redis://redis:6379/3
       DEFAULT_MODEL: ${DEFAULT_CHAT_MODEL:-llama3.2}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3001,http://localhost:5173,http://localhost:8080}
     ports:
       - "8080:8080"
@@ -386,7 +386,7 @@ services:
       NOVA_API_KEY: ${NOVA_API_KEY:-}
       DEFAULT_MODEL: ${DEFAULT_CHAT_MODEL:-auto}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
@@ -578,7 +578,7 @@ services:
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
       REDIS_URL: redis://redis:6379/9
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      REQUIRE_AUTH: ${REQUIRE_AUTH:-false}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-true}
       NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3001,http://localhost:5173}
     ports:

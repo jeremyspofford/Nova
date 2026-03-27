@@ -14,8 +14,10 @@ When REQUIRE_AUTH=false (dev mode), auth is skipped entirely.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 import httpx
@@ -26,6 +28,10 @@ from app.config import settings
 from app.session import get_or_create_session
 
 log = logging.getLogger(__name__)
+
+# ── Connection limits ─────────────────────────────────────────────────────────
+_conn_semaphore = asyncio.Semaphore(settings.ws_max_connections)
+_ip_connections: dict[str, int] = defaultdict(int)
 
 
 async def _validate_token(token: str) -> bool:
@@ -84,6 +90,31 @@ async def _authenticate(websocket: WebSocket) -> bool:
 
 
 async def handle_websocket(websocket: WebSocket):
+    client_ip = websocket.client.host if websocket.client else "unknown"
+
+    # Per-IP connection limit
+    if _ip_connections[client_ip] >= settings.ws_max_per_ip:
+        await websocket.close(code=4008, reason="Too many connections from this IP")
+        log.warning("WebSocket rejected: IP %s exceeded per-IP limit (%d)", client_ip, settings.ws_max_per_ip)
+        return
+
+    # Global connection limit (non-blocking check)
+    if _conn_semaphore._value == 0:  # noqa: SLF001
+        await websocket.close(code=4008, reason="Server connection limit reached")
+        log.warning("WebSocket rejected: global connection limit reached (%d)", settings.ws_max_connections)
+        return
+
+    async with _conn_semaphore:
+        _ip_connections[client_ip] += 1
+        try:
+            await _handle_websocket_inner(websocket, client_ip)
+        finally:
+            _ip_connections[client_ip] -= 1
+            if _ip_connections[client_ip] <= 0:
+                del _ip_connections[client_ip]
+
+
+async def _handle_websocket_inner(websocket: WebSocket, client_ip: str):
     await websocket.accept()
     log.info("WebSocket connection accepted from %s", websocket.client)
 
@@ -119,13 +150,17 @@ async def handle_websocket(websocket: WebSocket):
                 # Send session_id back so client can persist it across reconnects
                 await websocket.send_json({
                     "type": "system",
-                    "content": f"Session started",
+                    "content": "Session started",
                     "session_id": session_id,
                     "agent_id": agent_id,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
 
             conversation_history.append({"role": "user", "content": user_content})
+
+            # Cap conversation history to prevent unbounded memory growth
+            if len(conversation_history) > settings.ws_max_history:
+                conversation_history = conversation_history[-settings.ws_max_history:]
 
             # Stream response from Orchestrator
             full_response = await _stream_response(

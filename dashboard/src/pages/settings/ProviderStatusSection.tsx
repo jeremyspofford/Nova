@@ -52,6 +52,7 @@ export function ProviderStatusSection() {
   const [editing, setEditing] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
   const [restartHint, setRestartHint] = useState(false)
 
@@ -73,6 +74,7 @@ export function ProviderStatusSection() {
     if (!envKey || value === undefined) return
 
     setSaving(slug)
+    setSaveError(null)
     try {
       await patchEnv({ [envKey]: value })
       setEditing(null)
@@ -80,7 +82,7 @@ export function ProviderStatusSection() {
       setRestartHint(true)
       queryClient.invalidateQueries({ queryKey: ['env-vars'] })
     } catch (e) {
-      console.error('Failed to save API key:', e)
+      setSaveError(`Failed to save ${slug} key: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setSaving(null)
     }
@@ -92,6 +94,12 @@ export function ProviderStatusSection() {
       title="Provider Status"
       description="LLM providers configured for this instance. Manage API keys and test connectivity."
     >
+      {saveError && (
+        <div className="flex items-start gap-2 rounded-sm border border-red-200 dark:border-red-800 bg-danger-dim px-3 py-2 text-compact text-red-700 dark:text-red-400">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
       {restartHint && (
         <div className="flex items-start gap-2 rounded-sm border border-amber-200 dark:border-amber-800 bg-warning-dim px-3 py-2 text-compact text-amber-700 dark:text-amber-400">
           <AlertTriangle size={14} className="mt-0.5 shrink-0" />

@@ -36,18 +36,32 @@ HEARTBEAT_KEY_FMT    = "nova:heartbeat:task:{task_id}"
 
 # ── Producer ───────────────────────────────────────────────────────────────────
 
+# Lua script for atomic SADD+LPUSH — prevents race where SADD succeeds
+# but LPUSH never fires (crash/disconnect between the two calls).
+_ENQUEUE_LUA = """
+local added = redis.call('SADD', KEYS[1], ARGV[1])
+if added == 1 then
+    redis.call('LPUSH', KEYS[2], ARGV[1])
+    return 1
+end
+return 0
+"""
+
+
 async def enqueue_task(task_id: str) -> None:
     """
-    Push a task onto the work queue with dedup.
+    Push a task onto the work queue with dedup (atomic via Lua script).
     SADD to the dedup set first — if the task is already queued, skip LPUSH.
     LPUSH so newest tasks go to the front; BRPOP pops from the right (FIFO).
     """
     redis = get_redis()
-    added = await redis.sadd(TASK_QUEUE_SET_KEY, task_id)
+    # redis.eval runs a Lua script atomically on the Redis server
+    added = await redis.eval(  # noqa: S307 — Redis Lua, not Python eval
+        _ENQUEUE_LUA, 2, TASK_QUEUE_SET_KEY, TASK_QUEUE_KEY, task_id,
+    )
     if not added:
         logger.info("Task %s already in queue — skipping duplicate enqueue", task_id)
         return
-    await redis.lpush(TASK_QUEUE_KEY, task_id)
     logger.debug("Enqueued task %s", task_id)
 
 
@@ -86,10 +100,13 @@ async def clear_heartbeat(task_id: str) -> None:
 
 # ── Dead letter ────────────────────────────────────────────────────────────────
 
+DEAD_LETTER_MAX = 10_000  # Cap to prevent unbounded Redis memory growth
+
+
 async def move_to_dead_letter(task_id: str, reason: str) -> None:
     """
     Push a failed task to the dead letter queue for inspection.
-    Items are never automatically removed — operators can replay or discard them.
+    Capped at DEAD_LETTER_MAX entries — oldest items are trimmed.
     """
     redis = get_redis()
     entry = json.dumps({
@@ -97,7 +114,10 @@ async def move_to_dead_letter(task_id: str, reason: str) -> None:
         "reason":    reason,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     })
-    await redis.lpush(DEAD_LETTER_KEY, entry)
+    pipe = redis.pipeline()
+    pipe.lpush(DEAD_LETTER_KEY, entry)
+    pipe.ltrim(DEAD_LETTER_KEY, 0, DEAD_LETTER_MAX - 1)
+    await pipe.execute()
     logger.warning("Task %s moved to dead letter: %s", task_id, reason)
 
 

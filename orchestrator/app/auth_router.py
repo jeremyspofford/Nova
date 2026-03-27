@@ -479,26 +479,16 @@ async def validate_invite(code: str):
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """SELECT ic.id, ic.role, ic.expires_at, ic.account_expires_in_hours, ic.created_at,
+            """SELECT ic.id, ic.role, ic.expires_at, ic.account_expires_in_hours,
+                      ic.created_at, ic.used_by,
                       u.display_name AS created_by_name
                FROM invite_codes ic
                LEFT JOIN users u ON u.id = ic.created_by
                WHERE ic.code = $1""",
             code,
         )
-    if not row or row.get("used_by") is not None:
-        # Check if it was used or doesn't exist
-        pass
 
-    if not row:
-        return {"valid": False}
-
-    # Check if used (need separate query since we didn't select used_by above)
-    async with pool.acquire() as conn:
-        used = await conn.fetchval(
-            "SELECT used_by FROM invite_codes WHERE code = $1", code
-        )
-    if used is not None:
+    if not row or row["used_by"] is not None:
         return {"valid": False}
 
     # Check expiry

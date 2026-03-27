@@ -38,6 +38,15 @@ DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
 _decomposition_semaphore = asyncio.Semaphore(5)
 
 
+async def _process_event_guarded(raw_payload: str) -> None:
+    """Run _process_event under the decomposition semaphore with error handling."""
+    try:
+        async with _decomposition_semaphore:
+            await _process_event(raw_payload)
+    except Exception:
+        log.exception("Engram ingestion failed for event: %s", raw_payload[:200])
+
+
 async def ingestion_loop() -> None:
     """Main ingestion loop — BRPOP from Redis queue, process each event."""
     if not settings.engram_ingestion_enabled:
@@ -70,8 +79,13 @@ async def ingestion_loop() -> None:
                 log.warning("Malformed ingestion event (not valid JSON), skipping: %s", raw_payload[:200])
                 continue
 
-            async with _decomposition_semaphore:
-                await _process_event(raw_payload)
+            # Fire into background so BRPOP loop isn't blocked.
+            # The semaphore inside _process_event_guarded gates
+            # expensive LLM calls to at most 5 concurrent.
+            asyncio.create_task(
+                _process_event_guarded(raw_payload),
+                name="engram-ingest",
+            )
 
         except asyncio.CancelledError:
             log.info("Engram ingestion worker shutting down")

@@ -2,6 +2,38 @@
 
 > Items considered and explicitly deferred. Each has enough context to pick up cold.
 
+## Priority: Cortex Autonomy Gaps
+
+These are the gaps preventing Nova from being truly self-directed. Ordered by impact.
+
+### Goal Decomposition
+**What:** Break high-level goals ("build a feature") into subtask DAGs instead of one monolithic blob per cycle.
+**Why:** Without decomposition, Cortex can only work on one atomic chunk per thinking cycle. Complex goals stall because there's no way to parallelize or sequence sub-work.
+**How:** Planning phase in the thinking loop produces a DAG of subtasks with dependencies. Cortex dispatches leaf tasks, tracks completion via TRACK phase, and schedules dependents.
+**Effort:** 2-3 weeks
+**Added:** 2026-03-27
+
+### Learning from Failures
+**What:** Read prior reflections back before planning new cycles.
+**Why:** Cortex writes reflections to engrams after each cycle but never queries them. It repeats the same mistakes because it has no memory of what went wrong before.
+**How:** In the PLAN phase, query engrams for recent reflections/failures related to the current goal. Include them in the LLM planning prompt.
+**Effort:** 1 week
+**Added:** 2026-03-27
+
+### Maturation Pipeline Executor
+**What:** Execute goal maturation stages (triaging → scoping → speccing → review → building → verifying) via Cortex drive logic.
+**Why:** Maturation columns exist in the schema but nothing transitions goals through the stages. Goals sit in "triaging" forever.
+**How:** New Cortex drive or sub-drive in the Improve/Serve drives that checks goal maturation status and runs the appropriate pipeline action for each stage.
+**Effort:** 2-3 days
+**Added:** 2026-03-27
+
+### Cortex Integration Tests
+**What:** Integration test coverage for goals, drives, thinking loop, task feedback.
+**Why:** Zero test coverage on the autonomous brain. Any refactor could silently break the thinking loop.
+**How:** Tests in `tests/` that hit Cortex endpoints, create goals, verify drive selection, confirm task dispatch + TRACK phase feedback.
+**Effort:** 2 days
+**Added:** 2026-03-27
+
 ## Friction Log Enhancements
 
 ### Docker Log Auto-Attach

@@ -6,6 +6,7 @@ import clsx from 'clsx'
 import { useAuth } from '../stores/auth-store'
 import { apiFetch } from '../api'
 import { Button } from './ui/Button'
+import { ConfirmDialog } from './ui'
 import { SearchInput } from './ui/SearchInput'
 import { Tooltip } from './ui/Tooltip'
 
@@ -33,6 +34,7 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
   const [search, setSearch] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
+  const [deleteId, setDeleteId] = useState<string | null>(null)
   const editRef = useRef<HTMLInputElement>(null)
 
   const { data: conversations = [] } = useQuery({
@@ -102,6 +104,7 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
       await apiFetch(`/api/v1/conversations/${id}`, { method: 'DELETE' })
       queryClient.invalidateQueries({ queryKey: ['conversations'] })
     } catch { /* ignore */ }
+    setDeleteId(null)
   }
 
   if (collapsed) {
@@ -217,7 +220,7 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
                       </Tooltip>
                       <Tooltip content="Delete">
                         <button
-                          onClick={e => { e.stopPropagation(); handleDelete(conv.id) }}
+                          onClick={e => { e.stopPropagation(); setDeleteId(conv.id) }}
                           className="p-1 rounded-xs hover:bg-danger-dim text-danger transition-colors duration-fast"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -237,6 +240,16 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!deleteId}
+        title="Delete Conversation"
+        description="This conversation and all its messages will be permanently deleted. This cannot be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => deleteId && handleDelete(deleteId)}
+        onClose={() => setDeleteId(null)}
+      />
     </div>
   )
 }

@@ -48,22 +48,29 @@ function ServiceStatusSection() {
 
   const [restartingService, setRestartingService] = useState<string | null>(null)
   const [restartingAll, setRestartingAll] = useState(false)
+  const [restartError, setRestartError] = useState<string | null>(null)
 
   const handleRestart = useCallback(async (svc: string) => {
     setRestartingService(svc)
+    setRestartError(null)
     try {
       await restartService(svc)
       qc.invalidateQueries({ queryKey: ['recovery-services'] })
-    } catch { /* silently handled */ }
+    } catch (e) {
+      setRestartError(`Failed to restart ${svc}: ${e instanceof Error ? e.message : String(e)}`)
+    }
     setRestartingService(null)
   }, [qc])
 
   const handleRestartAll = useCallback(async () => {
     setRestartingAll(true)
+    setRestartError(null)
     try {
       await restartAllServices()
       qc.invalidateQueries({ queryKey: ['recovery-services'] })
-    } catch { /* silently handled */ }
+    } catch (e) {
+      setRestartError(`Failed to restart services: ${e instanceof Error ? e.message : String(e)}`)
+    }
     setRestartingAll(false)
   }, [qc])
 
@@ -77,6 +84,12 @@ function ServiceStatusSection() {
         </div>
       </div>
       <div className="px-5 py-4 space-y-3">
+        {restartError && (
+          <div className="flex items-start gap-2 rounded-sm border border-red-200 dark:border-red-800 bg-danger-dim px-3 py-2 text-compact text-red-700 dark:text-red-400">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <span>{restartError}</span>
+          </div>
+        )}
         {isLoading ? (
           <p className="text-compact text-content-tertiary">Checking services...</p>
         ) : (

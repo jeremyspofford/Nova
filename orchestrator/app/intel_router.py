@@ -374,26 +374,19 @@ async def list_recommendations(
         f" ORDER BY created_at DESC LIMIT ${idx} OFFSET ${idx + 1}"
     )
 
+    # Single query with correlated subqueries to avoid N+1
+    query_with_counts = (
+        f"SELECT r.*,"
+        f" (SELECT COUNT(*) FROM intel_recommendation_sources WHERE recommendation_id = r.id) AS source_count,"
+        f" (SELECT COUNT(*) FROM intel_recommendation_engrams WHERE recommendation_id = r.id) AS memory_count,"
+        f" (SELECT COUNT(*) FROM comments WHERE entity_type = 'recommendation' AND entity_id = r.id) AS comment_count"
+        f" FROM ({query}) r"
+    )
+
     pool = get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(query, *values)
-        results = []
-        for r in rows:
-            rec = dict(r)
-            rec["source_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM intel_recommendation_sources WHERE recommendation_id = $1",
-                r["id"],
-            )
-            rec["memory_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM intel_recommendation_engrams WHERE recommendation_id = $1",
-                r["id"],
-            )
-            rec["comment_count"] = await conn.fetchval(
-                "SELECT COUNT(*) FROM comments WHERE entity_type = 'recommendation' AND entity_id = $1",
-                r["id"],
-            )
-            results.append(rec)
-    return results
+        rows = await conn.fetch(query_with_counts, *values)
+    return [dict(r) for r in rows]
 
 
 @intel_router.get("/api/v1/intel/recommendations/{rec_id}")

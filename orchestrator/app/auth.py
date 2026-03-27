@@ -252,7 +252,7 @@ async def require_user(
             except HTTPException:
                 raise
             except Exception:
-                pass  # Redis unavailable — allow request through
+                log.warning("Redis deny-list check failed — allowing request through (user=%s)", user_id)
 
             # Check account expiry
             try:
@@ -280,7 +280,7 @@ async def require_user(
             except HTTPException:
                 raise
             except Exception:
-                pass  # DB unavailable — allow request through
+                log.warning("Account status/expiry check failed — allowing request through (user=%s)", user_id)
 
             return AuthenticatedUser(
                 id=user_id,
