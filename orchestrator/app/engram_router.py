@@ -9,7 +9,9 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
+from uuid import UUID
 
+import httpx
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
@@ -425,3 +427,41 @@ async def _reindex_knowledge(pool, redis, since: datetime | None, dry_run: bool)
 
     log.info("Reindex: queued %d knowledge engrams for re-decomposition", len(rows))
     return len(rows)
+
+
+@router.post("/sources/{source_id}/redecompose")
+async def redecompose_source(source_id: UUID, _admin: AdminDep):
+    """Re-decompose a source through the current ingestion pipeline.
+
+    Fetches stored content from memory-service and re-queues for ingestion.
+    Useful after decomposition prompt improvements.
+    """
+    async with httpx.AsyncClient(timeout=10) as client:
+        content_resp = await client.get(
+            f"{settings.memory_service_url}/api/v1/engrams/sources/{source_id}/content"
+        )
+        if content_resp.status_code != 200:
+            return {"error": "Source content not available for re-decomposition"}
+        content = content_resp.json().get("content")
+
+        meta_resp = await client.get(
+            f"{settings.memory_service_url}/api/v1/engrams/sources/{source_id}"
+        )
+        meta = meta_resp.json() if meta_resp.status_code == 200 else {}
+
+    if not content:
+        return {"error": "No stored content — URI-only sources cannot be re-decomposed"}
+
+    r = aioredis.from_url(_engram_redis_url(), decode_responses=True)
+    try:
+        await _push_to_queue(
+            r,
+            raw_text=content,
+            source_type=meta.get("source_kind", "manual_paste"),
+            source_id=str(source_id),
+            metadata={"redecompose": True, "source_ref_id": str(source_id)},
+        )
+    finally:
+        await r.aclose()
+
+    return {"status": "queued", "source_id": str(source_id)}
