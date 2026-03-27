@@ -122,6 +122,7 @@ async def activate_engrams(
     seed_count: int | None = None,
     max_hops: int | None = None,
     max_results: int | None = None,
+    depth: str = "standard",
 ):
     """Run spreading activation on a query and return activated engrams."""
     async with get_db() as session:
@@ -130,6 +131,7 @@ async def activate_engrams(
             seed_count=seed_count,
             max_hops=max_hops,
             max_results=max_results,
+            depth=depth,
         )
     return {
         "count": len(activated),
@@ -181,6 +183,7 @@ async def get_engram_context(
     query: str = Body(...),
     session_id: str = Body(""),
     current_turn: int = Body(0),
+    depth: str = Body("standard"),
 ):
     """Assemble the full working memory context for a query.
 
@@ -193,6 +196,7 @@ async def get_engram_context(
             query=query,
             session_id=session_id,
             current_turn=current_turn,
+            depth=depth,
         )
     prompt = format_context_prompt(ctx)
     return {
@@ -246,6 +250,7 @@ async def get_consolidation_log(limit: int = Query(default=20, le=100)):
                 SELECT id, trigger_type, engrams_reviewed, schemas_created,
                        edges_strengthened, edges_pruned, engrams_pruned,
                        engrams_merged, contradictions_resolved,
+                       COALESCE(topics_created, 0) AS topics_created,
                        self_model_updates::text, model_used, duration_ms,
                        created_at
                 FROM consolidation_log
@@ -270,9 +275,44 @@ async def get_consolidation_log(limit: int = Query(default=20, le=100)):
                 "engrams_pruned": row.engrams_pruned,
                 "engrams_merged": row.engrams_merged,
                 "contradictions_resolved": row.contradictions_resolved,
+                "topics_created": getattr(row, "topics_created", 0),
                 "self_model_updates": json.loads(row.self_model_updates) if row.self_model_updates else {},
                 "model_used": row.model_used,
                 "duration_ms": row.duration_ms,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ],
+    }
+
+
+@engram_router.get("/topics")
+async def list_topics():
+    """List all active topic engrams with member counts."""
+    async with get_db() as session:
+        result = await session.execute(
+            text("""
+                SELECT e.id::text, e.content, e.importance, e.source_meta,
+                       e.created_at,
+                       (SELECT count(*) FROM engram_edges ee
+                        WHERE ee.target_id = e.id AND ee.relation = 'part_of') AS member_count
+                FROM engrams e
+                WHERE e.type = 'topic' AND NOT e.superseded
+                ORDER BY importance DESC
+            """)
+        )
+        rows = result.fetchall()
+
+    import json
+    return {
+        "count": len(rows),
+        "topics": [
+            {
+                "id": row.id,
+                "content": row.content,
+                "importance": round(float(row.importance), 3),
+                "member_count": row.member_count,
+                "entity_anchors": json.loads(row.source_meta or "{}").get("entity_anchors", []) if row.source_meta else [],
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
             for row in rows
