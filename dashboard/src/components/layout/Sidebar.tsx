@@ -16,6 +16,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
+  Sparkles,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
@@ -48,6 +49,7 @@ const navSections: NavSection[] = [
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
       { to: '/sources', label: 'Sources', icon: Globe, minRole: 'member' },
       { to: '/engrams', label: 'Memory', icon: Brain, minRole: 'member' },
+      { to: '/brain', label: 'Brain', icon: Sparkles, minRole: 'member' },
     ],
   },
   {

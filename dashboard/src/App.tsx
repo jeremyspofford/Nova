@@ -30,6 +30,7 @@ import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
 import Friction from './pages/Friction'
+import Brain from './pages/Brain'
 import Overview from './pages/Overview'
 import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
 import ComponentGallery from './pages/dev/ComponentGallery'
@@ -170,6 +171,7 @@ function AppShell() {
         <Route path="/mcp" element={<AppLayout><MCP /></AppLayout>} />
         <Route path="/agents" element={<AppLayout><AgentEndpoints /></AppLayout>} />
         <Route path="/engrams" element={<AppLayout><EngramExplorer /></AppLayout>} />
+        <Route path="/brain" element={<AppLayout fullWidth><Brain /></AppLayout>} />
         <Route path="/goals" element={<AppLayout><Goals /></AppLayout>} />
         <Route path="/sources" element={<AppLayout><Sources /></AppLayout>} />
         <Route path="/intelligence" element={<AppLayout><Intelligence /></AppLayout>} />
