@@ -240,6 +240,22 @@ CREATE TABLE IF NOT EXISTS retrieval_log (
 
 CREATE INDEX IF NOT EXISTS idx_retrieval_log_created ON retrieval_log(created_at);
 
+-- ── Topic clustering support ────────────────────────────────────────────────
+
+-- Add topics_created column to consolidation_log
+DO $$ BEGIN
+    ALTER TABLE consolidation_log ADD COLUMN topics_created INTEGER NOT NULL DEFAULT 0;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+-- Index for querying topic engrams (used by what_do_i_know)
+CREATE INDEX IF NOT EXISTS idx_engrams_type_topic
+    ON engrams(type) WHERE type = 'topic' AND NOT superseded;
+
+-- Index for structural edge queries (part_of, instance_of lookups)
+CREATE INDEX IF NOT EXISTS idx_edges_structural
+    ON engram_edges(relation, target_id) WHERE relation IN ('part_of', 'instance_of');
+
 -- Working memory session state (tracks what's on the "desk" per session)
 CREATE TABLE IF NOT EXISTS working_memory_slots (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
