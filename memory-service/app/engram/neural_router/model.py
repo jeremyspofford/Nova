@@ -17,7 +17,7 @@ class ScalarReranker(nn.Module):
     Output: relevance probability (0-1) per candidate
     """
 
-    SCALAR_DIM = 25
+    SCALAR_DIM = 26
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,7 +52,7 @@ class EmbeddingReranker(nn.Module):
     Output: relevance probability (0-1) per candidate
     """
 
-    SCALAR_DIM = 25
+    SCALAR_DIM = 26
     EMBED_DIM = 768
     PROJECT_DIM = 32
 

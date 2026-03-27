@@ -166,6 +166,20 @@ async def _what_do_i_know(args: dict) -> str:
                 for t in topic_list:
                     member_note = f" ({t.get('member_count', '?')} items)" if t.get("member_count") else ""
                     lines.append(f"\n- {t['content'][:200]}{member_note}")
+
+                # Standard/deep: also fetch schema summaries for each topic
+                if depth in ("standard", "deep") and topic_list:
+                    lines.append("\n\nSchemas:")
+                    schemas_resp = await c.post(
+                        f"{MEMORY_BASE}/activate",
+                        params={"query": "knowledge patterns", "max_results": 30, "depth": "shallow"},
+                    )
+                    if schemas_resp.status_code == 200:
+                        schemas_data = schemas_resp.json()
+                        for e in schemas_data.get("engrams", []):
+                            if e.get("type") == "schema":
+                                lines.append(f"\n- [schema] {e['content'][:200]}")
+
                 return "\n".join(lines)
 
         # Fall back to source-based domain summary

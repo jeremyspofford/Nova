@@ -522,6 +522,28 @@ async def maintain_topics(session: AsyncSession) -> dict:
                 if new_content:
                     new_embedding = await get_embedding(new_content, session)
                     meta["member_count"] = topic.member_count
+
+                    # Recompute centroid from current members
+                    member_embs = await session.execute(
+                        text("""
+                            SELECT e.embedding::text FROM engram_edges ee
+                            JOIN engrams e ON e.id = ee.source_id
+                            WHERE ee.target_id = CAST(:tid AS uuid)
+                              AND ee.relation = 'part_of'
+                              AND NOT e.superseded
+                              AND e.embedding IS NOT NULL
+                        """),
+                        {"tid": str(topic.id)},
+                    )
+                    emb_rows = member_embs.fetchall()
+                    if emb_rows:
+                        emb_arrays = []
+                        for r in emb_rows:
+                            vec_str = r.embedding.strip("[]")
+                            emb_arrays.append([float(x) for x in vec_str.split(",")])
+                        centroid = np.mean(emb_arrays, axis=0).tolist()
+                        meta["centroid"] = to_pg_vector(centroid)
+
                     await session.execute(
                         text("""
                             UPDATE engrams
