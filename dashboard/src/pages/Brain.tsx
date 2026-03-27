@@ -306,7 +306,7 @@ export default function Brain() {
 
       {/* ── Top Left: Topic Sidebar ──────────────────────────────────────── */}
       {activeGraph && activeGraph.nodes.length > 0 && (
-        <div className="absolute top-14 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-8rem)] overflow-y-auto w-[200px] scrollbar-thin">
+        <div className="absolute top-28 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-10rem)] overflow-y-auto w-[200px] scrollbar-thin">
           {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
             <>
               <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
