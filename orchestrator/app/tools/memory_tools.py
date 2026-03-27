@@ -42,6 +42,11 @@ MEMORY_TOOLS: list[ToolDefinition] = [
                     "type": "string",
                     "description": "Optional topic to focus the overview on",
                 },
+                "depth": {
+                    "type": "string",
+                    "enum": ["shallow", "standard", "deep"],
+                    "description": "shallow=topics only, standard=topics+schemas, deep=full breakdown",
+                },
             },
             "required": [],
         },
@@ -65,6 +70,11 @@ MEMORY_TOOLS: list[ToolDefinition] = [
                     "type": "integer",
                     "description": "Max results to return (default: 10, max: 30)",
                 },
+                "depth": {
+                    "type": "string",
+                    "enum": ["shallow", "standard", "deep"],
+                    "description": "shallow=schemas/topics only, standard=default, deep=follow all structural edges",
+                },
             },
             "required": ["query"],
         },
@@ -87,6 +97,11 @@ MEMORY_TOOLS: list[ToolDefinition] = [
                 "max_results": {
                     "type": "integer",
                     "description": "Max results (default: 15, max: 50)",
+                },
+                "depth": {
+                    "type": "string",
+                    "enum": ["shallow", "standard", "deep"],
+                    "description": "shallow=schemas/topics only, standard=default, deep=everything connected",
                 },
             },
             "required": ["entity"],
@@ -137,7 +152,23 @@ async def execute_tool(name: str, arguments: dict) -> str:
 
 
 async def _what_do_i_know(args: dict) -> str:
+    depth = args.get("depth", "shallow")
+
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        # Try topic-based overview first (direct query, not semantic search)
+        topics_resp = await c.get(f"{MEMORY_BASE}/topics")
+        if topics_resp.status_code == 200:
+            topics_data = topics_resp.json()
+            topic_list = topics_data.get("topics", [])
+
+            if topic_list:
+                lines = [f"Knowledge domains ({len(topic_list)} topics):"]
+                for t in topic_list:
+                    member_note = f" ({t.get('member_count', '?')} items)" if t.get("member_count") else ""
+                    lines.append(f"\n- {t['content'][:200]}{member_note}")
+                return "\n".join(lines)
+
+        # Fall back to source-based domain summary
         resp = await c.get(f"{MEMORY_BASE}/sources/domain-summary")
         resp.raise_for_status()
         data = resp.json()
@@ -164,11 +195,12 @@ async def _what_do_i_know(args: dict) -> str:
 async def _search_memory(args: dict) -> str:
     query = args.get("query", "")
     max_results = min(args.get("max_results", 10), 30)
+    depth = args.get("depth", "standard")
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         resp = await c.post(
             f"{MEMORY_BASE}/activate",
-            params={"query": query, "max_results": max_results},
+            params={"query": query, "max_results": max_results, "depth": depth},
         )
         resp.raise_for_status()
         data = resp.json()
@@ -188,11 +220,12 @@ async def _search_memory(args: dict) -> str:
 async def _recall_topic(args: dict) -> str:
     entity = args.get("entity", "")
     max_results = min(args.get("max_results", 15), 50)
+    depth = args.get("depth", "standard")
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
         resp = await c.post(
             f"{MEMORY_BASE}/activate",
-            params={"query": entity, "max_results": max_results},
+            params={"query": entity, "max_results": max_results, "depth": depth},
         )
         resp.raise_for_status()
         data = resp.json()

@@ -75,6 +75,7 @@ async def assemble_context(
     query: str,
     session_id: str = "",
     current_turn: int = 0,
+    depth: str = "standard",
 ) -> WorkingMemoryContext:
     """Full working memory assembly: activate → reconstruct → gate → context.
 
@@ -108,6 +109,7 @@ async def assemble_context(
         session, query,
         seed_count=seed_count,
         max_results=max_results,
+        depth=depth,
     )
 
     # 3b. Neural re-ranking (if model loaded)
