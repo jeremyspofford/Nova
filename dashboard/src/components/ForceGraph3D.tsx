@@ -394,67 +394,6 @@ function createStarfield(): Group {
   const group = new Group()
   group.name = 'starfield'
 
-  // ── Dim stars — the background dust ──
-  const dimCount = 2000
-  const dimPos = new Float32Array(dimCount * 3)
-  const dimCol = new Float32Array(dimCount * 3)
-
-  for (let i = 0; i < dimCount; i++) {
-    const r = 600 + Math.random() * 900
-    const theta = Math.random() * Math.PI * 2
-    const phi = Math.acos(2 * Math.random() - 1)
-    dimPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
-    dimPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-    dimPos[i * 3 + 2] = r * Math.cos(phi)
-
-    const t = Math.random()
-    if (t < 0.5) {        // cool white/blue-white
-      dimCol[i * 3] = 0.8 + Math.random() * 0.2
-      dimCol[i * 3 + 1] = 0.85 + Math.random() * 0.15
-      dimCol[i * 3 + 2] = 1.0
-    } else if (t < 0.75) { // warm yellow
-      dimCol[i * 3] = 1.0
-      dimCol[i * 3 + 1] = 0.8 + Math.random() * 0.2
-      dimCol[i * 3 + 2] = 0.5 + Math.random() * 0.2
-    } else {                // blue
-      dimCol[i * 3] = 0.5 + Math.random() * 0.2
-      dimCol[i * 3 + 1] = 0.6 + Math.random() * 0.2
-      dimCol[i * 3 + 2] = 1.0
-    }
-  }
-
-  const dimGeo = new BufferGeometry()
-  dimGeo.setAttribute('position', new Float32BufferAttribute(dimPos, 3))
-  dimGeo.setAttribute('color', new Float32BufferAttribute(dimCol, 3))
-  group.add(new Points(dimGeo, new PointsMaterial({
-    size: 0.8, vertexColors: true, transparent: true, opacity: 0.6, sizeAttenuation: true,
-  })))
-
-  // ── Bright stars — the visible ones ──
-  const brightCount = 300
-  const brightPos = new Float32Array(brightCount * 3)
-  const brightCol = new Float32Array(brightCount * 3)
-
-  for (let i = 0; i < brightCount; i++) {
-    const r = 500 + Math.random() * 1000
-    const theta = Math.random() * Math.PI * 2
-    const phi = Math.acos(2 * Math.random() - 1)
-    brightPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
-    brightPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-    brightPos[i * 3 + 2] = r * Math.cos(phi)
-
-    brightCol[i * 3] = 0.9 + Math.random() * 0.1
-    brightCol[i * 3 + 1] = 0.9 + Math.random() * 0.1
-    brightCol[i * 3 + 2] = 1.0
-  }
-
-  const brightGeo = new BufferGeometry()
-  brightGeo.setAttribute('position', new Float32BufferAttribute(brightPos, 3))
-  brightGeo.setAttribute('color', new Float32BufferAttribute(brightCol, 3))
-  group.add(new Points(brightGeo, new PointsMaterial({
-    size: 2.0, vertexColors: true, transparent: true, opacity: 0.9, sizeAttenuation: true,
-  })))
-
   // ── Nebulae — distant color clouds ──
   const nebulae = [
     { x: 700,  y: 300,  z: -500, s: 500, r: 100, g: 60,  b: 180, op: 0.15 },
@@ -496,6 +435,47 @@ function createStarfield(): Group {
     sprite.scale.set(g.w, g.h, 1)
     group.add(sprite)
   }
+
+  // ── Deep-field stars — static backdrop that's always visible ──
+  // Uses depthTest:false + renderOrder:-1 to render behind everything regardless
+  // of camera distance, and sizeAttenuation:false for constant pixel size.
+  const deepCount = 3000
+  const deepPos = new Float32Array(deepCount * 3)
+  const deepCol = new Float32Array(deepCount * 3)
+
+  for (let i = 0; i < deepCount; i++) {
+    const r = 4000 + Math.random() * 4000
+    const theta = Math.random() * Math.PI * 2
+    const phi = Math.acos(2 * Math.random() - 1)
+    deepPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+    deepPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+    deepPos[i * 3 + 2] = r * Math.cos(phi)
+
+    const t = Math.random()
+    if (t < 0.6) {
+      deepCol[i * 3] = 0.7 + Math.random() * 0.3
+      deepCol[i * 3 + 1] = 0.75 + Math.random() * 0.25
+      deepCol[i * 3 + 2] = 1.0
+    } else if (t < 0.8) {
+      deepCol[i * 3] = 1.0
+      deepCol[i * 3 + 1] = 0.85 + Math.random() * 0.15
+      deepCol[i * 3 + 2] = 0.6 + Math.random() * 0.2
+    } else {
+      deepCol[i * 3] = 0.4 + Math.random() * 0.2
+      deepCol[i * 3 + 1] = 0.5 + Math.random() * 0.2
+      deepCol[i * 3 + 2] = 1.0
+    }
+  }
+
+  const deepGeo = new BufferGeometry()
+  deepGeo.setAttribute('position', new Float32BufferAttribute(deepPos, 3))
+  deepGeo.setAttribute('color', new Float32BufferAttribute(deepCol, 3))
+  const deepStars = new Points(deepGeo, new PointsMaterial({
+    size: 1.5, vertexColors: true, transparent: true, opacity: 0.5,
+    sizeAttenuation: false, depthTest: false, depthWrite: false,
+  }))
+  deepStars.renderOrder = -1
+  group.add(deepStars)
 
   return group
 }
@@ -1117,17 +1097,17 @@ function makeDomainLabel(text: string, count: number, color: string): Sprite {
 
   // Domain label
   const label = text.length > 30 ? text.slice(0, 28) + '...' : text
-  ctx.font = '600 28px system-ui'
+  ctx.font = '600 32px system-ui'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = color
-  ctx.globalAlpha = 0.5
+  ctx.globalAlpha = 0.9
   ctx.fillText(label, w / 2, h / 2 - 12)
 
   // Count badge
-  ctx.font = '400 20px system-ui'
-  ctx.globalAlpha = 0.3
-  ctx.fillText(`${count} memories`, w / 2, h / 2 + 16)
+  ctx.font = '400 22px system-ui'
+  ctx.globalAlpha = 0.55
+  ctx.fillText(`${count} memories`, w / 2, h / 2 + 18)
 
   const tex = new CanvasTexture(canvas)
   const mat = new SpriteMaterial({
@@ -1137,8 +1117,8 @@ function makeDomainLabel(text: string, count: number, color: string): Sprite {
     depthTest: false,
   })
   const sprite = new Sprite(mat)
-  sprite.scale.set(60, 15, 1)
-  sprite.renderOrder = -1
+  sprite.scale.set(70, 18, 1)
+  sprite.renderOrder = 2
   return sprite
 }
 

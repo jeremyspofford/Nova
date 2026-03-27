@@ -59,10 +59,11 @@ export function useVoiceChat({
     return () => clearInterval(interval)
   }, [])
 
-  // Persist mute state
+  // Persist mute state + immediately stop playback when muted
   useEffect(() => {
     localStorage.setItem('nova_voice_muted', String(muted))
-  }, [muted])
+    if (muted) stopAllPlayback()
+  }, [muted, stopAllPlayback])
 
   // Detect supported MIME type
   useEffect(() => {
