@@ -9,6 +9,7 @@ export interface ActivityStep {
   model?: string
   category?: string | null
   startedAt?: number  // Date.now(), set client-side for live timer
+  engram_ids?: string[]  // IDs of engrams retrieved during memory step
 }
 
 export interface AttachedFile {

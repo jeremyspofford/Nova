@@ -151,15 +151,19 @@ export default function Brain() {
     return () => window.removeEventListener('keydown', handler)
   }, [chatOpen, searchActive, selectedNode])
 
-  // Activity step handler
+  // Activity step handler — highlights actual retrieved engrams when IDs are available
   const handleActivityStep = useCallback((_step: ActivityStep) => {
     if (!activeGraph?.nodes) return
-    if (_step.step === 'memory' && _step.state === 'running') {
-      const nodes = activeGraph.nodes
-      const count = Math.max(3, Math.floor(nodes.length * 0.15))
-      const shuffled = [...nodes].sort(() => Math.random() - 0.5)
-      const ids = shuffled.slice(0, count).map(n => n.id)
-      graphRef.current?.highlightNodes(ids, 1500)
+    if (_step.step === 'memory' && _step.state === 'done' && _step.engram_ids?.length) {
+      // Real engram IDs from the memory retrieval — highlight exactly what Nova recalled
+      const graphNodeIds = new Set(activeGraph.nodes.map(n => n.id))
+      const matchingIds = _step.engram_ids.filter(id => graphNodeIds.has(id))
+      if (matchingIds.length > 0) {
+        graphRef.current?.highlightNodes(matchingIds, 2500)
+      }
+    } else if (_step.step === 'memory' && _step.state === 'running') {
+      // Fallback: no IDs yet (running state), show a subtle pulse
+      graphRef.current?.pulseAll(1000)
     }
     if (_step.step === 'generating' && _step.state === 'running') {
       graphRef.current?.pulseAll(2000)
@@ -422,114 +426,119 @@ export default function Brain() {
         </div>
       )}
 
-      {/* ── Bottom Left: Selected Node Detail Panel ───────────────────────── */}
+      {/* ── Memory Detail Modal ─────────────────────────────────────────── */}
       {selectedNodeData && (
-        <div className="absolute bottom-4 left-4 z-10 w-[340px] max-h-[calc(100vh-6rem)] overflow-y-auto bg-black/70 backdrop-blur-sm border border-white/10 rounded-lg scrollbar-thin">
-          {/* Header */}
-          <div className="sticky top-0 bg-black/80 backdrop-blur-sm border-b border-white/5 px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 min-w-0">
-              <span
-                className="text-[11px] px-1.5 py-0.5 rounded font-medium shrink-0"
-                style={{
-                  backgroundColor: `${nodeColor}20`,
-                  color: nodeColor,
-                }}
-              >
-                {selectedNodeData.type === 'self_model' ? 'self model' : selectedNodeData.type}
-              </span>
-              {selectedNodeData.superseded && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 shrink-0">
-                  superseded
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedNode(null) }}
+        >
+          <div className="w-[480px] max-h-[70vh] overflow-y-auto bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl scrollbar-thin">
+            {/* Header */}
+            <div className="sticky top-0 bg-zinc-900/95 backdrop-blur-md border-b border-white/5 px-5 py-3.5 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span
+                  className="text-[11px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                  style={{
+                    backgroundColor: `${nodeColor}20`,
+                    color: nodeColor,
+                  }}
+                >
+                  {selectedNodeData.type === 'self_model' ? 'self model' : selectedNodeData.type}
                 </span>
-              )}
-            </div>
-            <button
-              onClick={() => setSelectedNode(null)}
-              className="text-stone-600 hover:text-stone-300 transition-colors"
-            >
-              <X size={14} />
-            </button>
-          </div>
-
-          <div className="p-4 space-y-4">
-            {/* Content */}
-            <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content}</p>
-
-            {/* Scores */}
-            <div className="space-y-2 pt-3 border-t border-white/5">
-              <div className="text-[10px] text-stone-600 uppercase tracking-wider">Scores</div>
-              <ScoreBar value={selectedNodeData.activation} label="Activation" color="#f59e0b" />
-              <ScoreBar value={selectedNodeData.importance} label="Importance" color="#14b8a6" />
-              <ScoreBar value={selectedNodeData.confidence} label="Confidence" color="#818cf8" />
-            </div>
-
-            {/* Metadata */}
-            <div className="pt-3 border-t border-white/5">
-              <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-2">Metadata</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                <div>
-                  <div className="text-[10px] text-stone-600">Source</div>
-                  <div className="text-[11px] text-stone-300">{selectedNodeData.source_type || 'unknown'}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] text-stone-600">Recalled</div>
-                  <div className="text-[11px] text-stone-300">{selectedNodeData.access_count.toLocaleString()} times</div>
-                </div>
-                {selectedNodeData.created_at && (
-                  <div>
-                    <div className="text-[10px] text-stone-600">Created</div>
-                    <div className="text-[11px] text-stone-300">{new Date(selectedNodeData.created_at).toLocaleDateString()}</div>
-                  </div>
+                {selectedNodeData.superseded && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 shrink-0">
+                    superseded
+                  </span>
                 )}
               </div>
-              <div className="font-mono text-[9px] text-stone-700 break-all mt-2">{selectedNodeData.id}</div>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="text-stone-600 hover:text-stone-300 transition-colors"
+              >
+                <X size={14} />
+              </button>
             </div>
 
-            {/* Explore from here */}
-            <button
-              onClick={() => exploreNode(selectedNodeData.id)}
-              className="w-full flex items-center justify-center gap-1.5 text-xs text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/20 rounded-md py-1.5 transition-colors"
-            >
-              <Network size={12} />
-              Explore from here
-            </button>
+            <div className="p-5 space-y-4">
+              {/* Content */}
+              <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content}</p>
 
-            {/* Connections */}
-            <div className="pt-3 border-t border-white/5">
-              <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-2">
-                Connections ({selectedConnections.length})
+              {/* Scores */}
+              <div className="space-y-2 pt-3 border-t border-white/5">
+                <div className="text-[10px] text-stone-600 uppercase tracking-wider">Scores</div>
+                <ScoreBar value={selectedNodeData.activation} label="Activation" color="#f59e0b" />
+                <ScoreBar value={selectedNodeData.importance} label="Importance" color="#14b8a6" />
+                <ScoreBar value={selectedNodeData.confidence} label="Confidence" color="#818cf8" />
               </div>
-              {selectedConnections.length > 0 ? (
-                <div className="space-y-1">
-                  {selectedConnections.map((edge, i) => {
-                    const otherId = edge.source === selectedNodeData.id ? edge.target : edge.source
-                    const otherNode = activeGraph?.nodes.find(n => n.id === otherId)
-                    const isOutgoing = edge.source === selectedNodeData.id
-                    return (
-                      <button
-                        key={i}
-                        type="button"
-                        className="flex items-center gap-1.5 w-full text-left text-[11px] p-1.5 rounded hover:bg-white/5 transition-colors"
-                        onClick={() => {
-                          setSelectedNode(otherId)
-                          setFocusNode({ id: otherId, ts: Date.now() })
-                        }}
-                      >
-                        <span className="text-stone-600 shrink-0">{isOutgoing ? '\u2192' : '\u2190'}</span>
-                        <span className="text-stone-400 font-medium shrink-0">{edge.relation.replace(/_/g, ' ')}</span>
-                        <span className="flex-1 truncate text-stone-500">
-                          {otherNode?.content ?? otherId.slice(0, 8)}
-                        </span>
-                        <span className="text-stone-700 text-[10px] shrink-0" title="Connection strength">
-                          {edge.weight.toFixed(2)}
-                        </span>
-                      </button>
-                    )
-                  })}
+
+              {/* Metadata */}
+              <div className="pt-3 border-t border-white/5">
+                <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-2">Metadata</div>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div>
+                    <div className="text-[10px] text-stone-600">Source</div>
+                    <div className="text-[11px] text-stone-300">{selectedNodeData.source_type || 'unknown'}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-stone-600">Recalled</div>
+                    <div className="text-[11px] text-stone-300">{selectedNodeData.access_count.toLocaleString()} times</div>
+                  </div>
+                  {selectedNodeData.created_at && (
+                    <div>
+                      <div className="text-[10px] text-stone-600">Created</div>
+                      <div className="text-[11px] text-stone-300">{new Date(selectedNodeData.created_at).toLocaleDateString()}</div>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <p className="text-[11px] text-stone-600">No connections in this subgraph</p>
-              )}
+                <div className="font-mono text-[9px] text-stone-700 break-all mt-2">{selectedNodeData.id}</div>
+              </div>
+
+              {/* Explore from here */}
+              <button
+                onClick={() => exploreNode(selectedNodeData.id)}
+                className="w-full flex items-center justify-center gap-1.5 text-xs text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/20 rounded-md py-1.5 transition-colors"
+              >
+                <Network size={12} />
+                Explore from here
+              </button>
+
+              {/* Connections */}
+              <div className="pt-3 border-t border-white/5">
+                <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-2">
+                  Connections ({selectedConnections.length})
+                </div>
+                {selectedConnections.length > 0 ? (
+                  <div className="space-y-1">
+                    {selectedConnections.map((edge, i) => {
+                      const otherId = edge.source === selectedNodeData.id ? edge.target : edge.source
+                      const otherNode = activeGraph?.nodes.find(n => n.id === otherId)
+                      const isOutgoing = edge.source === selectedNodeData.id
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          className="flex items-center gap-1.5 w-full text-left text-[11px] p-1.5 rounded hover:bg-white/5 transition-colors"
+                          onClick={() => {
+                            setSelectedNode(otherId)
+                            setFocusNode({ id: otherId, ts: Date.now() })
+                          }}
+                        >
+                          <span className="text-stone-600 shrink-0">{isOutgoing ? '\u2192' : '\u2190'}</span>
+                          <span className="text-stone-400 font-medium shrink-0">{edge.relation.replace(/_/g, ' ')}</span>
+                          <span className="flex-1 truncate text-stone-500">
+                            {otherNode?.content ?? otherId.slice(0, 8)}
+                          </span>
+                          <span className="text-stone-700 text-[10px] shrink-0" title="Connection strength">
+                            {edge.weight.toFixed(2)}
+                          </span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-stone-600">No connections in this subgraph</p>
+                )}
+              </div>
             </div>
           </div>
         </div>

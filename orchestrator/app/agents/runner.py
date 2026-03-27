@@ -257,7 +257,10 @@ async def run_agent_turn_streaming(
         if will_classify:
             yield json.dumps({"status": {"step": "classifying", "state": "done", "detail": category or "general", "elapsed_ms": cls_ms}})
         mem_detail = f"{memory_count} memor{'y' if memory_count == 1 else 'ies'}" if memory_count else "no memories"
-        yield json.dumps({"status": {"step": "memory", "state": "done", "detail": mem_detail, "elapsed_ms": mem_ms}})
+        mem_status: dict = {"step": "memory", "state": "done", "detail": mem_detail, "elapsed_ms": mem_ms}
+        if _engram_ids:
+            mem_status["engram_ids"] = _engram_ids
+        yield json.dumps({"status": mem_status})
 
         if classified_model:
             model = classified_model
