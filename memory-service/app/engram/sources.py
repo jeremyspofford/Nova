@@ -303,12 +303,41 @@ async def get_domain_summary(session: AsyncSession) -> dict:
     )
     recent_sources = [{"title": r.title, "kind": r.source_kind} for r in titles_q.fetchall()]
 
+    # Incomplete sources
+    gaps_q = await session.execute(
+        text("""
+            SELECT title, source_kind, completeness, coverage_notes
+            FROM sources
+            WHERE completeness != 'complete'
+            ORDER BY ingested_at DESC
+            LIMIT 10
+        """)
+    )
+    gaps = [
+        {"title": r.title, "kind": r.source_kind, "coverage": r.coverage_notes}
+        for r in gaps_q.fetchall()
+    ]
+
+    # Stale sources
+    stale_q = await session.execute(
+        text("""
+            SELECT title, source_kind, verified_at
+            FROM sources
+            WHERE stale = TRUE OR (verified_at IS NOT NULL AND verified_at < NOW() - INTERVAL '30 days')
+            ORDER BY verified_at ASC NULLS FIRST
+            LIMIT 10
+        """)
+    )
+    stale_sources = [{"title": r.title, "kind": r.source_kind} for r in stale_q.fetchall()]
+
     return {
         "source_count": sum(v["count"] for v in kinds.values()),
         "engram_count": engram_count,
         "by_kind": kinds,
         "domains": domains,
         "recent_sources": recent_sources,
+        "gaps": gaps,
+        "stale_sources": stale_sources,
     }
 
 
