@@ -112,6 +112,9 @@ async def assemble_context(
 
     # 3b. Neural re-ranking (if model loaded)
     if activated and model is not None:
+        # Before neural reranking, exclude index-node types
+        rerank_candidates = [a for a in activated if a.type not in ("topic",)]
+
         # Get query embedding for embedding-mode reranking
         query_embedding = await get_embedding(query, session)
 
@@ -125,7 +128,7 @@ async def assemble_context(
 
         # Convert ActivatedEngram to dicts for reranking
         candidate_dicts = []
-        for e in activated:
+        for e in rerank_candidates:
             candidate_dicts.append({
                 "id": str(e.id),
                 "type": e.type,
@@ -148,6 +151,28 @@ async def assemble_context(
             temporal_context=temporal_context,
             max_results=settings.engram_max_results,
         )
+
+        # Add back excluded topic engrams (they skip reranking but are still included)
+        topic_engrams = [a for a in activated if a.type in ("topic",)]
+        topic_dicts = [
+            {
+                "id": str(e.id),
+                "type": e.type,
+                "content": e.content,
+                "cosine_similarity": e.activation,
+                "importance": e.importance,
+                "activation": e.activation,
+                "last_accessed": None,
+                "convergence_paths": e.convergence_paths,
+                "outcome_avg": getattr(e, "outcome_avg", None),
+                "outcome_count": getattr(e, "outcome_count", 0),
+                "embedding": None,
+                "final_score": e.final_score,
+                "source_type": e.source_type,
+            }
+            for e in topic_engrams
+        ]
+        reranked_dicts.extend(topic_dicts)
 
         # Convert back to ActivatedEngram for reconstruction
         activated = [
