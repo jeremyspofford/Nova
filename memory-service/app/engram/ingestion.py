@@ -208,6 +208,7 @@ async def _process_event(raw_payload: str) -> dict:
                     source_ref_id=source_ref_id,
                     source_meta=source_meta,
                     trust=trust,
+                    temporal_validity=getattr(decomposed, 'temporal_validity', 'unknown'),
                 )
                 index_to_id[i] = engram_id
                 engram_ids.append(engram_id)
@@ -314,6 +315,7 @@ async def _store_or_update_engram(
     source_ref_id=None,
     source_meta=None,
     trust=0.8,
+    temporal_validity: str = "unknown",
 ) -> tuple[UUID, bool]:
     """Store a new engram or update an existing one after entity resolution.
 
@@ -361,14 +363,16 @@ async def _store_or_update_engram(
             INSERT INTO engrams (
                 type, content, fragments, embedding, embedding_model,
                 occurred_at, importance, source_type, source_id,
-                confidence, tenant_id, source_ref_id, source_meta
+                confidence, tenant_id, source_ref_id, source_meta,
+                temporal_validity
             ) VALUES (
                 :type, :content, CAST(:fragments AS jsonb),
                 CAST(:embedding AS halfvec), :embedding_model,
                 CAST(:occurred_at AS timestamptz), :importance,
                 :source_type, CAST(:source_id AS uuid),
                 :confidence, CAST(:tenant_id AS uuid),
-                :source_ref_id, CAST(:source_meta AS jsonb)
+                :source_ref_id, CAST(:source_meta AS jsonb),
+                :temporal_validity
             )
             RETURNING id
         """),
@@ -386,6 +390,7 @@ async def _store_or_update_engram(
             "tenant_id": DEFAULT_TENANT,
             "source_ref_id": source_ref_id,
             "source_meta": json.dumps(source_meta or {}),
+            "temporal_validity": temporal_validity,
         },
     )
     row = result.fetchone()

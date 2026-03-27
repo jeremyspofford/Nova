@@ -97,69 +97,76 @@ async def resolve_model(model: str) -> str:
     return _resolved_model
 
 
-DECOMPOSITION_SYSTEM_PROMPT_CHAT = """You extract facts from conversations into structured JSON memory units.
+DECOMPOSITION_SYSTEM_PROMPT_CHAT = """You are a memory decomposition engine. Extract structured knowledge from a conversation between a user and an AI assistant.
 
-CRITICAL: Focus on what the USER says about themselves, their preferences, their work, and their requests. The assistant's responses are context, but the user's statements are what matter for memory.
+FOCUS: Extract information about the USER — their identity, preferences, knowledge, decisions, and experiences. The assistant's responses are context, not knowledge.
 
-Return ONLY valid JSON — no other text, no markdown fences, no explanation:
-{"engrams":[{"type":"fact","content":"...","importance":0.5,"entities_referenced":[]}],"relationships":[],"contradictions":[]}
+OUTPUT FORMAT: Valid JSON (no markdown fences). Return a DecompositionResult:
+{
+  "engrams": [...],
+  "relationships": [...],
+  "contradictions": []
+}
 
-Types: fact (knowledge/claims), entity (people/places/tools), preference (likes/dislikes), episode (events), procedure (how-to)
+ENGRAM GUIDELINES:
+- Each engram should be a SELF-CONTAINED statement of 1-3 sentences
+- Include enough context that the engram makes sense on its own, without needing other engrams
+- DO NOT split closely related facts into separate engrams — keep them together
+- BAD: "Jeremy founded Aria Labs" + "Aria Labs was founded in 2025" + "Aria Labs builds AI"
+- GOOD: "Jeremy founded Aria Labs in 2025 to build autonomous AI platforms"
+- Entity engrams (type=entity) are the exception — these should be atomic identifiers
 
-Importance: 0.3=trivial, 0.5=normal, 0.7=significant, 0.9=critical (user identity, core preferences)
+TYPES:
+- fact: Self-contained statement about the user or their world (1-3 sentences, include context)
+- entity: Atomic identifier — a person, place, project, tool, concept (name only, keep short)
+- preference: User preference with rationale ("prefers X because Y")
+- episode: Something that happened, with context ("on date X, user did Y because Z")
+- procedure: How to do something the user described (steps together, not split)
 
-EXAMPLES:
+IMPORTANCE (0.0-1.0):
+- 0.9: Core identity, critical decisions, strong preferences
+- 0.7: Significant facts, project details, professional context
+- 0.5: Normal conversational facts
+- 0.3: Minor details, passing mentions
 
-User: "My name is Jeremy and I'm a software engineer"
-Assistant: "Nice to meet you Jeremy!"
-Output: {"engrams":[{"type":"entity","content":"The user's name is Jeremy","importance":0.9,"entities_referenced":["Jeremy"]},{"type":"fact","content":"Jeremy is a software engineer","importance":0.7,"entities_referenced":["Jeremy"]}],"relationships":[{"from_index":0,"to_index":1,"relation":"related_to","strength":0.8}],"contradictions":[]}
+TEMPORAL VALIDITY:
+- For each engram, assess if it's time-sensitive:
+  - "permanent": definitions, identities, math facts
+  - "dated": news, releases, current events, versions
+  - "unknown": can't determine
 
-User: "I prefer Python over JavaScript"
-Assistant: "Python is great for backend work"
-Output: {"engrams":[{"type":"preference","content":"The user prefers Python over JavaScript","importance":0.6,"entities_referenced":["Python","JavaScript"]}],"relationships":[],"contradictions":[]}
+RELATIONSHIPS: Connect engrams that have meaningful associations. Use:
+- related_to, caused_by, enables, part_of, instance_of, preceded, analogous_to
 
-User: "Good morning!"
-Assistant: "Good morning! How can I help?"
-Output: {"engrams":[],"relationships":[],"contradictions":[]}
+CONTRADICTIONS: If a new statement contradicts something the user previously said, flag it.
 
-Rules:
-- Extract info about the USER, not the assistant
-- User's name, role, company, preferences = high importance (0.7-0.9)
-- Greetings, filler, small talk = return empty engrams list
-- Each engram = ONE atomic fact
-- Always include entities_referenced (can be empty list)"""
+If the conversation is just greetings or contains no extractable knowledge, return {"engrams": [], "relationships": [], "contradictions": []}.
+"""
 
-DECOMPOSITION_SYSTEM_PROMPT_INTEL = """You extract factual information from third-party content (news articles, RSS feeds, Reddit posts, release notes) into structured JSON memory units.
+DECOMPOSITION_SYSTEM_PROMPT_INTEL = """You are a memory decomposition engine. Extract structured knowledge from external content (news articles, blog posts, forum discussions, documentation).
 
-CRITICAL: This is NOT a conversation with the user. This is external content from the internet. Do NOT attribute opinions or preferences to "the user" — attribute them to the author, community, or source. Extract objective facts, trends, announcements, and notable opinions with attribution.
+CRITICAL: This is THIRD-PARTY content, not the user speaking. Do NOT attribute statements as user preferences. Attribute to the source ("according to the article", "the author argues").
 
-Return ONLY valid JSON — no other text, no markdown fences, no explanation:
-{"engrams":[{"type":"fact","content":"...","importance":0.5,"entities_referenced":[]}],"relationships":[],"contradictions":[]}
+OUTPUT FORMAT: Valid JSON (no markdown fences). Return a DecompositionResult.
 
-Types: fact (knowledge/claims/announcements), entity (people/orgs/tools/products), preference (community sentiment — NOT the user's preference), episode (events/releases/incidents), procedure (how-to/tutorials)
+ENGRAM GUIDELINES:
+- Each engram should be a SELF-CONTAINED statement of 1-3 sentences
+- Include source attribution within the engram text itself
+- Preserve key details: names, dates, versions, metrics
+- BAD: "GPT-5 was released" + "GPT-5 has 10T parameters" + "GPT-5 was released in March"
+- GOOD: "OpenAI released GPT-5 in March 2026 with 10T parameters, marking a significant scale increase"
 
-Importance: 0.3=minor news, 0.5=normal, 0.7=significant announcement, 0.9=major release or breakthrough
+TYPES: fact (objective claims), entity (people/orgs/tools), episode (events with dates), procedure (how-to), preference (community sentiment — attribute to source)
 
-EXAMPLES:
+IMPORTANCE: 0.9=major announcements, 0.7=significant developments, 0.5=normal news, 0.3=minor updates
 
-Title: "OpenAI releases GPT-5 with 1M context"
-Body: "OpenAI announced GPT-5 today with a 1 million token context window..."
-Output: {"engrams":[{"type":"episode","content":"OpenAI released GPT-5 with 1 million token context window","importance":0.8,"entities_referenced":["OpenAI","GPT-5"]},{"type":"entity","content":"GPT-5 is OpenAI's latest model with 1M token context","importance":0.7,"entities_referenced":["GPT-5","OpenAI"]}],"relationships":[{"from_index":0,"to_index":1,"relation":"related_to","strength":0.8}],"contradictions":[]}
+TEMPORAL VALIDITY: Most intel content is "dated" — include the timeframe in the engram text.
+"""
 
-Title: "Reddit: Claude is better than GPT for coding"
-Body: "Most commenters agree Claude handles complex refactors better..."
-Output: {"engrams":[{"type":"fact","content":"Reddit community sentiment: Claude is preferred over GPT for complex coding refactors","importance":0.4,"entities_referenced":["Claude","GPT"]}],"relationships":[],"contradictions":[]}
-
-Rules:
-- This is EXTERNAL content — never say "the user thinks/wants/prefers"
-- Attribute opinions to the source (e.g. "Reddit community", "the author", the named person)
-- Focus on factual content: releases, announcements, benchmarks, trends
-- Each engram = ONE atomic fact
-- Always include entities_referenced (can be empty list)"""
-
-DECOMPOSITION_USER_TEMPLATE = """Decompose this into atomic engrams:
-
-{raw_text}"""
+DECOMPOSITION_USER_TEMPLATE = (
+    "Decompose this into structured engrams. For each engram, include a "
+    "temporal_validity field ('permanent', 'dated', or 'unknown').\n\n{raw_text}"
+)
 
 
 # Valid enum values from nova-contracts EdgeRelation

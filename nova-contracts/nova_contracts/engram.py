@@ -137,6 +137,7 @@ class DecomposedEngram(BaseModel):
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
     entities_referenced: list[str] = Field(default_factory=list)
     temporal: dict[str, Any] = Field(default_factory=dict)
+    temporal_validity: str = "unknown"  # permanent, dated, unknown
 
 
 class DecomposedRelationship(BaseModel):
