@@ -320,6 +320,41 @@ async def list_topics():
     }
 
 
+@engram_router.get("/engrams/{engram_id}")
+async def get_engram_detail(engram_id: str):
+    """Get full detail for a single engram (no content truncation)."""
+    async with get_db() as session:
+        result = await session.execute(
+            text("""
+                SELECT id::text, type, content, activation, importance,
+                       access_count, confidence, source_type, superseded,
+                       created_at, source_ref_id::text, source_meta
+                FROM engrams
+                WHERE id = CAST(:id AS uuid)
+            """),
+            {"id": engram_id},
+        )
+        row = result.fetchone()
+        if not row:
+            from fastapi import HTTPException
+            raise HTTPException(404, "Engram not found")
+
+    return {
+        "id": row.id,
+        "type": row.type,
+        "content": row.content,  # Full content, no truncation
+        "activation": round(float(row.activation), 4),
+        "importance": round(float(row.importance), 4),
+        "access_count": row.access_count,
+        "confidence": round(float(row.confidence), 4),
+        "source_type": row.source_type,
+        "superseded": row.superseded,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "source_ref_id": row.source_ref_id,
+        "source_meta": row.source_meta if isinstance(row.source_meta, dict) else {},
+    }
+
+
 # ── Phase 5: Neural Router Status & Mark-Used ─────────────────────────
 
 

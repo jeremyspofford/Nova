@@ -186,9 +186,22 @@ export default function Brain() {
     prevNodeIdsRef.current = currentIds
   }, [activeGraph])
 
-  // Selected node data
-  const selectedNodeData = selectedNode
+  // Selected node data (graph has truncated content)
+  const selectedNodeBasic = selectedNode
     ? activeGraph?.nodes.find(n => n.id === selectedNode) ?? null
+    : null
+
+  // Fetch full engram detail (untruncated content) when a node is selected
+  const { data: selectedNodeFull } = useQuery({
+    queryKey: ['engram-detail', selectedNode],
+    queryFn: () => apiFetch<GraphNode>(`/mem/api/v1/engrams/engrams/${selectedNode}`),
+    enabled: !!selectedNode,
+    staleTime: 60_000,
+  })
+
+  // Merge: use full content from detail query, fall back to graph node data
+  const selectedNodeData = selectedNodeBasic
+    ? { ...selectedNodeBasic, content: selectedNodeFull?.content ?? selectedNodeBasic.content }
     : null
 
   // Handle search submit

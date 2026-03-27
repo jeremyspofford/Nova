@@ -3,7 +3,7 @@ import ForceGraph3DLib from '3d-force-graph'
 import {
   Mesh,
   SphereGeometry,
-  MeshBasicMaterial,
+  ShaderMaterial,
   Sprite,
   SpriteMaterial,
   CanvasTexture,
@@ -16,6 +16,7 @@ import {
   Float32BufferAttribute,
   PointsMaterial,
   Points,
+  FrontSide,
 } from 'three'
 // @ts-expect-error — three/examples not typed
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass'
@@ -192,6 +193,82 @@ function getGlowTexture(): CanvasTexture {
   ctx.fillRect(0, 0, size, size)
   glowTextureCache = new CanvasTexture(canvas)
   return glowTextureCache
+}
+
+// ── Fresnel orb shader ──────────────────────────────────────────────────────
+
+const orbVertexShader = /* glsl */ `
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+  void main() {
+    vNormal = normalize(normalMatrix * normal);
+    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+    vViewDir = normalize(-mvPos.xyz);
+    gl_Position = projectionMatrix * mvPos;
+  }
+`
+
+const orbFragmentShader = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  uniform float uActivation;
+
+  varying vec3 vNormal;
+  varying vec3 vViewDir;
+
+  void main() {
+    float facing = dot(vNormal, vViewDir);
+
+    // Fresnel rim — bright edges like a holographic shield
+    float fresnel = 1.0 - facing;
+    fresnel = pow(fresnel, 2.2);
+
+    // Core illumination — bright center falloff
+    float core = pow(facing, 1.6);
+
+    // Specular highlight — virtual light from upper-right
+    vec3 lightDir = normalize(vec3(0.4, 0.7, 0.6));
+    vec3 halfVec = normalize(vViewDir + lightDir);
+    float spec = pow(max(dot(vNormal, halfVec), 0.0), 32.0);
+
+    // Base color: darker away from view, lit center
+    vec3 baseCol = uColor * (0.25 + core * 0.55);
+    // Rim highlight (boosted color + white tint)
+    vec3 rimCol = uColor * 1.6 + vec3(0.2);
+    // Mix — rim glow blends over base
+    vec3 finalCol = mix(baseCol, rimCol, fresnel * 0.5);
+    // Specular catch — white-ish highlight for glassy depth
+    finalCol += vec3(1.0) * spec * 0.35;
+    // Subtle ambient so back-facing areas aren't pure black
+    finalCol += uColor * 0.06;
+
+    // Alpha: slightly brighter at rim for glow
+    float alpha = uOpacity * (0.85 + fresnel * 0.15);
+
+    gl_FragColor = vec4(finalCol, alpha);
+  }
+`
+
+function makeOrbMaterial(color: string, opacity: number, activation: number): ShaderMaterial {
+  const mat = new ShaderMaterial({
+    uniforms: {
+      uColor: { value: new Color(color) },
+      uOpacity: { value: opacity },
+      uActivation: { value: activation },
+    },
+    vertexShader: orbVertexShader,
+    fragmentShader: orbFragmentShader,
+    transparent: true,
+    side: FrontSide,
+    depthWrite: true,
+  })
+  // Sync .opacity reads/writes with the shader uniform so animation code
+  // that sets material.opacity directly still works.
+  Object.defineProperty(mat, 'opacity', {
+    get() { return mat.uniforms.uOpacity.value },
+    set(v: number) { mat.uniforms.uOpacity.value = v },
+  })
+  return mat
 }
 
 // ── Node label texture ───────────────────────────────────────────────────────
@@ -558,18 +635,14 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         const radiusScale = isLargeGraph ? 2.5 : 4
         const radius = baseRadius + importance * radiusScale
         const alpha = 0.7 + activation * 0.3
-        // Lower sphere detail for large graphs
-        const segments = isLargeGraph ? 8 : 16
+        // Sphere detail — higher for smooth close-up, lower for large graphs
+        const segments = isLargeGraph ? 16 : 32
 
         const group = new Group()
 
-        // Sphere
+        // Sphere — Fresnel orb shader for lit, glassy depth
         const geo = new SphereGeometry(radius, segments, segments)
-        const mat = new MeshBasicMaterial({
-          color: new Color(color),
-          transparent: true,
-          opacity: alpha,
-        })
+        const mat = makeOrbMaterial(color, alpha, activation)
         const sphere = new Mesh(geo, mat)
         group.add(sphere)
 
@@ -632,13 +705,23 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       // ── Interaction ──────────────────────────────────────────────────
       .onNodeClick((node: any) => {
         onSelectNodeRef.current(node.id)
-        // Zoom to clicked node
+        // Freeze node position so it doesn't drift during camera animation
+        node.fx = node.x
+        node.fy = node.y
+        node.fz = node.z
+        // Zoom to clicked node using current coordinates
         const distance = 80
         graph.cameraPosition(
           { x: node.x, y: node.y, z: node.z + distance },
           { x: node.x, y: node.y, z: node.z },
           800,
         )
+        // Unfreeze after camera arrives
+        setTimeout(() => {
+          node.fx = undefined
+          node.fy = undefined
+          node.fz = undefined
+        }, 900)
       })
       .onBackgroundClick(() => {
         onBackgroundClickRef.current?.()
