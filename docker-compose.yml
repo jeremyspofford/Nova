@@ -245,6 +245,8 @@ services:
       EMBEDDING_MODEL: nomic-embed-text
       EMBEDDING_DIMENSIONS: "768"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data/sources:/data/sources
     ports:
       - "8002:8002"
     depends_on:
