@@ -29,6 +29,8 @@ interface GraphNode {
   activation: number
   importance: number
   access_count: number
+  cluster_id?: number
+  cluster_label?: string
 }
 
 interface GraphEdge {
@@ -38,9 +40,16 @@ interface GraphEdge {
   weight: number
 }
 
+interface ClusterInfo {
+  id: number
+  label: string
+  count: number
+}
+
 interface ForceGraph3DProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  clusters?: ClusterInfo[]
   selectedId: string | null
   onSelectNode: (id: string) => void
   onBackgroundClick?: () => void
@@ -76,6 +85,21 @@ const TYPE_COLORS: Record<string, string> = {
   goal:       '#c084fc',
 }
 const DEFAULT_COLOR = '#71717a'
+
+// Distinct cluster colors for full-graph mode
+const CLUSTER_COLORS = [
+  '#818cf8', '#60a5fa', '#2dd4bf', '#34d399', '#fbbf24',
+  '#f87171', '#c084fc', '#fb923c', '#a3e635', '#22d3ee',
+  '#e879f9', '#f472b6', '#38bdf8', '#4ade80', '#facc15',
+  '#a78bfa', '#67e8f9', '#fca5a5', '#86efac', '#fde68a',
+]
+
+function getNodeColor(node: GraphNode, useCluster: boolean): string {
+  if (useCluster && node.cluster_id != null) {
+    return CLUSTER_COLORS[node.cluster_id % CLUSTER_COLORS.length]
+  }
+  return TYPE_COLORS[node.type] ?? DEFAULT_COLOR
+}
 
 // ── Glow sprite texture (cached) ─────────────────────────────────────────────
 
@@ -356,6 +380,7 @@ const LABEL_MIN_IMPORTANCE = 0.3
 export function ForceGraph3D({
   nodes,
   edges,
+  clusters,
   selectedId,
   onSelectNode,
   onBackgroundClick,
@@ -363,6 +388,8 @@ export function ForceGraph3D({
   bgColor = '#000000',
   className,
 }: ForceGraph3DProps) {
+  const useClusterColors = (clusters?.length ?? 0) > 0
+  const isLargeGraph = nodes.length > 200
   const containerRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
@@ -384,7 +411,7 @@ export function ForceGraph3D({
 
     // If already initialized, just update data
     if (graphRef.current && initializedRef.current) {
-      updateGraphData(graphRef.current, nodes, edges)
+      updateGraphData(graphRef.current, nodes, edges, useClusterColors)
       return
     }
 
@@ -404,24 +431,33 @@ export function ForceGraph3D({
       .nodeVal((node: any) => 1 + (node.importance ?? 0) * 8)
       .nodeLabel((node: any) => {
         const type = node.type === 'self_model' ? 'self model' : (node.type ?? '')
-        const color = TYPE_COLORS[node.type] ?? DEFAULT_COLOR
+        const color = getNodeColor(node, useClusterColors)
+        const clusterLine = node.cluster_label
+          ? `<div style="color:${color};font-weight:600;margin-bottom:2px;font-size:10px;letter-spacing:0.5px;">${node.cluster_label}</div>`
+          : ''
         return `<div style="background:rgba(9,9,11,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 12px;max-width:300px;font-family:system-ui;font-size:12px;pointer-events:none;">
-          <div style="color:${color};font-weight:600;margin-bottom:4px;text-transform:uppercase;font-size:10px;letter-spacing:0.5px;">${type}</div>
+          ${clusterLine}
+          <div style="color:#71717a;text-transform:uppercase;font-size:9px;letter-spacing:0.5px;margin-bottom:3px;">${type}</div>
           <div style="color:#e4e4e7;line-height:1.4;">${node.content ?? ''}</div>
           <div style="color:#71717a;font-size:10px;margin-top:4px;">${(node.access_count ?? 0).toLocaleString()} recalls</div>
         </div>`
       })
       .nodeThreeObject((node: any) => {
-        const color = TYPE_COLORS[node.type] ?? DEFAULT_COLOR
+        const color = getNodeColor(node, useClusterColors)
         const importance = node.importance ?? 0
         const activation = node.activation ?? 0
-        const radius = 2 + importance * 4
+        // Smaller base radius for large graphs so clusters don't overlap
+        const baseRadius = isLargeGraph ? 1.2 : 2
+        const radiusScale = isLargeGraph ? 2.5 : 4
+        const radius = baseRadius + importance * radiusScale
         const alpha = 0.7 + activation * 0.3
+        // Lower sphere detail for large graphs
+        const segments = isLargeGraph ? 8 : 16
 
         const group = new Group()
 
         // Sphere
-        const geo = new SphereGeometry(radius, 16, 12)
+        const geo = new SphereGeometry(radius, segments, segments)
         const mat = new MeshBasicMaterial({
           color: new Color(color),
           transparent: true,
@@ -430,21 +466,24 @@ export function ForceGraph3D({
         const sphere = new Mesh(geo, mat)
         group.add(sphere)
 
-        // Glow sprite — additive blend pushes brightness past bloom threshold
-        const spriteMat = new SpriteMaterial({
-          map: getGlowTexture(),
-          color: new Color(color),
-          transparent: true,
-          opacity: 0.35 + activation * 0.25,
-          blending: AdditiveBlending,
-          depthWrite: false,
-        })
-        const sprite = new Sprite(spriteMat)
-        sprite.scale.set(radius * 3, radius * 3, 1)
-        group.add(sprite)
+        // Glow sprite — skip for unimportant nodes in large graphs
+        if (!isLargeGraph || importance >= 0.3) {
+          const spriteMat = new SpriteMaterial({
+            map: getGlowTexture(),
+            color: new Color(color),
+            transparent: true,
+            opacity: 0.35 + activation * 0.25,
+            blending: AdditiveBlending,
+            depthWrite: false,
+          })
+          const sprite = new Sprite(spriteMat)
+          sprite.scale.set(radius * 3, radius * 3, 1)
+          group.add(sprite)
+        }
 
         // Text label — only for notable nodes, shown by proximity in render loop
-        if (importance >= LABEL_MIN_IMPORTANCE) {
+        const labelThreshold = isLargeGraph ? 0.5 : LABEL_MIN_IMPORTANCE
+        if (importance >= labelThreshold) {
           const content = node.content ?? ''
           const labelTex = makeNodeLabelTexture(content, color)
           const labelMat = new SpriteMaterial({
@@ -468,11 +507,12 @@ export function ForceGraph3D({
       // ── Link appearance ──────────────────────────────────────────────
       .linkColor((link: any) => {
         const sourceNode = typeof link.source === 'object' ? link.source : null
-        return TYPE_COLORS[sourceNode?.type] ?? '#60a5fa'
+        if (!sourceNode) return '#60a5fa'
+        return getNodeColor(sourceNode, useClusterColors)
       })
-      .linkOpacity(0.4)
-      .linkWidth((link: any) => 0.6 + (link.weight ?? 0) * 1.8)
-      .linkDirectionalParticles((link: any) => Math.ceil((link.weight ?? 0.5) * 3))
+      .linkOpacity(isLargeGraph ? 0.15 : 0.4)
+      .linkWidth((link: any) => isLargeGraph ? 0.3 + (link.weight ?? 0) * 0.8 : 0.6 + (link.weight ?? 0) * 1.8)
+      .linkDirectionalParticles((link: any) => isLargeGraph ? 0 : Math.ceil((link.weight ?? 0.5) * 3))
       .linkDirectionalParticleWidth(1.2)
       .linkDirectionalParticleSpeed(0.005)
       .linkDirectionalParticleColor(() => getAccentColor())
@@ -503,43 +543,54 @@ export function ForceGraph3D({
       })
 
       // ── Forces ───────────────────────────────────────────────────────
-      .d3AlphaDecay(0.02)
-      .d3VelocityDecay(0.3)
-      .warmupTicks(60)
-      .cooldownTicks(200)
+      .d3AlphaDecay(isLargeGraph ? 0.03 : 0.02)
+      .d3VelocityDecay(isLargeGraph ? 0.4 : 0.3)
+      .warmupTicks(isLargeGraph ? 120 : 60)
+      .cooldownTicks(isLargeGraph ? 300 : 200)
 
-    // Configure forces
+    // Configure forces — weaker charge for large graphs to keep clusters tight
     try {
-      graph.d3Force('link')?.distance((link: any) => 30 + (1 - (link.weight ?? 0.5)) * 60)
-      graph.d3Force('charge')?.strength(-80)
+      if (isLargeGraph) {
+        graph.d3Force('link')?.distance((link: any) => 15 + (1 - (link.weight ?? 0.5)) * 30)
+        graph.d3Force('charge')?.strength(-20)
+      } else {
+        graph.d3Force('link')?.distance((link: any) => 30 + (1 - (link.weight ?? 0.5)) * 60)
+        graph.d3Force('charge')?.strength(-80)
+      }
     } catch { /* force config may fail silently */ }
 
-    // ── Type clustering force ──────────────────────────────────────────
-    // Gentle attraction between same-type nodes so they organically group.
-    // Unlike hard grouping, this preserves the graph topology — connected
-    // nodes of different types still stay close, but same-type nodes drift
-    // toward their siblings.
+    // ── Clustering force — cluster-aware when available, type-based fallback ──
+    // Gentle attraction between same-cluster nodes so they organically group.
+    // Preserves graph topology — connected nodes of different clusters stay
+    // close, but same-cluster nodes drift toward their siblings.
     graph.onEngineTick(() => {
       const data = graph.graphData()
       if (!data?.nodes?.length) return
 
-      // Compute centroids per type
+      // Group key: use cluster_id if available, otherwise fall back to type
+      const getGroup = useClusterColors
+        ? (node: any) => String(node.cluster_id ?? 'none')
+        : (node: any) => String(node.type ?? 'unknown')
+
+      // Compute centroids per group
       const centroids = new Map<string, { x: number; y: number; z: number; count: number }>()
       for (const node of data.nodes) {
         if (node.x == null) continue
-        const c = centroids.get(node.type) ?? { x: 0, y: 0, z: 0, count: 0 }
+        const key = getGroup(node)
+        const c = centroids.get(key) ?? { x: 0, y: 0, z: 0, count: 0 }
         c.x += node.x
         c.y += node.y
         c.z += node.z
         c.count++
-        centroids.set(node.type, c)
+        centroids.set(key, c)
       }
 
-      // Nudge each node gently toward its type centroid
-      const strength = 0.003
+      // Nudge each node gently toward its group centroid
+      // Stronger for cluster mode to keep distinct domains separated
+      const strength = useClusterColors ? 0.006 : 0.003
       for (const node of data.nodes) {
         if (node.x == null) continue
-        const c = centroids.get(node.type)
+        const c = centroids.get(getGroup(node))
         if (!c || c.count < 2) continue
         const cx = c.x / c.count
         const cy = c.y / c.count
@@ -623,7 +674,7 @@ export function ForceGraph3D({
     }
 
     // Load initial data
-    updateGraphData(graph, nodes, edges)
+    updateGraphData(graph, nodes, edges, useClusterColors)
 
     // Handle resize
     const ro = new ResizeObserver(([entry]) => {
@@ -682,9 +733,9 @@ export function ForceGraph3D({
     if (!graph) return
     graph.nodeColor((node: any) => {
       if (node.id === selectedId) return getCSSColor('--accent-300')
-      return TYPE_COLORS[node.type] ?? DEFAULT_COLOR
+      return getNodeColor(node, useClusterColors)
     })
-  }, [selectedId])
+  }, [selectedId, useClusterColors])
 
   return (
     <div
@@ -709,7 +760,7 @@ const TYPE_LABELS: Record<string, string> = {
   goal: 'GOALS',
 }
 
-function makeClusterLabel(text: string, count: number, color: string): Sprite {
+function makeDomainLabel(text: string, count: number, color: string): Sprite {
   const canvas = document.createElement('canvas')
   const w = 512
   const h = 128
@@ -718,17 +769,18 @@ function makeClusterLabel(text: string, count: number, color: string): Sprite {
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, w, h)
 
-  // Type name
+  // Domain label
+  const label = text.length > 30 ? text.slice(0, 28) + '...' : text
   ctx.font = '600 28px system-ui'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.fillStyle = color
-  ctx.globalAlpha = 0.4
-  ctx.fillText(text, w / 2, h / 2 - 12)
+  ctx.globalAlpha = 0.5
+  ctx.fillText(label, w / 2, h / 2 - 12)
 
   // Count badge
   ctx.font = '400 20px system-ui'
-  ctx.globalAlpha = 0.25
+  ctx.globalAlpha = 0.3
   ctx.fillText(`${count} memories`, w / 2, h / 2 + 16)
 
   const tex = new CanvasTexture(canvas)
@@ -747,7 +799,7 @@ function makeClusterLabel(text: string, count: number, color: string): Sprite {
 // Track cluster visuals so we can remove them on update
 const clusterVisuals: (Sprite | Mesh)[] = []
 
-function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[]) {
+function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], useClusterMode: boolean) {
   const graphNodes = nodes.map(n => ({ ...n }))
   const nodeIds = new Set(nodes.map(n => n.id))
   const graphLinks = edges
@@ -761,7 +813,10 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[]) {
 
   graph.graphData({ nodes: graphNodes, links: graphLinks })
 
-  // Add cluster labels + halos after simulation settles
+  // Longer settle time for large graphs
+  const settleMs = nodes.length > 500 ? 2500 : 1200
+
+  // Add cluster/domain labels after simulation settles
   setTimeout(() => {
     try { graph.zoomToFit(600, 50) } catch { /* ok */ }
 
@@ -770,44 +825,80 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[]) {
     for (const s of clusterVisuals) scene.remove(s)
     clusterVisuals.length = 0
 
-    // Group positioned nodes by type
     const data = graph.graphData()
-    const byType = new Map<string, any[]>()
-    for (const node of data.nodes) {
-      if (node.x == null) continue
-      const list = byType.get(node.type) ?? []
-      list.push(node)
-      byType.set(node.type, list)
+
+    if (useClusterMode) {
+      // ── Cluster mode: group by cluster_id, label by domain ──
+      const byCluster = new Map<number, any[]>()
+      for (const node of data.nodes) {
+        if (node.x == null) continue
+        const cid = node.cluster_id ?? -1
+        const list = byCluster.get(cid) ?? []
+        list.push(node)
+        byCluster.set(cid, list)
+      }
+
+      for (const [clusterId, group] of byCluster) {
+        if (group.length < CLUSTER_MIN_NODES) continue
+
+        const cx = group.reduce((s: number, n: any) => s + n.x, 0) / group.length
+        const cy = group.reduce((s: number, n: any) => s + n.y, 0) / group.length
+        const cz = group.reduce((s: number, n: any) => s + n.z, 0) / group.length
+
+        const maxDist = Math.max(
+          ...group.map((n: any) => Math.sqrt(
+            (n.x - cx) ** 2 + (n.y - cy) ** 2 + (n.z - cz) ** 2
+          ))
+        )
+        const haloRadius = Math.max(maxDist + 15, 25)
+
+        const color = clusterId >= 0
+          ? CLUSTER_COLORS[clusterId % CLUSTER_COLORS.length]
+          : DEFAULT_COLOR
+
+        // Use the cluster_label from the first node in this group
+        const domainLabel = group[0]?.cluster_label ?? `Cluster ${clusterId}`
+
+        const label = makeDomainLabel(domainLabel, group.length, color)
+        label.position.set(cx, cy - haloRadius - 5, cz)
+        scene.add(label)
+        clusterVisuals.push(label)
+      }
+    } else {
+      // ── Type mode: group by engram type (original behavior) ──
+      const byType = new Map<string, any[]>()
+      for (const node of data.nodes) {
+        if (node.x == null) continue
+        const list = byType.get(node.type) ?? []
+        list.push(node)
+        byType.set(node.type, list)
+      }
+
+      for (const [type, group] of byType) {
+        if (group.length < CLUSTER_MIN_NODES) continue
+
+        const cx = group.reduce((s: number, n: any) => s + n.x, 0) / group.length
+        const cy = group.reduce((s: number, n: any) => s + n.y, 0) / group.length
+        const cz = group.reduce((s: number, n: any) => s + n.z, 0) / group.length
+
+        const maxDist = Math.max(
+          ...group.map((n: any) => Math.sqrt(
+            (n.x - cx) ** 2 + (n.y - cy) ** 2 + (n.z - cz) ** 2
+          ))
+        )
+        const haloRadius = Math.max(maxDist + 15, 25)
+
+        const color = TYPE_COLORS[type] ?? DEFAULT_COLOR
+
+        const label = makeDomainLabel(
+          TYPE_LABELS[type] ?? type.toUpperCase(),
+          group.length,
+          color,
+        )
+        label.position.set(cx, cy - haloRadius - 5, cz)
+        scene.add(label)
+        clusterVisuals.push(label)
+      }
     }
-
-    // Create labels + halos for clusters
-    for (const [type, group] of byType) {
-      if (group.length < CLUSTER_MIN_NODES) continue
-
-      const cx = group.reduce((s: number, n: any) => s + n.x, 0) / group.length
-      const cy = group.reduce((s: number, n: any) => s + n.y, 0) / group.length
-      const cz = group.reduce((s: number, n: any) => s + n.z, 0) / group.length
-
-      // Compute cluster spread for halo sizing
-      const maxDist = Math.max(
-        ...group.map((n: any) => Math.sqrt(
-          (n.x - cx) ** 2 + (n.y - cy) ** 2 + (n.z - cz) ** 2
-        ))
-      )
-      const haloRadius = Math.max(maxDist + 15, 25)
-
-      const color = TYPE_COLORS[type] ?? DEFAULT_COLOR
-
-      // Cluster label with count
-      const label = makeClusterLabel(
-        TYPE_LABELS[type] ?? type.toUpperCase(),
-        group.length,
-        color,
-      )
-      label.position.set(cx, cy - haloRadius - 5, cz)
-      scene.add(label)
-      clusterVisuals.push(label)
-
-    }
-  }, 1200)
+  }, settleMs)
 }

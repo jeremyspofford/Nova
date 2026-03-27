@@ -31,6 +31,8 @@ interface EngramNode {
   source_type: string
   superseded: boolean
   created_at: string | null
+  cluster_id?: number
+  cluster_label?: string
 }
 
 interface EngramEdge {
@@ -41,10 +43,17 @@ interface EngramEdge {
   co_activations: number
 }
 
+interface ClusterInfo {
+  id: number
+  label: string
+  count: number
+}
+
 interface GraphData {
-  center_id: string
+  center_id?: string
   nodes: EngramNode[]
   edges: EngramEdge[]
+  clusters?: ClusterInfo[]
   node_count: number
   edge_count: number
 }
@@ -132,6 +141,14 @@ const GRAPH_BG_PRESETS = [
 ] as const
 
 const DEFAULT_GRAPH_BG = 'galaxy'
+
+// Distinct cluster colors for full-graph mode — enough for ~20 clusters
+const CLUSTER_COLORS = [
+  '#818cf8', '#60a5fa', '#2dd4bf', '#34d399', '#fbbf24',
+  '#f87171', '#c084fc', '#fb923c', '#a3e635', '#22d3ee',
+  '#e879f9', '#f472b6', '#38bdf8', '#4ade80', '#facc15',
+  '#a78bfa', '#67e8f9', '#fca5a5', '#86efac', '#fde68a',
+]
 
 // ── Score bar helper ─────────────────────────────────────────────────────────
 
@@ -412,9 +429,16 @@ function GraphTab() {
     queryKey: ['engram-graph', searchQuery],
     queryFn: () => {
       const params = new URLSearchParams()
-      if (searchQuery) params.set('query', searchQuery)
-      params.set('depth', '2')
-      params.set('max_nodes', '50')
+      if (searchQuery) {
+        // Search mode: BFS from a matching node
+        params.set('query', searchQuery)
+        params.set('depth', '2')
+        params.set('max_nodes', '100')
+      } else {
+        // Default: full brain view with all clusters
+        params.set('mode', 'full')
+        params.set('max_nodes', '2000')
+      }
       return apiFetch(`/mem/api/v1/engrams/graph?${params}`)
     },
     enabled: true,
@@ -532,6 +556,7 @@ function GraphTab() {
                   <ForceGraph3D
                     nodes={graph.nodes}
                     edges={graph.edges}
+                    clusters={graph.clusters}
                     selectedId={selectedNode?.id ?? null}
                     onSelectNode={handleSelectNode}
                     onBackgroundClick={() => setSelectedNode(null)}
@@ -540,25 +565,42 @@ function GraphTab() {
                     className="w-full h-full"
                   />
                 </div>
-                {/* Type legend */}
-                <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1">
-                  {Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
-                    <div key={type} className="flex items-center gap-2 text-micro">
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}
-                      />
-                      <Tooltip content={TYPE_DESCRIPTIONS[type] ?? type}>
-                        <span className="text-neutral-400 cursor-help">
-                          {type === 'self_model' ? 'self model' : type}
+                {/* Legend — clusters when in full mode, types otherwise */}
+                <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-sm border border-white/5 rounded-sm px-3 py-2 space-y-1 max-h-[300px] overflow-y-auto">
+                  {graph.clusters && graph.clusters.length > 0 ? (
+                    graph.clusters.slice(0, 20).map(cluster => (
+                      <div key={cluster.id} className="flex items-center gap-2 text-micro">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length], boxShadow: `0 0 6px ${CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]}` }}
+                        />
+                        <span className="text-neutral-400 truncate max-w-[140px]">
+                          {cluster.label}
                         </span>
-                      </Tooltip>
-                    </div>
-                  ))}
+                        <span className="text-neutral-600 text-[10px]">{cluster.count}</span>
+                      </div>
+                    ))
+                  ) : (
+                    Array.from(new Set(graph.nodes.map(n => n.type))).map(type => (
+                      <div key={type} className="flex items-center gap-2 text-micro">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: GRAPH_TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${GRAPH_TYPE_COLORS[type] ?? '#71717a'}` }}
+                        />
+                        <Tooltip content={TYPE_DESCRIPTIONS[type] ?? type}>
+                          <span className="text-neutral-400 cursor-help">
+                            {type === 'self_model' ? 'self model' : type}
+                          </span>
+                        </Tooltip>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
               <div className="text-caption text-content-tertiary">
-                {graph.node_count} memories &middot; {graph.edge_count} connections &mdash; orbit to rotate, scroll to zoom, click a node for details
+                {graph.node_count} memories &middot; {graph.edge_count} connections
+                {graph.clusters && graph.clusters.length > 0 && <> &middot; {graph.clusters.length} cluster{graph.clusters.length !== 1 ? 's' : ''}</>}
+                {' '}&mdash; orbit to rotate, scroll to zoom, click a node for details
               </div>
             </>
           ) : (

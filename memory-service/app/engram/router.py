@@ -12,7 +12,7 @@ Phase 7: POST /outcome-feedback
 from __future__ import annotations
 
 import logging
-from collections import deque
+from collections import defaultdict, deque
 
 from fastapi import APIRouter, Body, Query
 from sqlalchemy import text
@@ -330,19 +330,189 @@ async def mark_used(
 # ── Phase 6: Graph Visualization ───────────────────────────────────────
 
 
+def _extract_cluster_label(members: list[dict]) -> str:
+    """Pick the best domain label for a connected component."""
+    # Priority 1: self_model engrams → "Nova"
+    if any(m["type"] == "self_model" for m in members):
+        return "Nova"
+
+    # Priority 2: entity engrams → most important entity's content
+    entities = sorted(
+        [m for m in members if m["type"] == "entity"],
+        key=lambda m: m["importance"],
+        reverse=True,
+    )
+    if entities:
+        # Entity content is usually a clean name like "Jeremy", "AWS"
+        return entities[0]["content"][:40].split(".")[0].strip()
+
+    # Priority 3: most important node — first meaningful phrase
+    top = max(members, key=lambda m: m["importance"])
+    content = top["content"]
+    # Strip common prefixes that aren't informative
+    for prefix in ("The user ", "Nova ", "The ", "A ", "An "):
+        if content.startswith(prefix):
+            content = content[len(prefix):]
+            break
+    words = content.split()[:5]
+    return " ".join(words)
+
+
 @engram_router.get("/graph")
 async def get_graph(
     center_id: str | None = Query(default=None, description="Engram ID to center on"),
     query: str | None = Query(default=None, description="Query to find center via activation"),
     depth: int = Query(default=2, ge=1, le=4, description="BFS depth"),
-    max_nodes: int = Query(default=50, ge=10, le=200),
+    max_nodes: int = Query(default=50, ge=10, le=5000),
+    mode: str = Query(default="bfs", description="bfs = BFS from center, full = all clusters"),
 ):
     """Return a subgraph for visualization (nodes + edges).
 
-    Provide either center_id or query. If query is given, the top activated
-    engram becomes the center. Returns a D3-compatible node/link structure.
+    mode=bfs: BFS from a center node (default, backward-compatible).
+    mode=full: Return all non-superseded engrams with connected-component
+    clustering and domain labels. Like an Obsidian graph view.
     """
     async with get_db() as session:
+
+        # ── Full-graph mode: all clusters ────────────────────────────────
+        if mode == "full":
+            # Fetch all non-superseded engrams
+            engrams_result = await session.execute(
+                text("""
+                    SELECT id::text, type, LEFT(content, 200) AS content,
+                           activation, importance, access_count, confidence,
+                           source_type, superseded, created_at
+                    FROM engrams
+                    WHERE NOT superseded
+                    ORDER BY importance DESC
+                    LIMIT :limit
+                """),
+                {"limit": max_nodes},
+            )
+            all_engrams = [
+                {
+                    "id": r.id, "type": r.type, "content": r.content,
+                    "activation": float(r.activation), "importance": float(r.importance),
+                    "access_count": r.access_count, "confidence": float(r.confidence),
+                    "source_type": r.source_type, "superseded": r.superseded,
+                    "created_at": r.created_at,
+                }
+                for r in engrams_result
+            ]
+
+            if not all_engrams:
+                return {"nodes": [], "edges": [], "clusters": []}
+
+            engram_ids = [e["id"] for e in all_engrams]
+            id_set = set(engram_ids)
+
+            # Fetch all edges between selected engrams
+            edges_result = await session.execute(
+                text("""
+                    SELECT source_id::text, target_id::text, relation,
+                           weight, co_activations
+                    FROM engram_edges
+                    WHERE source_id = ANY(CAST(:ids AS uuid[]))
+                      AND target_id = ANY(CAST(:ids AS uuid[]))
+                """),
+                {"ids": engram_ids},
+            )
+            raw_edges = [
+                {
+                    "source_id": r.source_id, "target_id": r.target_id,
+                    "relation": r.relation, "weight": float(r.weight),
+                    "co_activations": r.co_activations,
+                }
+                for r in edges_result
+            ]
+
+            # ── Union-Find for connected components ──────────────────────
+            parent: dict[str, str] = {eid: eid for eid in engram_ids}
+            rank: dict[str, int] = {eid: 0 for eid in engram_ids}
+
+            def find(x: str) -> str:
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]  # path compression
+                    x = parent[x]
+                return x
+
+            def union(a: str, b: str) -> None:
+                ra, rb = find(a), find(b)
+                if ra == rb:
+                    return
+                if rank[ra] < rank[rb]:
+                    ra, rb = rb, ra
+                parent[rb] = ra
+                if rank[ra] == rank[rb]:
+                    rank[ra] += 1
+
+            for edge in raw_edges:
+                s, t = edge["source_id"], edge["target_id"]
+                if s in id_set and t in id_set:
+                    union(s, t)
+
+            # Group by component
+            components: dict[str, list[dict]] = defaultdict(list)
+            for engram in all_engrams:
+                root = find(engram["id"])
+                components[root].append(engram)
+
+            # Sort components: largest first
+            sorted_comps = sorted(components.values(), key=len, reverse=True)
+
+            # Label each component and assign cluster IDs
+            clusters: list[dict] = []
+            engram_cluster: dict[str, int] = {}
+
+            for idx, members in enumerate(sorted_comps):
+                label = _extract_cluster_label(members)
+                clusters.append({
+                    "id": idx,
+                    "label": label,
+                    "count": len(members),
+                })
+                for m in members:
+                    engram_cluster[m["id"]] = idx
+
+            # Build response
+            nodes = [
+                {
+                    "id": e["id"],
+                    "type": e["type"],
+                    "content": e["content"],
+                    "activation": round(e["activation"], 3),
+                    "importance": round(e["importance"], 3),
+                    "access_count": e["access_count"],
+                    "confidence": round(e["confidence"], 3),
+                    "source_type": e["source_type"],
+                    "superseded": e["superseded"],
+                    "created_at": e["created_at"].isoformat() if e["created_at"] else None,
+                    "cluster_id": engram_cluster.get(e["id"], 0),
+                    "cluster_label": clusters[engram_cluster.get(e["id"], 0)]["label"],
+                }
+                for e in all_engrams
+            ]
+
+            edges = [
+                {
+                    "source": e["source_id"],
+                    "target": e["target_id"],
+                    "relation": e["relation"],
+                    "weight": round(e["weight"], 3),
+                    "co_activations": e["co_activations"],
+                }
+                for e in raw_edges
+            ]
+
+            return {
+                "nodes": nodes,
+                "edges": edges,
+                "clusters": clusters,
+                "node_count": len(nodes),
+                "edge_count": len(edges),
+            }
+
+        # ── BFS mode (original behavior) ────────────────────────────────
         # Determine center node
         if query and not center_id:
             activated = await spreading_activation(session, query, max_results=1)
@@ -366,11 +536,11 @@ async def get_graph(
 
         # BFS from center
         visited: set[str] = set()
-        queue: deque[tuple[str, int]] = deque([(center_id, 0)])
+        bfs_queue: deque[tuple[str, int]] = deque([(center_id, 0)])
         node_ids: list[str] = []
 
-        while queue and len(node_ids) < max_nodes:
-            current_id, current_depth = queue.popleft()
+        while bfs_queue and len(node_ids) < max_nodes:
+            current_id, current_depth = bfs_queue.popleft()
             if current_id in visited:
                 continue
             visited.add(current_id)
@@ -389,7 +559,7 @@ async def get_graph(
                 )
                 for row in neighbors:
                     if row.neighbor_id not in visited:
-                        queue.append((row.neighbor_id, current_depth + 1))
+                        bfs_queue.append((row.neighbor_id, current_depth + 1))
 
         if not node_ids:
             return {"nodes": [], "edges": []}
