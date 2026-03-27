@@ -122,54 +122,63 @@ async def run_consolidation(trigger: str = "manual") -> dict:
             )
             stats["engrams_reviewed"] = count_row.scalar() or 0
 
+            # Each phase uses a savepoint so a failure in one phase doesn't
+            # poison the PostgreSQL transaction for subsequent phases.
+
             # Phase 2: Pattern Extraction → Schema engrams
             try:
-                schemas_created = await _extract_patterns(session)
-                stats["schemas_created"] = schemas_created
+                async with session.begin_nested():
+                    schemas_created = await _extract_patterns(session)
+                    stats["schemas_created"] = schemas_created
             except Exception:
                 log.warning("Consolidation Phase 2 (pattern extraction) failed", exc_info=True)
 
             # Phase 2.5: Topic Discovery — cluster engrams into topics
             try:
-                from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
-                topics_created = await discover_topics(session)
-                topics_assigned = await assign_new_engrams_to_topics(session)
-                maintenance = await maintain_topics(session)
-                stats["topics_created"] = topics_created
-                log.info(
-                    "Phase 2.5: %d topics created, %d engrams assigned, %d dissolved, %d regenerated",
-                    topics_created, topics_assigned,
-                    maintenance.get("dissolved", 0), maintenance.get("regenerated", 0),
-                )
+                async with session.begin_nested():
+                    from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
+                    topics_created = await discover_topics(session)
+                    topics_assigned = await assign_new_engrams_to_topics(session)
+                    maintenance = await maintain_topics(session)
+                    stats["topics_created"] = topics_created
+                    log.info(
+                        "Phase 2.5: %d topics created, %d engrams assigned, %d dissolved, %d regenerated",
+                        topics_created, topics_assigned,
+                        maintenance.get("dissolved", 0), maintenance.get("regenerated", 0),
+                    )
             except Exception:
                 log.warning("Consolidation Phase 2.5 (topic discovery) failed", exc_info=True)
 
             # Phase 3: Edge Strengthening & Weakening (Hebbian)
             try:
-                strengthened, weakened = await _hebbian_update(session)
-                stats["edges_strengthened"] = strengthened
-                stats["edges_pruned"] = weakened
+                async with session.begin_nested():
+                    strengthened, weakened = await _hebbian_update(session)
+                    stats["edges_strengthened"] = strengthened
+                    stats["edges_pruned"] = weakened
             except Exception:
                 log.warning("Consolidation Phase 3 (Hebbian update) failed", exc_info=True)
 
             # Phase 4: Contradiction Resolution
             try:
-                resolved = await _resolve_contradictions(session)
-                stats["contradictions_resolved"] = resolved
+                async with session.begin_nested():
+                    resolved = await _resolve_contradictions(session)
+                    stats["contradictions_resolved"] = resolved
             except Exception:
                 log.warning("Consolidation Phase 4 (contradiction resolution) failed", exc_info=True)
 
             # Phase 5: Merging (pruning removed — engrams fade via activation decay)
             try:
-                merged = await _merge_duplicates(session)
-                stats["engrams_merged"] = merged
+                async with session.begin_nested():
+                    merged = await _merge_duplicates(session)
+                    stats["engrams_merged"] = merged
             except Exception:
                 log.warning("Consolidation Phase 5 (merging) failed", exc_info=True)
 
             # Phase 6: Self-Model Update
             try:
-                self_updates = await _update_self_model(session)
-                stats["self_model_updates"] = self_updates
+                async with session.begin_nested():
+                    self_updates = await _update_self_model(session)
+                    stats["self_model_updates"] = self_updates
             except Exception:
                 log.warning("Consolidation Phase 6 (self-model update) failed", exc_info=True)
 
