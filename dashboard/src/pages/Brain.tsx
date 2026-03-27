@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, MessageSquare, X } from 'lucide-react'
 import { apiFetch } from '../api'
+import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
 import type { ActivityStep } from '../stores/chat-store'
@@ -109,10 +110,6 @@ export default function Brain() {
   const handleStreamComplete = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['brain-graph'] })
   }, [queryClient])
-
-  // Suppress unused warnings — these are wired up in Phase 2/3
-  void handleActivityStep
-  void handleStreamComplete
 
   // Selected node data
   const selectedNodeData = selectedNode
@@ -247,19 +244,13 @@ export default function Brain() {
         </button>
       )}
 
-      {/* -- Chat Panel Slot (Phase 2) ----------------------------------------- */}
+      {/* -- Chat Panel --------------------------------------------------------- */}
       {chatOpen && (
-        <div className="absolute top-0 right-0 h-full w-[380px] z-20 flex flex-col bg-black/70 backdrop-blur-xl border-l border-white/[0.06] animate-slide-in-right">
-          <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-            <span className="text-sm font-medium text-stone-200">Chat</span>
-            <button onClick={() => setChatOpen(false)} className="text-stone-500 hover:text-stone-300">
-              <X size={16} />
-            </button>
-          </div>
-          <div className="flex-1 flex items-center justify-center text-stone-600 text-sm">
-            Chat panel coming in Phase 2
-          </div>
-        </div>
+        <BrainChat
+          onClose={() => setChatOpen(false)}
+          onActivityStep={handleActivityStep}
+          onStreamComplete={handleStreamComplete}
+        />
       )}
     </div>
   )
