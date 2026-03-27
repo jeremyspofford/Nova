@@ -90,14 +90,13 @@ Steps 5-6 are the existing chat infrastructure, unchanged. The voice service onl
 
 ```python
 class STTProvider(ABC):
-    async def transcribe(self, audio: bytes, format: str = "webm") -> TranscriptResult:
+    async def transcribe(self, audio: bytes, format: str = "webm", language: str | None = None) -> TranscriptResult:
         """Transcribe audio to text. Format is the MIME subtype (webm, mp4, ogg, wav)."""
-        """Transcribe audio to text. Returns transcript with metadata."""
         ...
 
 class TTSProvider(ABC):
     async def synthesize(self, text: str, voice: str, model: str) -> bytes:
-        """Convert text to audio. Returns MP3 bytes."""
+        """Convert text to audio. Returns complete MP3 bytes."""
         ...
 
 @dataclass
@@ -155,7 +154,10 @@ class Settings(BaseSettings):
 ```
 Request:
   Content-Type: multipart/form-data
-  Body: audio file (WebM/Opus, max 25MB)
+  Fields:
+    file: audio file (WebM/Opus/MP4/OGG, max 25MB) — field name MUST be "file"
+    language: (optional) ISO 639-1 code, e.g. "en" — improves accuracy
+    format: (optional) MIME subtype, e.g. "webm", "mp4" — defaults to "webm"
 
 Response: 200
 {
@@ -166,8 +168,12 @@ Response: 200
   "speaker_id": null
 }
 
+Silence/hallucination guard: If confidence < 0.4 AND duration_ms < 1000,
+return {"text": "", ...} instead of hallucinated content. Whisper is known
+to hallucinate ("Thank you for watching", etc.) on silent/near-silent audio.
+
 Errors:
-  400: Audio too long (> max_audio_duration_seconds)
+  400: Audio too short (< 500ms) or too long (> max_audio_duration_seconds)
   400: No audio provided
   422: Audio format not supported
   500: STT provider error (with retry info)
@@ -232,7 +238,7 @@ TTS requests are rate-limited per API key (authenticated) or per IP (dev mode):
 ### Authentication
 
 Same pattern as all Nova services:
-- `REQUIRE_AUTH` env var (default `false` for dev, should be `true` in production)
+- `REQUIRE_AUTH` env var — Python default is `True` (safer for a paid-API proxy), but `docker-compose.yml` sets `REQUIRE_AUTH: ${REQUIRE_AUTH:-false}` for dev convenience, matching the existing service pattern
 - When enabled: `X-Admin-Secret` header or `Authorization: Bearer sk-nova-<hash>` required on all endpoints
 - Rate limiting applies per API key (authenticated) or per IP (unauthenticated dev mode)
 - Without auth, anyone who can reach the voice service can proxy requests to paid STT/TTS APIs
@@ -284,6 +290,8 @@ Add between the textarea and send button:
 
 **Recording behavior:**
 - Uses `MediaRecorder` API with runtime MIME type selection: try `audio/webm;codecs=opus` (Chrome/Firefox), fall back to `audio/mp4` (Safari/iOS), then `audio/ogg;codecs=opus`. Use `MediaRecorder.isTypeSupported()` to detect. Pass actual MIME type to `/transcribe` via the `format` field.
+- **Audio constraints:** Request `{ echoCancellation: true, noiseSuppression: true }` when calling `getUserMedia()`. This prevents Nova's own TTS audio from being captured by the mic on devices without headphones.
+- **Minimum duration:** 500ms. Ignore stop clicks before 500ms elapsed (prevents double-click sending empty recordings). Button shows "recording" state immediately but requires 500ms before stop is honored.
 - Max duration: 60 seconds. Countdown appears after 45s. Auto-stops at 60s.
 - On stop: send audio blob to voice service `/transcribe`
 - On transcript received: call `handleSubmit(transcript)` directly. **Implementation note:** `handleSubmit` in BrainChat must be refactored to accept an optional `text?: string` parameter. When provided, use it instead of reading from `input` state. This avoids React state batching timing issues where `setInput(transcript)` + `handleSubmit()` would read the stale `input` value from the closure.
@@ -299,12 +307,23 @@ Without this, Nova's voice gets picked up by the mic and transcribed as the user
 
 ### Audio Playback
 
+**Text-to-speakable preprocessor** — Before sending text to TTS, transform it into content that sounds natural when spoken:
+- **Fenced code blocks** (` ``` `): skip entirely. Optionally insert a brief spoken cue: "Here's some code." Code is for reading, not hearing.
+- **Inline code** (`` ` ``): strip the backticks, speak the content (usually short identifiers — acceptable spoken)
+- **URLs**: replace with "link to [domain]" (extract hostname) or skip if embedded in a sentence
+- **Markdown tables**: skip entirely. Optionally: "Here's a table with N rows."
+- **Markdown headers** (`#`, `##`): strip the `#` markers, speak the text
+- **Bold/italic** (`**`, `*`, `__`): strip markers, speak the text
+- **List markers** (`- `, `* `, `1. `): strip markers. Speak list items as natural sentences.
+- **Horizontal rules** (`---`): skip
+
+This preprocessor runs per-sentence AFTER sentence detection, BEFORE sending to `/synthesize`.
+
 **Sentence buffering** — As the LLM streams text, JavaScript buffers until a sentence boundary:
 - Primary delimiters: `. `, `? `, `! `, `\n`
-- Skip delimiters inside backtick blocks (code)
+- Skip delimiters inside fenced code blocks (track ``` open/close state)
 - Max-length fallback: 200 characters (don't wait forever for a period)
 - **Stream end:** when the LLM stream completes, unconditionally flush whatever remains in the buffer as a final TTS request, regardless of length or delimiter presence
-- Strip markdown before sending to TTS (`#`, `**`, `` ` ``, `- ` list markers)
 
 **Playback queue** — Sentences are synthesized in parallel (up to 3 concurrent) but played in sequence:
 ```
@@ -316,7 +335,7 @@ Each sentence gets a sequence number. Playback only advances when the next-in-se
 
 **Audio output:**
 - Create `Audio` element per sentence from MP3 blob URL
-- On `ended` event: play next in queue
+- On `ended` event: revoke the blob URL via `URL.revokeObjectURL()` to prevent memory leaks, then play next in queue
 - No visible player controls — responses just speak
 - Small speaker icon on message bubbles that were spoken
 - Mute button in BrainChat header silences TTS without disabling it (messages still stream as text)
