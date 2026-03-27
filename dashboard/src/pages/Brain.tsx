@@ -1,13 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, MessageSquare, X } from 'lucide-react'
+import { Search, MessageSquare, X, ChevronRight, Network } from 'lucide-react'
 import { apiFetch } from '../api'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
 import type { ActivityStep } from '../stores/chat-store'
 
-// Reuse graph data types matching the memory-service API response
+// ── Types ────────────────────────────────────────────────────────────────────
+
 interface GraphNode {
   id: string
   type: string
@@ -17,6 +18,8 @@ interface GraphNode {
   access_count: number
   confidence: number
   source_type: string
+  superseded?: boolean
+  created_at?: string | null
   cluster_id?: number
   cluster_label?: string
 }
@@ -42,7 +45,61 @@ interface GraphData {
   edge_count: number
 }
 
+// ── Constants ────────────────────────────────────────────────────────────────
+
 const LAYOUT_PRESETS = ['compact', 'spread', 'galaxy', 'constellation'] as const
+
+const TYPE_COLORS: Record<string, string> = {
+  fact:       '#60a5fa',
+  entity:     '#2dd4bf',
+  preference: '#34d399',
+  procedure:  '#a1a1aa',
+  self_model: '#818cf8',
+  episode:    '#fbbf24',
+  schema:     '#f87171',
+  goal:       '#c084fc',
+}
+
+const TYPE_DESCRIPTIONS: Record<string, string> = {
+  fact:       'Objective knowledge or information Nova has learned',
+  self_model: "Nova's self-knowledge and identity traits",
+  procedure:  'How-to knowledge and learned workflows',
+  entity:     'Named people, systems, or concepts',
+  preference: 'User preferences and communication style',
+  episode:    'Specific past interactions or events',
+  schema:     'Patterns extracted from repeated experiences',
+  goal:       'Objectives or intentions Nova is tracking',
+}
+
+const CLUSTER_COLORS = [
+  '#818cf8', '#60a5fa', '#2dd4bf', '#34d399', '#fbbf24',
+  '#f87171', '#c084fc', '#fb923c', '#a3e635', '#22d3ee',
+  '#e879f9', '#f472b6', '#38bdf8', '#4ade80', '#facc15',
+  '#a78bfa', '#67e8f9', '#fca5a5', '#86efac', '#fde68a',
+]
+
+const SCORE_TOOLTIPS: Record<string, string> = {
+  Activation: 'How "hot" this memory is — rises when accessed, decays over time.',
+  Importance: 'How critical for decisions — affects retrieval frequency.',
+  Confidence: 'How certain Nova is this memory is accurate.',
+}
+
+// ── Score bar (glass-styled for overlay) ─────────────────────────────────────
+
+function ScoreBar({ value, label, color }: { value: number; label: string; color: string }) {
+  const pct = Math.round(Math.min(Math.max(value, 0), 1) * 100)
+  return (
+    <div className="flex items-center gap-2" title={SCORE_TOOLTIPS[label] ?? `${label}: ${pct}%`}>
+      <span className="text-[11px] text-stone-500 w-[4.5rem] shrink-0">{label}</span>
+      <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      <span className="text-[10px] text-stone-600 w-7 text-right">{pct}%</span>
+    </div>
+  )
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export default function Brain() {
   const queryClient = useQueryClient()
@@ -62,6 +119,9 @@ export default function Brain() {
   const [layout, setLayout] = useState<string>('spread')
   const [searchQuery, setSearchQuery] = useState('')
   const [searchActive, setSearchActive] = useState(false)
+  const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
+  const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
+  const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -76,7 +136,6 @@ export default function Brain() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Don't capture when typing in input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === '/' && !e.metaKey && !e.ctrlKey) {
         e.preventDefault()
@@ -84,15 +143,15 @@ export default function Brain() {
       }
       if (e.key === 'Escape') {
         if (chatOpen) setChatOpen(false)
+        else if (selectedNode) setSelectedNode(null)
         else if (searchActive) { setSearchActive(false); setSearchQuery('') }
-        else setSelectedNode(null)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [chatOpen, searchActive])
+  }, [chatOpen, searchActive, selectedNode])
 
-  // Activity step handler for Phase 3
+  // Activity step handler
   const handleActivityStep = useCallback((_step: ActivityStep) => {
     if (!activeGraph?.nodes) return
     if (_step.step === 'memory' && _step.state === 'running') {
@@ -111,7 +170,7 @@ export default function Brain() {
     queryClient.invalidateQueries({ queryKey: ['brain-graph'] })
   }, [queryClient])
 
-  // Track previous node IDs for fade-in animation on new engrams
+  // Track previous node IDs for fade-in animation
   const prevNodeIdsRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     if (!activeGraph?.nodes) return
@@ -129,7 +188,7 @@ export default function Brain() {
 
   // Selected node data
   const selectedNodeData = selectedNode
-    ? activeGraph?.nodes.find(n => n.id === selectedNode)
+    ? activeGraph?.nodes.find(n => n.id === selectedNode) ?? null
     : null
 
   // Handle search submit
@@ -145,6 +204,20 @@ export default function Brain() {
     setSearchQuery('')
   }
 
+  // Navigate to node (explore from here)
+  const exploreNode = (nodeId: string) => {
+    setFocusNode({ id: nodeId, ts: Date.now() })
+  }
+
+  // Connections for selected node
+  const selectedConnections = selectedNodeData && activeGraph
+    ? activeGraph.edges.filter(e => e.source === selectedNodeData.id || e.target === selectedNodeData.id)
+    : []
+
+  const nodeColor = selectedNodeData
+    ? TYPE_COLORS[selectedNodeData.type] ?? '#71717a'
+    : '#71717a'
+
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black">
       {/* Full-viewport graph */}
@@ -156,6 +229,10 @@ export default function Brain() {
         selectedId={selectedNode}
         onSelectNode={setSelectedNode}
         onBackgroundClick={() => setSelectedNode(null)}
+        focusClusterId={focusCluster?.id ?? null}
+        focusClusterTs={focusCluster?.ts}
+        focusNodeId={focusNode?.id ?? null}
+        focusNodeTs={focusNode?.ts}
         autoSpin
         bgColor="galaxy"
         layoutPreset={layout}
@@ -169,7 +246,7 @@ export default function Brain() {
         className="w-full h-full"
       />
 
-      {/* -- Floating Controls: Top Left ---------------------------------------- */}
+      {/* ── Top Left: Search + Layout + Stats ─────────────────────────────── */}
       <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
         {/* Search bar */}
         <form onSubmit={handleSearch} className="flex items-center gap-1 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-3 py-1.5">
@@ -209,46 +286,260 @@ export default function Brain() {
         {activeGraph && (
           <div className="text-xs text-stone-600 px-1">
             {activeGraph.nodes.length} memories · {activeGraph.edges.length} connections
-            {activeGraph.clusters && ` · ${activeGraph.clusters.length} domains`}
+            {activeGraph.clusters && ` · ${activeGraph.clusters.length} topics`}
           </div>
         )}
       </div>
 
-      {/* -- Selected Node Detail: Bottom Left --------------------------------- */}
-      {selectedNodeData && (
-        <div className="absolute bottom-6 left-4 z-10 max-w-md bg-black/70 backdrop-blur-sm border border-white/10 rounded-lg p-4">
-          <div className="flex items-start gap-2 mb-2">
-            <span className="text-xs px-1.5 py-0.5 rounded bg-teal-500/20 text-teal-400 shrink-0">
-              {selectedNodeData.type}
-            </span>
-            {selectedNodeData.source_type && (
-              <span className="text-xs text-stone-600">
-                from: {selectedNodeData.source_type}
-              </span>
-            )}
+      {/* ── Top Left: Topic Sidebar ──────────────────────────────────────── */}
+      {activeGraph && activeGraph.nodes.length > 0 && (
+        <div className="absolute top-14 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-8rem)] overflow-y-auto w-[200px] scrollbar-thin">
+          {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
+            <>
+              <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                {activeGraph.clusters.length} topics
+              </div>
+              {activeGraph.clusters.slice(0, 30).map(cluster => {
+                const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
+                const isExpanded = expandedClusterId === cluster.id
+                const isFocused = focusCluster?.id === cluster.id
+                return (
+                  <div key={cluster.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFocusCluster({ id: cluster.id, ts: Date.now() })
+                        setExpandedClusterId(isExpanded ? null : cluster.id)
+                      }}
+                      className={`flex items-center gap-1.5 w-full text-left text-[11px] rounded px-1.5 py-1 transition-colors ${
+                        isFocused ? 'bg-white/10' : 'hover:bg-white/5'
+                      }`}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                      />
+                      <span className="text-stone-300 truncate flex-1" title={cluster.label}>
+                        {cluster.label}
+                      </span>
+                      <span className="text-stone-600 text-[10px] shrink-0">{cluster.count}</span>
+                      <ChevronRight
+                        size={10}
+                        className={`text-stone-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                      />
+                    </button>
+                    {isExpanded && (
+                      <div className="pl-5 pr-1 py-0.5 space-y-px">
+                        {activeGraph.nodes
+                          .filter(n => n.cluster_id === cluster.id)
+                          .sort((a, b) => b.importance - a.importance)
+                          .slice(0, 12)
+                          .map(node => (
+                            <button
+                              key={node.id}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setSelectedNode(node.id)
+                                setFocusNode({ id: node.id, ts: Date.now() })
+                              }}
+                              className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                              title={node.content}
+                            >
+                              {node.content}
+                            </button>
+                          ))}
+                        {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
+                          <div className="text-[10px] text-stone-600 px-1 pt-0.5">
+                            +{activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+              {activeGraph.clusters.length > 30 && (
+                <div className="text-[10px] text-stone-600 px-1.5 pt-1 border-t border-white/5 mt-1">
+                  +{activeGraph.clusters.length - 30} smaller clusters
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                Types
+              </div>
+              {Array.from(new Set(activeGraph.nodes.map(n => n.type))).map(type => (
+                <div key={type} className="flex items-center gap-2 text-[11px] px-1.5 py-0.5">
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${TYPE_COLORS[type] ?? '#71717a'}` }}
+                  />
+                  <span className="text-stone-400" title={TYPE_DESCRIPTIONS[type]}>
+                    {type === 'self_model' ? 'self model' : type}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ── Bottom Left: Graph Key (hidden when detail panel open) ────────── */}
+      {!selectedNodeData && (
+        <div className="absolute bottom-6 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-3 py-2.5 max-w-[220px]">
+          <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-1.5">Graph Key</div>
+          <div className="space-y-1.5 text-[11px] text-stone-400">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-400 shrink-0" />
+              <span><strong className="text-stone-300">Node</strong> = a single memory</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-px bg-stone-500 shrink-0" />
+              <span><strong className="text-stone-300">Edge</strong> = relationship</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex gap-0.5 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+              </div>
+              <span><strong className="text-stone-300">Color</strong> = knowledge domain</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-px shrink-0">
+                <span className="w-1 h-1 rounded-full bg-stone-500" />
+                <span className="w-2 h-2 rounded-full bg-stone-400" />
+                <span className="w-2.5 h-2.5 rounded-full bg-stone-300" />
+              </div>
+              <span><strong className="text-stone-300">Size</strong> = importance</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-400/30 ring-1 ring-teal-400/50 shrink-0" />
+              <span><strong className="text-stone-300">Glow</strong> = recently accessed</span>
+            </div>
           </div>
-          <p className="text-sm text-stone-300 leading-relaxed line-clamp-4">
-            {selectedNodeData.content}
-          </p>
-          <div className="flex gap-4 mt-3 text-xs text-stone-500">
-            <div className="flex items-center gap-1.5">
-              <span>Importance</span>
-              <div className="w-16 h-1 bg-stone-800 rounded-full overflow-hidden">
-                <div className="h-full bg-teal-500 rounded-full" style={{ width: `${selectedNodeData.importance * 100}%` }} />
-              </div>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span>Activation</span>
-              <div className="w-16 h-1 bg-stone-800 rounded-full overflow-hidden">
-                <div className="h-full bg-amber-500 rounded-full" style={{ width: `${selectedNodeData.activation * 100}%` }} />
-              </div>
-            </div>
-            <span>{selectedNodeData.access_count} recalls</span>
+          <div className="text-[10px] text-stone-600 border-t border-white/5 mt-2 pt-1.5">
+            Click node for details · Drag to orbit · Scroll to zoom
           </div>
         </div>
       )}
 
-      {/* -- Chat Toggle FAB: Bottom Right ------------------------------------- */}
+      {/* ── Bottom Left: Selected Node Detail Panel ───────────────────────── */}
+      {selectedNodeData && (
+        <div className="absolute bottom-4 left-4 z-10 w-[340px] max-h-[calc(100vh-6rem)] overflow-y-auto bg-black/70 backdrop-blur-sm border border-white/10 rounded-lg scrollbar-thin">
+          {/* Header */}
+          <div className="sticky top-0 bg-black/80 backdrop-blur-sm border-b border-white/5 px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <span
+                className="text-[11px] px-1.5 py-0.5 rounded font-medium shrink-0"
+                style={{
+                  backgroundColor: `${nodeColor}20`,
+                  color: nodeColor,
+                }}
+              >
+                {selectedNodeData.type === 'self_model' ? 'self model' : selectedNodeData.type}
+              </span>
+              {selectedNodeData.superseded && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 shrink-0">
+                  superseded
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setSelectedNode(null)}
+              className="text-stone-600 hover:text-stone-300 transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {/* Content */}
+            <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content}</p>
+
+            {/* Scores */}
+            <div className="space-y-2 pt-3 border-t border-white/5">
+              <div className="text-[10px] text-stone-600 uppercase tracking-wider">Scores</div>
+              <ScoreBar value={selectedNodeData.activation} label="Activation" color="#f59e0b" />
+              <ScoreBar value={selectedNodeData.importance} label="Importance" color="#14b8a6" />
+              <ScoreBar value={selectedNodeData.confidence} label="Confidence" color="#818cf8" />
+            </div>
+
+            {/* Metadata */}
+            <div className="pt-3 border-t border-white/5">
+              <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-2">Metadata</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div>
+                  <div className="text-[10px] text-stone-600">Source</div>
+                  <div className="text-[11px] text-stone-300">{selectedNodeData.source_type || 'unknown'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-stone-600">Recalled</div>
+                  <div className="text-[11px] text-stone-300">{selectedNodeData.access_count.toLocaleString()} times</div>
+                </div>
+                {selectedNodeData.created_at && (
+                  <div>
+                    <div className="text-[10px] text-stone-600">Created</div>
+                    <div className="text-[11px] text-stone-300">{new Date(selectedNodeData.created_at).toLocaleDateString()}</div>
+                  </div>
+                )}
+              </div>
+              <div className="font-mono text-[9px] text-stone-700 break-all mt-2">{selectedNodeData.id}</div>
+            </div>
+
+            {/* Explore from here */}
+            <button
+              onClick={() => exploreNode(selectedNodeData.id)}
+              className="w-full flex items-center justify-center gap-1.5 text-xs text-teal-400 bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/20 rounded-md py-1.5 transition-colors"
+            >
+              <Network size={12} />
+              Explore from here
+            </button>
+
+            {/* Connections */}
+            <div className="pt-3 border-t border-white/5">
+              <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-2">
+                Connections ({selectedConnections.length})
+              </div>
+              {selectedConnections.length > 0 ? (
+                <div className="space-y-1">
+                  {selectedConnections.map((edge, i) => {
+                    const otherId = edge.source === selectedNodeData.id ? edge.target : edge.source
+                    const otherNode = activeGraph?.nodes.find(n => n.id === otherId)
+                    const isOutgoing = edge.source === selectedNodeData.id
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        className="flex items-center gap-1.5 w-full text-left text-[11px] p-1.5 rounded hover:bg-white/5 transition-colors"
+                        onClick={() => {
+                          setSelectedNode(otherId)
+                          setFocusNode({ id: otherId, ts: Date.now() })
+                        }}
+                      >
+                        <span className="text-stone-600 shrink-0">{isOutgoing ? '\u2192' : '\u2190'}</span>
+                        <span className="text-stone-400 font-medium shrink-0">{edge.relation.replace(/_/g, ' ')}</span>
+                        <span className="flex-1 truncate text-stone-500">
+                          {otherNode?.content ?? otherId.slice(0, 8)}
+                        </span>
+                        <span className="text-stone-700 text-[10px] shrink-0" title="Connection strength">
+                          {edge.weight.toFixed(2)}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : (
+                <p className="text-[11px] text-stone-600">No connections in this subgraph</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Chat Toggle FAB: Bottom Right ─────────────────────────────────── */}
       {!chatOpen && (
         <button
           onClick={() => setChatOpen(true)}
@@ -260,7 +551,7 @@ export default function Brain() {
         </button>
       )}
 
-      {/* -- Chat Panel --------------------------------------------------------- */}
+      {/* ── Chat Panel ────────────────────────────────────────────────────── */}
       {chatOpen && (
         <BrainChat
           onClose={() => setChatOpen(false)}

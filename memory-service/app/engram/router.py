@@ -575,40 +575,70 @@ async def get_graph(
                 for r in edges_result
             ]
 
-            # ── Union-Find for connected components ──────────────────────
-            parent: dict[str, str] = {eid: eid for eid in engram_ids}
-            rank: dict[str, int] = {eid: 0 for eid in engram_ids}
+            # ── Topic-based clustering ────────────────────────────────────
+            # Use topic engrams and part_of edges for natural clustering
+            # instead of hardcoded keyword classification.
+            topic_edges = await session.execute(
+                text("""
+                    SELECT ee.source_id::text AS member_id,
+                           ee.target_id::text AS topic_id,
+                           t.content AS topic_content
+                    FROM engram_edges ee
+                    JOIN engrams t ON t.id = ee.target_id
+                      AND t.type = 'topic' AND NOT t.superseded
+                    WHERE ee.relation = 'part_of'
+                      AND ee.source_id = ANY(CAST(:ids AS uuid[]))
+                """),
+                {"ids": engram_ids},
+            )
+            topic_memberships = topic_edges.fetchall()
 
-            def find(x: str) -> str:
-                while parent[x] != x:
-                    parent[x] = parent[parent[x]]  # path compression
-                    x = parent[x]
-                return x
+            # Build cluster map from topic memberships
+            topic_ids_seen: dict[str, int] = {}  # topic_id -> cluster_id
+            engram_cluster: dict[str, int] = {}
+            clusters: list[dict] = []
 
-            def union(a: str, b: str) -> None:
-                ra, rb = find(a), find(b)
-                if ra == rb:
-                    return
-                if rank[ra] < rank[rb]:
-                    ra, rb = rb, ra
-                parent[rb] = ra
-                if rank[ra] == rank[rb]:
-                    rank[ra] += 1
+            for row in topic_memberships:
+                if row.topic_id not in topic_ids_seen:
+                    cluster_id = len(clusters)
+                    topic_ids_seen[row.topic_id] = cluster_id
+                    # Extract topic name (first line of "TOPIC: <name>\n<summary>")
+                    label = row.topic_content or "Unnamed Topic"
+                    if label.startswith("TOPIC: "):
+                        label = label[7:]
+                    if "\n" in label:
+                        label = label.split("\n")[0]
+                    clusters.append({
+                        "id": cluster_id,
+                        "label": label.strip(),
+                        "count": 0,
+                        "topic_engram_id": row.topic_id,
+                    })
+                cluster_id = topic_ids_seen[row.topic_id]
+                engram_cluster[row.member_id] = cluster_id
+                clusters[cluster_id]["count"] += 1
 
-            for edge in raw_edges:
-                s, t = edge["source_id"], edge["target_id"]
-                if s in id_set and t in id_set:
-                    union(s, t)
+            # Uncategorized cluster for engrams not in any topic
+            uncategorized_count = sum(1 for e in all_engrams if e["id"] not in engram_cluster and e["type"] != "topic")
+            if uncategorized_count > 0:
+                uncat_id = len(clusters)
+                clusters.append({"id": uncat_id, "label": "Uncategorized", "count": uncategorized_count})
+                for e in all_engrams:
+                    if e["id"] not in engram_cluster and e["type"] != "topic":
+                        engram_cluster[e["id"]] = uncat_id
 
-            # Group by component
-            components: dict[str, list[dict]] = defaultdict(list)
-            for engram in all_engrams:
-                root = find(engram["id"])
-                components[root].append(engram)
+            # Assign topic nodes to their own cluster
+            for e in all_engrams:
+                if e["type"] == "topic" and e["id"] in topic_ids_seen:
+                    engram_cluster[e["id"]] = topic_ids_seen[e["id"]]
 
-            # Merge connected components into semantic domains
-            sorted_comps = sorted(components.values(), key=len, reverse=True)
-            clusters, engram_cluster = _merge_into_domains(sorted_comps)
+            # Sort clusters by count descending
+            clusters.sort(key=lambda c: -c["count"])
+            # Remap cluster IDs after sorting
+            old_to_new = {c["id"]: i for i, c in enumerate(clusters)}
+            for c in clusters:
+                c["id"] = old_to_new[c["id"]]
+            engram_cluster = {eid: old_to_new[cid] for eid, cid in engram_cluster.items()}
 
             # Build response
             nodes = [
@@ -624,7 +654,7 @@ async def get_graph(
                     "superseded": e["superseded"],
                     "created_at": e["created_at"].isoformat() if e["created_at"] else None,
                     "cluster_id": engram_cluster.get(e["id"], 0),
-                    "cluster_label": clusters[engram_cluster.get(e["id"], 0)]["label"],
+                    "cluster_label": clusters[engram_cluster.get(e["id"], 0)]["label"] if e["id"] in engram_cluster else "Uncategorized",
                 }
                 for e in all_engrams
             ]

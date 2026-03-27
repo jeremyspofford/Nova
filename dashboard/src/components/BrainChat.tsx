@@ -4,6 +4,7 @@ import { X, Send, Loader2 } from 'lucide-react'
 import { streamChat, resolveModel, type ChatMessage } from '../api'
 import { cleanToolArtifacts } from '../utils/cleanToolArtifacts'
 import { MessageBubble } from '../pages/chat/MessageBubble'
+import { useChatStore } from '../stores/chat-store'
 import type { Message, ActivityStep } from '../stores/chat-store'
 
 interface BrainChatProps {
@@ -19,13 +20,16 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  // Resolve default model
+  // Use shared model from chat store (syncs with main Chat page)
+  const { modelId: sharedModelId } = useChatStore()
+
+  // Fallback to resolved model if chat store has no selection
   const { data: resolved } = useQuery({
     queryKey: ['resolve-model'],
     queryFn: resolveModel,
     staleTime: 60_000,
   })
-  const modelId = resolved?.model ?? ''
+  const modelId = sharedModelId || resolved?.model || ''
 
   // Auto-scroll when near bottom
   const scrollToBottom = useCallback(() => {
