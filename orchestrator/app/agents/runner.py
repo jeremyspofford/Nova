@@ -968,6 +968,9 @@ def _build_prompt(
     return result
 
 
+# TODO: When memory_retrieval_mode == "tools", extract engram IDs from
+# search_memory/recall_topic tool results and call _mark_engrams_used()
+# for the feedback loop. Requires parsing tool_results for memory tool calls.
 async def _store_exchange(
     agent_id: str,
     session_id: str,
