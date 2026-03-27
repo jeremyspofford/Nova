@@ -100,10 +100,11 @@ async def lifespan(app: FastAPI):
     await _seed_config_from_env()
 
     # Sync DB config to Redis so LLM gateway has correct values immediately
-    from app.config_sync import sync_llm_config_to_redis, sync_inference_config_to_redis, sync_engram_config_to_redis
+    from app.config_sync import sync_llm_config_to_redis, sync_inference_config_to_redis, sync_engram_config_to_redis, sync_voice_config_to_redis
     await sync_llm_config_to_redis()
     await sync_inference_config_to_redis()
     await sync_engram_config_to_redis()
+    await sync_voice_config_to_redis()
 
     # Guarantee one canonical Nova agent exists; prune any duplicates
     primary = await ensure_primary_agent()

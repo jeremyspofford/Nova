@@ -462,6 +462,14 @@ export function Settings() {
           <div id="voice">
             <Section icon={Mic} title="Voice" description="Speech recognition and synthesis settings. Requires docker compose --profile voice.">
               <ConfigField
+                label="OpenAI API Key (for Whisper + TTS)"
+                configKey="voice.openai_api_key"
+                value={useConfigValue(entries, 'voice.openai_api_key', '')}
+                description="Used for speech recognition and text-to-speech. Same key as the LLM provider."
+                onSave={handleSave}
+                saving={saveMutation.isPending}
+              />
+              <ConfigField
                 label="STT Provider"
                 configKey="voice.stt_provider"
                 value={useConfigValue(entries, 'voice.stt_provider', 'openai')}

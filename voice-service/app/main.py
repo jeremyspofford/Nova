@@ -66,14 +66,19 @@ async def health_live():
 
 @app.get("/health/ready")
 async def health_ready():
-    stt_available = bool(settings.openai_api_key) if settings.stt_provider == "openai" else False
-    tts_available = bool(settings.openai_api_key) if settings.tts_provider == "openai" else False
+    from app.providers import _resolve_api_key, _resolve_setting
+    stt_provider = _resolve_setting("stt_provider", settings.stt_provider)
+    tts_provider = _resolve_setting("tts_provider", settings.tts_provider)
+    stt_key = _resolve_api_key(stt_provider)
+    tts_key = _resolve_api_key(tts_provider)
+    stt_available = bool(stt_key)
+    tts_available = bool(tts_key)
     status = "ready" if (stt_available and tts_available) else "degraded"
     return {
         "status": status,
-        "stt_provider": settings.stt_provider,
+        "stt_provider": stt_provider,
         "stt_available": stt_available,
-        "tts_provider": settings.tts_provider,
+        "tts_provider": tts_provider,
         "tts_available": tts_available,
     }
 
