@@ -46,6 +46,25 @@ interface ClusterInfo {
   count: number
 }
 
+// ── Layout presets ────────────────────────────────────────────────────────────
+
+export interface LayoutConfig {
+  sphereRadius: number
+  homeForce: number
+  charge: number
+  linkDist: number
+  linkDistSpread: number
+}
+
+export const LAYOUT_PRESETS: Record<string, LayoutConfig & { label: string; description: string }> = {
+  compact:       { label: 'Compact',       sphereRadius: 0, homeForce: 0, charge: -25, linkDist: 12, linkDistSpread: 20, description: 'Dense — tight clusters, more connections visible' },
+  spread:        { label: 'Spread',        sphereRadius: 0, homeForce: 0, charge: -40, linkDist: 20, linkDistSpread: 30, description: 'Balanced — clear clusters with visible structure' },
+  galaxy:        { label: 'Galaxy',        sphereRadius: 0, homeForce: 0, charge: -60, linkDist: 30, linkDistSpread: 40, description: 'Airy — more space between nodes' },
+  constellation: { label: 'Constellation', sphereRadius: 0, homeForce: 0, charge: -80, linkDist: 40, linkDistSpread: 50, description: 'Maximum spread — each node clearly separate' },
+}
+
+export const DEFAULT_LAYOUT = 'spread'
+
 interface ForceGraph3DProps {
   nodes: GraphNode[]
   edges: GraphEdge[]
@@ -60,6 +79,7 @@ interface ForceGraph3DProps {
   focusClusterTs?: number
   focusNodeId?: string | null
   focusNodeTs?: number
+  layoutPreset?: string
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -413,9 +433,11 @@ export function ForceGraph3D({
   focusClusterTs,
   focusNodeId,
   focusNodeTs,
+  layoutPreset = DEFAULT_LAYOUT,
 }: ForceGraph3DProps) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
+  const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
   const containerRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
@@ -437,7 +459,7 @@ export function ForceGraph3D({
 
     // If already initialized, just update data
     if (graphRef.current && initializedRef.current) {
-      updateGraphData(graphRef.current, nodes, edges, useClusterColors)
+      updateGraphData(graphRef.current, nodes, edges, useClusterColors, layoutRef.current)
       return
     }
 
@@ -569,16 +591,30 @@ export function ForceGraph3D({
       })
 
       // ── Forces ───────────────────────────────────────────────────────
-      .d3AlphaDecay(isLargeGraph ? 0.03 : 0.02)
-      .d3VelocityDecay(isLargeGraph ? 0.4 : 0.3)
-      .warmupTicks(isLargeGraph ? 120 : 60)
-      .cooldownTicks(isLargeGraph ? 300 : 200)
+      // Organic force-directed layout — let topology create clusters
+      // naturally. No artificial sphere positioning.
+      .d3AlphaDecay(0.02)
+      .d3VelocityDecay(0.3)
+      .warmupTicks(isLargeGraph ? 150 : 60)
+      .cooldownTicks(isLargeGraph ? 400 : 200)
 
-    // Configure forces — weaker charge for large graphs to keep clusters tight
     try {
       if (isLargeGraph) {
-        graph.d3Force('link')?.distance((link: any) => 15 + (1 - (link.weight ?? 0.5)) * 30)
-        graph.d3Force('charge')?.strength(-20)
+        const cfg = layoutRef.current
+        graph.d3Force('charge')?.strength(cfg.charge).distanceMax(250)
+        // Weight-proportional: strong edges pull firmly (short distance),
+        // weak edges barely pull (long distance + low strength).
+        // This is the key to preventing clumping without losing edges.
+        graph.d3Force('link')
+          ?.distance((link: any) => {
+            const w = link.weight ?? 0.3
+            return cfg.linkDist + (1 - w) * cfg.linkDistSpread
+          })
+          .strength((link: any) => {
+            const w = link.weight ?? 0.3
+            return 0.02 + w * 0.3  // weak=0.02, strong=0.32
+          })
+        graph.d3Force('center')?.strength(0.008)
       } else {
         graph.d3Force('link')?.distance((link: any) => 30 + (1 - (link.weight ?? 0.5)) * 60)
         graph.d3Force('charge')?.strength(-80)
@@ -586,28 +622,13 @@ export function ForceGraph3D({
     } catch { /* force config may fail silently */ }
 
     // ── Clustering force ──────────────────────────────────────────────
-    // Two modes:
-    // 1. Home-position mode (cluster view): each cluster has a fixed "home"
-    //    on a Fibonacci sphere. Nodes are pulled toward their home so clusters
-    //    stay spatially separated instead of blobbing together.
-    // 2. Centroid mode (BFS/type view): nodes drift toward their type centroid.
-    graph.onEngineTick(() => {
-      const data = graph.graphData()
-      if (!data?.nodes?.length) return
-
-      if (useClusterColors && clusterHomePositions.size > 0) {
-        // Home-position mode — pull toward cluster's fixed spot on the sphere
-        const strength = 0.006
-        for (const node of data.nodes) {
-          if (node.x == null) continue
-          const home = clusterHomePositions.get(String(node.cluster_id ?? 0))
-          if (!home) continue
-          node.vx = (node.vx ?? 0) + (home.x - node.x) * strength
-          node.vy = (node.vy ?? 0) + (home.y - node.y) * strength
-          node.vz = (node.vz ?? 0) + (home.z - node.z) * strength
-        }
-      } else {
-        // Centroid mode (original) — nudge toward type centroid
+    // For non-cluster mode (BFS/type view): gentle nudge toward type centroid.
+    // For cluster mode: not needed — the organic force-directed layout
+    // creates natural clusters from edge topology + charge repulsion.
+    if (!useClusterColors) {
+      graph.onEngineTick(() => {
+        const data = graph.graphData()
+        if (!data?.nodes?.length) return
         const centroids = new Map<string, { x: number; y: number; z: number; count: number }>()
         for (const node of data.nodes) {
           if (node.x == null) continue
@@ -626,8 +647,8 @@ export function ForceGraph3D({
           node.vy = (node.vy ?? 0) + (cy - node.y) * strength
           node.vz = (node.vz ?? 0) + (cz - node.z) * strength
         }
-      }
-    })
+      })
+    }
 
     // ── Bloom post-processing ──────────────────────────────────────────
     try {
@@ -702,7 +723,7 @@ export function ForceGraph3D({
     }
 
     // Load initial data
-    updateGraphData(graph, nodes, edges, useClusterColors)
+    updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current)
 
     // Handle resize
     const ro = new ResizeObserver(([entry]) => {
@@ -754,6 +775,28 @@ export function ForceGraph3D({
       graph.backgroundColor(bgColor)
     }
   }, [bgColor])
+
+  // Live-reconfigure layout when preset changes — no full teardown
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph || !initializedRef.current) return
+
+    const cfg = LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT]
+    layoutRef.current = cfg
+
+    // Reconfigure d3 forces from preset
+    try {
+      if (isLargeGraph) {
+        graph.d3Force('charge')?.strength(cfg.charge).distanceMax(250)
+        graph.d3Force('link')
+          ?.distance((link: any) => cfg.linkDist + (1 - (link.weight ?? 0.3)) * cfg.linkDistSpread)
+          .strength((link: any) => 0.02 + (link.weight ?? 0.3) * 0.3)
+      }
+    } catch { /* ok */ }
+
+    // Re-energize the simulation so nodes rearrange
+    try { graph.numDimensions(3) } catch { /* triggers simulation restart */ }
+  }, [layoutPreset])
 
   // Highlight selected node
   useEffect(() => {
@@ -868,7 +911,8 @@ function makeDomainLabel(text: string, count: number, color: string): Sprite {
 // Track cluster visuals so we can remove them on update
 const clusterVisuals: (Sprite | Mesh)[] = []
 
-function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], useClusterMode: boolean) {
+function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], useClusterMode: boolean, config?: LayoutConfig) {
+  const cfg = config ?? LAYOUT_PRESETS[DEFAULT_LAYOUT]
   const graphNodes = nodes.map(n => ({ ...n })) as any[]
   const nodeIds = new Set(nodes.map(n => n.id))
   const graphLinks = edges
@@ -880,46 +924,17 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
       weight: e.weight,
     }))
 
-  // ── Fibonacci sphere initial positioning for cluster mode ──────────
-  // Each cluster gets a fixed "home" on a sphere so they start separated
-  // instead of all spawning at the origin and blobbing together.
-  if (useClusterMode && graphNodes.length > 0) {
-    const byCluster = new Map<number, typeof graphNodes>()
-    for (const n of graphNodes) {
-      const cid = n.cluster_id ?? 0
-      const list = byCluster.get(cid) ?? []
-      list.push(n)
-      byCluster.set(cid, list)
-    }
-
-    // Sphere radius scales with cluster count — more clusters = wider spread
-    const sphereRadius = Math.max(250, byCluster.size * 2)
-    clusterHomePositions.clear()
-
-    let idx = 0
-    for (const [cid, members] of byCluster) {
-      const home = fibonacciSphere(idx, byCluster.size, sphereRadius)
-      clusterHomePositions.set(String(cid), home)
-
-      // Spread within cluster scales with member count
-      const spread = Math.max(10, Math.sqrt(members.length) * 5)
-      for (const node of members) {
-        node.x = home.x + (Math.random() - 0.5) * spread
-        node.y = home.y + (Math.random() - 0.5) * spread
-        node.z = home.z + (Math.random() - 0.5) * spread
-      }
-      idx++
-    }
-  }
-
+  // Let d3-force handle layout organically — no forced positioning.
+  // The topology (edges) naturally creates clusters, charge pushes
+  // unconnected nodes apart, and domain coloring makes groups visible.
   graph.graphData({ nodes: graphNodes, links: graphLinks })
 
   // Longer settle time for large graphs
-  const settleMs = nodes.length > 500 ? 2500 : 1200
+  const settleMs = nodes.length > 500 ? 3000 : 1200
 
   // Add cluster/domain labels after simulation settles
   setTimeout(() => {
-    try { graph.zoomToFit(600, 50) } catch { /* ok */ }
+    try { graph.zoomToFit(600, 60) } catch { /* ok */ }
 
     // Remove old cluster visuals
     const scene = graph.scene()

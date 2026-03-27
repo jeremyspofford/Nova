@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import type { SimulationNodeDatum, SimulationLinkDatum } from 'd3-force'
 
@@ -11,6 +11,8 @@ interface GraphNode {
   activation: number
   importance: number
   access_count: number
+  cluster_id?: number
+  cluster_label?: string
 }
 
 interface GraphEdge {
@@ -26,22 +28,38 @@ interface ForceGraphProps {
   selectedId: string | null
   onSelectNode: (id: string) => void
   className?: string
+  focusClusterId?: number | null
+  focusNodeId?: string | null
 }
 
 // ── Color mapping ────────────────────────────────────────────────────────────
 
 const TYPE_COLORS: Record<string, string> = {
-  fact:       '#60a5fa', // info blue
-  entity:     '#2dd4bf', // accent teal
-  preference: '#34d399', // success green
-  procedure:  '#a1a1aa', // neutral gray
-  self_model: '#818cf8', // indigo
-  episode:    '#fbbf24', // warning amber
-  schema:     '#f87171', // danger red
-  goal:       '#c084fc', // purple
+  fact:       '#60a5fa',
+  entity:     '#2dd4bf',
+  preference: '#34d399',
+  procedure:  '#a1a1aa',
+  self_model: '#818cf8',
+  episode:    '#fbbf24',
+  schema:     '#f87171',
+  goal:       '#c084fc',
 }
 
+const CLUSTER_COLORS = [
+  '#818cf8', '#60a5fa', '#2dd4bf', '#34d399', '#fbbf24',
+  '#f87171', '#c084fc', '#fb923c', '#a3e635', '#22d3ee',
+  '#e879f9', '#f472b6', '#38bdf8', '#4ade80', '#facc15',
+  '#a78bfa', '#67e8f9', '#fca5a5', '#86efac', '#fde68a',
+]
+
 const DEFAULT_COLOR = '#71717a'
+
+function getColor(node: { type: string; cluster_id?: number }, useCluster: boolean): string {
+  if (useCluster && node.cluster_id != null) {
+    return CLUSTER_COLORS[node.cluster_id % CLUSTER_COLORS.length]
+  }
+  return TYPE_COLORS[node.type] ?? DEFAULT_COLOR
+}
 
 // ── Simulation node type ─────────────────────────────────────────────────────
 
@@ -52,6 +70,8 @@ interface SimNode extends SimulationNodeDatum {
   activation: number
   importance: number
   access_count: number
+  cluster_id?: number
+  cluster_label?: string
   radius: number
 }
 
@@ -62,16 +82,23 @@ interface SimLink extends SimulationLinkDatum<SimNode> {
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }: ForceGraphProps) {
+export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className, focusClusterId, focusNodeId }: ForceGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const simRef = useRef<ReturnType<typeof forceSimulation<SimNode>> | null>(null)
   const nodesRef = useRef<SimNode[]>([])
   const linksRef = useRef<SimLink[]>([])
   const hoveredRef = useRef<string | null>(null)
   const dragRef = useRef<{ node: SimNode; startX: number; startY: number } | null>(null)
-  const rafRef = useRef<number>(0)
+  const panRef = useRef<{ startX: number; startY: number; startTx: number; startTy: number } | null>(null)
 
-  // Build simulation data
+  // Zoom/pan transform state
+  const transformRef = useRef({ tx: 0, ty: 0, scale: 1 })
+  const [, forceRender] = useState(0)
+
+  const isLargeGraph = nodes.length > 100
+  const useClusterColors = nodes.some(n => n.cluster_id != null)
+
+  // Build simulation
   useEffect(() => {
     if (!nodes.length) return
 
@@ -82,7 +109,9 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
     canvas.width = width * window.devicePixelRatio
     canvas.height = height * window.devicePixelRatio
 
-    // Create simulation nodes with radius based on importance
+    // Reset transform
+    transformRef.current = { tx: width / 2, ty: height / 2, scale: isLargeGraph ? 0.8 : 1 }
+
     const simNodes: SimNode[] = nodes.map(n => ({
       id: n.id,
       type: n.type,
@@ -90,9 +119,11 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
       activation: n.activation,
       importance: n.importance,
       access_count: n.access_count,
-      radius: 8 + n.importance * 16,
-      x: width / 2 + (Math.random() - 0.5) * width * 0.6,
-      y: height / 2 + (Math.random() - 0.5) * height * 0.6,
+      cluster_id: n.cluster_id,
+      cluster_label: n.cluster_label,
+      radius: isLargeGraph ? 2 + n.importance * 5 : 6 + n.importance * 12,
+      x: (Math.random() - 0.5) * width * 0.8,
+      y: (Math.random() - 0.5) * height * 0.8,
     }))
 
     const nodeMap = new Map(simNodes.map(n => [n.id, n]))
@@ -108,17 +139,29 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
     nodesRef.current = simNodes
     linksRef.current = simLinks
 
-    // Stop previous simulation
     simRef.current?.stop()
 
+    const linkForce = forceLink<SimNode, SimLink>(simLinks).id(d => d.id)
+    if (isLargeGraph) {
+      // Weight-proportional: weak edges barely pull, strong edges pull firmly
+      linkForce
+        .distance(d => 30 + (1 - d.weight) * 60)
+        .strength(d => 0.02 + d.weight * 0.3)
+    } else {
+      linkForce
+        .distance(d => 60 + (1 - d.weight) * 40)
+        .strength(d => 0.3 + d.weight * 0.4)
+    }
+
+    const chargeForce = forceManyBody<SimNode>()
+      .strength(isLargeGraph ? -50 : -200)
+    if (isLargeGraph) chargeForce.distanceMax(250)
+
     const sim = forceSimulation<SimNode>(simNodes)
-      .force('link', forceLink<SimNode, SimLink>(simLinks)
-        .id(d => d.id)
-        .distance(d => 80 + (1 - d.weight) * 60)
-        .strength(d => 0.3 + d.weight * 0.4))
-      .force('charge', forceManyBody<SimNode>().strength(-200))
-      .force('center', forceCenter(width / 2, height / 2).strength(0.05))
-      .force('collide', forceCollide<SimNode>(d => d.radius + 4))
+      .force('link', linkForce)
+      .force('charge', chargeForce)
+      .force('center', forceCenter(0, 0).strength(isLargeGraph ? 0.008 : 0.05))
+      .force('collide', forceCollide<SimNode>(d => d.radius + 2))
       .alphaDecay(0.02)
       .on('tick', () => draw(canvas, width, height))
 
@@ -126,23 +169,57 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
 
     return () => {
       sim.stop()
-      cancelAnimationFrame(rafRef.current)
     }
   }, [nodes, edges])
 
-  // Redraw when selection changes
+  // Redraw on selection change
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     draw(canvas, canvas.clientWidth, canvas.clientHeight)
   }, [selectedId])
 
+  // Focus cluster
+  useEffect(() => {
+    if (focusClusterId == null) return
+    const clusterNodes = nodesRef.current.filter(n => n.cluster_id === focusClusterId)
+    if (!clusterNodes.length) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const cx = clusterNodes.reduce((s, n) => s + (n.x ?? 0), 0) / clusterNodes.length
+    const cy = clusterNodes.reduce((s, n) => s + (n.y ?? 0), 0) / clusterNodes.length
+    const w = canvas.clientWidth, h = canvas.clientHeight
+
+    transformRef.current = { tx: w / 2 - cx * 1.5, ty: h / 2 - cy * 1.5, scale: 1.5 }
+    draw(canvas, w, h)
+  }, [focusClusterId])
+
+  // Focus node
+  useEffect(() => {
+    if (!focusNodeId) return
+    const node = nodesRef.current.find(n => n.id === focusNodeId)
+    if (!node || node.x == null) return
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const w = canvas.clientWidth, h = canvas.clientHeight
+    transformRef.current = { tx: w / 2 - node.x * 2, ty: h / 2 - (node.y ?? 0) * 2, scale: 2 }
+    draw(canvas, w, h)
+  }, [focusNodeId])
+
   const draw = useCallback((canvas: HTMLCanvasElement, width: number, height: number) => {
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     const dpr = window.devicePixelRatio
+    const { tx, ty, scale } = transformRef.current
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, width, height)
+
+    // Apply zoom/pan transform
+    ctx.save()
+    ctx.translate(tx, ty)
+    ctx.scale(scale, scale)
 
     const simNodes = nodesRef.current
     const simLinks = linksRef.current
@@ -155,25 +232,16 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
       if (source.x == null || source.y == null || target.x == null || target.y == null) continue
 
       const isConnected = selectedId && (source.id === selectedId || target.id === selectedId)
+      const edgeAlpha = isConnected ? 0.5 : Math.max(0.03, link.weight * 0.15)
 
       ctx.beginPath()
       ctx.moveTo(source.x, source.y)
       ctx.lineTo(target.x, target.y)
       ctx.strokeStyle = isConnected
         ? 'rgba(45, 212, 191, 0.5)'
-        : 'rgba(113, 113, 122, 0.15)'
-      ctx.lineWidth = isConnected ? 2 : 1
+        : `rgba(113, 113, 122, ${edgeAlpha})`
+      ctx.lineWidth = isConnected ? 2 / scale : (0.5 + link.weight) / scale
       ctx.stroke()
-
-      // Draw relation label on connected edges
-      if (isConnected) {
-        const mx = (source.x + target.x) / 2
-        const my = (source.y + target.y) / 2
-        ctx.font = '10px system-ui'
-        ctx.fillStyle = 'rgba(161, 161, 170, 0.8)'
-        ctx.textAlign = 'center'
-        ctx.fillText(link.relation.replace(/_/g, ' '), mx, my - 4)
-      }
     }
 
     // Draw nodes
@@ -182,20 +250,14 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
 
       const isSelected = node.id === selectedId
       const isHovered = node.id === hovered
-      const color = TYPE_COLORS[node.type] ?? DEFAULT_COLOR
-      const alpha = 0.3 + node.activation * 0.7
+      const color = getColor(node, useClusterColors)
+      const alpha = 0.4 + node.activation * 0.6
 
       // Glow for selected/hovered
       if (isSelected || isHovered) {
         ctx.beginPath()
-        ctx.arc(node.x, node.y, node.radius + 4, 0, Math.PI * 2)
-        ctx.fillStyle = isSelected
-          ? color.replace(')', ', 0.2)').replace('rgb', 'rgba')
-          : color.replace(')', ', 0.1)').replace('rgb', 'rgba')
-        // For hex colors, convert
-        ctx.fillStyle = isSelected
-          ? hexToRgba(color, 0.25)
-          : hexToRgba(color, 0.12)
+        ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2)
+        ctx.fillStyle = hexToRgba(color, isSelected ? 0.3 : 0.15)
         ctx.fill()
       }
 
@@ -207,37 +269,40 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
 
       if (isSelected) {
         ctx.strokeStyle = color
-        ctx.lineWidth = 2
+        ctx.lineWidth = 2 / scale
         ctx.stroke()
       }
 
-      // Label
-      const label = node.content.length > 30 ? node.content.slice(0, 28) + '...' : node.content
-      ctx.font = `${isSelected || isHovered ? '12' : '11'}px system-ui`
-      ctx.textAlign = 'center'
-      ctx.fillStyle = isSelected || isHovered
-        ? 'rgba(250, 250, 250, 0.95)'
-        : 'rgba(212, 212, 216, 0.7)'
-      ctx.fillText(label, node.x, node.y + node.radius + 14)
-
-      // Type label inside node (for larger nodes)
-      if (node.radius > 14) {
-        ctx.font = '9px system-ui'
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.6)'
-        ctx.fillText(node.type === 'self_model' ? 'self' : node.type.slice(0, 4), node.x, node.y + 3)
+      // Label — only show when zoomed in enough or for selected/hovered
+      if (scale > 1.2 || isSelected || isHovered) {
+        const label = node.content.length > 30 ? node.content.slice(0, 28) + '...' : node.content
+        const fontSize = Math.max(9, 11 / scale)
+        ctx.font = `${isSelected || isHovered ? fontSize + 1 : fontSize}px system-ui`
+        ctx.textAlign = 'center'
+        ctx.fillStyle = isSelected || isHovered
+          ? 'rgba(250, 250, 250, 0.95)'
+          : 'rgba(212, 212, 216, 0.6)'
+        ctx.fillText(label, node.x, node.y + node.radius + 12 / scale)
       }
     }
-  }, [selectedId])
 
-  // Hit test helper
-  const hitTest = useCallback((e: React.MouseEvent<HTMLCanvasElement>): SimNode | null => {
+    ctx.restore()
+  }, [selectedId, useClusterColors])
+
+  // Screen → graph coordinates
+  const screenToGraph = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
-    if (!canvas) return null
+    if (!canvas) return { x: 0, y: 0 }
     const rect = canvas.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+    const { tx, ty, scale } = transformRef.current
+    return {
+      x: (e.clientX - rect.left - tx) / scale,
+      y: (e.clientY - rect.top - ty) / scale,
+    }
+  }, [])
 
-    // Check in reverse order (top nodes first)
+  const hitTest = useCallback((e: React.MouseEvent<HTMLCanvasElement>): SimNode | null => {
+    const { x, y } = screenToGraph(e)
     for (let i = nodesRef.current.length - 1; i >= 0; i--) {
       const node = nodesRef.current[i]
       if (node.x == null || node.y == null) continue
@@ -248,18 +313,27 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
       }
     }
     return null
-  }, [])
+  }, [screenToGraph])
 
-  const CLICK_THRESHOLD = 5 // px — movement below this counts as a click, not a drag
+  const CLICK_THRESHOLD = 5
 
   const handleMouseMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
     if (!canvas) return
 
+    // Pan
+    if (panRef.current) {
+      const dx = e.clientX - panRef.current.startX
+      const dy = e.clientY - panRef.current.startY
+      transformRef.current.tx = panRef.current.startTx + dx
+      transformRef.current.ty = panRef.current.startTy + dy
+      draw(canvas, canvas.clientWidth, canvas.clientHeight)
+      return
+    }
+
+    // Drag node
     if (dragRef.current) {
-      const rect = canvas.getBoundingClientRect()
-      const x = e.clientX - rect.left
-      const y = e.clientY - rect.top
+      const { x, y } = screenToGraph(e)
       dragRef.current.node.fx = x
       dragRef.current.node.fy = y
       simRef.current?.alpha(0.1).restart()
@@ -270,10 +344,10 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
     const newHovered = node?.id ?? null
     if (newHovered !== hoveredRef.current) {
       hoveredRef.current = newHovered
-      canvas.style.cursor = newHovered ? 'pointer' : 'default'
+      canvas.style.cursor = newHovered ? 'pointer' : 'grab'
       draw(canvas, canvas.clientWidth, canvas.clientHeight)
     }
-  }, [hitTest, draw])
+  }, [hitTest, draw, screenToGraph])
 
   const handleMouseDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const node = hitTest(e)
@@ -281,6 +355,14 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
       dragRef.current = { node, startX: e.clientX, startY: e.clientY }
       node.fx = node.x
       node.fy = node.y
+    } else {
+      // Start panning
+      panRef.current = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startTx: transformRef.current.tx,
+        startTy: transformRef.current.ty,
+      }
     }
   }, [hitTest])
 
@@ -298,7 +380,32 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
 
       if (wasClick) onSelectNode(nodeId)
     }
+    panRef.current = null
   }, [onSelectNode])
+
+  // Zoom with scroll wheel
+  const handleWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
+    e.preventDefault()
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const rect = canvas.getBoundingClientRect()
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+
+    const { tx, ty, scale } = transformRef.current
+    const factor = e.deltaY > 0 ? 0.9 : 1.1
+    const newScale = Math.max(0.1, Math.min(10, scale * factor))
+
+    // Zoom toward mouse position
+    transformRef.current = {
+      tx: mx - (mx - tx) * (newScale / scale),
+      ty: my - (my - ty) * (newScale / scale),
+      scale: newScale,
+    }
+
+    draw(canvas, canvas.clientWidth, canvas.clientHeight)
+  }, [draw])
 
   return (
     <canvas
@@ -308,7 +415,8 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className }
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
-      style={{ width: '100%', height: '100%' }}
+      onWheel={handleWheel}
+      style={{ width: '100%', height: '100%', cursor: 'grab', background: '#0a0a0a' }}
     />
   )
 }

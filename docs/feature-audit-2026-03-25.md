@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline, LLM gateway, memory system, cortex, intel system, chat, dashboard, recovery, and auth are all fully implemented and integrated. The main gaps are in the recently-built knowledge sources system (credential retrieval TODO), sandbox tier isolation beyond `workspace`, and the planned-but-unimplemented Skills & Rules extensibility system.
+Nova is **~75-80% feature-complete** for autonomous operation. The core pipeline, LLM gateway, memory system, cortex thinking loop, chat, dashboard, recovery, and auth are all fully implemented and integrated. The main gaps are: (1) **Intel recommendation generation** — feed polling and CRUD endpoints work but the Cortex synthesis goals that analyze content and create recommendations are not implemented, (2) knowledge sources credential retrieval TODO, (3) sandbox tier isolation beyond `workspace`, and (4) the planned-but-unimplemented Skills & Rules extensibility system.
 
 ---
 
@@ -19,8 +19,8 @@ Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline
 | Core Quartet Pipeline | Fully Implemented | 100% | 5-stage chain, checkpointing, heartbeat, stale reaper |
 | LLM Gateway | Fully Implemented | 100% | 27+ providers, intelligent routing, caching |
 | Engram Memory System | Fully Implemented | 95% | All 7 phases working; neural router needs 200+ observations to activate |
-| Cortex (Autonomous Brain) | Fully Implemented | 100% | Thinking loop, 5 drives, goals, budget tracking |
-| Intel System | Fully Implemented | 100% | Feed polling, recommendations, goal integration |
+| Cortex (Autonomous Brain) | Partially Implemented | 85% | Thinking loop, 5 drives, goals, budget tracking; **intel synthesis goals NOT wired** |
+| Intel System | Partially Implemented | 50% | Feed polling + CRUD endpoints work; **recommendation generation pipeline NOT implemented** (see gaps below) |
 | Knowledge Sources | Partially Implemented | 75% | Crawler + GitHub extractor working; credential flow stubbed |
 | Chat System | Fully Implemented | 100% | WebSocket streaming, Telegram/Slack bridges |
 | Dashboard | Fully Implemented | 95% | 20 pages; Settings expansion planned |
@@ -43,7 +43,7 @@ Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline
 - Quartet pipeline: Context -> Task -> Guardrail -> Code Review -> Decision
 - Parallel agent support within pods
 - 66 database migrations, auto-run at startup
-- Intel router: feed CRUD, content ingestion, recommendations, comments
+- Intel router: feed CRUD, content ingestion, recommendation CRUD (listing/updating only — generation not implemented), comments
 - Knowledge router: source CRUD, credential CRUD, manual paste, stats
 - Goal management with maturation status tracking
 - MCP server registration and tool dispatch
@@ -85,8 +85,9 @@ Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline
 - Scheduler: periodic checks for idle goals, expired tasks
 - Maturation: goals track stages (triaging -> scoping -> speccing -> review -> building -> verifying)
 
-### Intel Worker (Port 8110) -- FULLY IMPLEMENTED
+### Intel Worker (Port 8110) -- PARTIALLY IMPLEMENTED
 
+**Working:**
 - Polling loop with configurable intervals per feed
 - 5 fetcher types: RSS, Reddit JSON, page change detection, GitHub trending, GitHub releases
 - Error backoff (exponential, capped at 24h)
@@ -94,7 +95,22 @@ Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline
 - Pushes to engram ingestion queue + intel notification queue
 - SSRF validation on all URLs
 - 14 default feeds seeded by migration
+- Orchestrator CRUD endpoints for feeds, content, recommendations, comments
+- Dashboard UI for browsing recommendations and managing feeds
+- Database schema fully designed (intel_feeds, intel_content_items, intel_recommendations, linkage tables)
+- System goals seeded in migration 040
 - **Tests:** Feed CRUD, SSRF protection, recommendation listing
+
+**NOT Implemented (critical gap):**
+- **Recommendation generation** — No code exists to analyze ingested intel content and create `intel_recommendations` records. The `RECOMMENDATION_CREATED` stimulus is defined but never fired. The three Cortex synthesis goals (Daily Knowledge Accumulation, Weekly Synthesis, Self-Improvement Check) are seeded as database records but have no task execution logic.
+- **Goal maturation pipeline** — The triage/scope/spec/review/build/verify lifecycle is defined in the schema and spec but the Cortex drive logic to execute these phases is not implemented.
+- The `POST /api/v1/intel/recommendations` creation endpoint exists in the router but nothing calls it automatically.
+
+**What needs to be built:**
+1. Cortex goal task handler for "Weekly Intelligence Synthesis" — reads recent intel content, cross-references with engram memory, generates graded (A/B/C) recommendations via LLM
+2. Cortex goal task handler for "Self-Improvement Check" — identifies capability gaps from accumulated intel
+3. Stimulus wiring so approved recommendations create linked goals
+4. Goal maturation drive logic in Cortex (scoping, speccing, etc.)
 
 ### Knowledge Worker (Port 8120) -- PARTIALLY IMPLEMENTED
 
@@ -167,7 +183,7 @@ Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline
 | Phase 6b -- Code Quality | Delivered | Delivered |
 | Phase 6d -- Platform Hardening | Delivered | Delivered |
 | Phase 6c -- Nova SDK, CLI/TUI | In Progress | NOT STARTED (large section, no code) |
-| Phase 7 -- Self-Directed Autonomy | In Progress | PARTIALLY DELIVERED (Cortex + goals exist, but not all Phase 7 items) |
+| Phase 7 -- Self-Directed Autonomy | In Progress | PARTIALLY DELIVERED (Cortex thinking loop + goals + drives exist; **intel synthesis goals and goal maturation drive logic not implemented**) |
 | Phase 7a -- Platform Self-Introspection | In Progress | NOT STARTED |
 | Phase 7b -- Supernova (Workflow Engine) | Planned | NOT STARTED |
 | Phase 8 -- Full Autonomous Loop | Planned | Cortex covers some of this already |
@@ -199,12 +215,17 @@ Nova is **~85-90% feature-complete** for autonomous operation. The core pipeline
 6. **Connect BuiltinCredentialProvider to the ABC** -- Make the pluggable interface real so future Vault/1Password backends can drop in.
 7. **Dashboard Settings expansion** -- .env editor, models.yaml editor (Phase 5b items).
 
+### High Priority (days — core gap)
+
+8. **Intel recommendation generation pipeline** — The most visible gap. Feed polling ingests content but nothing analyzes it or creates recommendations. Requires: (a) Cortex goal task handler for weekly synthesis — read recent `intel_content_items`, query engram memory for context, use LLM to generate graded recommendations, write to `intel_recommendations` table; (b) Self-improvement check goal handler — compare intel insights against Nova's current capabilities; (c) Wire `RECOMMENDATION_CREATED` stimulus so Cortex reacts to new recommendations. See spec: `docs/superpowers/specs/2026-03-25-intelligence-and-goal-maturation-design.md` sections on Synthesis Pipeline.
+9. **Goal maturation drive logic** — Goals can be created with maturation stages but Cortex doesn't execute the scoping/speccing/review/building/verifying phases. The Serve drive needs task handlers for each maturation stage.
+
 ### Strategic (weeks+)
 
-8. **Skills & Rules system** (Phase 5c) -- Agent extensibility for reusable prompt templates and pre-execution constraints.
-9. **Nova SDK & CLI/TUI** (Phase 6c) -- External developer interface.
-10. **Platform Self-Introspection** (Phase 7a) -- Nova understanding its own architecture.
-11. **Additional knowledge extractors** -- GitLab, social media, email/calendar (future phases of knowledge sources spec).
+10. **Skills & Rules system** (Phase 5c) -- Agent extensibility for reusable prompt templates and pre-execution constraints.
+11. **Nova SDK & CLI/TUI** (Phase 6c) -- External developer interface.
+12. **Platform Self-Introspection** (Phase 7a) -- Nova understanding its own architecture.
+13. **Additional knowledge extractors** -- GitLab, social media, email/calendar (future phases of knowledge sources spec).
 
 ---
 
