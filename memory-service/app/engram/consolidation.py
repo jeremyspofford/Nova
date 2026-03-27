@@ -209,13 +209,17 @@ async def run_consolidation(trigger: str = "manual") -> dict:
 async def _extract_patterns(session) -> int:
     """Phase 2: Find recurring themes and promote to schema engrams.
 
-    Looks for fact/preference engrams that share entities with 3+ episodes.
-    Uses LLM to synthesize the pattern into a schema engram.
+    Looks for entities referenced by 3+ distinct engrams. Uses LLM to
+    synthesize patterns into schema engrams with instance_of edges back
+    to source engrams. Quality gates ensure no truncated/vague/orphaned output.
     """
+    from .ingestion import _create_edge
+
     # Find entities referenced by 3+ distinct engrams
     result = await session.execute(
         text("""
-            SELECT e.content AS entity_name, count(DISTINCT ee.source_id) AS ref_count
+            SELECT e.id AS entity_id, e.content AS entity_name,
+                   count(DISTINCT ee.source_id) AS ref_count
             FROM engrams e
             JOIN engram_edges ee ON ee.target_id = e.id
             WHERE e.type = 'entity'
@@ -230,62 +234,126 @@ async def _extract_patterns(session) -> int:
 
     schemas_created = 0
     for entity_row in frequent_entities:
-        # Check if we already have a schema for this entity
-        existing = await session.execute(
-            text("""
-                SELECT id FROM engrams
-                WHERE type = 'schema'
-                  AND NOT superseded
-                  AND content ILIKE :pattern
-                LIMIT 1
-            """),
-            {"pattern": f"%{entity_row.entity_name}%"},
-        )
-        if existing.fetchone():
-            continue
+        entity_name = entity_row.entity_name
 
-        # Gather the related engrams' content
+        # Gather related engrams, ordered by importance + access_count
         related = await session.execute(
             text("""
-                SELECT DISTINCT e2.content, e2.type
+                SELECT DISTINCT e2.id, e2.content, e2.type, e2.importance, e2.access_count
                 FROM engram_edges ee
                 JOIN engrams e ON e.id = ee.target_id AND e.content = :entity
                 JOIN engram_edges ee2 ON ee2.target_id = e.id
                 JOIN engrams e2 ON e2.id = ee2.source_id AND NOT e2.superseded
-                WHERE e2.type IN ('fact', 'preference', 'episode')
+                WHERE e2.type IN ('fact', 'preference', 'episode', 'procedure')
+                ORDER BY e2.importance DESC, e2.access_count DESC
                 LIMIT 10
             """),
-            {"entity": entity_row.entity_name},
+            {"entity": entity_name},
         )
         related_items = related.fetchall()
         if len(related_items) < 3:
             continue
 
-        # Synthesize a schema via LLM
+        # Synthesize schema via LLM (with quality gates)
         items_text = "\n".join(f"- [{r.type}] {r.content}" for r in related_items)
-        schema_content = await _synthesize_schema(entity_row.entity_name, items_text)
-        if schema_content:
-            embedding = await get_embedding(schema_content, session)
-            await session.execute(
-                text("""
-                    INSERT INTO engrams (type, content, embedding, embedding_model,
-                                        importance, source_type, confidence)
-                    VALUES ('schema', :content, CAST(:embedding AS halfvec), :model,
-                            0.7, 'consolidation', 0.7)
-                """),
-                {
-                    "content": schema_content,
-                    "embedding": to_pg_vector(embedding),
-                    "model": settings.embedding_model,
-                },
+        schema_content = await _synthesize_schema(entity_name, items_text)
+        if not schema_content:
+            continue
+
+        # Compute embedding for the schema
+        embedding = await get_embedding(schema_content, session)
+
+        # Gate 4: Embedding coherence — schema must be similar to at least half its sources
+        source_embeddings = []
+        for r in related_items:
+            emb_row = await session.execute(
+                text("SELECT embedding FROM engrams WHERE id = CAST(:id AS uuid) AND embedding IS NOT NULL"),
+                {"id": str(r.id)},
             )
-            schemas_created += 1
+            row = emb_row.fetchone()
+            if row and row.embedding:
+                source_embeddings.append((str(r.id), row.embedding))
+
+        if source_embeddings:
+            schema_vec_str = to_pg_vector(embedding)
+            coherent_count = 0
+            for src_id, _ in source_embeddings:
+                sim_row = await session.execute(
+                    text("""
+                        SELECT 1 - (CAST(:schema_emb AS halfvec) <=> e.embedding) AS sim
+                        FROM engrams e WHERE e.id = CAST(:src_id AS uuid)
+                    """),
+                    {"schema_emb": schema_vec_str, "src_id": src_id},
+                )
+                sim = sim_row.scalar()
+                if sim and sim > settings.engram_schema_coherence_threshold:
+                    coherent_count += 1
+
+            if coherent_count < len(source_embeddings) / 2:
+                log.warning(
+                    "Schema for entity=%s failed coherence gate (%d/%d sources above %.2f)",
+                    entity_name, coherent_count, len(source_embeddings),
+                    settings.engram_schema_coherence_threshold,
+                )
+                continue
+
+        # Check for duplicate schema via embedding similarity
+        existing_schema = await session.execute(
+            text("""
+                SELECT id FROM engrams
+                WHERE type = 'schema'
+                  AND NOT superseded
+                  AND embedding IS NOT NULL
+                  AND 1 - (embedding <=> CAST(:emb AS halfvec)) > :threshold
+                LIMIT 1
+            """),
+            {
+                "emb": to_pg_vector(embedding),
+                "threshold": settings.engram_schema_dedup_threshold,
+            },
+        )
+        if existing_schema.fetchone():
+            continue
+
+        # Insert the schema engram
+        schema_row = await session.execute(
+            text("""
+                INSERT INTO engrams (type, content, embedding, embedding_model,
+                                    importance, source_type, confidence)
+                VALUES ('schema', :content, CAST(:embedding AS halfvec), :model,
+                        0.7, 'consolidation', 0.7)
+                RETURNING id
+            """),
+            {
+                "content": schema_content,
+                "embedding": to_pg_vector(embedding),
+                "model": settings.embedding_model,
+            },
+        )
+        schema_id = schema_row.scalar()
+
+        # Create instance_of edges from source engrams to schema
+        for r in related_items:
+            try:
+                await _create_edge(session, r.id, schema_id, "instance_of", 0.8)
+            except Exception:
+                log.warning("Failed to create instance_of edge for schema %s", schema_id, exc_info=True)
+
+        schemas_created += 1
+        log.info("Created schema for entity=%s with %d source edges", entity_name, len(related_items))
 
     return schemas_created
 
 
-async def _synthesize_schema(entity_name: str, items_text: str) -> str:
-    """Use LLM to extract a generalized pattern from related engrams."""
+async def _synthesize_schema(entity_name: str, items_text: str) -> str | None:
+    """Use LLM to extract a generalized pattern from related engrams.
+
+    Returns the pattern text if it passes quality gates, None otherwise.
+    Quality gates:
+    1. Response must complete naturally (not hit token limit)
+    2. Must reference the entity name
+    3. Content must be non-trivial (>20 chars)
+    """
     try:
         from .decomposition import resolve_model
         model = await resolve_model(settings.engram_consolidation_model)
@@ -295,22 +363,53 @@ async def _synthesize_schema(entity_name: str, items_text: str) -> str:
                 json={
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": "Extract a single generalized pattern from these observations. Return one concise sentence."},
-                        {"role": "user", "content": f"Entity: {entity_name}\n\nObservations:\n{items_text}"},
+                        {
+                            "role": "system",
+                            "content": (
+                                f'You are synthesizing a knowledge pattern from observations about "{entity_name}".\n\n'
+                                "Capture the full pattern — include key details, relationships, and conditions, "
+                                "not just the conclusion. Be concise but complete. If the pattern is simple, "
+                                "one sentence is fine. If it's complex, use a short paragraph.\n\n"
+                                "The pattern must:\n"
+                                f"- Reference {entity_name} by name\n"
+                                "- Be self-contained (understandable without reading the source observations)\n"
+                                "- Capture specifics, not vague generalizations"
+                            ),
+                        },
+                        {"role": "user", "content": f"Observations:\n{items_text}"},
                     ],
                     "temperature": 0.2,
-                    "max_tokens": 200,
+                    "max_tokens": settings.engram_schema_max_tokens,
                 },
             )
             resp.raise_for_status()
             data = resp.json()
+
+            # Gate 1: Check stop reason — reject truncated responses
+            stop_reason = data.get("stop_reason") or data.get("finish_reason", "")
+            if stop_reason in ("length", "max_tokens"):
+                log.warning("Schema synthesis truncated for entity=%s, discarding", entity_name)
+                return None
+
             content = data.get("content", "")
             if isinstance(content, list):
                 content = content[0].get("text", "") if content else ""
-            return content.strip()
+            content = content.strip()
+
+            # Gate 2: Non-trivial length
+            if len(content) < 20:
+                log.warning("Schema synthesis too short (%d chars) for entity=%s", len(content), entity_name)
+                return None
+
+            # Gate 3: Must reference the entity
+            if entity_name.lower() not in content.lower():
+                log.warning("Schema synthesis doesn't reference entity=%s, discarding", entity_name)
+                return None
+
+            return content
     except Exception:
-        log.warning("Schema synthesis failed", exc_info=True)
-        return ""
+        log.warning("Schema synthesis failed for entity=%s", entity_name, exc_info=True)
+        return None
 
 
 async def _hebbian_update(session) -> tuple[int, int]:
