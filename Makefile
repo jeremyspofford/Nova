@@ -21,7 +21,7 @@ ifneq ($(filter auto host,$(OLLAMA_BASE_URL)),)
   export OLLAMA_BASE_URL := $(RESOLVED_OLLAMA_URL)
 endif
 
-COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY)
+COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice
 
 # ─────────────────────────────────────────────────────────────────────────────
 help: ## Show available commands
