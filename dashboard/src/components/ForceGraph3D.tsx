@@ -58,7 +58,7 @@ export interface LayoutConfig {
 }
 
 export const LAYOUT_PRESETS: Record<string, LayoutConfig & { label: string; description: string }> = {
-  clustered: { label: 'Clustered', sphereRadius: 0, homeForce: 0, charge: -50, linkDist: 20, linkDistSpread: 35, description: 'Topic-clustered layout with spatial grouping' },
+  clustered: { label: 'Clustered', sphereRadius: 0, homeForce: 0, charge: -80, linkDist: 25, linkDistSpread: 40, description: 'Topic-clustered layout with spatial grouping' },
 }
 
 export const DEFAULT_LAYOUT = 'clustered'
@@ -788,17 +788,24 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         centroids.set(node.cluster_id, c)
       }
 
-      // Apply clustering force only to nodes in real topics
-      const strength = 0.008
+      // Apply clustering force only to nodes in real topics.
+      // Gentle pull (0.003) keeps nodes near their topic neighborhood
+      // without collapsing them into a single point. The stronger charge
+      // repulsion (-80) pushes nodes apart within the cluster.
+      const strength = 0.003
       for (const node of data.nodes) {
         if (node.x == null || node.cluster_id == null) continue
         if (node.cluster_label === 'Uncategorized') continue
         const c = centroids.get(node.cluster_id)
         if (!c || c.count < 2) continue
         const cx = c.x / c.count, cy = c.y / c.count, cz = c.z / c.count
-        node.vx = (node.vx ?? 0) + (cx - node.x) * strength
-        node.vy = (node.vy ?? 0) + (cy - node.y) * strength
-        node.vz = (node.vz ?? 0) + (cz - node.z) * strength
+        // Only pull if node is far from centroid — don't compress nodes already nearby
+        const dx = cx - node.x, dy = cy - node.y, dz = cz - node.z
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
+        if (dist < 15) continue  // already close enough, let charge handle spacing
+        node.vx = (node.vx ?? 0) + dx * strength
+        node.vy = (node.vy ?? 0) + dy * strength
+        node.vz = (node.vz ?? 0) + dz * strength
       }
     })
 
