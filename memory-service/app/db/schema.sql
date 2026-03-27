@@ -71,34 +71,6 @@ CREATE INDEX IF NOT EXISTS idx_sources_hash ON sources(content_hash) WHERE conte
 CREATE INDEX IF NOT EXISTS idx_sources_tenant ON sources(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_sources_trust ON sources(trust_score);
 
--- Link engrams to their provenance source
-DO $$ BEGIN
-    ALTER TABLE engrams ADD COLUMN source_ref_id UUID REFERENCES sources(id) ON DELETE SET NULL;
-EXCEPTION WHEN duplicate_column THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    ALTER TABLE engrams ADD COLUMN source_meta JSONB DEFAULT '{}';
-EXCEPTION WHEN duplicate_column THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    ALTER TABLE engrams ADD COLUMN temporal_validity TEXT DEFAULT 'unknown';
-EXCEPTION WHEN duplicate_column THEN NULL;
-END $$;
-
-DO $$ BEGIN
-    ALTER TABLE engrams ADD COLUMN valid_as_of TIMESTAMPTZ;
-EXCEPTION WHEN duplicate_column THEN NULL;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_engrams_source_ref ON engrams(source_ref_id) WHERE source_ref_id IS NOT NULL;
-
--- NOTE: The engram_archive table mirrors engrams but does NOT get these new columns.
--- Archived engrams will lose provenance linkage. This is acceptable — archived engrams
--- are cold storage and rarely queried. If needed, add matching ALTER TABLE statements
--- for engram_archive in a follow-up.
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Engram Network: graph-based cognitive memory
 -- Engrams are atomic memory nodes; engram_edges are weighted typed associations.
@@ -147,6 +119,34 @@ CREATE INDEX IF NOT EXISTS idx_engrams_occurred ON engrams(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_engrams_content_tsv ON engrams USING GIN (to_tsvector('english', content));
 CREATE INDEX IF NOT EXISTS idx_engrams_hnsw ON engrams
     USING hnsw (embedding halfvec_cosine_ops) WITH (m = 24, ef_construction = 128);
+
+-- Link engrams to their provenance source (must come after CREATE TABLE engrams)
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN source_ref_id UUID REFERENCES sources(id) ON DELETE SET NULL;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN source_meta JSONB DEFAULT '{}';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN temporal_validity TEXT DEFAULT 'unknown';
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+DO $$ BEGIN
+    ALTER TABLE engrams ADD COLUMN valid_as_of TIMESTAMPTZ;
+EXCEPTION WHEN duplicate_column THEN NULL;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_engrams_source_ref ON engrams(source_ref_id) WHERE source_ref_id IS NOT NULL;
+
+-- NOTE: The engram_archive table mirrors engrams but does NOT get these new columns.
+-- Archived engrams will lose provenance linkage. This is acceptable — archived engrams
+-- are cold storage and rarely queried. If needed, add matching ALTER TABLE statements
+-- for engram_archive in a follow-up.
 
 -- Engram edges: typed, weighted associations between engrams
 CREATE TABLE IF NOT EXISTS engram_edges (
