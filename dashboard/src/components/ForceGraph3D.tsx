@@ -93,6 +93,8 @@ interface ForceGraph3DProps {
   focusNodeTs?: number
   layoutPreset?: string
   neuralMode?: NeuralModeConfig
+  showBackgroundStars?: boolean
+  showInnerStars?: boolean
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -390,7 +392,7 @@ function makeGalaxyTexture(): CanvasTexture {
   return new CanvasTexture(canvas)
 }
 
-function createStarfield(): Group {
+function createStarfield(options: { bgStars: boolean; innerStars: boolean }): Group {
   const group = new Group()
   group.name = 'starfield'
 
@@ -436,46 +438,117 @@ function createStarfield(): Group {
     group.add(sprite)
   }
 
-  // ── Deep-field stars — static backdrop that's always visible ──
-  // Uses depthTest:false + renderOrder:-1 to render behind everything regardless
-  // of camera distance, and sizeAttenuation:false for constant pixel size.
-  const deepCount = 3000
-  const deepPos = new Float32Array(deepCount * 3)
-  const deepCol = new Float32Array(deepCount * 3)
+  // ── Deep-field stars — static backdrop ──
+  if (options.bgStars) {
+    // Uses depthTest:false + renderOrder:-1 to render behind everything regardless
+    // of camera distance, and sizeAttenuation:false for constant pixel size.
+    const deepCount = 3000
+    const deepPos = new Float32Array(deepCount * 3)
+    const deepCol = new Float32Array(deepCount * 3)
 
-  for (let i = 0; i < deepCount; i++) {
-    const r = 4000 + Math.random() * 4000
-    const theta = Math.random() * Math.PI * 2
-    const phi = Math.acos(2 * Math.random() - 1)
-    deepPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
-    deepPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
-    deepPos[i * 3 + 2] = r * Math.cos(phi)
+    for (let i = 0; i < deepCount; i++) {
+      const r = 4000 + Math.random() * 4000
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      deepPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+      deepPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+      deepPos[i * 3 + 2] = r * Math.cos(phi)
 
-    const t = Math.random()
-    if (t < 0.6) {
-      deepCol[i * 3] = 0.7 + Math.random() * 0.3
-      deepCol[i * 3 + 1] = 0.75 + Math.random() * 0.25
-      deepCol[i * 3 + 2] = 1.0
-    } else if (t < 0.8) {
-      deepCol[i * 3] = 1.0
-      deepCol[i * 3 + 1] = 0.85 + Math.random() * 0.15
-      deepCol[i * 3 + 2] = 0.6 + Math.random() * 0.2
-    } else {
-      deepCol[i * 3] = 0.4 + Math.random() * 0.2
-      deepCol[i * 3 + 1] = 0.5 + Math.random() * 0.2
-      deepCol[i * 3 + 2] = 1.0
+      const t = Math.random()
+      if (t < 0.6) {
+        deepCol[i * 3] = 0.7 + Math.random() * 0.3
+        deepCol[i * 3 + 1] = 0.75 + Math.random() * 0.25
+        deepCol[i * 3 + 2] = 1.0
+      } else if (t < 0.8) {
+        deepCol[i * 3] = 1.0
+        deepCol[i * 3 + 1] = 0.85 + Math.random() * 0.15
+        deepCol[i * 3 + 2] = 0.6 + Math.random() * 0.2
+      } else {
+        deepCol[i * 3] = 0.4 + Math.random() * 0.2
+        deepCol[i * 3 + 1] = 0.5 + Math.random() * 0.2
+        deepCol[i * 3 + 2] = 1.0
+      }
     }
+
+    const deepGeo = new BufferGeometry()
+    deepGeo.setAttribute('position', new Float32BufferAttribute(deepPos, 3))
+    deepGeo.setAttribute('color', new Float32BufferAttribute(deepCol, 3))
+    const deepStars = new Points(deepGeo, new PointsMaterial({
+      size: 1.5, vertexColors: true, transparent: true, opacity: 0.5,
+      sizeAttenuation: false, depthTest: false, depthWrite: false,
+    }))
+    deepStars.renderOrder = -1
+    group.add(deepStars)
   }
 
-  const deepGeo = new BufferGeometry()
-  deepGeo.setAttribute('position', new Float32BufferAttribute(deepPos, 3))
-  deepGeo.setAttribute('color', new Float32BufferAttribute(deepCol, 3))
-  const deepStars = new Points(deepGeo, new PointsMaterial({
-    size: 1.5, vertexColors: true, transparent: true, opacity: 0.5,
-    sizeAttenuation: false, depthTest: false, depthWrite: false,
-  }))
-  deepStars.renderOrder = -1
-  group.add(deepStars)
+  // ── Inner stars — mid-field particles surrounding the graph ──
+  if (options.innerStars) {
+    // Dim layer: 2000 particles, radius 600-1500, three color variants
+    const dimCount = 2000
+    const dimPos = new Float32Array(dimCount * 3)
+    const dimCol = new Float32Array(dimCount * 3)
+
+    for (let i = 0; i < dimCount; i++) {
+      const r = 600 + Math.random() * 900
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      dimPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+      dimPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+      dimPos[i * 3 + 2] = r * Math.cos(phi)
+
+      const t = Math.random()
+      if (t < 0.6) {
+        // Cool white/blue
+        dimCol[i * 3] = 0.8 + Math.random() * 0.2
+        dimCol[i * 3 + 1] = 0.85 + Math.random() * 0.15
+        dimCol[i * 3 + 2] = 1.0
+      } else if (t < 0.8) {
+        // Warm yellow
+        dimCol[i * 3] = 1.0
+        dimCol[i * 3 + 1] = 0.9 + Math.random() * 0.1
+        dimCol[i * 3 + 2] = 0.5 + Math.random() * 0.3
+      } else {
+        // Blue
+        dimCol[i * 3] = 0.4 + Math.random() * 0.2
+        dimCol[i * 3 + 1] = 0.5 + Math.random() * 0.2
+        dimCol[i * 3 + 2] = 1.0
+      }
+    }
+
+    const dimGeo = new BufferGeometry()
+    dimGeo.setAttribute('position', new Float32BufferAttribute(dimPos, 3))
+    dimGeo.setAttribute('color', new Float32BufferAttribute(dimCol, 3))
+    group.add(new Points(dimGeo, new PointsMaterial({
+      size: 0.8, vertexColors: true, transparent: true, opacity: 0.6,
+      sizeAttenuation: true, depthWrite: false,
+    })))
+
+    // Bright layer: 300 particles, radius 500-1500, white-blue
+    const brightCount = 300
+    const brightPos = new Float32Array(brightCount * 3)
+    const brightCol = new Float32Array(brightCount * 3)
+
+    for (let i = 0; i < brightCount; i++) {
+      const r = 500 + Math.random() * 1000
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      brightPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+      brightPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+      brightPos[i * 3 + 2] = r * Math.cos(phi)
+
+      brightCol[i * 3] = 0.85 + Math.random() * 0.15
+      brightCol[i * 3 + 1] = 0.9 + Math.random() * 0.1
+      brightCol[i * 3 + 2] = 1.0
+    }
+
+    const brightGeo = new BufferGeometry()
+    brightGeo.setAttribute('position', new Float32BufferAttribute(brightPos, 3))
+    brightGeo.setAttribute('color', new Float32BufferAttribute(brightCol, 3))
+    group.add(new Points(brightGeo, new PointsMaterial({
+      size: 2.0, vertexColors: true, transparent: true, opacity: 0.9,
+      sizeAttenuation: true, depthWrite: false,
+    })))
+  }
 
   return group
 }
@@ -519,6 +592,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   focusNodeTs,
   layoutPreset = DEFAULT_LAYOUT,
   neuralMode,
+  showBackgroundStars = true,
+  showInnerStars = false,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
@@ -535,6 +610,10 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const bloomPassRef = useRef<any>(null)
   const neuralModeRef = useRef(neuralMode)
   neuralModeRef.current = neuralMode
+  const showBgStarsRef = useRef(showBackgroundStars)
+  showBgStarsRef.current = showBackgroundStars
+  const showInnerStarsRef = useRef(showInnerStars)
+  showInnerStarsRef.current = showInnerStars
 
   // Activity visualization refs (imperative handle)
   const highlightedNodesRef = useRef<Set<string>>(new Set())
@@ -945,7 +1024,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     // Attach starfield if galaxy mode at init
     if (bgColorRef.current === 'galaxy') {
-      const sf = createStarfield()
+      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current })
       graph.scene().add(sf)
       starfieldRef.current = sf
     }
@@ -996,13 +1075,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     if (bgColor === 'galaxy') {
       graph.backgroundColor('#000000')
-      const sf = createStarfield()
+      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars })
       scene.add(sf)
       starfieldRef.current = sf
     } else {
       graph.backgroundColor(bgColor)
     }
-  }, [bgColor])
+  }, [bgColor, showBackgroundStars, showInnerStars])
 
   // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 
