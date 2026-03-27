@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Bot, Wrench, Palette, Users, Bug, Database, Lock,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
-  FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell,
+  FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell, Mic,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -68,6 +68,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'pipeline-models', label: 'Pipeline Models', icon: Layers },
       { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'tool-permissions', label: 'Tool Permissions', icon: Wrench },
+      { id: 'voice', label: 'Voice', icon: Mic },
     ],
   },
   {
@@ -456,6 +457,43 @@ export function Settings() {
 
           <div id="tool-permissions">
             <ToolPermissionsSection />
+          </div>
+
+          <div id="voice">
+            <Section icon={Mic} title="Voice" description="Speech recognition and synthesis settings. Requires docker compose --profile voice.">
+              <ConfigField
+                label="STT Provider"
+                configKey="voice.stt_provider"
+                value={useConfigValue(entries, 'voice.stt_provider', 'openai')}
+                description="Speech-to-text: openai (Whisper), deepgram"
+                onSave={handleSave}
+                saving={saveMutation.isPending}
+              />
+              <ConfigField
+                label="TTS Provider"
+                configKey="voice.tts_provider"
+                value={useConfigValue(entries, 'voice.tts_provider', 'openai')}
+                description="Text-to-speech: openai, elevenlabs"
+                onSave={handleSave}
+                saving={saveMutation.isPending}
+              />
+              <ConfigField
+                label="Voice"
+                configKey="voice.tts_voice"
+                value={useConfigValue(entries, 'voice.tts_voice', 'nova')}
+                description="OpenAI voices: alloy, echo, fable, onyx, nova, shimmer"
+                onSave={handleSave}
+                saving={saveMutation.isPending}
+              />
+              <ConfigField
+                label="TTS Model"
+                configKey="voice.tts_model"
+                value={useConfigValue(entries, 'voice.tts_model', 'tts-1')}
+                description="tts-1 (fast, ~200ms) or tts-1-hd (quality, ~500ms)"
+                onSave={handleSave}
+                saving={saveMutation.isPending}
+              />
+            </Section>
           </div>
 
           {/* ── Connections ──────────────────────────────────────────── */}

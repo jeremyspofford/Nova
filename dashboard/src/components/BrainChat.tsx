@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { X, Send, Loader2 } from 'lucide-react'
+import { X, Send, Loader2, Mic, Volume2, VolumeX } from 'lucide-react'
 import { streamChat, resolveModel, type ChatMessage } from '../api'
 import { cleanToolArtifacts } from '../utils/cleanToolArtifacts'
+import { useVoiceChat } from '../hooks/useVoiceChat'
 import { MessageBubble } from '../pages/chat/MessageBubble'
 import { useChatStore } from '../stores/chat-store'
 import type { Message, ActivityStep } from '../stores/chat-store'
@@ -19,6 +20,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   const [isStreaming, setIsStreaming] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const pendingTranscriptRef = useRef<string | null>(null)
 
   // Use shared model from chat store (syncs with main Chat page)
   const { modelId: sharedModelId } = useChatStore()
@@ -51,10 +53,35 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     return () => clearTimeout(timer)
   }, [])
 
-  const handleSubmit = useCallback(async () => {
-    const text = input.trim()
+  // Voice chat integration
+  const handleSubmitRef = useRef<(text?: string) => void>(() => {})
+
+  const {
+    isRecording, isTranscribing, recordingDuration,
+    toggleRecording, isSpeaking, muted, setMuted,
+    feedText, flushBuffer, stopAllPlayback, voiceAvailable,
+  } = useVoiceChat({
+    onTranscript: (text) => {
+      if (isStreaming) {
+        pendingTranscriptRef.current = text
+      } else {
+        handleSubmitRef.current(text)
+      }
+    },
+    onError: (err) => {
+      setMessages(prev => [...prev, {
+        id: crypto.randomUUID(),
+        role: 'assistant' as const,
+        content: `*${err}*`,
+        timestamp: new Date(),
+      }])
+    },
+  })
+
+  const handleSubmit = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim()
     if (!text || isStreaming) return
-    setInput('')
+    if (!overrideText) setInput('')
 
     // Add user message
     const userMsg: Message = {
@@ -90,6 +117,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
       for await (const event of streamChat(history, modelId || undefined)) {
         if (typeof event === 'string') {
           accumulated += event
+          feedText(event)  // Feed to TTS sentence buffer
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantId ? { ...m, content: accumulated } : m,
@@ -127,6 +155,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     } catch {
       accumulated += '\n\n*Error: connection lost*'
     } finally {
+      flushBuffer()  // Flush remaining TTS buffer
       setMessages(prev =>
         prev.map(m =>
           m.id === assistantId
@@ -137,7 +166,21 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
       setIsStreaming(false)
       onStreamComplete?.()
     }
-  }, [input, isStreaming, messages, modelId, onActivityStep, onStreamComplete])
+  }, [input, isStreaming, messages, modelId, onActivityStep, onStreamComplete, feedText, flushBuffer])
+
+  // Keep ref in sync so voice callbacks always call latest handleSubmit
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit
+  }, [handleSubmit])
+
+  // Drain pending voice transcript when streaming ends
+  useEffect(() => {
+    if (!isStreaming && pendingTranscriptRef.current) {
+      const text = pendingTranscriptRef.current
+      pendingTranscriptRef.current = null
+      handleSubmit(text)
+    }
+  }, [isStreaming, handleSubmit])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -156,9 +199,20 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
             <span className="text-xs text-stone-600 truncate max-w-[180px]">{modelId}</span>
           )}
         </div>
-        <button onClick={onClose} className="text-stone-500 hover:text-stone-300 transition-colors">
-          <X size={16} />
-        </button>
+        <div className="flex items-center gap-2">
+          {voiceAvailable && (
+            <button
+              onClick={() => setMuted(m => !m)}
+              className="text-stone-500 hover:text-stone-300 transition-colors"
+              title={muted ? 'Unmute voice' : 'Mute voice'}
+            >
+              {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+            </button>
+          )}
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-300 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -187,8 +241,24 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
             rows={1}
             disabled={isStreaming}
           />
+          {voiceAvailable && (
+            <button
+              onClick={toggleRecording}
+              disabled={isTranscribing}
+              className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                isRecording
+                  ? 'bg-red-600 hover:bg-red-500 animate-pulse'
+                  : isTranscribing
+                    ? 'bg-stone-700 cursor-wait'
+                    : 'bg-stone-700 hover:bg-stone-600'
+              } text-white`}
+              title={isRecording ? `Recording (${Math.floor(recordingDuration / 1000)}s)` : 'Push to talk'}
+            >
+              {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
+            </button>
+          )}
           <button
-            onClick={handleSubmit}
+            onClick={() => handleSubmit()}
             disabled={isStreaming || !input.trim()}
             className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-teal-600/80 hover:bg-teal-600 disabled:opacity-30 disabled:hover:bg-teal-600/80 text-white transition-colors"
           >

@@ -54,6 +54,14 @@ const CLUSTER_COLORS = [
 
 const DEFAULT_COLOR = '#71717a'
 
+/** Parse hex to [r,g,b] */
+function hexToRgb(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return [r, g, b]
+}
+
 function getColor(node: { type: string; cluster_id?: number }, useCluster: boolean): string {
   if (useCluster && node.cluster_id != null) {
     return CLUSTER_COLORS[node.cluster_id % CLUSTER_COLORS.length]
@@ -253,19 +261,53 @@ export function ForceGraph({ nodes, edges, selectedId, onSelectNode, className, 
       const color = getColor(node, useClusterColors)
       const alpha = 0.4 + node.activation * 0.6
 
+      const [cr, cg, cb] = hexToRgb(color)
+
       // Glow for selected/hovered
       if (isSelected || isHovered) {
+        const glowR = node.radius + 4
+        const glowGrad = ctx.createRadialGradient(
+          node.x, node.y, node.radius * 0.6,
+          node.x, node.y, glowR,
+        )
+        const ga = isSelected ? 0.35 : 0.18
+        glowGrad.addColorStop(0, `rgba(${cr},${cg},${cb},${ga})`)
+        glowGrad.addColorStop(1, `rgba(${cr},${cg},${cb},0)`)
         ctx.beginPath()
-        ctx.arc(node.x, node.y, node.radius + 3, 0, Math.PI * 2)
-        ctx.fillStyle = hexToRgba(color, isSelected ? 0.3 : 0.15)
+        ctx.arc(node.x, node.y, glowR, 0, Math.PI * 2)
+        ctx.fillStyle = glowGrad
         ctx.fill()
       }
 
-      // Node circle
+      // Node orb — radial gradient with offset highlight for 3D depth
+      const hlX = node.x - node.radius * 0.3  // highlight offset (upper-left)
+      const hlY = node.y - node.radius * 0.3
+      const orbGrad = ctx.createRadialGradient(
+        hlX, hlY, node.radius * 0.05,         // bright highlight core
+        node.x, node.y, node.radius,           // outer edge
+      )
+      // Bright highlight center
+      const hi = Math.min(255, cr + 80)
+      const hg = Math.min(255, cg + 80)
+      const hb = Math.min(255, cb + 80)
+      orbGrad.addColorStop(0, `rgba(${hi},${hg},${hb},${alpha})`)
+      // Base color at mid-radius
+      orbGrad.addColorStop(0.45, `rgba(${cr},${cg},${cb},${alpha})`)
+      // Darker rim
+      const dr = Math.floor(cr * 0.4)
+      const dg = Math.floor(cg * 0.4)
+      const db = Math.floor(cb * 0.4)
+      orbGrad.addColorStop(1, `rgba(${dr},${dg},${db},${alpha * 0.7})`)
+
       ctx.beginPath()
       ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2)
-      ctx.fillStyle = hexToRgba(color, alpha)
+      ctx.fillStyle = orbGrad
       ctx.fill()
+
+      // Rim ring for definition
+      ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha * 0.5})`
+      ctx.lineWidth = 0.5 / scale
+      ctx.stroke()
 
       if (isSelected) {
         ctx.strokeStyle = color

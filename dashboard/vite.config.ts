@@ -36,6 +36,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/cortex-api/, ''),
       },
+      // Voice Service — STT/TTS
+      '/voice-api': {
+        target: 'http://localhost:8130',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/voice-api/, ''),
+      },
     },
   },
 })

@@ -203,6 +203,29 @@ Cross-cutting reliability work shipped across hardening phases:
 
 ## In Progress — Partially Delivered
 
+### Voice Chat
+
+Push-to-talk voice interaction for the Brain page.
+
+**Delivered:**
+- Voice service microservice (port 8130, profile `voice`) — STT/TTS provider proxy
+- OpenAI Whisper STT with silence/hallucination guard
+- OpenAI TTS with 6 configurable voices (default: nova)
+- Provider abstraction (STTProvider/TTSProvider ABCs) — add providers by implementing one file
+- Push-to-talk mic button in BrainChat with recording states and duration limit
+- Sentence-buffered TTS playback — parallel synthesis, sequential playback
+- Text-to-speakable preprocessor — strips code blocks, URLs, markdown for natural speech
+- Echo cancellation and noise suppression on recording
+- Mute toggle, blob URL cleanup, transcript queuing during streaming
+- Voice section in dashboard Settings (STT/TTS provider, voice, model — runtime-configurable)
+- Docker Compose, Vite proxy, nginx proxy, integration tests
+
+**Remaining:**
+- Redis sliding window rate limiting for TTS requests
+- Cost tracking (per-request STT/TTS cost to Redis, dashboard display)
+- Speaker identification via voiceprint enrollment (v2)
+- Always-listening with voice activity detection and wake word (v3)
+
 ### Pipeline Performance
 
 Chat latency optimizations and intelligent routing shipped. Deeper pipeline optimizations remain.
