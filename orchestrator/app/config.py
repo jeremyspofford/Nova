@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     context_working_pct: float = 0.15
     context_compaction_threshold: float = 0.80  # Trigger at 80% usage
 
+    # Memory retrieval mode
+    memory_retrieval_mode: str = "inject"  # "inject" (legacy 40%), "tools" (agent-driven). Switch via dashboard Settings or .env
+    context_priming_pct: float = 0.05     # Domain awareness priming budget (small)
+
     service_host: str = "0.0.0.0"
     service_port: int = 8000
     log_level: str = "INFO"
