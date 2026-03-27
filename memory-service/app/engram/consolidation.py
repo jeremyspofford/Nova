@@ -102,6 +102,7 @@ async def run_consolidation(trigger: str = "manual") -> dict:
         stats = {
             "engrams_reviewed": 0,
             "schemas_created": 0,
+            "topics_created": 0,
             "edges_strengthened": 0,
             "edges_pruned": 0,
             "engrams_pruned": 0,
@@ -128,6 +129,21 @@ async def run_consolidation(trigger: str = "manual") -> dict:
             except Exception:
                 log.warning("Consolidation Phase 2 (pattern extraction) failed", exc_info=True)
 
+            # Phase 2.5: Topic Discovery — cluster engrams into topics
+            try:
+                from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
+                topics_created = await discover_topics(session)
+                topics_assigned = await assign_new_engrams_to_topics(session)
+                maintenance = await maintain_topics(session)
+                stats["topics_created"] = topics_created
+                log.info(
+                    "Phase 2.5: %d topics created, %d engrams assigned, %d dissolved, %d regenerated",
+                    topics_created, topics_assigned,
+                    maintenance.get("dissolved", 0), maintenance.get("regenerated", 0),
+                )
+            except Exception:
+                log.warning("Consolidation Phase 2.5 (topic discovery) failed", exc_info=True)
+
             # Phase 3: Edge Strengthening & Weakening (Hebbian)
             try:
                 strengthened, weakened = await _hebbian_update(session)
@@ -143,14 +159,12 @@ async def run_consolidation(trigger: str = "manual") -> dict:
             except Exception:
                 log.warning("Consolidation Phase 4 (contradiction resolution) failed", exc_info=True)
 
-            # Phase 5: Pruning & Merging
+            # Phase 5: Merging (pruning removed — engrams fade via activation decay)
             try:
-                pruned = await _prune_dead_engrams(session)
                 merged = await _merge_duplicates(session)
-                stats["engrams_pruned"] = pruned
                 stats["engrams_merged"] = merged
             except Exception:
-                log.warning("Consolidation Phase 5 (pruning/merging) failed", exc_info=True)
+                log.warning("Consolidation Phase 5 (merging) failed", exc_info=True)
 
             # Phase 6: Self-Model Update
             try:
@@ -164,12 +178,12 @@ async def run_consolidation(trigger: str = "manual") -> dict:
             await session.execute(
                 text("""
                     INSERT INTO consolidation_log
-                        (trigger_type, engrams_reviewed, schemas_created,
+                        (trigger_type, engrams_reviewed, schemas_created, topics_created,
                          edges_strengthened, edges_pruned, engrams_pruned,
                          engrams_merged, contradictions_resolved,
                          self_model_updates, model_used, duration_ms)
                     VALUES
-                        (:trigger, :reviewed, :schemas, :strengthened, :pruned_edges,
+                        (:trigger, :reviewed, :schemas, :topics, :strengthened, :pruned_edges,
                          :pruned_engrams, :merged, :contradictions,
                          CAST(:self_updates AS jsonb), :model, :duration)
                 """),
@@ -177,6 +191,7 @@ async def run_consolidation(trigger: str = "manual") -> dict:
                     "trigger": trigger,
                     "reviewed": stats["engrams_reviewed"],
                     "schemas": stats["schemas_created"],
+                    "topics": stats["topics_created"],
                     "strengthened": stats["edges_strengthened"],
                     "pruned_edges": stats["edges_pruned"],
                     "pruned_engrams": stats["engrams_pruned"],
@@ -191,9 +206,9 @@ async def run_consolidation(trigger: str = "manual") -> dict:
 
         _engrams_since_last = 0
         log.info(
-            "Consolidation complete (%s): %d reviewed, %d schemas, %d pruned, %d merged, %dms",
+            "Consolidation complete (%s): %d reviewed, %d schemas, %d topics, %d merged, %dms",
             trigger, stats["engrams_reviewed"], stats["schemas_created"],
-            stats["engrams_pruned"], stats["engrams_merged"], duration_ms,
+            stats["topics_created"], stats["engrams_merged"], duration_ms,
         )
         try:
             await emit_to_cortex("consolidation.complete", {
@@ -435,6 +450,7 @@ async def _hebbian_update(session) -> tuple[int, int]:
 
     # Weaken: decay edge weights slightly — only for edges older than 7 days
     # (protect young edges from being decayed before they get a chance to strengthen)
+    # Structural edges (instance_of, part_of) are exempt from decay — they must never fade
     result = await session.execute(
         text("""
             UPDATE engram_edges
@@ -442,6 +458,7 @@ async def _hebbian_update(session) -> tuple[int, int]:
             WHERE co_activations <= 1
               AND weight > 0.01
               AND created_at < NOW() - INTERVAL '7 days'
+              AND relation NOT IN ('instance_of', 'part_of')
             RETURNING id
         """),
         {"decay": settings.engram_edge_decay},
@@ -449,12 +466,14 @@ async def _hebbian_update(session) -> tuple[int, int]:
     weakened = len(result.fetchall())
 
     # Prune edges that have decayed to near-zero AND are old
+    # Structural edges (instance_of, part_of) are exempt from pruning — they must never be deleted
     result = await session.execute(
         text("""
             DELETE FROM engram_edges
             WHERE weight < 0.02
               AND co_activations <= 1
               AND created_at < NOW() - INTERVAL '14 days'
+              AND relation NOT IN ('instance_of', 'part_of')
             RETURNING id
         """)
     )
@@ -511,41 +530,6 @@ async def _resolve_contradictions(session) -> int:
 
     return resolved
 
-
-async def _prune_dead_engrams(session) -> int:
-    """Phase 5a: Move dead engrams to archive.
-
-    Dead = activation < floor AND no strong edges AND never accessed.
-    """
-    result = await session.execute(
-        text("""
-            WITH dead AS (
-                SELECT e.id
-                FROM engrams e
-                WHERE e.activation < :floor
-                  AND e.access_count = 0
-                  AND NOT EXISTS (
-                      SELECT 1 FROM engram_edges ee
-                      WHERE (ee.source_id = e.id OR ee.target_id = e.id)
-                        AND ee.weight > 0.1
-                  )
-                LIMIT 100
-            ),
-            archived AS (
-                INSERT INTO engram_archive
-                SELECT e.*, NOW() AS archived_at, 'dead_pruned' AS archive_reason
-                FROM engrams e
-                JOIN dead d ON d.id = e.id
-                RETURNING id
-            )
-            DELETE FROM engrams
-            WHERE id IN (SELECT id FROM dead)
-            RETURNING id
-        """),
-        {"floor": settings.engram_prune_activation_floor},
-    )
-    pruned = len(result.fetchall())
-    return pruned
 
 
 async def _merge_duplicates(session) -> int:
