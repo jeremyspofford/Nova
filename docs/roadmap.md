@@ -288,13 +288,13 @@ Cortex brain loop works. The feedback loop that makes it actually autonomous is 
 
 | Gap | Impact | Effort |
 |---|---|---|
-| **No task completion feedback** | Cortex dispatches tasks then never checks results. If task fails, cortex doesn't know. | 1-2 days |
-| **Hardcoded outcome scores** | Reports 0.2 (failure) or 0.7 (success) — no actual measurement | 1 day |
-| **No goal progress tracking** | `progress` field never updated, always 0.0 | 1 day |
+| ~~**No task completion feedback**~~ | ~~Cortex dispatches tasks then never checks results~~ | ✅ Delivered (TRACK phase) |
+| ~~**Hardcoded outcome scores**~~ | ~~Reports 0.2 or 0.7 — no actual measurement~~ | ✅ Delivered (status-based scoring) |
+| ~~**No goal progress tracking**~~ | ~~`progress` field never updated~~ | ✅ Delivered (iteration-based progress) |
 | **No goal decomposition** | Can't break "build a feature" into subtask DAG. One blob per cycle. | 2-3 weeks |
 | **Maturation pipeline stub** | Status columns exist but no executor transitions goals through phases | 2-3 days |
-| **No learning from failures** | Writes reflections but never reads them back | 1 week |
-| **Zero test coverage** | No cortex integration tests | 2 days |
+| **No learning from failures** | Writes reflections but never reads them back. **Spec complete** — see `docs/specs/2026-03-28-cortex-learning-from-experience.md` | 1 week |
+| **Zero test coverage** | Partial — `test_cortex_goals.py` covers cost tracking + goal schema. Full thinking loop tests still needed. | 2 days |
 
 ### RBAC & Multi-Tenancy
 
@@ -403,8 +403,9 @@ Safety: read tools unrestricted, write tools require confirmation, service resta
 - ✅ Outcome scores based on actual task status: complete=0.8, complete+findings=0.6, failed=0.2, cancelled=0.1, timeout=0.5
 - ✅ Goal progress updated based on iteration count vs max_iterations
 - ✅ Failed task errors stored in goal `current_plan` metadata for next cycle's LLM planning
-- Integration tests for cortex goal lifecycle — not yet
-- Read prior reflections before planning — not yet (engrams are written but not explicitly queried back)
+- ✅ Goal cost tracking — `total_cost_usd` on TaskOutcome, accumulated on goals per cycle
+- Integration tests for cortex goal lifecycle — partial (`test_cortex_goals.py` covers cost + schema)
+- Read prior reflections before planning — **spec complete**, implementation next (`docs/specs/2026-03-28-cortex-learning-from-experience.md`)
 
 ### P1: Skills & Rules System `[spec]`
 
