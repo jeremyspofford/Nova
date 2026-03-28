@@ -22,6 +22,9 @@ ifneq ($(filter auto host,$(OLLAMA_BASE_URL)),)
 endif
 
 COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice
+ALL_PROFILES = --profile voice --profile website --profile bridges --profile knowledge \
+               --profile local-ollama --profile local-vllm --profile local-sglang \
+               --profile cloudflare-tunnel --profile tailscale
 
 # ─────────────────────────────────────────────────────────────────────────────
 help: ## Show available commands
@@ -38,12 +41,12 @@ up: ## Start all services detached (production / staging)
 build: ## Rebuild all Docker images (run before up after code changes)
 	$(COMPOSE) build
 
-down: ## Stop and remove all containers
-	$(COMPOSE) down
+down: ## Stop and remove all containers (all profiles + orphans)
+	docker compose -f docker-compose.yml $(GPU_OVERLAY) $(ALL_PROFILES) down --remove-orphans
 
 # ── Develop ──────────────────────────────────────────────────────────────────
-dev: ## Start backend detached + Vite dashboard with hot-reload  [1-line dev]
-	$(COMPOSE) --profile website up -d
+dev: ## Start all services detached + Vite dashboard with hot-reload  [1-line dev]
+	$(COMPOSE) --profile website up -d --remove-orphans
 	cd $(DASHBOARD) && npm run dev
 
 watch: ## Sync Python source into running containers for backend hot-reload

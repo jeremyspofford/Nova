@@ -493,9 +493,10 @@ _AUTO_PREFERENCE: list[tuple[str, str, bool]] = [
 
 _FALLBACK_MODEL = "llama3.2"
 
-# Module-level cache for resolve result
+# Module-level cache for resolve result — lock prevents thundering herd on TTL expiry
 _resolve_cache: dict[str, tuple[str, str, float]] = {}  # "resolve" -> (model, source, timestamp)
 _RESOLVE_CACHE_TTL = 30.0  # seconds
+_resolve_lock = asyncio.Lock()
 
 
 def _best_ollama_model() -> str | None:
@@ -574,26 +575,34 @@ async def resolve_model() -> ResolveResponse:
     """Resolve the default chat model. If set to 'auto', picks the best available model."""
     import time as _time
 
-    # Check cache
+    # Check cache (fast path, no lock)
     cached = _resolve_cache.get("resolve")
     if cached:
         model, source, ts = cached
         if (_time.monotonic() - ts) < _RESOLVE_CACHE_TTL:
             return ResolveResponse(model=model, source=source)
 
-    # Read configured default from Redis
-    from app.registry import _get_redis_config
-    configured = await _get_redis_config("llm.default_chat_model", "auto")
+    # Lock prevents thundering herd — concurrent requests wait for the first resolver
+    async with _resolve_lock:
+        # Re-check after acquiring lock (another request may have filled it)
+        cached = _resolve_cache.get("resolve")
+        if cached:
+            model, source, ts = cached
+            if (_time.monotonic() - ts) < _RESOLVE_CACHE_TTL:
+                return ResolveResponse(model=model, source=source)
 
-    if configured == "auto":
-        model = await resolve_auto_model()
-        source = "auto"
-    else:
-        model = configured
-        source = "explicit"
+        from app.registry import _get_redis_config
+        configured = await _get_redis_config("llm.default_chat_model", "auto")
 
-    _resolve_cache["resolve"] = (model, source, _time.monotonic())
-    return ResolveResponse(model=model, source=source)
+        if configured == "auto":
+            model = await resolve_auto_model()
+            source = "auto"
+        else:
+            model = configured
+            source = "explicit"
+
+        _resolve_cache["resolve"] = (model, source, _time.monotonic())
+        return ResolveResponse(model=model, source=source)
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

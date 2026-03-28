@@ -11,7 +11,7 @@ interface Props {
 function ElapsedTimer({ startedAt }: { startedAt: number }) {
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 100)
+    const id = setInterval(() => setNow(Date.now()), 500)
     return () => clearInterval(id)
   }, [])
   return <span>{((now - startedAt) / 1000).toFixed(1)}s</span>

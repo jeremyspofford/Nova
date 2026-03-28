@@ -51,5 +51,6 @@ async def emit_stimulus(type: str, payload: dict | None = None, priority: int = 
     try:
         r = await _get_redis()
         await r.lpush(STIMULUS_KEY, json.dumps(stimulus))
+        await r.ltrim(STIMULUS_KEY, 0, 999)  # Cap at 1000 — prevent unbounded growth if Cortex is down
     except Exception as e:
         log.debug("Failed to emit stimulus %s: %s", type, e)

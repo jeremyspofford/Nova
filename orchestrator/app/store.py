@@ -52,6 +52,7 @@ async def create_agent(config: AgentConfig) -> AgentInfo:
     await redis.set(
         AGENT_KEY.format(agent_id=agent_id),
         info.model_dump_json(),
+        ex=86400,  # 24h TTL — prevents orphaned keys if agent crashes
     )
     log.info("Created agent %s (%s)", agent_id, config.name)
     return info
@@ -72,7 +73,7 @@ async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     agent.status = status
     agent.last_active = datetime.now(timezone.utc)
     redis = get_redis()
-    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json())
+    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json(), ex=86400)
 
 
 async def list_agents() -> list[AgentInfo]:
@@ -148,7 +149,7 @@ async def update_agent_config(
     agent.config.fallback_models = fallback_models
     agent.last_active = datetime.now(timezone.utc)
     redis = get_redis()
-    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json())
+    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json(), ex=86400)
     log.info("Updated config for agent %s (%s)", agent_id, agent.config.name)
     return agent
 

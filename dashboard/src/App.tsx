@@ -40,6 +40,7 @@ const queryClient = new QueryClient({
     queries: {
       retry: 1,
       staleTime: 5_000,
+      gcTime: 10 * 60_000, // 10 min — prevent stale queries lingering in memory
     },
   },
 })
@@ -50,7 +51,7 @@ const queryClient = new QueryClient({
  */
 async function checkBackendReady(): Promise<boolean> {
   try {
-    const resp = await fetch('/api/health/live', { signal: AbortSignal.timeout(3000) })
+    const resp = await fetch('/api/v1/pipeline/stats', { signal: AbortSignal.timeout(3000) })
     return resp.ok
   } catch {
     return false

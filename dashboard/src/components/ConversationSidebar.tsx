@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, MessageSquare, Archive, Trash2, Pencil, Check, X, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -48,34 +48,36 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
     if (editingId && editRef.current) editRef.current.focus()
   }, [editingId])
 
-  const filtered = search
-    ? conversations.filter(c => (c.title ?? '').toLowerCase().includes(search.toLowerCase()))
-    : conversations
+  const groups = useMemo(() => {
+    const filtered = search
+      ? conversations.filter(c => (c.title ?? '').toLowerCase().includes(search.toLowerCase()))
+      : conversations
 
-  // Group by time
-  const now = Date.now()
-  const DAY = 86400000
-  const groups: { label: string; items: Conversation[] }[] = []
-  const today: Conversation[] = []
-  const yesterday: Conversation[] = []
-  const week: Conversation[] = []
-  const month: Conversation[] = []
-  const older: Conversation[] = []
+    const now = Date.now()
+    const DAY = 86400000
+    const buckets: { label: string; items: Conversation[] }[] = []
+    const today: Conversation[] = []
+    const yesterday: Conversation[] = []
+    const week: Conversation[] = []
+    const month: Conversation[] = []
+    const older: Conversation[] = []
 
-  for (const c of filtered) {
-    const t = new Date(c.last_message_at ?? c.created_at).getTime()
-    const age = now - t
-    if (age < DAY) today.push(c)
-    else if (age < 2 * DAY) yesterday.push(c)
-    else if (age < 7 * DAY) week.push(c)
-    else if (age < 30 * DAY) month.push(c)
-    else older.push(c)
-  }
-  if (today.length) groups.push({ label: 'Today', items: today })
-  if (yesterday.length) groups.push({ label: 'Yesterday', items: yesterday })
-  if (week.length) groups.push({ label: 'This Week', items: week })
-  if (month.length) groups.push({ label: 'This Month', items: month })
-  if (older.length) groups.push({ label: 'Older', items: older })
+    for (const c of filtered) {
+      const t = new Date(c.last_message_at ?? c.created_at).getTime()
+      const age = now - t
+      if (age < DAY) today.push(c)
+      else if (age < 2 * DAY) yesterday.push(c)
+      else if (age < 7 * DAY) week.push(c)
+      else if (age < 30 * DAY) month.push(c)
+      else older.push(c)
+    }
+    if (today.length) buckets.push({ label: 'Today', items: today })
+    if (yesterday.length) buckets.push({ label: 'Yesterday', items: yesterday })
+    if (week.length) buckets.push({ label: 'This Week', items: week })
+    if (month.length) buckets.push({ label: 'This Month', items: month })
+    if (older.length) buckets.push({ label: 'Older', items: older })
+    return buckets
+  }, [conversations, search])
 
   const handleRename = async (id: string) => {
     if (!editTitle.trim()) { setEditingId(null); return }
@@ -234,7 +236,7 @@ export function ConversationSidebar({ currentId, onSelect, onNew, collapsed, onT
           </div>
         ))}
 
-        {filtered.length === 0 && (
+        {groups.length === 0 && (
           <div className="px-3 py-8 text-center text-caption text-content-tertiary">
             {search ? 'No matching conversations' : 'No conversations yet'}
           </div>

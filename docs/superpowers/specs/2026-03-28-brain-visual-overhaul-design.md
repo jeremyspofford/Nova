@@ -172,6 +172,70 @@ const [topicsOpen, setTopicsOpen] = useState(false)
 - **Animated edges disabled when graph > 500 nodes:** Too many particles would impact performance. Fall back to gradient with a note in settings.
 - **Settings persistence:** Settings are ephemeral (useState) for now. Future: persist to localStorage or Redis config.
 
+## Performance Amendments (2026-03-28)
+
+Added post-audit. The Brain page currently renders at **4 FPS** with 2000 nodes / 5744 edges (1.7MB payload, GPU stalls confirmed via browser profiling). The visual overhaul must not make this worse. These amendments are **required constraints** on the implementation.
+
+### P0: Cap Default Node Count to 500
+
+Until instancing and shader-driven animation land, cap `max_nodes` at 500. The visual overhaul at 500 nodes with high fidelity is far better than 2000 nodes at 2-4 FPS. The cap can be raised as the rendering architecture improves.
+
+### P0: Shader-Driven Animation (No JS forEach Loops)
+
+The current implementation has **3 separate `forEach` loops over all nodes every frame** (`ForceGraph3D.tsx:944-1015`): neural breathing, highlight fade, and birth fade-in. These produce ~360K property writes/sec at 2000 nodes.
+
+**Requirement:** The new star shader MUST handle breathing and fade-in via uniforms, not JavaScript iteration. Pass:
+- `u_time` (global uniform, updated once per frame)
+- Per-node attributes: `a_birthTime`, `a_importance`, `a_highlighted` (via `BufferGeometry` attributes or `InstancedBufferAttribute`)
+
+The GPU handles `sin(u_time + phase) * amplitude` natively — this eliminates all 3 JS loops entirely.
+
+### P1: Glow Overdraw Budget
+
+Large glow sprites (5-6x core radius) with additive blending on 500+ overlapping nodes will thrash GPU fill rate. Mitigations:
+
+- **Depth-sort glows back-to-front** and use `depthWrite: false` (already likely, but verify)
+- **Clamp glow opacity** — `max(0.15, importance * 0.4)` so dim nodes don't stack invisible overdraw
+- **Consider glow as a post-processing bloom** instead of per-node sprites. `UnrealBloomPass` is already imported — a single bloom pass on bright cores is cheaper than 500 additive sprites. Evaluate both approaches and pick the one with better frame time.
+
+### P1: Instanced Rendering
+
+`3d-force-graph` creates individual `Object3D` per node via `nodeThreeObject`. Each object = separate draw call + separate matrix update. At 500 nodes this is borderline; at 2000 it's a wall.
+
+**Requirement for this spec:** Use `nodeThreeObject` as currently planned (pragmatic for shipping). But structure the node creation so cores and glows use shared geometries and shared materials — this enables a future migration to `InstancedMesh` without rewriting the shader.
+
+**Future (out of scope for this spec):** Replace per-node `Object3D` with two `InstancedMesh` calls (one for cores, one for glows) using `InstancedBufferAttribute` for per-node color/size/importance. This reduces draw calls from ~1000 to ~2.
+
+### P2: Level-of-Detail by Zoom Distance
+
+At far zoom (camera distance > 800):
+- Hide node labels entirely
+- Reduce glow radius to 2-3x (from 5-6x)
+- Cull edges below a weight threshold (e.g., hide edges with weight < 0.3)
+
+At mid zoom (400-800):
+- Show glow at full size, no labels
+- Show all edges
+
+At close zoom (< 400):
+- Full detail — labels, full glow, all edges
+
+This can be implemented in the `useFrame` / `onRenderFramePre` callback with camera distance checks. Low effort, significant improvement when zoomed out on large graphs.
+
+### P2: Fix Existing Performance Bugs
+
+These pre-existing bugs in `ForceGraph3D.tsx` should be fixed during the overhaul since the relevant code is being rewritten anyway:
+
+| Bug | Location | Fix |
+|-----|----------|-----|
+| **Unbounded texture cache** | `labelTextureCache` (line 276-336) never evicts. 2000+ canvas textures leak VRAM. | Add LRU cap (200 entries) with `.dispose()` on eviction, or clear cache on graph data change. |
+| **CSS color read every frame** | `getCSSColor('--accent-500')` called per-link per-frame (line 130) | Read once into a `useRef` on mount + theme change. |
+| **Search query not debounced** | `Brain.tsx:131-136` — every keystroke fires a new graph query | Add 300ms debounce via `useDeferredValue` or a debounce utility. |
+
+### Animated Particles Implementation Note
+
+The spec allows 2 particles per edge, capped at 500 nodes. With typical edge density (~3 edges/node), that's ~1500 edges × 2 = 3000 particles. These MUST be rendered via a single `Points` geometry (one draw call) with per-particle position updates in a buffer, NOT as individual `Sprite` or `Mesh` objects. The `3d-force-graph` library's built-in `linkDirectionalParticles` uses this pattern — prefer it over a custom implementation if it supports the visual spec.
+
 ## Out of Scope
 
 - Voice input/output integration (separate feature)
@@ -179,3 +243,4 @@ const [topicsOpen, setTopicsOpen] = useState(false)
 - Mobile app shell / iOS/Android packaging
 - Topic Map mode (removed — revisit after clustering improvements)
 - Backend clustering algorithm changes
+- Full `InstancedMesh` migration (future — see P1 note above)

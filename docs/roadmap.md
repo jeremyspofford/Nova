@@ -20,7 +20,7 @@
 | **3 — Self-aware** | Nova understands its own architecture, config, health; can inspect and modify itself. | Not Started |
 | **4 — Triggered execution** | Tasks start from external events — git push, cron, webhook, Slack. | Partial (intel/knowledge polling) |
 | **5 — Reactive** | Nova watches continuous streams, applies AI judgment, acts autonomously. | Not Started |
-| **6 — Self-directed** | Nova breaks goals into subtasks, executes, evaluates, re-plans, loops to completion. | Partial (cortex exists, feedback loop missing) |
+| **6 — Self-directed** | Nova breaks goals into subtasks, executes, evaluates, re-plans, loops to completion. | Partial (cortex exists, goal loop blocked — see P1: Autonomous Loop Activation) |
 
 ---
 
@@ -49,7 +49,7 @@ Multi-provider model routing with 27+ provider files.
 - **Providers:** Ollama, Anthropic, OpenAI, Groq, Gemini, Cerebras, OpenRouter, GitHub Models, vLLM, SGLang, Claude/ChatGPT subscription, remote OpenAI-compatible
 - **Routing strategies:** local-only, local-first, cloud-only, cloud-first
 - **Intelligent routing:** Classifier-based (general/code/reasoning/creative/quick) with cascading classifier models (Ollama → Groq → Cerebras), per-category model preference lists, auto-fallback
-- Auto model resolution with 30s caching, quality-ranked preference list
+- Auto model resolution with 30s caching, quality-ranked preference list, vLLM availability tracks Redis config (fixed 2026-03-28)
 - Response caching (300s TTL), rate limiting (Redis sliding window)
 - Token counting + cost tracking via LiteLLM
 - SSE metadata events (model, category) before content deltas
@@ -105,9 +105,11 @@ Autonomous AI ecosystem feed poller. Feed ingestion is operational; recommendati
 - Database schema: intel_feeds, intel_content_items, intel_recommendations, linkage tables
 
 **Not yet implemented:**
-- Recommendation generation — no Cortex goal or background task analyzes intel content and creates recommendations. The CRUD endpoints exist but nothing populates the `intel_recommendations` table.
+- Recommendation generation — no Cortex goal or background task analyzes intel content and creates recommendations. The CRUD endpoints exist (GET/PATCH/DELETE) but POST is missing and nothing populates the `intel_recommendations` table. Root cause analysis and implementation plan in **P1: Autonomous Loop Activation, Tier 3**.
 - Goal maturation pipeline — maturation stages defined in schema but Cortex drive logic to execute them is not built.
+- `intel:new_items` Redis queue (db6) has no consumer — accumulates indefinitely as dead letter.
 - See spec: `docs/superpowers/specs/2026-03-25-intelligence-and-goal-maturation-design.md`
+- See analysis: `docs/superpowers/specs/2026-03-28-platform-health-analysis.md`
 
 ### Knowledge Sources (Port 8120)
 
@@ -194,7 +196,7 @@ Cross-cutting reliability work shipped across hardening phases:
 ### Testing
 
 - 150+ integration tests hitting real running services (no mocks)
-- 18 test files covering: health, pipeline mechanics/behavior, SSRF, intel, knowledge, RBAC, inference backends, memory, recovery
+- 22 test files covering: health, pipeline mechanics/behavior, SSRF, intel, knowledge, RBAC, inference backends, memory, recovery, cortex goals, model discovery, consolidation, agent capabilities
 - Tests create resources with `nova-test-` prefix, clean up via fixture teardown
 - `make test` (full suite, ~2 min) / `make test-quick` (health only, ~0.4s)
 - Dashboard: `cd dashboard && npm run build` (TypeScript compilation check)
@@ -252,7 +254,7 @@ Full design spec: `docs/superpowers/specs/2026-03-17-performance-optimization-de
 
 ### Dashboard Enhancement
 
-Pod management and core settings done. Advanced pipeline visibility and settings expansion remain.
+Pod management and core settings done. Advanced pipeline visibility and settings expansion remain. Brain page visual overhaul planned — see **P1: Brain Visual Overhaul** in Priority Backlog.
 
 **Delivered:**
 - Pod management page with full CRUD and per-agent configuration
@@ -284,17 +286,19 @@ Cortex brain loop works. The feedback loop that makes it actually autonomous is 
 - Stimulus system for event-driven reactivity
 - Scheduler for periodic health checks
 
-**Remaining — Cortex gaps identified by audit:**
+**Remaining — Cortex gaps identified by audit (updated 2026-03-28):**
 
 | Gap | Impact | Effort |
 |---|---|---|
 | ~~**No task completion feedback**~~ | ~~Cortex dispatches tasks then never checks results~~ | ✅ Delivered (TRACK phase) |
 | ~~**Hardcoded outcome scores**~~ | ~~Reports 0.2 or 0.7 — no actual measurement~~ | ✅ Delivered (status-based scoring) |
 | ~~**No goal progress tracking**~~ | ~~`progress` field never updated~~ | ✅ Delivered (iteration-based progress) |
+| ~~**Cost tracking pipeline broken**~~ | ~~`cost_so_far_usd` never written — 3 gaps in the data pipeline~~ | ✅ Fixed 2026-03-28 |
+| **Goals stuck — LLM planner always skips** | Serve drive sends only title (no description/history/plan) to planner. "skip" escape hatch too easy. `last_checked_at` not updated on skip → infinite 30s loop. 6700+ wasted cycles. | **See P1: Autonomous Loop Activation** |
 | **No goal decomposition** | Can't break "build a feature" into subtask DAG. One blob per cycle. | 2-3 weeks |
 | **Maturation pipeline stub** | Status columns exist but no executor transitions goals through phases | 2-3 days |
 | **No learning from failures** | Writes reflections but never reads them back. **Spec complete** — see `docs/specs/2026-03-28-cortex-learning-from-experience.md` | 1 week |
-| **Zero test coverage** | Partial — `test_cortex_goals.py` covers cost tracking + goal schema. Full thinking loop tests still needed. | 2 days |
+| **Partial test coverage** | `test_cortex_goals.py` covers cost tracking + goal schema. Full thinking loop tests still needed. | 2 days |
 
 ### RBAC & Multi-Tenancy
 
@@ -395,17 +399,95 @@ Ordered by dependency and impact on the autonomy vision. Detailed design specs f
 
 Safety: read tools unrestricted, write tools require confirmation, service restarts require explicit approval, all self-modifications audit-logged, no source code modification.
 
-### ✅ P1: Cortex Task Feedback Loop — Delivered 2026-03-25
+### ✅ P1: Cortex Task Feedback Loop — Delivered 2026-03-25, cost fix 2026-03-28
 
-**Delivered in commit `f990eb8` (Tier 1).**
+**Delivered in commit `f990eb8` (Tier 1). Cost pipeline fixed 2026-03-28.**
 
 - ✅ New TRACK phase in thinking cycle (between ACT and REFLECT) — `task_tracker.py` polls orchestrator for task completion
 - ✅ Outcome scores based on actual task status: complete=0.8, complete+findings=0.6, failed=0.2, cancelled=0.1, timeout=0.5
 - ✅ Goal progress updated based on iteration count vs max_iterations
 - ✅ Failed task errors stored in goal `current_plan` metadata for next cycle's LLM planning
-- ✅ Goal cost tracking — `total_cost_usd` on TaskOutcome, accumulated on goals per cycle
+- ✅ Goal cost tracking — 3-gap pipeline fixed 2026-03-28: `executor.py` rolls up agent_session costs to `tasks.total_cost_usd`, `pipeline_router.py` includes cost in task detail response, `task_tracker.py` carries cost in `TaskOutcome`, `cycle.py` accumulates cost on every goal update
 - Integration tests for cortex goal lifecycle — partial (`test_cortex_goals.py` covers cost + schema)
 - Read prior reflections before planning — **spec complete**, implementation next (`docs/specs/2026-03-28-cortex-learning-from-experience.md`)
+
+### P1: Autonomous Loop Activation — 2026-03-28
+
+**Why:** The autonomous loop infrastructure is built (Cortex, Intel, Memory, Goals, Recommendations) but the end-to-end flow is broken at multiple integration points. Goals never dispatch tasks. Intel never generates recommendations. The chat agent can't verify its own state. Fixing these turns "infrastructure exists" into "Nova actually does things autonomously."
+
+**Analysis:** `docs/superpowers/specs/2026-03-28-platform-health-analysis.md`
+
+**Phase structure:** 5 sequential tiers, each independently shippable. Work serially to minimize conflicts.
+
+#### Tier 1: Unblock the goal execution loop (~1 day)
+
+The cortex thinking loop runs 6700+ cycles producing nothing because the LLM planner always says "skip." Five reinforcing bugs create an infinite no-op loop.
+
+| Fix | File(s) | Description |
+|---|---|---|
+| Enrich planning context | `cortex/app/drives/serve.py` | Query `description`, `current_plan`, `iteration`, `max_iterations`, `cost_so_far_usd` — not just title/priority |
+| Remove easy skip | `cortex/app/cycle.py` | Restructure prompt: require a plan when urgency > 0. Move skip to structured output with mandatory reason. |
+| Update `last_checked_at` on skip | `cortex/app/cycle.py` | Prevent the same stale goal from triggering every 30 seconds |
+| Fix adaptive timeout for skips | `cortex/app/cycle.py` | Set `action_taken` to `"idle"` on skip so timeout stays long (5min), not short (30s) |
+| Add skip counter → forced action | `cortex/app/cycle.py` | After 3 consecutive skips, force dispatch with drive's proposed_action or escalate to user |
+| Enforce max_iterations/max_cost | `cortex/app/drives/serve.py` | Exclude goals where `iteration >= max_iterations` or `cost_so_far_usd >= max_cost_usd` from stale query |
+
+**Verification:** Cortex logs show `outcome=Task dispatched` instead of `outcome=Skipped`. Goals advance past iteration 1.
+
+#### Tier 2: Agent self-awareness tools (~0.5 day)
+
+The chat agent makes false claims about consolidation and its own capabilities because it has no tools to verify system state.
+
+| Fix | File(s) | Description |
+|---|---|---|
+| `get_consolidation_status` tool | `orchestrator/app/tools/memory_tools.py` | Wraps `GET /consolidation-log?limit=5`. Agent can verify consolidation is running. |
+| `get_memory_stats` tool | `orchestrator/app/tools/memory_tools.py` | Wraps `GET /stats`. Agent can verify engram count, last ingestion time. |
+| `trigger_consolidation` tool | `orchestrator/app/tools/memory_tools.py` | Wraps `POST /consolidate` with cooldown check. |
+| Expand self-knowledge narrative | `orchestrator/app/agents/runner.py` | Add "What I Can Do" section describing all 7 tool groups, not just 5 diagnosis tools. Add missing services (voice, chat-bridge). |
+| Metacognition guidance | `orchestrator/app/agents/runner.py` | Add "verify before asserting" pattern to self-knowledge block. |
+| Expose all tools in catalog | `orchestrator/app/tools/__init__.py` or tool router | Add Diagnosis, Introspect, and Memory groups to `/api/v1/tools` response. |
+
+**Verification:** Ask chat agent "is consolidation working?" — it calls `get_consolidation_status` and gives a factual answer.
+
+#### Tier 3: Intel recommendation pipeline (~1-2 days)
+
+14 feeds produce 711 items/week but 0 recommendations. The grading step was never built.
+
+| Fix | File(s) | Description |
+|---|---|---|
+| `POST /api/v1/intel/recommendations` | `orchestrator/app/intel_router.py` | Create endpoint for recommendation insertion. |
+| Intel MCP tools for Cortex | `orchestrator/app/tools/intel_tools.py` (new) | `query_intel_content`, `create_recommendation`, `get_dismissed_hashes` — let Cortex grade content via system goals. |
+| System goal descriptions | Migration or seed update | Add concrete descriptions and success criteria to "Daily Intelligence Sweep" and "Weekly Intelligence Synthesis" goals. |
+| Drain dead queue | `intel-worker/app/queue.py` | Either add a consumer for `intel:new_items` (db6) or stop pushing to it. Currently leaks memory indefinitely. |
+
+**Verification:** `GET /api/v1/intel/recommendations` returns non-empty list. Dashboard "Suggested" tab shows recommendations.
+
+#### Tier 4: Sources UX clarity (~0.5 day)
+
+Two unrelated concepts share the name "Sources" in the dashboard, causing user confusion.
+
+| Fix | File(s) | Description |
+|---|---|---|
+| Rename sidebar link | `dashboard/src/components/layout/Sidebar.tsx` | "Sources" → "Knowledge" |
+| Rename Engram Explorer tab | `dashboard/src/pages/EngramExplorer.tsx` | "Sources" tab → "Provenance" |
+| Fix auth bypass | `dashboard/src/pages/EngramExplorer.tsx` | SourcesTab uses raw `fetch()` instead of `apiFetch()`, skipping auth headers |
+| Update help text | Overview.tsx, Sources.tsx, EngramExplorer.tsx | Clarify the distinction in help entries and descriptions |
+
+**Verification:** No two pages share the label "Sources." Auth-gated endpoints work on the Provenance tab.
+
+#### Tier 5: Regression test coverage (~0.5 day)
+
+Tests written during this analysis. Expand to cover the new code from Tiers 1-4.
+
+| Test | File | Covers |
+|---|---|---|
+| Goal planning context | `tests/test_cortex_goals.py` | Goals return description, current_plan, cost fields |
+| Model discovery | `tests/test_model_discovery.py` | vLLM availability matches Redis, all providers listed |
+| Consolidation health | `tests/test_consolidation.py` | Consolidation running, log shape, manual trigger |
+| Agent tools | `tests/test_agent_capabilities.py` | Tool catalog completeness, memory endpoints functional |
+| Recommendation pipeline | `tests/test_agent_capabilities.py` | POST endpoint exists, approve→goal flow works |
+
+**Total effort:** ~4 days, working serially through Tiers 1-5.
 
 ### P1: Skills & Rules System `[spec]`
 
@@ -420,6 +502,28 @@ Safety: read tools unrestricted, write tools require confirmation, service resta
 - CRUD endpoints in pipeline_router.py + Skills/Rules dashboard pages
 
 **Effort:** 2-3 weeks
+
+### P1: Brain Visual Overhaul `[spec]`
+
+**Why:** The Brain page is Nova's primary interface — not a dashboard panel. Users will open the app and see the brain, talk to Nova via microphone, and watch memories glow during conversation. The current solid-sphere rendering, scattered-corners layout, and 4 FPS at 2000 nodes don't support this vision.
+
+**Spec:** `docs/superpowers/specs/2026-03-28-brain-visual-overhaul-design.md`
+
+**Three phases (each ships independently):**
+
+| Phase | What | Status |
+|---|---|---|
+| **1 — Star shader + layout** | Star-style nodes (soft glow, no hard edge), bloom-driven glow (remove 500 per-node sprites), shader-driven animation (eliminate 3 per-frame forEach loops), node cap at 500, minimal HUD layout (stats pill, icon overlays, mic button). Plan: `docs/superpowers/plans/2026-03-28-brain-overhaul-phase1.md` | Not Started |
+| **2 — Configurability** | Color mode toggle (domain/type/importance), edge style toggle (static/gradient/animated particles + speed slider), settings overlay panel | Not Started |
+| **3 — Polish** | Level-of-detail by zoom distance, fix texture cache VRAM leak, debounce search query, cache CSS color reads | Not Started |
+
+**Performance constraints (from spec amendments):**
+- P0: Cap `max_nodes` at 500 until instancing lands
+- P0: Breathing/fade-in/highlight animation via shader uniforms, not JS forEach
+- P1: Evaluate bloom vs sprites for glow (bloom likely wins at 500+ nodes)
+- P1: Shared geometry across nodes (prep for future InstancedMesh migration)
+
+**Effort:** Phase 1: 1-2 days. Phase 2: 1 day. Phase 3: 0.5 day.
 
 ### P2: Nova SDK & CLI `[spec]`
 
@@ -556,7 +660,7 @@ Comprehensive 5-discipline review (architecture, backend, frontend, security, te
 | ID | Finding | Effort |
 |---|---|---|
 | ARCH-3 | `working_memory_slots` never cleaned up — unbounded growth | 2 hours |
-| ARCH-5 | `intel:new_items` queue written but never consumed — dead code | 1 hour |
+| ARCH-5 | `intel:new_items` queue written but never consumed — dead code. **Addressed in P1: Autonomous Loop Activation, Tier 3.** | 1 hour |
 | ARCH-7 | Orphaned comments/engram references after parent deletion | 2 hours |
 | SEC-5 | Google OAuth bypasses invite-only registration | 1 hour |
 | SEC-6 | No rate limiting on login/register — brute force possible | 2 hours |
@@ -602,11 +706,13 @@ Comprehensive 5-discipline review (architecture, backend, frontend, security, te
 - Dead letter queue grows unbounded — no TTL, no cleanup, no archival
 - Episodic memory partitions hardcoded through 2026-04 — need auto-creation
 
-**Cortex — partially resolved (2026-03-25):**
-- Zero test coverage — no integration tests for goals, drives, or thinking loop
+**Cortex — partially resolved (2026-03-25, updated 2026-03-28):**
+- Partial test coverage — `test_cortex_goals.py` covers cost tracking + goal schema. Thinking loop tests still needed.
 - ~~Dispatches tasks without checking results~~ — TRACK phase polls orchestrator, reads results
 - ~~Hardcoded outcome scores~~ — actual measurement based on task status (0.8/0.6/0.2/0.1/0.5)
 - ~~`progress` field never updated~~ — updated based on iteration count vs max_iterations
+- ~~Cost tracking pipeline broken~~ — 3-gap fix shipped 2026-03-28
+- Goals stuck in skip loop — root cause analyzed, fix planned in P1: Autonomous Loop Activation, Tier 1
 
 ### Deferred Features
 

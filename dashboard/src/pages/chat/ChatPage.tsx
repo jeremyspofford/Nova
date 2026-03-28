@@ -51,6 +51,9 @@ export function Chat() {
   // Track conversation switches to use instant scroll (no animation) on load
   const lastConversationId = useRef(conversationId)
   const needsInstantScroll = useRef(true)
+  // Ref for messages so handleSubmit doesn't recreate on every message change
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
 
   const { data: providers } = useQuery({
     queryKey: ['model-catalog'],
@@ -199,9 +202,9 @@ export function Chat() {
       return newId
     })()
 
-    // Build message history
+    // Build message history (read from ref to avoid dep-array churn)
     const history: ChatMessage[] = [
-      ...messages.map(m => ({ role: m.role as ChatMessage['role'], content: m.content })),
+      ...messagesRef.current.map(m => ({ role: m.role as ChatMessage['role'], content: m.content })),
     ]
 
     // Build user message content — multimodal if attachments present
@@ -302,7 +305,7 @@ export function Chat() {
         queryClient.invalidateQueries({ queryKey: ['conversations'] })
       }
     }
-  }, [messages, sessionId, conversationId, modelId, isStreaming, setMessages, setSessionId, setError, pendingFiles, setPendingFiles, outputStyle, customInstructions, webSearchEnabled, deepResearchEnabled, queryClient])
+  }, [sessionId, conversationId, modelId, isStreaming, pendingFiles, outputStyle, customInstructions, webSearchEnabled, deepResearchEnabled, queryClient])
 
   // Process queued messages sequentially when streaming completes
   useEffect(() => {
