@@ -34,7 +34,7 @@ function usePaletteItems(navigate: ReturnType<typeof useNavigate>): PaletteItem[
     { id: 'page-chat', label: 'Chat', icon: MessageSquare, category: 'Pages', action: () => navigate('/chat') },
     { id: 'page-tasks', label: 'Tasks', icon: ListTodo, category: 'Pages', action: () => navigate('/tasks') },
     { id: 'page-goals', label: 'Goals', icon: Target, category: 'Pages', action: () => navigate('/goals') },
-    { id: 'page-memory', label: 'Memory', icon: Brain, category: 'Pages', action: () => navigate('/engrams') },
+    { id: 'page-brain', label: 'Brain', icon: Brain, category: 'Pages', action: () => navigate('/') },
     { id: 'page-pods', label: 'Pods', icon: Boxes, category: 'Pages', action: () => navigate('/pods') },
     { id: 'page-models', label: 'Models', icon: Monitor, category: 'Pages', action: () => navigate('/models') },
     { id: 'page-keys', label: 'Keys', icon: Shield, category: 'Pages', action: () => navigate('/keys') },
