@@ -1,23 +1,30 @@
-import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Database } from 'lucide-react'
 import { apiFetch } from '../../api'
 import { Section, EmptyState, Skeleton } from '../../components/ui'
 
-export function EngramSourcesSection() {
-  const [sources, setSources] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
+interface EngramSource {
+  id: string
+  title: string | null
+  source_kind: string
+  engram_count: number
+  summary: string | null
+  trust_score: number
+  stale: boolean
+  completeness: string
+  coverage_notes: string | null
+  uri: string | null
+}
 
-  useEffect(() => {
-    setLoading(true)
-    apiFetch('/mem/api/v1/engrams/sources')
-      .then((data: any) => setSources(Array.isArray(data) ? data : []))
-      .catch(() => setSources([]))
-      .finally(() => setLoading(false))
-  }, [])
+export function EngramSourcesSection() {
+  const { data: sources = [], isLoading } = useQuery<EngramSource[]>({
+    queryKey: ['engram-sources'],
+    queryFn: () => apiFetch('/mem/api/v1/engrams/sources'),
+  })
 
   return (
     <Section icon={Database} title="Engram Sources" description="Tracked origins of ingested content — conversations, feeds, crawled pages, and documents that Nova has processed into memories.">
-      {loading ? (
+      {isLoading ? (
         <Skeleton lines={5} />
       ) : (
         <div className="space-y-3">
@@ -28,7 +35,7 @@ export function EngramSourcesSection() {
               description="Sources are created when content is ingested through conversations, feeds, or crawls."
             />
           ) : (
-            sources.map((s: any) => (
+            sources.map((s) => (
               <div key={s.id} className="bg-surface-elevated rounded-lg p-3">
                 <div className="flex justify-between items-start">
                   <div>
