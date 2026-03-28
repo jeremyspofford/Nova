@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, MessageSquare, X, ChevronRight, Network } from 'lucide-react'
 import { apiFetch } from '../api'
@@ -58,6 +58,17 @@ const TYPE_COLORS: Record<string, string> = {
   episode:    '#fbbf24',
   schema:     '#f87171',
   goal:       '#c084fc',
+}
+
+const TYPE_FILTER_CLASSES: Record<string, string> = {
+  fact: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+  entity: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+  preference: 'bg-green-500/20 text-green-300 border-green-500/30',
+  procedure: 'bg-stone-500/20 text-stone-300 border-stone-500/30',
+  self_model: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+  episode: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30',
+  schema: 'bg-red-500/20 text-red-300 border-red-500/30',
+  goal: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
 }
 
 const TYPE_DESCRIPTIONS: Record<string, string> = {
@@ -126,6 +137,7 @@ export default function Brain() {
   const [showInnerStars, setShowInnerStars] = useState(false)
   const [showNebulae, setShowNebulae] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [typeFilter, setTypeFilter] = useState<string | null>(null)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -242,6 +254,14 @@ export default function Brain() {
     setSearchQuery('')
   }
 
+  const filteredGraphData = useMemo(() => {
+    if (!activeGraph || !typeFilter) return activeGraph
+    const filteredNodes = activeGraph.nodes.filter(n => n.type === typeFilter)
+    const nodeIds = new Set(filteredNodes.map(n => n.id))
+    const filteredEdges = activeGraph.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+    return { ...activeGraph, nodes: filteredNodes, edges: filteredEdges }
+  }, [activeGraph, typeFilter])
+
   // Navigate to node (explore from here)
   const exploreNode = (nodeId: string) => {
     setFocusNode({ id: nodeId, ts: Date.now() })
@@ -261,9 +281,9 @@ export default function Brain() {
       {/* Full-viewport graph */}
       <ForceGraph3D
         ref={graphRef}
-        nodes={activeGraph?.nodes ?? []}
-        edges={activeGraph?.edges ?? []}
-        clusters={activeGraph?.clusters}
+        nodes={filteredGraphData?.nodes ?? []}
+        edges={filteredGraphData?.edges ?? []}
+        clusters={filteredGraphData?.clusters}
         selectedId={selectedNode}
         onSelectNode={setSelectedNode}
         onBackgroundClick={() => setSelectedNode(null)}
@@ -385,6 +405,39 @@ export default function Brain() {
               >
                 <X size={12} />
               </button>
+              {/* Type distribution filter */}
+              {engramStats?.by_type && (
+                <div className="mb-3 pb-3 border-b border-white/5">
+                  <p className="text-[10px] uppercase tracking-wider text-stone-500 mb-2 px-1.5">Filter by type</p>
+                  <div className="flex flex-wrap gap-1 px-1">
+                    <button
+                      onClick={() => setTypeFilter(null)}
+                      className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                        !typeFilter
+                          ? 'border-white/20 text-white bg-white/10'
+                          : 'border-white/5 text-stone-600 hover:text-stone-400'
+                      }`}
+                    >
+                      All
+                    </button>
+                    {Object.entries(engramStats.by_type).map(([type, { total }]) => (
+                      <button
+                        key={type}
+                        onClick={() => setTypeFilter(typeFilter === type ? null : type)}
+                        className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                          typeFilter === type
+                            ? TYPE_FILTER_CLASSES[type] ?? 'border-white/20 text-white'
+                            : typeFilter
+                              ? 'border-white/5 text-stone-700 hover:text-stone-500'
+                              : 'border-white/5 text-stone-500 hover:text-stone-300'
+                        }`}
+                      >
+                        {type === 'self_model' ? 'self model' : type} ({total})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
                 <>
                   <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
