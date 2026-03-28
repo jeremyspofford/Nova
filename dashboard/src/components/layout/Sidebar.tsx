@@ -1,6 +1,5 @@
-import { useLocation, NavLink } from 'react-router-dom'
+import { useLocation, NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard,
   MessageSquare,
   ListTodo,
   AlertTriangle,
@@ -16,7 +15,6 @@ import {
   ChevronsLeft,
   ChevronsRight,
   ChevronDown,
-  Sparkles,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
@@ -42,14 +40,12 @@ const navSections: NavSection[] = [
   {
     // Core — no label, always visible
     items: [
-      { to: '/', label: 'Overview', icon: LayoutDashboard, minRole: 'guest' },
+      { to: '/', label: 'Brain', icon: Brain, minRole: 'guest' },
       { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
       { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
       { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member', debugOnly: true },
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
       { to: '/sources', label: 'Sources', icon: Globe, minRole: 'member' },
-      { to: '/engrams', label: 'Memory', icon: Brain, minRole: 'member' },
-      { to: '/brain', label: 'Brain', icon: Sparkles, minRole: 'member' },
     ],
   },
   {
@@ -89,6 +85,7 @@ export function Sidebar({
   onToggle: () => void
 }) {
   const location = useLocation()
+  const navigate = useNavigate()
   const { user, authConfig } = useAuth()
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
   const { data: attentionCount = 0 } = useAttentionCount()
@@ -106,7 +103,7 @@ export function Sidebar({
       )}
     >
       {/* Logo */}
-      <div className={clsx('flex items-center gap-2.5 px-3 h-14 shrink-0', collapsed && 'justify-center')}>
+      <div className={clsx('flex items-center gap-2.5 px-3 h-14 shrink-0 cursor-pointer', collapsed && 'justify-center')} onClick={() => navigate('/')} title="Go to Brain">
         <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shrink-0 dark:shadow-[0_0_16px_rgb(var(--accent-500)/0.3)]">
           <span className="text-white text-compact font-bold leading-none">N</span>
         </div>
