@@ -22,6 +22,7 @@ MEMORY_URL = os.getenv("NOVA_MEMORY_URL", "http://localhost:8002")
 CHAT_API_URL = os.getenv("NOVA_CHAT_API_URL", "http://localhost:8080")
 RECOVERY_URL = os.getenv("NOVA_RECOVERY_URL", "http://localhost:8888")
 KNOWLEDGE_WORKER_URL = os.getenv("NOVA_KNOWLEDGE_WORKER_URL", "http://localhost:8120")
+CORTEX_URL = os.getenv("NOVA_CORTEX_URL", "http://localhost:8100")
 
 ADMIN_SECRET = os.getenv("NOVA_ADMIN_SECRET", "")
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
@@ -37,6 +38,7 @@ SERVICE_URLS = {
 # Optional services started via --profile flags; excluded from parametrized health tests
 OPTIONAL_SERVICE_URLS = {
     "knowledge-worker": KNOWLEDGE_WORKER_URL,
+    "cortex": CORTEX_URL,
 }
 
 
@@ -84,6 +86,12 @@ async def recovery():
 @pytest_asyncio.fixture
 async def knowledge_worker():
     async with httpx.AsyncClient(base_url=KNOWLEDGE_WORKER_URL, timeout=30) as client:
+        yield client
+
+
+@pytest_asyncio.fixture
+async def cortex():
+    async with httpx.AsyncClient(base_url=CORTEX_URL, timeout=30) as client:
         yield client
 
 

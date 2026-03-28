@@ -6,6 +6,7 @@ import {
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, Metric, Badge, StatusDot, Skeleton } from '../components/ui'
+import { useDebug } from '../stores/debug-store'
 import {
   getPipelineStats, getFrictionStats, getActivityFeed,
   type ActivityEvent,
@@ -25,6 +26,8 @@ const SEVERITY_ICON: Record<string, React.ReactNode> = {
 }
 
 export default function Overview() {
+  const { isDebug } = useDebug()
+
   const { data: pipelineStats, isLoading: statsLoading } = useQuery({
     queryKey: ['pipeline-stats'],
     queryFn: getPipelineStats,
@@ -35,6 +38,7 @@ export default function Overview() {
     queryKey: ['friction-stats'],
     queryFn: getFrictionStats,
     staleTime: 10_000,
+    enabled: isDebug,
   })
 
   const { data: activity, isLoading: activityLoading } = useQuery({
@@ -81,9 +85,11 @@ export default function Overview() {
             <Card className="p-4 animate-fade-in-up-delay-3">
               <Metric label="Failed Today" value={pipelineStats?.failed_today ?? 0} tooltip="Tasks that failed or were aborted today." />
             </Card>
-            <Card className="p-4 animate-fade-in-up-delay-4">
-              <Metric label="Open Friction" value={frictionStats?.open_count ?? 0} tooltip="Unresolved friction log entries — bugs and issues found during use." />
-            </Card>
+            {isDebug && (
+              <Card className="p-4 animate-fade-in-up-delay-4">
+                <Metric label="Open Friction" value={frictionStats?.open_count ?? 0} tooltip="Unresolved friction log entries — bugs and issues found during use." />
+              </Card>
+            )}
           </>
         )}
       </div>
@@ -110,7 +116,7 @@ export default function Overview() {
         <div className="grid grid-cols-2 gap-4">
           <NavCard to="/chat" icon={MessageSquare} label="Chat" description="Talk to Nova" />
           <NavCard to="/tasks" icon={ListTodo} label="Tasks" description="Pipeline queue" />
-          <NavCard to="/friction" icon={AlertTriangle} label="Friction" description="Issue tracker" />
+          {isDebug && <NavCard to="/friction" icon={AlertTriangle} label="Friction" description="Issue tracker" />}
           <NavCard to="/engrams" icon={Brain} label="Memory" description="Engram explorer" />
           <NavCard to="/pods" icon={Boxes} label="Pods" description="Agent pipelines" />
           <NavCard to="/settings" icon={Activity} label="Settings" description="Configuration" />

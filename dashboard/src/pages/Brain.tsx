@@ -124,6 +124,7 @@ export default function Brain() {
   const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
   const [showBgStars, setShowBgStars] = useState(true)
   const [showInnerStars, setShowInnerStars] = useState(false)
+  const [showNebulae, setShowNebulae] = useState(true)
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Search-filtered graph
@@ -265,6 +266,7 @@ export default function Brain() {
         }}
         showBackgroundStars={showBgStars}
         showInnerStars={showInnerStars}
+        showNebulae={showNebulae}
         className="w-full h-full"
       />
 
@@ -316,6 +318,16 @@ export default function Brain() {
             }`}
           >
             Inner Stars
+          </button>
+          <button
+            onClick={() => setShowNebulae(v => !v)}
+            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+              showNebulae
+                ? 'border-teal-500/30 text-teal-400 bg-teal-500/10'
+                : 'border-white/10 text-stone-600 hover:text-stone-400'
+            }`}
+          >
+            Clouds
           </button>
         </div>
       </div>

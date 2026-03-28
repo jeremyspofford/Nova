@@ -95,6 +95,7 @@ interface ForceGraph3DProps {
   neuralMode?: NeuralModeConfig
   showBackgroundStars?: boolean
   showInnerStars?: boolean
+  showNebulae?: boolean
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -392,11 +393,12 @@ function makeGalaxyTexture(): CanvasTexture {
   return new CanvasTexture(canvas)
 }
 
-function createStarfield(options: { bgStars: boolean; innerStars: boolean }): Group {
+function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean }): Group {
   const group = new Group()
   group.name = 'starfield'
 
   // ── Nebulae — distant color clouds ──
+  if (options.nebulae) {
   const nebulae = [
     { x: 700,  y: 300,  z: -500, s: 500, r: 100, g: 60,  b: 180, op: 0.15 },
     { x: -500, y: -400, z: 600,  s: 400, r: 40,  g: 80,  b: 160, op: 0.12 },
@@ -437,6 +439,7 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean }): Gr
     sprite.scale.set(g.w, g.h, 1)
     group.add(sprite)
   }
+  } // end nebulae
 
   // ── Deep-field stars — static backdrop ──
   if (options.bgStars) {
@@ -594,6 +597,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   neuralMode,
   showBackgroundStars = true,
   showInnerStars = false,
+  showNebulae = true,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
@@ -614,6 +618,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showBgStarsRef.current = showBackgroundStars
   const showInnerStarsRef = useRef(showInnerStars)
   showInnerStarsRef.current = showInnerStars
+  const showNebulaeRef = useRef(showNebulae)
+  showNebulaeRef.current = showNebulae
   // Activity visualization refs (imperative handle)
   const highlightedNodesRef = useRef<Set<string>>(new Set())
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
@@ -1023,7 +1029,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     // Attach starfield if galaxy mode at init
     if (bgColorRef.current === 'galaxy') {
-      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current })
+      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current })
       graph.scene().add(sf)
       starfieldRef.current = sf
     }
@@ -1074,13 +1080,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     if (bgColor === 'galaxy') {
       graph.backgroundColor('#000000')
-      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars })
+      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae })
       scene.add(sf)
       starfieldRef.current = sf
     } else {
       graph.backgroundColor(bgColor)
     }
-  }, [bgColor, showBackgroundStars, showInnerStars])
+  }, [bgColor, showBackgroundStars, showInnerStars, showNebulae])
 
   // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 

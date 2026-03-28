@@ -461,7 +461,7 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
     async with pool.acquire() as conn:
         # Read current goal state
         row = await conn.fetchrow(
-            "SELECT iteration, max_iterations, progress, current_plan FROM goals WHERE id = $1::uuid",
+            "SELECT iteration, max_iterations, progress, current_plan, cost_so_far_usd FROM goals WHERE id = $1::uuid",
             goal_id,
         )
         if not row:
@@ -471,6 +471,8 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
         iteration = row["iteration"]
         max_iterations = row["max_iterations"] or 50
         current_plan = row["current_plan"] or {}
+
+        new_cost = float(row["cost_so_far_usd"] or 0) + outcome.total_cost_usd
 
         if outcome.status == "complete":
             # Successful task — increment iteration, estimate progress from iteration ratio
@@ -494,12 +496,14 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                    SET iteration = $1,
                        progress = $2,
                        current_plan = $3::jsonb,
+                       cost_so_far_usd = $5,
                        updated_at = NOW()
                    WHERE id = $4::uuid""",
                 new_iteration,
                 new_progress,
                 json.dumps(plan_update),
                 goal_id,
+                new_cost,
             )
             log.info(
                 "Goal %s: iteration %d/%d, progress %.1f%% (task %s complete)",
@@ -518,10 +522,12 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             await conn.execute(
                 """UPDATE goals
                    SET current_plan = $1::jsonb,
+                       cost_so_far_usd = $3,
                        updated_at = NOW()
                    WHERE id = $2::uuid""",
                 json.dumps(plan_update),
                 goal_id,
+                new_cost,
             )
             log.info(
                 "Goal %s: task %s failed — error stored for re-planning",
@@ -539,10 +545,12 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             await conn.execute(
                 """UPDATE goals
                    SET current_plan = $1::jsonb,
+                       cost_so_far_usd = $3,
                        updated_at = NOW()
                    WHERE id = $2::uuid""",
                 json.dumps(plan_update),
                 goal_id,
+                new_cost,
             )
 
         elif outcome.timed_out:
@@ -556,10 +564,12 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             await conn.execute(
                 """UPDATE goals
                    SET current_plan = $1::jsonb,
+                       cost_so_far_usd = $3,
                        updated_at = NOW()
                    WHERE id = $2::uuid""",
                 json.dumps(plan_update),
                 goal_id,
+                new_cost,
             )
             log.info(
                 "Goal %s: task %s still running — noted for next cycle",

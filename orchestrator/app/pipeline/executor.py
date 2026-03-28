@@ -1144,6 +1144,21 @@ async def _complete_task(task_id: str, output: str, state: PipelineState) -> Non
         return
 
     pool = get_pool()
+
+    # Roll up agent session costs to the task
+    try:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """UPDATE tasks SET
+                       total_cost_usd = COALESCE((SELECT SUM(cost_usd) FROM agent_sessions WHERE task_id = $1::uuid), 0),
+                       total_input_tokens = COALESCE((SELECT SUM(input_tokens) FROM agent_sessions WHERE task_id = $1::uuid), 0),
+                       total_output_tokens = COALESCE((SELECT SUM(output_tokens) FROM agent_sessions WHERE task_id = $1::uuid), 0)
+                   WHERE id = $1::uuid""",
+                task_id,
+            )
+    except Exception:
+        logger.debug("Task %s: cost rollup failed (columns may not exist yet)", task_id)
+
     await _audit(task_id, "task_complete", "info", {"flags": list(state.flags)})
     logger.info(f"Task {task_id} complete")
     # Emit activity event for dashboard feed

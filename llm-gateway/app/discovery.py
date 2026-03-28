@@ -379,20 +379,20 @@ _DISCOVERY_FNS: dict[str, Any] = {
 }
 
 
-def _vllm_available() -> bool:
-    """Check if vLLM is the active backend AND healthy."""
-    from app.registry import _vllm
-    return _vllm.is_available
-
-
-def _is_provider_available(slug: str) -> bool:
+async def _is_provider_available(slug: str) -> bool:
     """Check if a provider has credentials configured."""
     from app.providers.claude_subscription_provider import discover_claude_oauth_token
     from app.providers.chatgpt_subscription_provider import discover_chatgpt_token
 
+    if slug == "vllm":
+        # Must check Redis directly — the in-memory health flag starts False
+        # and only flips after actual inference requests.
+        from app.registry import _get_redis_config
+        backend = await _get_redis_config("inference.backend", "ollama")
+        return backend == "vllm"
+
     checks = {
         "ollama": lambda: True,
-        "vllm": lambda: _vllm_available(),
         "claude-max": lambda: bool(discover_claude_oauth_token()),
         "chatgpt": lambda: bool(discover_chatgpt_token()),
         "groq": lambda: bool(settings.groq_api_key),
@@ -458,7 +458,7 @@ async def discover_all() -> list[ProviderModelList]:
     catalog = []
     for meta, result in zip(_PROVIDER_META, results):
         slug = meta["slug"]
-        available = _is_provider_available(slug)
+        available = await _is_provider_available(slug)
         models = result if isinstance(result, list) else []
 
         catalog.append(ProviderModelList(
@@ -544,7 +544,7 @@ async def resolve_auto_model() -> str:
     """Iterate the preference list and return the first model whose provider is available.
     Falls back to preferred local model, best Ollama model, then llama3.2."""
     for model_id, slug, _ in _AUTO_PREFERENCE:
-        if _is_provider_available(slug):
+        if await _is_provider_available(slug):
             return model_id
 
     # Check if user has a preferred local model configured

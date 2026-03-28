@@ -30,6 +30,7 @@ class TaskOutcome:
     error: str | None = None
     findings_count: int = 0
     timed_out: bool = False
+    total_cost_usd: float = 0.0
 
 
 def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
@@ -39,12 +40,13 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
     output = task.get("output")
     error = task.get("error")
     findings_count = task.get("findings_count", 0)
+    total_cost_usd = float(task.get("total_cost_usd") or 0)
 
     if timed_out:
         return TaskOutcome(
             task_id=task_id, status="running", score=0.5, confidence=0.3,
             output=output, error=error, findings_count=findings_count,
-            timed_out=True,
+            timed_out=True, total_cost_usd=total_cost_usd,
         )
 
     if status == "complete":
@@ -53,28 +55,33 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
             return TaskOutcome(
                 task_id=task_id, status=status, score=0.6, confidence=0.8,
                 output=output, error=error, findings_count=findings_count,
+                total_cost_usd=total_cost_usd,
             )
         return TaskOutcome(
             task_id=task_id, status=status, score=0.8, confidence=0.9,
             output=output, error=error, findings_count=findings_count,
+            total_cost_usd=total_cost_usd,
         )
 
     if status == "failed":
         return TaskOutcome(
             task_id=task_id, status=status, score=0.2, confidence=0.9,
             output=output, error=error, findings_count=findings_count,
+            total_cost_usd=total_cost_usd,
         )
 
     if status == "cancelled":
         return TaskOutcome(
             task_id=task_id, status=status, score=0.1, confidence=0.9,
             output=output, error=error, findings_count=findings_count,
+            total_cost_usd=total_cost_usd,
         )
 
     # Unexpected status — treat as unknown
     return TaskOutcome(
         task_id=task_id, status=status, score=0.5, confidence=0.3,
         output=output, error=error, findings_count=findings_count,
+        total_cost_usd=total_cost_usd,
     )
 
 
