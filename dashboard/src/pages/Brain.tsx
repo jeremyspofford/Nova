@@ -199,6 +199,23 @@ export default function Brain() {
     ? activeGraph?.nodes.find(n => n.id === selectedNode) ?? null
     : null
 
+  const { data: engramStats } = useQuery<{
+    total_engrams: number
+    total_edges: number
+    total_archived: number
+    by_type: Record<string, { total: number; superseded: number }>
+  }>({
+    queryKey: ['engram-stats'],
+    queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
+    staleTime: 30_000,
+  })
+
+  const { data: routerStatus } = useQuery<{ observation_count: number }>({
+    queryKey: ['engram-router-status'],
+    queryFn: () => apiFetch('/mem/api/v1/engrams/router-status'),
+    staleTime: 30_000,
+  })
+
   // Fetch full engram detail (untruncated content) when a node is selected
   const { data: selectedNodeFull } = useQuery({
     queryKey: ['engram-detail', selectedNode],
@@ -290,12 +307,24 @@ export default function Brain() {
         </form>
 
         {/* Stats badge */}
-        {activeGraph && (
-          <div className="text-xs text-stone-600 px-1">
-            {activeGraph.nodes.length} memories · {activeGraph.edges.length} connections
-            {activeGraph.clusters && ` · ${activeGraph.clusters.length} topics`}
-          </div>
-        )}
+        <div className="text-xs text-stone-600 px-1 flex items-center gap-1.5">
+          {engramStats ? (
+            <>
+              {engramStats.total_engrams.toLocaleString()} memories
+              {' · '}{engramStats.total_edges.toLocaleString()} edges
+              {engramStats.total_archived > 0 && <> · {engramStats.total_archived} archived</>}
+              {activeGraph?.clusters && ` · ${activeGraph.clusters.length} topics`}
+              {routerStatus && routerStatus.observation_count > 0 && (
+                <> · {routerStatus.observation_count} router obs</>
+              )}
+            </>
+          ) : activeGraph ? (
+            <>
+              {activeGraph.nodes.length} memories · {activeGraph.edges.length} connections
+              {activeGraph.clusters && ` · ${activeGraph.clusters.length} topics`}
+            </>
+          ) : null}
+        </div>
 
         {/* Display toggles */}
         <div className="flex items-center gap-2 px-1">
