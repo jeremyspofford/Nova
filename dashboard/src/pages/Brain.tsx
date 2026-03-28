@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, MessageSquare, X, ChevronRight, Network } from 'lucide-react'
 import { apiFetch } from '../api'
@@ -124,8 +124,7 @@ export default function Brain() {
   const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
   const [showBgStars, setShowBgStars] = useState(true)
   const [showInnerStars, setShowInnerStars] = useState(false)
-  const [graphMode, setGraphMode] = useState<'full' | 'topic-map'>('full')
-  const [expandedCluster, setExpandedCluster] = useState<number | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -148,13 +147,12 @@ export default function Brain() {
       if (e.key === 'Escape') {
         if (chatOpen) setChatOpen(false)
         else if (selectedNode) setSelectedNode(null)
-        else if (expandedCluster != null) setExpandedCluster(null)
         else if (searchActive) { setSearchActive(false); setSearchQuery('') }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [chatOpen, searchActive, selectedNode, expandedCluster])
+  }, [chatOpen, searchActive, selectedNode])
 
   // Activity step handler — highlights actual retrieved engrams when IDs are available
   const handleActivityStep = useCallback((_step: ActivityStep) => {
@@ -213,27 +211,11 @@ export default function Brain() {
     ? { ...selectedNodeBasic, content: selectedNodeFull?.content ?? selectedNodeBasic.content }
     : null
 
-  // Auto-zoom when drilling into a cluster
-  useEffect(() => {
-    if (expandedCluster != null) {
-      setFocusCluster({ id: expandedCluster, ts: Date.now() })
-    }
-  }, [expandedCluster])
-
-  // Fall back to Full Graph when clusters drop below 3
-  useEffect(() => {
-    if (graphMode === 'topic-map' && (!activeGraph?.clusters || activeGraph.clusters.length < 3)) {
-      setGraphMode('full')
-      setExpandedCluster(null)
-    }
-  }, [activeGraph?.clusters, graphMode])
-
   // Handle search submit
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault()
     if (searchQuery.trim().length > 2) {
       setSearchActive(true)
-      setExpandedCluster(null)
     }
   }
 
@@ -256,126 +238,16 @@ export default function Brain() {
     ? TYPE_COLORS[selectedNodeData.type] ?? '#71717a'
     : '#71717a'
 
-  // ── Topic Map: super-node computation ────────────────────────────────────
-  const topicMapData = useMemo(() => {
-    if (!activeGraph?.clusters || activeGraph.clusters.length < 3) return null
-
-    const clusters = activeGraph.clusters
-    const nodesByCluster = new Map<number, GraphNode[]>()
-    for (const node of activeGraph.nodes) {
-      const cid = node.cluster_id ?? -1
-      const list = nodesByCluster.get(cid) ?? []
-      list.push(node)
-      nodesByCluster.set(cid, list)
-    }
-
-    const maxCount = Math.max(...clusters.map(c => c.count))
-
-    const superNodes: GraphNode[] = clusters.map(c => {
-      const members = nodesByCluster.get(c.id) ?? []
-      const avgActivation = members.length > 0
-        ? members.reduce((s, n) => s + n.activation, 0) / members.length
-        : 0
-      return {
-        id: `super-${c.id}`,
-        type: 'cluster',
-        content: c.label,
-        activation: avgActivation,
-        importance: c.count / maxCount,
-        access_count: c.count,
-        confidence: 1,
-        source_type: 'cluster',
-        cluster_id: c.id,
-        cluster_label: c.label,
-      }
-    })
-
-    const uncategorized = nodesByCluster.get(-1) ?? []
-    if (uncategorized.length > 0) {
-      superNodes.push({
-        id: 'super-uncategorized',
-        type: 'cluster',
-        content: 'Other',
-        activation: uncategorized.reduce((s, n) => s + n.activation, 0) / uncategorized.length,
-        importance: uncategorized.length / maxCount,
-        access_count: uncategorized.length,
-        confidence: 1,
-        source_type: 'cluster',
-        cluster_id: -1,
-        cluster_label: 'Other',
-      })
-    }
-
-    const edgeMap = new Map<string, number>()
-    for (const edge of activeGraph.edges) {
-      const srcNode = activeGraph.nodes.find(n => n.id === edge.source)
-      const tgtNode = activeGraph.nodes.find(n => n.id === edge.target)
-      if (!srcNode || !tgtNode) continue
-      const srcCluster = srcNode.cluster_id ?? -1
-      const tgtCluster = tgtNode.cluster_id ?? -1
-      if (srcCluster === tgtCluster) continue
-      const key = [Math.min(srcCluster, tgtCluster), Math.max(srcCluster, tgtCluster)].join('-')
-      edgeMap.set(key, (edgeMap.get(key) ?? 0) + 1)
-    }
-
-    const superEdges: GraphEdge[] = []
-    for (const [key, count] of edgeMap) {
-      const [a, b] = key.split('-').map(Number)
-      superEdges.push({
-        source: a === -1 ? 'super-uncategorized' : `super-${a}`,
-        target: b === -1 ? 'super-uncategorized' : `super-${b}`,
-        relation: 'cross_topic',
-        weight: count,
-      })
-    }
-
-    return { nodes: superNodes, edges: superEdges, nodesByCluster }
-  }, [activeGraph])
-
-  // ── Topic Map: drill-down data ───────────────────────────────────────────
-  const drillData = useMemo(() => {
-    if (!topicMapData || expandedCluster == null || !activeGraph) return null
-    const members = topicMapData.nodesByCluster.get(expandedCluster) ?? []
-    const memberIds = new Set(members.map(n => n.id))
-    const innerEdges = activeGraph.edges.filter(
-      e => memberIds.has(e.source) && memberIds.has(e.target)
-    )
-    return { nodes: members, edges: innerEdges }
-  }, [topicMapData, expandedCluster, activeGraph])
-
-  // ── Graph data selection (mode-aware) ────────────────────────────────────
-  const graphNodes = (() => {
-    if (searchActive) return activeGraph?.nodes ?? []
-    if (graphMode === 'topic-map' && expandedCluster != null && drillData) return drillData.nodes
-    if (graphMode === 'topic-map' && topicMapData) return topicMapData.nodes
-    return activeGraph?.nodes ?? []
-  })()
-
-  const graphEdges = (() => {
-    if (searchActive) return activeGraph?.edges ?? []
-    if (graphMode === 'topic-map' && expandedCluster != null && drillData) return drillData.edges
-    if (graphMode === 'topic-map' && topicMapData) return topicMapData.edges
-    return activeGraph?.edges ?? []
-  })()
-
   return (
     <div className="relative w-full h-screen overflow-hidden bg-black">
       {/* Full-viewport graph */}
       <ForceGraph3D
         ref={graphRef}
-        nodes={graphNodes}
-        edges={graphEdges}
+        nodes={activeGraph?.nodes ?? []}
+        edges={activeGraph?.edges ?? []}
         clusters={activeGraph?.clusters}
         selectedId={selectedNode}
-        onSelectNode={(id: string) => {
-          if (graphMode === 'topic-map' && id.startsWith('super-')) {
-            const clusterId = id === 'super-uncategorized' ? -1 : parseInt(id.replace('super-', ''))
-            setExpandedCluster(clusterId)
-            setSelectedNode(null)
-          } else {
-            setSelectedNode(id)
-          }
-        }}
+        onSelectNode={setSelectedNode}
         onBackgroundClick={() => setSelectedNode(null)}
         focusClusterId={focusCluster?.id ?? null}
         focusClusterTs={focusCluster?.ts}
@@ -393,7 +265,6 @@ export default function Brain() {
         }}
         showBackgroundStars={showBgStars}
         showInnerStars={showInnerStars}
-        graphMode={graphMode === 'topic-map' ? (expandedCluster != null ? 'topic-drill' : 'topic-map') : 'full'}
         className="w-full h-full"
       />
 
@@ -424,24 +295,6 @@ export default function Brain() {
           </div>
         )}
 
-        {/* Graph mode selector */}
-        {activeGraph?.clusters && activeGraph.clusters.length >= 3 && (
-          <div className="flex items-center gap-px bg-white/5 rounded-md p-0.5">
-            <button
-              onClick={() => { setGraphMode('full'); setExpandedCluster(null) }}
-              className={`text-[10px] px-2.5 py-1 rounded transition-colors ${
-                graphMode === 'full' ? 'bg-white/10 text-stone-200' : 'text-stone-500 hover:text-stone-300'
-              }`}
-            >Full Graph</button>
-            <button
-              onClick={() => { setGraphMode('topic-map'); setExpandedCluster(null) }}
-              className={`text-[10px] px-2.5 py-1 rounded transition-colors ${
-                graphMode === 'topic-map' ? 'bg-white/10 text-stone-200' : 'text-stone-500 hover:text-stone-300'
-              }`}
-            >Topic Map</button>
-          </div>
-        )}
-
         {/* Display toggles */}
         <div className="flex items-center gap-2 px-1">
           <button
@@ -467,99 +320,122 @@ export default function Brain() {
         </div>
       </div>
 
-      {/* ── Top Left: Topic Sidebar ──────────────────────────────────────── */}
-      {(graphMode !== 'topic-map' || expandedCluster != null) && activeGraph && activeGraph.nodes.length > 0 && (
-        <div className="absolute top-28 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-10rem)] overflow-y-auto w-[200px] scrollbar-thin">
-          {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
-            <>
-              <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
-                {activeGraph.clusters.length} topics
-              </div>
-              {activeGraph.clusters.slice(0, 30).map(cluster => {
-                const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
-                const isExpanded = expandedClusterId === cluster.id
-                const isFocused = focusCluster?.id === cluster.id
-                return (
-                  <div key={cluster.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setFocusCluster({ id: cluster.id, ts: Date.now() })
-                        setExpandedClusterId(isExpanded ? null : cluster.id)
-                      }}
-                      className={`flex items-center gap-1.5 w-full text-left text-[11px] rounded px-1.5 py-1 transition-colors ${
-                        isFocused ? 'bg-white/10' : 'hover:bg-white/5'
-                      }`}
-                    >
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
-                      />
-                      <span className="text-stone-300 truncate flex-1" title={cluster.label}>
-                        {cluster.label}
-                      </span>
-                      <span className="text-stone-600 text-[10px] shrink-0">{cluster.count}</span>
-                      <ChevronRight
-                        size={10}
-                        className={`text-stone-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                      />
-                    </button>
-                    {isExpanded && (
-                      <div className="pl-5 pr-1 py-0.5 space-y-px">
-                        {activeGraph.nodes
-                          .filter(n => n.cluster_id === cluster.id)
-                          .sort((a, b) => b.importance - a.importance)
-                          .slice(0, 12)
-                          .map(node => (
-                            <button
-                              key={node.id}
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                setSelectedNode(node.id)
-                                setFocusNode({ id: node.id, ts: Date.now() })
-                              }}
-                              className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
-                              title={node.content}
-                            >
-                              {node.content}
-                            </button>
-                          ))}
-                        {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
-                          <div className="text-[10px] text-stone-600 px-1 pt-0.5">
-                            +{activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
+      {/* ── Top Left: Topic Sidebar (collapsible) ─────────────────────── */}
+      {activeGraph && activeGraph.nodes.length > 0 && (
+        <>
+          {!sidebarOpen && (
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="absolute top-28 left-4 z-10 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-2 text-stone-500 hover:text-stone-300 transition-colors"
+            >
+              <ChevronRight size={12} />
+              <span className="text-[10px]">
+                {activeGraph.clusters && activeGraph.clusters.length > 0
+                  ? `${activeGraph.clusters.length} topics`
+                  : `${new Set(activeGraph.nodes.map(n => n.type)).size} types`}
+              </span>
+            </button>
+          )}
+          {sidebarOpen && (
+            <div className="absolute top-28 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-10rem)] overflow-y-auto w-[200px] scrollbar-thin">
+              <button
+                onClick={() => setSidebarOpen(false)}
+                className="absolute top-2 right-2 text-stone-600 hover:text-stone-300 transition-colors"
+              >
+                <X size={12} />
+              </button>
+              {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
+                <>
+                  <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                    {activeGraph.clusters.length} topics
+                  </div>
+                  {activeGraph.clusters.slice(0, 30).map(cluster => {
+                    const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
+                    const isExpanded = expandedClusterId === cluster.id
+                    const isFocused = focusCluster?.id === cluster.id
+                    return (
+                      <div key={cluster.id}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFocusCluster({ id: cluster.id, ts: Date.now() })
+                            setExpandedClusterId(isExpanded ? null : cluster.id)
+                          }}
+                          className={`flex items-center gap-1.5 w-full text-left text-[11px] rounded px-1.5 py-1 transition-colors ${
+                            isFocused ? 'bg-white/10' : 'hover:bg-white/5'
+                          }`}
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                          />
+                          <span className="text-stone-300 truncate flex-1" title={cluster.label}>
+                            {cluster.label}
+                          </span>
+                          <span className="text-stone-600 text-[10px] shrink-0">{cluster.count}</span>
+                          <ChevronRight
+                            size={10}
+                            className={`text-stone-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          />
+                        </button>
+                        {isExpanded && (
+                          <div className="pl-5 pr-1 py-0.5 space-y-px">
+                            {activeGraph.nodes
+                              .filter(n => n.cluster_id === cluster.id)
+                              .sort((a, b) => b.importance - a.importance)
+                              .slice(0, 12)
+                              .map(node => (
+                                <button
+                                  key={node.id}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setSelectedNode(node.id)
+                                    setFocusNode({ id: node.id, ts: Date.now() })
+                                  }}
+                                  className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                                  title={node.content}
+                                >
+                                  {node.content}
+                                </button>
+                              ))}
+                            {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
+                              <div className="text-[10px] text-stone-600 px-1 pt-0.5">
+                                +{activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
-                    )}
+                    )
+                  })}
+                  {activeGraph.clusters.length > 30 && (
+                    <div className="text-[10px] text-stone-600 px-1.5 pt-1 border-t border-white/5 mt-1">
+                      +{activeGraph.clusters.length - 30} smaller clusters
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
+                    Types
                   </div>
-                )
-              })}
-              {activeGraph.clusters.length > 30 && (
-                <div className="text-[10px] text-stone-600 px-1.5 pt-1 border-t border-white/5 mt-1">
-                  +{activeGraph.clusters.length - 30} smaller clusters
-                </div>
+                  {Array.from(new Set(activeGraph.nodes.map(n => n.type))).map(type => (
+                    <div key={type} className="flex items-center gap-2 text-[11px] px-1.5 py-0.5">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${TYPE_COLORS[type] ?? '#71717a'}` }}
+                      />
+                      <span className="text-stone-400" title={TYPE_DESCRIPTIONS[type]}>
+                        {type === 'self_model' ? 'self model' : type}
+                      </span>
+                    </div>
+                  ))}
+                </>
               )}
-            </>
-          ) : (
-            <>
-              <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
-                Types
-              </div>
-              {Array.from(new Set(activeGraph.nodes.map(n => n.type))).map(type => (
-                <div key={type} className="flex items-center gap-2 text-[11px] px-1.5 py-0.5">
-                  <span
-                    className="w-2 h-2 rounded-full shrink-0"
-                    style={{ backgroundColor: TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${TYPE_COLORS[type] ?? '#71717a'}` }}
-                  />
-                  <span className="text-stone-400" title={TYPE_DESCRIPTIONS[type]}>
-                    {type === 'self_model' ? 'self model' : type}
-                  </span>
-                </div>
-              ))}
-            </>
+            </div>
           )}
-        </div>
+        </>
       )}
 
       {/* ── Bottom Left: Graph Key (hidden when detail panel open) ────────── */}
@@ -717,20 +593,6 @@ export default function Brain() {
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── Topic Map Breadcrumb ──────────────────────────────────────────── */}
-      {graphMode === 'topic-map' && expandedCluster != null && (
-        <div className="absolute top-4 right-4 z-10 flex items-center gap-2">
-          <button
-            onClick={() => setExpandedCluster(null)}
-            className="text-[11px] px-3 py-1.5 rounded-md border border-white/10 bg-white/5 text-stone-400 hover:text-stone-200 transition-colors"
-          >All Topics</button>
-          <span className="text-stone-600 text-xs">&rsaquo;</span>
-          <span className="text-[11px] px-3 py-1.5 rounded-md border border-indigo-500/25 bg-indigo-500/10 text-indigo-400">
-            {activeGraph?.clusters?.find(c => c.id === expandedCluster)?.label ?? 'Topic'}
-          </span>
         </div>
       )}
 
