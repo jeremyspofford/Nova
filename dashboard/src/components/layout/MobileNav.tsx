@@ -31,7 +31,7 @@ const primaryTabs: NavItem[] = [
   { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
   { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
   { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
-  { to: '/engrams', label: 'Memory', icon: Brain, minRole: 'member' },
+  { to: '/', label: 'Brain', icon: Brain, minRole: 'guest' },
 ]
 
 const moreItems: { label?: string; items: NavItem[] }[] = [
