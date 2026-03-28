@@ -32,7 +32,7 @@ New migration adds `cortex_reflections` table with:
 - **Context**: cycle number, drive name, maturation phase at time of reflection, dispatched task ID
 - **What was tried**: approach description (1-3 sentences), normalized approach hash (for dedup)
 - **What happened**: outcome enum (`success | partial | failure | timeout | cancelled | escalated`), numeric score (0.0-1.0), lesson learned (1-2 sentences), failure mode category (free text, LLM-classified)
-- **Conditions**: JSONB snapshot of budget tier, model used, memory hits, findings count, goal description hash (to detect goal modifications)
+- **Conditions**: JSONB snapshot of budget tier, model used, memory hits, findings count, task cost USD, goal description hash (to detect goal modifications)
 
 Indexes on `(goal_id, created_at DESC)`, `(goal_id, outcome)`, and `(goal_id, approach_hash)`.
 
@@ -69,7 +69,7 @@ After every Serve drive cycle that dispatched a pipeline task:
      - `cancelled` (score 0.1) → `cancelled` (external cancellation, not a failed approach)
      - `timed_out` (score 0.5) → `timeout`
    - Outcome score: raw numeric from task tracker
-   - Context snapshot: budget tier, model, findings count, goal description hash
+   - Context snapshot: budget tier, model, findings count, task cost USD (from `TaskOutcome.total_cost_usd`), goal description hash
    - Maturation phase: current `maturation_status` of the goal
 
 2. **LLM lesson extraction** (only at mid/best budget tier):
