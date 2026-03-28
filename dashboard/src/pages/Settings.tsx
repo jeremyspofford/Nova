@@ -4,6 +4,7 @@ import {
   Bot, Wrench, Palette, Users, Bug, Database, Lock,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
   FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell, Mic,
+  Brain, GitMerge,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -26,6 +27,11 @@ import { ToolPermissionsSection } from './settings/ToolPermissionsSection'
 import { SandboxSection } from './settings/SandboxSection'
 import { DebugSection } from './settings/DebugSection'
 import { UsersSection } from './settings/UsersSection'
+import { SelfModelSection } from './settings/SelfModelSection'
+import { ConsolidationSection } from './settings/ConsolidationSection'
+import { MaintenanceSection } from './settings/MaintenanceSection'
+import { EngramSourcesSection } from './settings/EngramSourcesSection'
+import { RouterStatusSection } from './settings/RouterStatusSection'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
 
@@ -69,6 +75,16 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'context-budgets', label: 'Context Budgets', icon: Gauge },
       { id: 'tool-permissions', label: 'Tool Permissions', icon: Wrench },
       { id: 'voice', label: 'Voice', icon: Mic },
+    ],
+  },
+  {
+    label: 'Memory',
+    items: [
+      { id: 'self-model', label: 'Self-Model', icon: Brain },
+      { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
+      { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+      { id: 'engram-sources', label: 'Engram Sources', icon: Database },
+      { id: 'router-status', label: 'Neural Router', icon: Activity },
     ],
   },
   {
@@ -569,6 +585,28 @@ export function Settings() {
                 </div>
               </div>
             </Section>
+          </div>
+
+          {/* ── Memory ───────────────────────────────────────────────────── */}
+
+          <div id="self-model">
+            <SelfModelSection />
+          </div>
+
+          <div id="consolidation">
+            <ConsolidationSection />
+          </div>
+
+          <div id="maintenance">
+            <MaintenanceSection />
+          </div>
+
+          <div id="engram-sources">
+            <EngramSourcesSection />
+          </div>
+
+          <div id="router-status">
+            <RouterStatusSection />
           </div>
 
           {/* ── Connections ──────────────────────────────────────────── */}
