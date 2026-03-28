@@ -60,6 +60,10 @@ export const features: Feature[] = [
     description: 'OpenAI-compatible endpoint works with Cursor, Continue.dev, Aider, and any OpenAI-API client.',
   },
   {
+    title: 'Voice Conversation',
+    description: 'Talk to Nova hands-free with Gemini-style conversation mode. Barge-in interruption, live transcription, auto-listen between turns.',
+  },
+  {
     title: 'Self-Configuration',
     description: 'Nova can modify its own settings, prompts, and pod definitions via the nova sandbox tier.',
   },

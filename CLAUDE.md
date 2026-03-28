@@ -214,6 +214,7 @@ Nova's website lives at `website/` (Astro/Starlight, arialabs.ai). The site serv
 | `cortex/` | (new — no docs yet) |
 | `intel-worker/`, `orchestrator/app/intel_router.py` | (new — no docs yet) |
 | `knowledge-worker/` | (new — no docs yet) |
+| `voice-service/` | `nova/docs/services/voice-service.md` |
 | `orchestrator/` (general) | `nova/docs/services/orchestrator.md` |
 | `docker-compose*.yml`, `Makefile`, `scripts/setup.sh` | `nova/docs/deployment.md`, `nova/docs/quickstart.md` |
 | GPU overlays, inference backends | `nova/docs/inference-backends.md` |

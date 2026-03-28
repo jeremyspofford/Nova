@@ -1,9 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { X, Send, Loader2, Mic, Volume2, VolumeX } from 'lucide-react'
+import { X, Send, Loader2, Mic, Volume2, VolumeX, AudioLines } from 'lucide-react'
 import { streamChat, resolveModel, discoverModels, type ChatMessage } from '../api'
 import { cleanToolArtifacts } from '../utils/cleanToolArtifacts'
-import { useVoiceChat } from '../hooks/useVoiceChat'
+import { useVoiceChat, type ConversationState } from '../hooks/useVoiceChat'
 import { useAudioLevel } from '../hooks/useAudioLevel'
 import { useSpeechToText } from '../hooks/useSpeechToText'
 import { AudioLevelIndicator } from './ui/AudioLevelIndicator'
@@ -12,6 +12,13 @@ import { useChatStore } from '../stores/chat-store'
 import type { Message, ActivityStep } from '../stores/chat-store'
 import { ModelPicker } from './ui/ModelPicker'
 import { getHiddenModels } from './ModelManagerModal'
+
+const CONV_STATE_LABELS: Record<ConversationState, string> = {
+  idle: '',
+  listening: 'Listening...',
+  processing: 'Thinking...',
+  speaking: 'Speaking... interrupt anytime',
+}
 
 interface BrainChatProps {
   onClose: () => void
@@ -70,6 +77,10 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     return () => clearTimeout(timer)
   }, [])
 
+  // Read conversation mode settings from localStorage
+  const silenceTimeoutMs = Number(localStorage.getItem('nova_voice_silence_timeout')) || 2000
+  const bargeInThreshold = Number(localStorage.getItem('nova_voice_bargein_threshold')) || 0.15
+
   // Voice chat integration
   const handleSubmitRef = useRef<(text?: string) => void>(() => {})
 
@@ -78,6 +89,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     toggleRecording, isSpeaking, muted, setMuted,
     feedText, flushBuffer, stopAllPlayback, voiceAvailable,
     mediaStream,
+    conversationMode, setConversationMode, conversationState, silenceCountdown,
   } = useVoiceChat({
     onTranscript: (text) => {
       if (isStreaming) {
@@ -94,6 +106,8 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
         timestamp: new Date(),
       }])
     },
+    silenceTimeoutMs,
+    bargeInThreshold,
   })
 
   // Audio level visualization from recording stream
@@ -108,6 +122,20 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     if (isRecording && !sttListening) sttStart()
     if (!isRecording && sttListening) sttStop()
   }, [isRecording, sttListening, sttSupported, sttStart, sttStop])
+
+  // Conversation mode: auto-listen when muted and stream finishes (TTS skipped)
+  useEffect(() => {
+    if (conversationMode && muted && !isStreaming && !isRecording && !isTranscribing && !isSpeaking) {
+      // When muted, TTS is skipped so isSpeaking never goes true.
+      // Auto-listen after a short delay for the response to fully settle.
+      const timer = setTimeout(() => {
+        if (conversationMode && !isRecording) {
+          toggleRecording()
+        }
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [conversationMode, muted, isStreaming, isRecording, isTranscribing, isSpeaking, toggleRecording])
 
   const handleSubmit = useCallback(async (overrideText?: string) => {
     const text = (overrideText ?? input).trim()
@@ -220,6 +248,9 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     }
   }
 
+  // Silence countdown for visual indicator
+  const silencePct = silenceCountdown > 0 ? (silenceCountdown / silenceTimeoutMs) * 100 : 0
+
   return (
     <div className="absolute top-0 right-0 h-full w-[380px] z-20 flex flex-col bg-black/70 backdrop-blur-xl border-l border-white/[0.06] animate-slide-in-right">
       {/* Header */}
@@ -264,8 +295,57 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
 
       {/* Input */}
       <div className="shrink-0 px-3 pb-3 pt-2 border-t border-white/[0.06]">
-        {/* Live transcription while recording */}
-        {isRecording && (
+        {/* Conversation mode status bar */}
+        {conversationMode && (
+          <div className="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md border text-xs relative overflow-hidden"
+            style={{
+              backgroundColor: conversationState === 'listening' ? 'rgba(127, 29, 29, 0.4)' :
+                               conversationState === 'speaking' ? 'rgba(20, 83, 45, 0.3)' :
+                               'rgba(41, 37, 36, 0.5)',
+              borderColor: conversationState === 'listening' ? 'rgba(239, 68, 68, 0.2)' :
+                           conversationState === 'speaking' ? 'rgba(34, 197, 94, 0.2)' :
+                           'rgba(255, 255, 255, 0.06)',
+            }}
+          >
+            {/* Silence countdown progress bar */}
+            {silencePct > 0 && (
+              <div
+                className="absolute inset-y-0 left-0 bg-amber-500/10 transition-all duration-100"
+                style={{ width: `${100 - silencePct}%` }}
+              />
+            )}
+            <div className="relative flex items-center gap-2 w-full">
+              {conversationState === 'listening' && (
+                <>
+                  <Mic size={12} className="text-red-400 shrink-0 animate-pulse" />
+                  <AudioLevelIndicator level={audioLevel} bars={4} className="h-3 shrink-0" />
+                  <span className="text-stone-400 truncate">
+                    {liveTranscript || 'Listening...'}
+                  </span>
+                  <span className="text-stone-600 shrink-0 ml-auto">{Math.floor(recordingDuration / 1000)}s</span>
+                </>
+              )}
+              {conversationState === 'processing' && (
+                <>
+                  <Loader2 size={12} className="text-stone-400 shrink-0 animate-spin" />
+                  <span className="text-stone-400">Thinking...</span>
+                </>
+              )}
+              {conversationState === 'speaking' && (
+                <>
+                  <Volume2 size={12} className="text-green-400 shrink-0" />
+                  <span className="text-stone-400">Speaking... interrupt anytime</span>
+                </>
+              )}
+              {conversationState === 'idle' && (
+                <span className="text-stone-500">Conversation mode — waiting...</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Non-conversation recording indicator */}
+        {!conversationMode && isRecording && (
           <div className="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md bg-red-950/40 border border-red-500/20 text-xs">
             <Mic size={12} className="text-red-400 shrink-0 animate-pulse" />
             <AudioLevelIndicator level={audioLevel} bars={4} className="h-3 shrink-0" />
@@ -275,36 +355,56 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
             <span className="text-stone-600 shrink-0 ml-auto">{Math.floor(recordingDuration / 1000)}s</span>
           </div>
         )}
+
         <div className="flex gap-2 items-end">
           <textarea
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Nova..."
+            placeholder={conversationMode ? 'Conversation mode active (Esc to exit)' : 'Ask Nova...'}
             className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-200 placeholder:text-stone-600 resize-none outline-none focus:border-teal-500/30 transition-colors"
             rows={1}
-            disabled={isStreaming}
+            disabled={isStreaming || conversationMode}
           />
           {voiceAvailable && (
-            <button
-              onClick={toggleRecording}
-              disabled={isTranscribing}
-              className={`shrink-0 flex items-center justify-center rounded-lg transition-colors ${
-                isRecording
-                  ? 'bg-red-600 hover:bg-red-500 w-8 h-8'
-                  : isTranscribing
-                    ? 'bg-stone-700 cursor-wait w-8 h-8'
-                    : 'bg-stone-700 hover:bg-stone-600 w-8 h-8'
-              } text-white`}
-              title={isRecording ? 'Stop recording' : 'Push to talk'}
-            >
-              {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
-            </button>
+            <>
+              {/* Conversation mode toggle */}
+              <button
+                onClick={() => setConversationMode(m => !m)}
+                disabled={isTranscribing}
+                className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                  conversationMode
+                    ? 'bg-teal-600 hover:bg-teal-500 ring-1 ring-teal-400/50'
+                    : 'bg-stone-700 hover:bg-stone-600'
+                } text-white`}
+                title={conversationMode ? 'Exit conversation mode (Esc)' : 'Start conversation mode'}
+              >
+                <AudioLines size={14} />
+              </button>
+
+              {/* Manual mic button (hidden in conversation mode) */}
+              {!conversationMode && (
+                <button
+                  onClick={toggleRecording}
+                  disabled={isTranscribing}
+                  className={`shrink-0 flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
+                    isRecording
+                      ? 'bg-red-600 hover:bg-red-500'
+                      : isTranscribing
+                        ? 'bg-stone-700 cursor-wait'
+                        : 'bg-stone-700 hover:bg-stone-600'
+                  } text-white`}
+                  title={isRecording ? 'Stop recording' : 'Push to talk'}
+                >
+                  {isTranscribing ? <Loader2 size={14} className="animate-spin" /> : <Mic size={14} />}
+                </button>
+              )}
+            </>
           )}
           <button
             onClick={() => handleSubmit()}
-            disabled={isStreaming || !input.trim()}
+            disabled={isStreaming || !input.trim() || conversationMode}
             className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-teal-600/80 hover:bg-teal-600 disabled:opacity-30 disabled:hover:bg-teal-600/80 text-white transition-colors"
           >
             {isStreaming ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}

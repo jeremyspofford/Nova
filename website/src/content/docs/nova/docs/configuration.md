@@ -100,6 +100,21 @@ Override the default model for each provider:
 | `DEFAULT_OPENROUTER_MODEL` | `openrouter/meta-llama/llama-3.1-8b-instruct:free` |
 | `DEFAULT_GITHUB_MODEL` | `github/gpt-4o-mini` |
 
+## Voice
+
+The voice service is optional. Enable it with `docker compose --profile voice up`.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `STT_PROVIDER` | Speech-to-text provider (`openai`, `deepgram`) | `openai` |
+| `TTS_PROVIDER` | Text-to-speech provider (`openai`, `elevenlabs`) | `openai` |
+| `TTS_VOICE` | Default TTS voice | `nova` |
+| `TTS_MODEL` | TTS quality (`tts-1` fast, `tts-1-hd` quality) | `tts-1` |
+| `DEEPGRAM_API_KEY` | API key for Deepgram STT | *(optional)* |
+| `ELEVENLABS_API_KEY` | API key for ElevenLabs TTS | *(optional)* |
+
+Voice uses the same `OPENAI_API_KEY` as the LLM provider section. All voice settings are also runtime-configurable from Dashboard > Settings > Voice.
+
 ## Remote access
 
 Nova supports two options for accessing the dashboard remotely:

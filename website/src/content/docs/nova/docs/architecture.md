@@ -19,6 +19,7 @@ Nova runs as a multi-service Docker Compose stack. Each service has a single res
 | **recovery** | 8888 | Backup/restore, factory reset, service management, inference backend lifecycle. Depends on postgres and Redis (db 7). |
 | **chat-bridge** | 8090 | Multi-platform chat integration (Telegram, Slack). Opt-in via `bridges` profile. |
 | **cortex** | 8100 | Autonomous brain: thinking loop, goals, drives, budget tracking |
+| **voice-service** | 8130 | STT/TTS provider proxy (OpenAI Whisper, Deepgram, ElevenLabs). Opt-in via `voice` profile. |
 
 ## Inter-service communication
 
@@ -29,6 +30,7 @@ dashboard ──proxy──▶ orchestrator  (/api)
           ──proxy──▶ llm-gateway   (/v1)
           ──proxy──▶ recovery      (/recovery-api)
           ──proxy──▶ cortex        (/cortex-api)
+          ──proxy──▶ voice-service (/voice-api)
 
 chat-api ──────────▶ orchestrator  (streaming endpoint)
 

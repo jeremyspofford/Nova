@@ -241,6 +241,48 @@ function SetupWizardSection({ onSave }: { onSave: (key: string, value: string) =
   )
 }
 
+// ── Local number setting (localStorage-backed) ──────────────────────────────
+
+function LocalNumberField({ label, storageKey, defaultValue, min, max, step, description }: {
+  label: string
+  storageKey: string
+  defaultValue: number
+  min: number
+  max: number
+  step: number
+  description: string
+}) {
+  const [value, setValue] = useState(() => {
+    const stored = localStorage.getItem(storageKey)
+    return stored ? Number(stored) : defaultValue
+  })
+  const handleChange = (v: number) => {
+    const clamped = Math.min(max, Math.max(min, v))
+    setValue(clamped)
+    localStorage.setItem(storageKey, String(clamped))
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <label className="text-compact font-medium text-content-primary">{label}</label>
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={value}
+            onChange={e => handleChange(Number(e.target.value))}
+            className="w-28 accent-teal-500"
+          />
+          <span className="text-compact text-content-secondary w-14 text-right tabular-nums">{value}</span>
+        </div>
+      </div>
+      <p className="text-micro text-content-tertiary">{description}</p>
+    </div>
+  )
+}
+
 // ── Data management ─────────────────────────────────────────────────────────
 
 function DataManagementSection() {
@@ -501,6 +543,31 @@ export function Settings() {
                 onSave={handleSave}
                 saving={saveMutation.isPending}
               />
+
+              {/* Conversation mode settings (client-side, localStorage) */}
+              <div className="border-t border-border-subtle pt-4 mt-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-content-tertiary mb-3">Conversation Mode</p>
+                <div className="space-y-3">
+                  <LocalNumberField
+                    label="Silence Timeout (ms)"
+                    storageKey="nova_voice_silence_timeout"
+                    defaultValue={2000}
+                    min={500}
+                    max={10000}
+                    step={100}
+                    description="How long to wait after you stop talking before auto-submitting. Lower = snappier, higher = more pause tolerance."
+                  />
+                  <LocalNumberField
+                    label="Barge-in Threshold"
+                    storageKey="nova_voice_bargein_threshold"
+                    defaultValue={0.15}
+                    min={0.05}
+                    max={0.5}
+                    step={0.05}
+                    description="Audio level (0-1) needed to interrupt Nova mid-speech. Lower = easier to interrupt, higher = avoids false triggers."
+                  />
+                </div>
+              </div>
             </Section>
           </div>
 

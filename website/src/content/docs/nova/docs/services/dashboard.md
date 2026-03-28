@@ -30,6 +30,7 @@ The Dashboard is Nova's web-based admin interface. Built with React, it provides
 | **MCP** | `/mcp` | MCP server management -- add from catalog, configure, reload |
 | **Memory Inspector** | `/memory` | Browse, search, and delete stored memories across all tiers |
 | **Agent Endpoints** | `/agent-endpoints` | External agent delegation configuration |
+| **Brain** | `/brain` | 3D knowledge graph with voice-enabled chat panel, conversation mode |
 | **Settings** | `/settings` | Platform configuration (see below) |
 | **Recovery** | `/recovery` | Backup/restore, factory reset, service management |
 | **Remote Access** | `/remote-access` | Cloudflare Tunnel and Tailscale setup wizards |
@@ -49,8 +50,9 @@ The Settings page is organized into these sections:
 9. **Recovery & Services** -- backup/restore, factory reset, service management
 10. **System Status** -- live status of Queue Worker, Reaper, and MCP Servers
 11. **Appearance** -- theme presets and accent color palette
-12. **Notifications** -- desktop notification preferences
-13. **Developer Resources** -- links to API docs and service ports
+12. **Voice** -- STT/TTS provider, API keys, voice selection, conversation mode settings (silence timeout, barge-in threshold)
+13. **Notifications** -- desktop notification preferences
+14. **Developer Resources** -- links to API docs and service ports
 
 ## Proxy configuration
 
