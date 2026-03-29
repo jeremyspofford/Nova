@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, MessageSquare, X, ChevronRight, Network } from 'lucide-react'
+import { Search, X, ChevronRight, Network, Settings, Menu, Mic } from 'lucide-react'
 import { apiFetch } from '../api'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
@@ -136,8 +136,9 @@ export default function Brain() {
   const [showBgStars, setShowBgStars] = useState(true)
   const [showInnerStars, setShowInnerStars] = useState(false)
   const [showNebulae, setShowNebulae] = useState(true)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [topicsOpen, setTopicsOpen] = useState(false)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -158,14 +159,16 @@ export default function Brain() {
         setChatOpen(o => !o)
       }
       if (e.key === 'Escape') {
-        if (chatOpen) setChatOpen(false)
+        if (settingsOpen) setSettingsOpen(false)
+        else if (topicsOpen) setTopicsOpen(false)
+        else if (chatOpen) setChatOpen(false)
         else if (selectedNode) setSelectedNode(null)
         else if (searchActive) { setSearchActive(false); setSearchQuery('') }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [chatOpen, searchActive, selectedNode])
+  }, [chatOpen, searchActive, selectedNode, settingsOpen, topicsOpen])
 
   // Activity step handler — highlights actual retrieved engrams when IDs are available
   const handleActivityStep = useCallback((_step: ActivityStep) => {
@@ -307,267 +310,244 @@ export default function Brain() {
         className="w-full h-full"
       />
 
-      {/* ── Top Left: Search + Layout + Stats ─────────────────────────────── */}
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
-        {/* Search bar */}
-        <form onSubmit={handleSearch} className="flex items-center gap-1 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-3 py-1.5">
-          <Search size={14} className="text-stone-500 shrink-0" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) clearSearch() }}
-            placeholder="Search memories..."
-            className="bg-transparent text-sm text-stone-200 placeholder:text-stone-600 outline-none w-48"
-          />
-          {searchActive && (
-            <button type="button" onClick={clearSearch} className="text-stone-500 hover:text-stone-300">
-              <X size={12} />
-            </button>
-          )}
-        </form>
-
-        {/* Stats badge */}
-        <div className="text-xs text-stone-600 px-1 flex items-center gap-1.5">
+      {/* ── HUD: Stats pill top-center ─────────────────────────────── */}
+      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+        <div className="bg-black/40 backdrop-blur-sm border border-white/[0.06] rounded-full px-3.5 py-1 flex items-center gap-2">
           {engramStats ? (
             <>
-              {engramStats.total_engrams.toLocaleString()} memories
-              {' · '}{engramStats.total_edges.toLocaleString()} edges
-              {engramStats.total_archived > 0 && <> · {engramStats.total_archived} archived</>}
-              {activeGraph?.clusters && ` · ${activeGraph.clusters.length} topics`}
-              {routerStatus && routerStatus.observation_count > 0 && (
-                <> · {routerStatus.observation_count} router obs</>
-              )}
+              <span className="text-[10px] text-stone-500">{engramStats.total_engrams.toLocaleString()} memories</span>
+              <span className="w-px h-2.5 bg-white/[0.08]" />
+              <span className="text-[10px] text-stone-500">
+                {activeGraph?.clusters ? `${activeGraph.clusters.length} topics` : `${engramStats.total_edges.toLocaleString()} edges`}
+              </span>
             </>
-          ) : activeGraph ? (
-            <>
-              {activeGraph.nodes.length} memories · {activeGraph.edges.length} connections
-              {activeGraph.clusters && ` · ${activeGraph.clusters.length} topics`}
-            </>
-          ) : null}
-        </div>
-
-        {/* Display toggles */}
-        <div className="flex items-center gap-2 px-1">
-          <button
-            onClick={() => setShowBgStars(v => !v)}
-            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-              showBgStars
-                ? 'border-teal-500/30 text-teal-400 bg-teal-500/10'
-                : 'border-white/10 text-stone-600 hover:text-stone-400'
-            }`}
-          >
-            Stars
-          </button>
-          <button
-            onClick={() => setShowInnerStars(v => !v)}
-            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-              showInnerStars
-                ? 'border-teal-500/30 text-teal-400 bg-teal-500/10'
-                : 'border-white/10 text-stone-600 hover:text-stone-400'
-            }`}
-          >
-            Inner Stars
-          </button>
-          <button
-            onClick={() => setShowNebulae(v => !v)}
-            className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-              showNebulae
-                ? 'border-teal-500/30 text-teal-400 bg-teal-500/10'
-                : 'border-white/10 text-stone-600 hover:text-stone-400'
-            }`}
-          >
-            Clouds
-          </button>
+          ) : (
+            <span className="text-[10px] text-stone-600">loading...</span>
+          )}
         </div>
       </div>
 
-      {/* ── Top Left: Topic Sidebar (collapsible) ─────────────────────── */}
-      {activeGraph && activeGraph.nodes.length > 0 && (
-        <>
-          {!sidebarOpen && (
+      {/* ── HUD: Topics icon top-left ──────────────────────────────── */}
+      <button
+        onClick={() => setTopicsOpen(v => !v)}
+        className="absolute top-3 left-3 z-10 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/[0.06] flex items-center justify-center text-stone-600 hover:text-stone-300 transition-colors"
+        title="Topics & Search"
+      >
+        <Menu size={14} />
+      </button>
+
+      {/* ── HUD: Settings icon top-right ───────────────────────────── */}
+      <button
+        onClick={() => setSettingsOpen(v => !v)}
+        className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/[0.06] flex items-center justify-center text-stone-600 hover:text-stone-300 transition-colors"
+        title="Display settings"
+      >
+        <Settings size={14} />
+      </button>
+
+      {/* ── HUD: Search hint bottom-left ───────────────────────────── */}
+      <div className="absolute bottom-5 left-3 z-10">
+        <div className="bg-black/30 rounded-full px-2.5 py-1">
+          <span className="text-[9px] text-stone-700">/ search</span>
+        </div>
+      </div>
+
+      {/* ── Overlay: Topics & Search ───────────────────────────────── */}
+      {topicsOpen && (
+        <div
+          className="absolute inset-0 z-20"
+          onClick={(e) => { if (e.target === e.currentTarget) setTopicsOpen(false) }}
+        >
+          <div className="absolute top-0 left-0 w-[280px] h-full bg-black/80 backdrop-blur-md border-r border-white/[0.06] p-4 overflow-y-auto scrollbar-thin">
+            {/* Close */}
             <button
-              onClick={() => setSidebarOpen(true)}
-              className="absolute top-28 left-4 z-10 flex items-center gap-1.5 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2.5 py-2 text-stone-500 hover:text-stone-300 transition-colors"
+              onClick={() => setTopicsOpen(false)}
+              className="absolute top-3 right-3 text-stone-600 hover:text-stone-300 transition-colors"
             >
-              <ChevronRight size={12} />
-              <span className="text-[10px]">
-                {activeGraph.clusters && activeGraph.clusters.length > 0
-                  ? `${activeGraph.clusters.length} topics`
-                  : `${new Set(activeGraph.nodes.map(n => n.type)).size} types`}
-              </span>
+              <X size={14} />
             </button>
-          )}
-          {sidebarOpen && (
-            <div className="absolute top-28 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-2 py-2 max-h-[calc(100vh-10rem)] overflow-y-auto w-[200px] scrollbar-thin">
-              <button
-                onClick={() => setSidebarOpen(false)}
-                className="absolute top-2 right-2 text-stone-600 hover:text-stone-300 transition-colors"
-              >
-                <X size={12} />
-              </button>
-              {/* Type distribution filter */}
-              {engramStats?.by_type && (
-                <div className="mb-3 pb-3 border-b border-white/5">
-                  <p className="text-[10px] uppercase tracking-wider text-stone-500 mb-2 px-1.5">Filter by type</p>
-                  <div className="flex flex-wrap gap-1 px-1">
+
+            {/* Search */}
+            <form onSubmit={handleSearch} className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 mb-4">
+              <Search size={13} className="text-stone-600 shrink-0" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) clearSearch() }}
+                placeholder="Search memories..."
+                className="bg-transparent text-sm text-stone-300 placeholder:text-stone-700 outline-none flex-1"
+              />
+              {searchActive && (
+                <button type="button" onClick={clearSearch} className="text-stone-600 hover:text-stone-300">
+                  <X size={11} />
+                </button>
+              )}
+            </form>
+
+            {/* Type distribution filter */}
+            {engramStats?.by_type && (
+              <div className="mb-3 pb-3 border-b border-white/5">
+                <p className="text-[10px] uppercase tracking-wider text-stone-500 mb-2 px-1">Filter by type</p>
+                <div className="flex flex-wrap gap-1">
+                  <button
+                    onClick={() => setTypeFilter(null)}
+                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                      !typeFilter
+                        ? 'border-white/20 text-white bg-white/10'
+                        : 'border-white/5 text-stone-600 hover:text-stone-400'
+                    }`}
+                  >
+                    All
+                  </button>
+                  {Object.entries(engramStats.by_type).map(([type, { total }]) => (
                     <button
-                      onClick={() => setTypeFilter(null)}
+                      key={type}
+                      onClick={() => setTypeFilter(typeFilter === type ? null : type)}
                       className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                        !typeFilter
-                          ? 'border-white/20 text-white bg-white/10'
-                          : 'border-white/5 text-stone-600 hover:text-stone-400'
+                        typeFilter === type
+                          ? TYPE_FILTER_CLASSES[type] ?? 'border-white/20 text-white'
+                          : typeFilter
+                            ? 'border-white/5 text-stone-700 hover:text-stone-500'
+                            : 'border-white/5 text-stone-500 hover:text-stone-300'
                       }`}
                     >
-                      All
+                      {type === 'self_model' ? 'self model' : type} ({total})
                     </button>
-                    {Object.entries(engramStats.by_type).map(([type, { total }]) => (
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Topic/cluster list */}
+            {activeGraph && activeGraph.clusters && activeGraph.clusters.length > 0 ? (
+              <>
+                <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1 pb-1.5 mb-1 border-b border-white/5">
+                  {activeGraph.clusters.length} topics
+                </div>
+                {activeGraph.clusters.slice(0, 30).map(cluster => {
+                  const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
+                  const isExpanded = expandedClusterId === cluster.id
+                  const isFocused = focusCluster?.id === cluster.id
+                  return (
+                    <div key={cluster.id}>
                       <button
-                        key={type}
-                        onClick={() => setTypeFilter(typeFilter === type ? null : type)}
-                        className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
-                          typeFilter === type
-                            ? TYPE_FILTER_CLASSES[type] ?? 'border-white/20 text-white'
-                            : typeFilter
-                              ? 'border-white/5 text-stone-700 hover:text-stone-500'
-                              : 'border-white/5 text-stone-500 hover:text-stone-300'
+                        type="button"
+                        onClick={() => {
+                          setFocusCluster({ id: cluster.id, ts: Date.now() })
+                          setExpandedClusterId(isExpanded ? null : cluster.id)
+                        }}
+                        className={`flex items-center gap-1.5 w-full text-left text-[11px] rounded px-1.5 py-1 transition-colors ${
+                          isFocused ? 'bg-white/10' : 'hover:bg-white/5'
                         }`}
                       >
-                        {type === 'self_model' ? 'self model' : type} ({total})
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                        />
+                        <span className="text-stone-300 truncate flex-1" title={cluster.label}>
+                          {cluster.label}
+                        </span>
+                        <span className="text-stone-600 text-[10px] shrink-0">{cluster.count}</span>
+                        <ChevronRight
+                          size={10}
+                          className={`text-stone-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                        />
                       </button>
-                    ))}
+                      {isExpanded && (
+                        <div className="pl-5 pr-1 py-0.5 space-y-px">
+                          {activeGraph.nodes
+                            .filter(n => n.cluster_id === cluster.id)
+                            .sort((a, b) => b.importance - a.importance)
+                            .slice(0, 12)
+                            .map(node => (
+                              <button
+                                key={node.id}
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedNode(node.id)
+                                  setFocusNode({ id: node.id, ts: Date.now() })
+                                }}
+                                className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                                title={node.content}
+                              >
+                                {node.content}
+                              </button>
+                            ))}
+                          {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
+                            <div className="text-[10px] text-stone-600 px-1 pt-0.5">
+                              +{activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {activeGraph.clusters.length > 30 && (
+                  <div className="text-[10px] text-stone-600 px-1.5 pt-1 border-t border-white/5 mt-1">
+                    +{activeGraph.clusters.length - 30} smaller clusters
                   </div>
+                )}
+              </>
+            ) : activeGraph ? (
+              <>
+                <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1 pb-1.5 mb-1 border-b border-white/5">
+                  Types
                 </div>
-              )}
-              {activeGraph.clusters && activeGraph.clusters.length > 0 ? (
-                <>
-                  <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
-                    {activeGraph.clusters.length} topics
+                {Array.from(new Set(activeGraph.nodes.map(n => n.type))).map(type => (
+                  <div key={type} className="flex items-center gap-2 text-[11px] px-1.5 py-0.5">
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${TYPE_COLORS[type] ?? '#71717a'}` }}
+                    />
+                    <span className="text-stone-400" title={TYPE_DESCRIPTIONS[type]}>
+                      {type === 'self_model' ? 'self model' : type}
+                    </span>
                   </div>
-                  {activeGraph.clusters.slice(0, 30).map(cluster => {
-                    const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
-                    const isExpanded = expandedClusterId === cluster.id
-                    const isFocused = focusCluster?.id === cluster.id
-                    return (
-                      <div key={cluster.id}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setFocusCluster({ id: cluster.id, ts: Date.now() })
-                            setExpandedClusterId(isExpanded ? null : cluster.id)
-                          }}
-                          className={`flex items-center gap-1.5 w-full text-left text-[11px] rounded px-1.5 py-1 transition-colors ${
-                            isFocused ? 'bg-white/10' : 'hover:bg-white/5'
-                          }`}
-                        >
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
-                          />
-                          <span className="text-stone-300 truncate flex-1" title={cluster.label}>
-                            {cluster.label}
-                          </span>
-                          <span className="text-stone-600 text-[10px] shrink-0">{cluster.count}</span>
-                          <ChevronRight
-                            size={10}
-                            className={`text-stone-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                          />
-                        </button>
-                        {isExpanded && (
-                          <div className="pl-5 pr-1 py-0.5 space-y-px">
-                            {activeGraph.nodes
-                              .filter(n => n.cluster_id === cluster.id)
-                              .sort((a, b) => b.importance - a.importance)
-                              .slice(0, 12)
-                              .map(node => (
-                                <button
-                                  key={node.id}
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setSelectedNode(node.id)
-                                    setFocusNode({ id: node.id, ts: Date.now() })
-                                  }}
-                                  className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
-                                  title={node.content}
-                                >
-                                  {node.content}
-                                </button>
-                              ))}
-                            {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
-                              <div className="text-[10px] text-stone-600 px-1 pt-0.5">
-                                +{activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length - 12} more
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                  {activeGraph.clusters.length > 30 && (
-                    <div className="text-[10px] text-stone-600 px-1.5 pt-1 border-t border-white/5 mt-1">
-                      +{activeGraph.clusters.length - 30} smaller clusters
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1.5 pb-1 mb-1 border-b border-white/5">
-                    Types
-                  </div>
-                  {Array.from(new Set(activeGraph.nodes.map(n => n.type))).map(type => (
-                    <div key={type} className="flex items-center gap-2 text-[11px] px-1.5 py-0.5">
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: TYPE_COLORS[type] ?? '#71717a', boxShadow: `0 0 6px ${TYPE_COLORS[type] ?? '#71717a'}` }}
-                      />
-                      <span className="text-stone-400" title={TYPE_DESCRIPTIONS[type]}>
-                        {type === 'self_model' ? 'self model' : type}
-                      </span>
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </>
+                ))}
+              </>
+            ) : null}
+          </div>
+        </div>
       )}
 
-      {/* ── Bottom Left: Graph Key (hidden when detail panel open) ────────── */}
-      {!selectedNodeData && (
-        <div className="absolute bottom-6 left-4 z-10 bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-3 py-2.5 max-w-[220px]">
-          <div className="text-[10px] text-stone-600 uppercase tracking-wider mb-1.5">Graph Key</div>
-          <div className="space-y-1.5 text-[11px] text-stone-400">
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal-400 shrink-0" />
-              <span><strong className="text-stone-300">Node</strong> = a single memory</span>
+      {/* ── Overlay: Display Settings ──────────────────────────────── */}
+      {settingsOpen && (
+        <div
+          className="absolute inset-0 z-20"
+          onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false) }}
+        >
+          <div className="absolute top-12 right-3 w-[220px] bg-black/80 backdrop-blur-md border border-white/[0.08] rounded-xl p-4 space-y-4">
+            <button
+              onClick={() => setSettingsOpen(false)}
+              className="absolute top-3 right-3 text-stone-600 hover:text-stone-300 transition-colors"
+            >
+              <X size={12} />
+            </button>
+
+            <div className="text-[10px] text-stone-500 uppercase tracking-wider">Display</div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] text-stone-600 mb-1">Background</div>
+              {[
+                { label: 'Stars', value: showBgStars, set: setShowBgStars },
+                { label: 'Inner Stars', value: showInnerStars, set: setShowInnerStars },
+                { label: 'Clouds', value: showNebulae, set: setShowNebulae },
+              ].map(({ label, value, set }) => (
+                <button
+                  key={label}
+                  onClick={() => set((v: boolean) => !v)}
+                  className={`block w-full text-left text-[11px] px-2 py-1 rounded transition-colors ${
+                    value
+                      ? 'text-teal-400 bg-teal-500/10'
+                      : 'text-stone-600 hover:text-stone-400'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-5 h-px bg-stone-500 shrink-0" />
-              <span><strong className="text-stone-300">Edge</strong> = relationship</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex gap-0.5 shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" />
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
-              </div>
-              <span><strong className="text-stone-300">Color</strong> = knowledge domain</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-px shrink-0">
-                <span className="w-1 h-1 rounded-full bg-stone-500" />
-                <span className="w-2 h-2 rounded-full bg-stone-400" />
-                <span className="w-2.5 h-2.5 rounded-full bg-stone-300" />
-              </div>
-              <span><strong className="text-stone-300">Size</strong> = importance</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-teal-400/30 ring-1 ring-teal-400/50 shrink-0" />
-              <span><strong className="text-stone-300">Glow</strong> = recently accessed</span>
-            </div>
-          </div>
-          <div className="text-[10px] text-stone-600 border-t border-white/5 mt-2 pt-1.5">
-            Click node for details · Drag to orbit · Scroll to zoom
           </div>
         </div>
       )}
@@ -690,15 +670,14 @@ export default function Brain() {
         </div>
       )}
 
-      {/* ── Chat Toggle FAB: Bottom Right ─────────────────────────────────── */}
+      {/* ── HUD: Mic button bottom-center ──────────────────────────── */}
       {!chatOpen && (
         <button
           onClick={() => setChatOpen(true)}
-          className="absolute bottom-6 right-6 z-10 flex items-center gap-2 bg-teal-600/80 hover:bg-teal-600 backdrop-blur-sm text-white rounded-full px-4 py-2.5 transition-colors shadow-lg shadow-teal-900/30"
+          className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 w-12 h-12 rounded-full bg-teal-500/15 border-2 border-teal-500/40 flex items-center justify-center text-teal-400 hover:bg-teal-500/25 transition-colors shadow-[0_0_20px_rgba(20,184,166,0.15)]"
           title="Chat with Nova (press /)"
         >
-          <MessageSquare size={16} />
-          <span className="text-sm font-medium">Chat</span>
+          <Mic size={18} />
         </button>
       )}
 
