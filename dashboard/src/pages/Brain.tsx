@@ -119,7 +119,7 @@ export default function Brain() {
   // Graph data
   const { data: graph } = useQuery<GraphData>({
     queryKey: ['brain-graph'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full&max_nodes=500'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full'),
     staleTime: 30_000,
     retry: 1,
   })
@@ -139,6 +139,7 @@ export default function Brain() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
+  const [bloomStrength, setBloomStrength] = useState(1.5)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -294,14 +295,13 @@ export default function Brain() {
         focusClusterTs={focusCluster?.ts}
         focusNodeId={focusNode?.id ?? null}
         focusNodeTs={focusNode?.ts}
-        autoSpin
         bgColor="galaxy"
         layoutPreset={layout}
         neuralMode={{
           enabled: true,
           breathingRate: 0.02,
           breathingAmplitude: 0.05,
-          bloomStrength: 1.2,
+          bloomStrength,
           particlesAlways: true,
         }}
         showBackgroundStars={showBgStars}
@@ -527,6 +527,23 @@ export default function Brain() {
             </button>
 
             <div className="text-[10px] text-stone-500 uppercase tracking-wider">Display</div>
+
+            {/* Bloom strength */}
+            <div className="space-y-1.5">
+              <div className="text-[10px] text-stone-600">Bloom</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="0.1"
+                  value={bloomStrength}
+                  onChange={(e) => setBloomStrength(parseFloat(e.target.value))}
+                  className="flex-1 h-1 accent-teal-500 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-webkit-slider-thumb]:appearance-none"
+                />
+                <span className="text-[10px] text-stone-500 w-6 text-right">{bloomStrength.toFixed(1)}</span>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <div className="text-[10px] text-stone-600 mb-1">Background</div>
