@@ -30,6 +30,7 @@ export interface Message {
   activitySteps?: ActivityStep[]
   activityCollapsed?: boolean
   attachments?: AttachedFile[]
+  metadata?: Record<string, unknown>
 }
 
 interface ChatStore {
@@ -207,6 +208,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         content: m.content,
         timestamp: new Date(m.created_at),
         modelUsed: m.model_used ?? undefined,
+        metadata: m.metadata,
       })))
       setConversationId(id)
       setSessionId(id)  // conversation ID = session ID for memory compatibility

@@ -1,11 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Plus, RefreshCw, SlidersHorizontal, Mic } from 'lucide-react'
+import { Send, Plus, SlidersHorizontal, Mic } from 'lucide-react'
 import clsx from 'clsx'
 import { useChatStore } from '../../stores/chat-store'
 import { useFileAttach } from '../../hooks/useFileAttach'
 import { InputDrawer } from './InputDrawer'
 import { FilePreviewBar } from './FilePreviewBar'
-import { Button } from '../../components/ui/Button'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { ModelPicker } from '../../components/ui/ModelPicker'
 
@@ -17,12 +16,11 @@ interface Props {
   modelId: string
   onModelChange: (id: string) => void
   resolvedModel?: string
-  onNewChat: () => void
   hasMessages: boolean
   onManageModels: () => void
 }
 
-export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onModelChange, resolvedModel, onNewChat, hasMessages, onManageModels }: Props) {
+export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onModelChange, resolvedModel, hasMessages, onManageModels }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -164,15 +162,6 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           </Tooltip>
         </div>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<RefreshCw size={12} />}
-          onClick={onNewChat}
-          disabled={isStreaming || !hasMessages}
-        >
-          New chat
-        </Button>
       </div>
 
       <InputDrawer

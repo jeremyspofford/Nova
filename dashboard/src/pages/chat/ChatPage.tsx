@@ -1,11 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { streamChat, discoverModels, resolveModel, apiFetch, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
+import { streamChat, discoverModels, resolveModel, apiFetch, getOrCreateActiveConversation, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
 import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
-import { ConversationSidebar } from '../../components/ConversationSidebar'
 import { ModelManagerModal, getHiddenModels } from '../../components/ModelManagerModal'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
@@ -28,13 +27,11 @@ export function Chat() {
     error, setError,
     resetConversation,
     loadConversation,
-    newConversation,
     pendingFiles, setPendingFiles,
     outputStyle,
     customInstructions,
     webSearchEnabled,
     deepResearchEnabled,
-    sidebarCollapsed, setSidebarCollapsed,
   } = useChatStore()
   const { isAuthenticated } = useAuth()
   const queryClient = useQueryClient()
@@ -103,12 +100,28 @@ export function Chat() {
     }
   }, [messages])
 
-  // Auto-load persisted conversation on mount (page refresh / rebuild)
+  // Auto-load the active conversation on mount for authenticated users.
+  // If a conversationId is already known, load messages for it.
+  // Otherwise fetch/create the most recent conversation and load that.
   useEffect(() => {
-    if (conversationId && messages.length === 0 && !isStreaming) {
-      loadConversation(conversationId).catch(() => {
-        // Conversation no longer exists — start fresh
-        resetConversation()
+    if (!isAuthenticated) return
+
+    if (conversationId) {
+      if (messages.length === 0 && !isStreaming) {
+        loadConversation(conversationId).catch(() => {
+          // Conversation no longer exists — get or create a new one
+          getOrCreateActiveConversation().then(id => {
+            loadConversation(id).catch(() => resetConversation())
+          }).catch(() => resetConversation())
+        })
+      }
+    } else {
+      // No stored conversation — fetch or create the active one
+      getOrCreateActiveConversation().then(id => {
+        loadConversation(id).catch(() => resetConversation())
+      }).catch(() => {
+        // API unavailable (e.g. REQUIRE_AUTH=false with no conversations endpoint)
+        // — do nothing, user can still chat without persistence
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -316,16 +329,6 @@ export function Chat() {
     }
   }, [isStreaming, messageQueue, handleSubmit])
 
-  const startNewConversation = async () => {
-    setMessageQueue([])
-    if (isAuthenticated) {
-      await newConversation()
-      queryClient.invalidateQueries({ queryKey: ['conversations'] })
-    } else {
-      resetConversation()
-    }
-  }
-
   // Compute streaming status text
   const streamingStatus = isStreaming ? (() => {
     const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
@@ -350,92 +353,71 @@ export function Chat() {
     modelId,
     onModelChange: setModelId,
     resolvedModel: resolved?.model,
-    onNewChat: startNewConversation,
     hasMessages: messages.length > 0,
     onManageModels: () => setModelManagerOpen(true),
   }
 
-  const handleSelectConversation = useCallback(async (id: string) => {
-    setMessageQueue([])
-    await loadConversation(id)
-  }, [loadConversation])
-
-  const handleNewConversation = useCallback(async () => {
-    await startNewConversation()
-  }, [startNewConversation]) // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
-    <div className="flex h-full overflow-hidden bg-surface-root">
-      {isAuthenticated && (
-        <ConversationSidebar
-          currentId={conversationId}
-          onSelect={handleSelectConversation}
-          onNew={handleNewConversation}
-          collapsed={sidebarCollapsed}
-          onToggle={() => setSidebarCollapsed(c => !c)}
-        />
-      )}
-      <div ref={containerRef} className="flex-1 flex flex-col h-full overflow-hidden">
-        {messages.length === 0 ? (
-          /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
-          <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
-            {greeting && (
-              <div className="max-w-5xl w-full mb-8">
+    <div ref={containerRef} className="flex flex-col h-full overflow-hidden bg-surface-root">
+      {messages.length === 0 ? (
+        /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
+        <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
+          {greeting && (
+            <div className="max-w-5xl w-full mb-8">
+              <MessageBubble message={{
+                id: 'greeting',
+                role: 'assistant',
+                content: greeting,
+                timestamp: new Date(),
+              }} />
+            </div>
+          )}
+          <div className="w-full max-w-5xl">
+            <ChatInput {...chatInputProps} />
+          </div>
+        </div>
+      ) : (
+        /* Active chat: scrollable messages + bottom-pinned input */
+        <>
+          <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+              {greeting && (
                 <MessageBubble message={{
                   id: 'greeting',
                   role: 'assistant',
                   content: greeting,
                   timestamp: new Date(),
                 }} />
-              </div>
-            )}
-            <div className="w-full max-w-5xl">
+              )}
+              {messages.map(msg => (
+                <MessageBubble key={msg.id} message={msg} />
+              ))}
+
+              {error && (
+                <div className="rounded-sm border border-danger/30 bg-danger-dim px-4 py-3 text-compact text-danger">
+                  {error}
+                </div>
+              )}
+
+              <div ref={bottomRef} />
+            </div>
+          </div>
+
+          {(streamingStatus || messageQueue.length > 0) && (
+            <p className="text-caption text-content-tertiary text-center py-1 min-h-6">
+              {streamingStatus && <>{aiName} is {streamingStatus}</>}
+              {streamingStatus && messageQueue.length > 0 && ' \u00b7 '}
+              {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
+            </p>
+          )}
+
+          <div className="shrink-0 w-full px-4 pb-4">
+            <div className="max-w-5xl mx-auto">
               <ChatInput {...chatInputProps} />
             </div>
           </div>
-        ) : (
-          /* Active chat: scrollable messages + bottom-pinned input */
-          <>
-            <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-                {greeting && (
-                  <MessageBubble message={{
-                    id: 'greeting',
-                    role: 'assistant',
-                    content: greeting,
-                    timestamp: new Date(),
-                  }} />
-                )}
-                {messages.map(msg => (
-                  <MessageBubble key={msg.id} message={msg} />
-                ))}
-
-                {error && (
-                  <div className="rounded-sm border border-danger/30 bg-danger-dim px-4 py-3 text-compact text-danger">
-                    {error}
-                  </div>
-                )}
-
-                <div ref={bottomRef} />
-              </div>
-            </div>
-
-            {(streamingStatus || messageQueue.length > 0) && (
-              <p className="text-caption text-content-tertiary text-center py-1 min-h-6">
-                {streamingStatus && <>{aiName} is {streamingStatus}</>}
-                {streamingStatus && messageQueue.length > 0 && ' \u00b7 '}
-                {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
-              </p>
-            )}
-
-            <div className="shrink-0 w-full px-4 pb-4">
-              <div className="max-w-5xl mx-auto">
-                <ChatInput {...chatInputProps} />
-              </div>
-            </div>
-          </>
-        )}
-      </div>
+        </>
+      )}
 
       <ModelManagerModal
         open={modelManagerOpen}

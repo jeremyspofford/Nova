@@ -86,7 +86,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
           ) : '\u2014'}
         </div>
 
-        {/* Footer: time, model, category */}
+        {/* Footer: time, model, category, channel */}
         <p
           className={clsx(
             'mt-1 font-mono text-mono-sm text-content-tertiary px-1',
@@ -94,6 +94,9 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
           )}
         >
           {formatDistanceToNow(message.timestamp, { addSuffix: true })}
+          {message.metadata?.channel === 'telegram' && (
+            <span className="ml-1.5 text-content-tertiary/50">via Telegram</span>
+          )}
           {!isUser && message.modelUsed && (
             <span className="ml-1.5">
               &middot; {message.modelUsed}
