@@ -119,7 +119,7 @@ export default function Brain() {
   // Graph data
   const { data: graph } = useQuery<GraphData>({
     queryKey: ['brain-graph'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full&max_nodes=5000'),
     staleTime: 30_000,
     retry: 1,
   })
@@ -295,6 +295,7 @@ export default function Brain() {
         focusClusterTs={focusCluster?.ts}
         focusNodeId={focusNode?.id ?? null}
         focusNodeTs={focusNode?.ts}
+        autoSpin={false}
         bgColor="galaxy"
         layoutPreset={layout}
         neuralMode={{
