@@ -812,24 +812,15 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       .onBackgroundClick(() => {
         onBackgroundClickRef.current?.()
       })
-      .onNodeDragEnd((node: any) => {
-        node.fx = node.x
-        node.fy = node.y
-        node.fz = node.z
-      })
-      .onNodeRightClick((node: any) => {
-        node.fx = undefined
-        node.fy = undefined
-        node.fz = undefined
-      })
+      .enableNodeDrag(false)
 
       // ── Forces ───────────────────────────────────────────────────────
       // Organic force-directed layout — let topology create clusters
       // naturally. No artificial sphere positioning.
-      .d3AlphaDecay(0.02)
-      .d3VelocityDecay(0.3)
-      .warmupTicks(isLargeGraph ? 150 : 60)
-      .cooldownTicks(isLargeGraph ? 400 : 200)
+      .d3AlphaDecay(0.04)
+      .d3VelocityDecay(0.4)
+      .warmupTicks(250)
+      .cooldownTicks(150)
 
     try {
       if (isLargeGraph) {
@@ -917,41 +908,43 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     const camPos = new Vector3()
     const nodePos = new Vector3()
 
+    let tickCount = 0
     const tick = () => {
       sharedUniforms.uTime.value = Date.now() * 0.001
+      tickCount++
 
       // Slow auto-rotate
       if (spinningRef.current) {
         try { graph.scene().rotation.y += 0.001 } catch { /* ok */ }
       }
 
-      // Progressive label visibility — Obsidian-style zoom-to-read
-      try {
-        const camera = graph.camera()
-        camPos.copy(camera.position)
+      // Progressive label visibility — throttle to every 5th frame
+      if (tickCount % 5 === 0) {
+        try {
+          const camera = graph.camera()
+          camPos.copy(camera.position)
 
-        const data = graph.graphData()
-        for (const node of data.nodes) {
-          const obj = node.__threeObj
-          if (!obj) continue
-          const label = obj.getObjectByName('nodeLabel')
-          if (!label) continue
+          const data = graph.graphData()
+          for (const node of data.nodes) {
+            const obj = node.__threeObj
+            if (!obj) continue
+            const label = obj.getObjectByName('nodeLabel')
+            if (!label) continue
 
-          nodePos.set(node.x ?? 0, node.y ?? 0, node.z ?? 0)
-          // Account for scene rotation
-          nodePos.applyMatrix4(graph.scene().matrixWorld)
-          const dist = camPos.distanceTo(nodePos)
+            nodePos.set(node.x ?? 0, node.y ?? 0, node.z ?? 0)
+            nodePos.applyMatrix4(graph.scene().matrixWorld)
+            const dist = camPos.distanceTo(nodePos)
 
-          if (dist < LABEL_SHOW_DISTANCE) {
-            label.visible = true
-            // Fade in/out smoothly based on distance
-            const t = 1 - (dist / LABEL_SHOW_DISTANCE)
-            label.material.opacity = t * t  // ease-in curve
-          } else {
-            label.visible = false
+            if (dist < LABEL_SHOW_DISTANCE) {
+              label.visible = true
+              const t = 1 - (dist / LABEL_SHOW_DISTANCE)
+              label.material.opacity = t * t
+            } else {
+              label.visible = false
+            }
           }
-        }
-      } catch { /* ok during init */ }
+        } catch { /* ok during init */ }
+      }
 
       // ── Neural mode pulsation + bloom breathing ─────────────────────
       try {
