@@ -525,31 +525,6 @@ Tests written during this analysis. Expand to cover the new code from Tiers 1-4.
 
 **Effort:** Phase 1: 1-2 days. Phase 2: 1 day. Phase 3: 0.5 day.
 
-### P2: Demo Platform `[spec]`
-
-**Why:** Self-serve "Try Nova Free" experience for viral growth. Anyone clicks a button on arialabs.ai, gets their own isolated Nova instance for 1 hour — no signup, no install. Critical for converting social media interest into real users before they commit to self-hosting.
-
-**Architecture:** Hybrid — `NOVA_DEMO=true` flag inside Nova activates budget caps, onboarding, session expiry, and feature gating. A separate demo provisioner service on a VPS creates/destroys isolated Docker Compose instances. Traefik handles wildcard routing (`demo-{id}.demo.arialabs.ai`).
-
-**Deliverables:**
-- Demo mode in LLM gateway (Redis-backed token budget tracking, cheap model lock)
-- Demo mode in orchestrator (session expiry endpoint, write-block after expiry)
-- Demo mode in dashboard (onboarding overlay, countdown timer, freeze state, hidden admin features)
-- Slimmed `docker-compose.demo.yml` (8 containers, no host ports, Traefik labels)
-- Demo provisioner service (FastAPI: instance lifecycle, reaper, rate limiting)
-- Demo host infrastructure (Traefik + Let's Encrypt wildcard cert via DNS-01)
-- Pre-seeded demo data (engrams, tasks, memory graph)
-- Website "Try Nova Free" CTA + provisioning interstitial page
-
-**Cost:** ~$30-40/mo VPS + $0.01-0.08 LLM per session. 5-8 concurrent demos.
-
-**Future:** When multi-tenancy ships (P2 RBAC), the per-instance provisioner gets replaced with shared-instance tenant isolation. All in-app demo mode work carries forward.
-
-**Spec:** `docs/superpowers/specs/2026-03-29-demo-platform-design.md`
-**Plan:** `docs/superpowers/plans/2026-03-29-demo-platform.md`
-
-**Effort:** 2-3 focused implementation sessions (~1 week)
-
 ### P2: Nova SDK & CLI `[spec]`
 
 **Why:** External integration layer. Blocks CI/CD automation, scripting, and any non-browser client. Dashboard's `api.ts` duplicates HTTP logic that should live in a typed client.
@@ -596,6 +571,31 @@ Extend chat-bridge adapter pattern. Each adapter is a module in the existing cha
 - Long-context detection — route large contexts to models with higher token limits
 - Separate chat vs pipeline model defaults
 - Chat onboarding — first-run greeting helps users configure providers through conversation
+
+### P3: Demo Platform `[spec]`
+
+**Why:** Self-serve "Try Nova Free" experience for viral growth. Anyone clicks a button on arialabs.ai, gets their own isolated Nova instance for 1 hour — no signup, no install. Converts social media interest into real users before they commit to self-hosting.
+
+**Architecture:** Hybrid — `NOVA_DEMO=true` flag inside Nova activates budget caps, onboarding, session expiry, and feature gating. A separate demo provisioner service on a VPS creates/destroys isolated Docker Compose instances. Traefik handles wildcard routing (`demo-{id}.demo.arialabs.ai`).
+
+**Deliverables:**
+- Demo mode in LLM gateway (Redis-backed token budget tracking, cheap model lock)
+- Demo mode in orchestrator (session expiry endpoint, write-block after expiry)
+- Demo mode in dashboard (onboarding overlay, countdown timer, freeze state, hidden admin features)
+- Slimmed `docker-compose.demo.yml` (8 containers, no host ports, Traefik labels)
+- Demo provisioner service (FastAPI: instance lifecycle, reaper, rate limiting)
+- Demo host infrastructure (Traefik + Let's Encrypt wildcard cert via DNS-01)
+- Pre-seeded demo data (engrams, tasks, memory graph)
+- Website "Try Nova Free" CTA + provisioning interstitial page
+
+**Cost:** ~$30-40/mo VPS + $0.01-0.08 LLM per session. 5-8 concurrent demos.
+
+**Future:** When multi-tenancy ships, the per-instance provisioner gets replaced with shared-instance tenant isolation. All in-app demo mode work carries forward.
+
+**Spec:** `docs/superpowers/specs/2026-03-29-demo-platform-design.md`
+**Plan:** `docs/superpowers/plans/2026-03-29-demo-platform.md`
+
+**Effort:** ~1 week
 
 ---
 
