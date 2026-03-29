@@ -76,7 +76,7 @@ services:
       # ollama/ollama image does not include curl — use the ollama binary itself.
       # `ollama list` connects to the running server and exits 0 when ready.
       test: ["CMD", "ollama", "list"]
-      start_period: 60s    # give more time on first run (model downloads may be pending)
+      start_period: 60s # give more time on first run (model downloads may be pending)
     deploy:
       resources:
         limits:
@@ -147,9 +147,9 @@ services:
       retries: 5
       start_period: 120s
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Nova Platform Services
-# ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Nova Platform Services
+  # ─────────────────────────────────────────────────────────────────────────────
   llm-gateway:
     <<: *nova-common
     extra_hosts:
@@ -157,7 +157,16 @@ services:
     build:
       context: .
       dockerfile: llm-gateway/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8001",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -231,7 +240,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health/live', timeout=3)",
+        ]
 
   memory-service:
     <<: *nova-common
@@ -258,7 +273,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8002/health/live', timeout=3)",
+        ]
 
   neural-router-trainer:
     <<: *nova-common
@@ -288,7 +309,16 @@ services:
     build:
       context: .
       dockerfile: orchestrator/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -333,14 +363,29 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live', timeout=3)",
+        ]
 
   chat-api:
     <<: *nova-common
     build:
       context: .
       dockerfile: chat-api/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -363,7 +408,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8080/health/live', timeout=3)",
+        ]
 
   chat-bridge:
     <<: *nova-common
@@ -371,7 +422,16 @@ services:
     build:
       context: .
       dockerfile: chat-bridge/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8090", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8090",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -400,7 +460,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8090/health/live', timeout=3)",
+        ]
 
   recovery:
     <<: *nova-common
@@ -436,7 +502,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8888/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8888/health/live', timeout=3)",
+        ]
     deploy:
       resources:
         limits:
@@ -478,7 +550,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8100/health/live', timeout=3)",
+        ]
     deploy:
       resources:
         limits:
@@ -492,7 +570,16 @@ services:
     build:
       context: .
       dockerfile: intel-worker/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8110", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8110",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -515,7 +602,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8110/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8110/health/live', timeout=3)",
+        ]
 
   # ── Knowledge Worker ────────────────────────────────────────────────────────
   knowledge-worker:
@@ -525,7 +618,16 @@ services:
     build:
       context: .
       dockerfile: knowledge-worker/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8120", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8120",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -552,7 +654,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8120/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8120/health/live', timeout=3)",
+        ]
 
   # ── Voice Service ───────────────────────────────────────────────────────────
   voice-service:
@@ -561,7 +669,16 @@ services:
     build:
       context: .
       dockerfile: voice-service/Dockerfile
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8130", "--reload"]
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8130",
+        "--reload",
+      ]
     develop:
       watch:
         - action: sync
@@ -588,7 +705,13 @@ services:
         condition: service_healthy
     healthcheck:
       <<: *nova-healthcheck
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8130/health/live', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8130/health/live', timeout=3)",
+        ]
 
   dashboard:
     <<: *nova-common
@@ -596,7 +719,7 @@ services:
       context: .
       dockerfile: dashboard/Dockerfile
     ports:
-      - "3001:3000"
+      - "3000:3000"
     depends_on:
       recovery:
         condition: service_healthy
@@ -617,9 +740,9 @@ services:
     profiles:
       - website
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Remote Access Sidecars (optional — enable via COMPOSE_PROFILES)
-# ─────────────────────────────────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Remote Access Sidecars (optional — enable via COMPOSE_PROFILES)
+  # ─────────────────────────────────────────────────────────────────────────────
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel run
