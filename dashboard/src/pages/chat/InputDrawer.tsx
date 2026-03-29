@@ -1,5 +1,4 @@
 import { Paperclip } from 'lucide-react'
-import { VoiceButton } from './VoiceButton'
 import { OutputStylePicker } from './OutputStylePicker'
 import { ResearchToggles } from './ResearchToggles'
 import { Tooltip } from '../../components/ui/Tooltip'
@@ -7,11 +6,9 @@ import { Tooltip } from '../../components/ui/Tooltip'
 interface Props {
   open: boolean
   onAttach: () => void
-  onTranscript: (text: string) => void
-  onLiveState?: (state: { isListening: boolean; transcript: string }) => void
 }
 
-export function InputDrawer({ open, onAttach, onTranscript, onLiveState }: Props) {
+export function InputDrawer({ open, onAttach }: Props) {
   return (
     <div
       className="overflow-hidden transition-all duration-normal ease-out"
@@ -29,7 +26,6 @@ export function InputDrawer({ open, onAttach, onTranscript, onLiveState }: Props
               <Paperclip size={16} />
             </button>
           </Tooltip>
-          <VoiceButton onTranscript={onTranscript} onLiveState={onLiveState} />
         </div>
 
         {/* Right: style + research */}

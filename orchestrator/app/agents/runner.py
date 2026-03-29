@@ -809,7 +809,17 @@ async def _build_nova_context(
     if settings.self_knowledge_enabled:
         self_knowledge_block = f"\n\n{_build_self_knowledge()}"
 
-    return f"{identity_block}{self_knowledge_block}\n\n{platform_block}\n\n{style_block}"
+    # Inject active skills
+    skills_block = ""
+    try:
+        from app.skills import resolve_skills
+        skills_block = await resolve_skills()
+        if skills_block:
+            skills_block = f"\n\n{skills_block}"
+    except Exception as e:
+        log.debug("Failed to resolve skills: %s", e)
+
+    return f"{identity_block}{self_knowledge_block}{skills_block}\n\n{platform_block}\n\n{style_block}"
 
 
 async def _resolve_tool_rounds(

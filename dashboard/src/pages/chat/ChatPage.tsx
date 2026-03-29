@@ -5,6 +5,7 @@ import { useChatStore, type Message } from '../../stores/chat-store'
 import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
+import { useVoiceChat } from '../../hooks/useVoiceChat'
 import { ConversationSidebar } from '../../components/ConversationSidebar'
 import { ModelManagerModal, getHiddenModels } from '../../components/ModelManagerModal'
 import { MessageBubble } from './MessageBubble'
@@ -79,6 +80,44 @@ export function Chat() {
       setModelId(resolved.model)
     }
   }, [modelId, resolved, hiddenModels, setModelId])
+
+  // ── Voice chat integration ──
+  const silenceTimeoutMs = Number(localStorage.getItem('nova_voice_silence_timeout')) || 2000
+  const bargeInThreshold = Number(localStorage.getItem('nova_voice_bargein_threshold')) || 0.15
+  const handleSubmitRef = useRef<(text: string) => void>(() => {})
+  const pendingTranscriptRef = useRef<string | null>(null)
+  const isStreamingRef = useRef(false)
+  isStreamingRef.current = isStreaming
+  const feedTextRef = useRef<(delta: string) => void>(() => {})
+  const flushBufferRef = useRef<() => void>(() => {})
+
+  const handleVoiceTranscript = useCallback((text: string) => {
+    if (isStreamingRef.current) {
+      pendingTranscriptRef.current = text
+    } else {
+      handleSubmitRef.current(text)
+    }
+  }, [])
+
+  const handleVoiceError = useCallback((err: string) => {
+    setError(err)
+  }, [setError])
+
+  const {
+    isRecording, isTranscribing, isSpeaking, recordingDuration,
+    toggleRecording, voiceAvailable, mediaStream,
+    feedText, flushBuffer, stopAllPlayback,
+    muted, setMuted,
+    conversationMode, setConversationMode, conversationState, silenceCountdown,
+  } = useVoiceChat({
+    onTranscript: handleVoiceTranscript,
+    onError: handleVoiceError,
+    silenceTimeoutMs,
+    bargeInThreshold,
+  })
+
+  feedTextRef.current = feedText
+  flushBufferRef.current = flushBuffer
 
   useEffect(() => {
     if (conversationId !== lastConversationId.current) {
@@ -279,6 +318,7 @@ export function Chat() {
           )
         }
         accumulated += event
+        feedTextRef.current(event as string)
       }
       // Stream complete — show the full response at once
       needsInstantScroll.current = true
@@ -300,6 +340,7 @@ export function Chat() {
         )
       )
     } finally {
+      flushBufferRef.current()
       setIsStreaming(false)
       if (conversationId) {
         queryClient.invalidateQueries({ queryKey: ['conversations'] })
@@ -315,6 +356,32 @@ export function Chat() {
       handleSubmit(next, true)
     }
   }, [isStreaming, messageQueue, handleSubmit])
+
+  // Keep voice submit ref in sync so callbacks always reach latest handleSubmit
+  useEffect(() => {
+    handleSubmitRef.current = handleSubmit
+  }, [handleSubmit])
+
+  // Drain pending voice transcript when streaming ends
+  useEffect(() => {
+    if (!isStreaming && pendingTranscriptRef.current) {
+      const text = pendingTranscriptRef.current
+      pendingTranscriptRef.current = null
+      handleSubmit(text)
+    }
+  }, [isStreaming, handleSubmit])
+
+  // Conversation mode: auto-listen when muted and stream finishes (TTS skipped)
+  useEffect(() => {
+    if (conversationMode && muted && !isStreaming && !isRecording && !isTranscribing && !isSpeaking) {
+      const timer = setTimeout(() => {
+        if (conversationMode && !isRecording) {
+          toggleRecording()
+        }
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [conversationMode, muted, isStreaming, isRecording, isTranscribing, isSpeaking, toggleRecording])
 
   const startNewConversation = async () => {
     setMessageQueue([])
@@ -353,6 +420,22 @@ export function Chat() {
     onNewChat: startNewConversation,
     hasMessages: messages.length > 0,
     onManageModels: () => setModelManagerOpen(true),
+    voice: voiceAvailable ? {
+      available: true as const,
+      isRecording,
+      isTranscribing,
+      isSpeaking,
+      recordingDuration,
+      toggleRecording,
+      muted,
+      setMuted,
+      conversationMode,
+      setConversationMode,
+      conversationState,
+      silenceCountdown,
+      silenceTimeoutMs,
+      mediaStream,
+    } : undefined,
   }
 
   const handleSelectConversation = useCallback(async (id: string) => {

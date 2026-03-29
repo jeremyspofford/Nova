@@ -34,6 +34,8 @@ from app.tools.memory_tools import MEMORY_TOOLS
 from app.tools.memory_tools import execute_tool as _exec_memory
 from app.tools.intel_tools import INTEL_TOOLS
 from app.tools.intel_tools import execute_tool as _exec_intel
+from app.tools.config_tools import CONFIG_TOOLS
+from app.tools.config_tools import execute_tool as _exec_config
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -55,6 +57,7 @@ _REGISTRY: list[ToolGroup] = [
     ToolGroup("Introspect", "Platform Awareness", "Query platform config, knowledge sources, MCP servers, user profiles", INTROSPECT_TOOLS, _exec_introspect),
     ToolGroup("Memory", "Knowledge Retrieval", "Search, recall, and read from Nova's memory system", MEMORY_TOOLS, _exec_memory),
     ToolGroup("Intel", "Intelligence Analysis", "Query intel feeds, create recommendations, check dismissed content", INTEL_TOOLS, _exec_intel),
+    ToolGroup("Config", "Skills & Rules", "Manage prompt skills and behavior rules", CONFIG_TOOLS, _exec_config),
 ]
 
 # Derived from registry — same shapes the rest of the codebase expects
@@ -134,6 +137,16 @@ def get_all_tools() -> list[ToolDefinition]:
 
 async def execute_tool(name: str, arguments: dict) -> str:
     """Dispatch a tool call to the appropriate module."""
+    # ── Hard rule enforcement (pre-execution) ──
+    try:
+        from app.rules import check_hard_rules
+        allowed, violation_msg = await check_hard_rules(name, arguments)
+        if not allowed:
+            return f"Tool execution blocked: {violation_msg}"
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("Rule check failed: %s", e)
+
     # MCP tools are namespaced as mcp__{server}__{tool}
     if name.startswith("mcp__"):
         try:
