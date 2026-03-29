@@ -48,7 +48,8 @@ router = APIRouter(tags=["orchestrator"])
 
 
 async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sandbox_token=None,
-                      conversation_id: str | None = None, user_message: str | None = None):
+                      conversation_id: str | None = None, user_message: str | None = None,
+                      session_id: str | None = None, message_metadata: dict | None = None):
     """SSE-formatted wrapper: yields deltas from run_agent_turn_streaming, handles errors, resets agent status."""
     accumulated = ""
     model_used = None
@@ -81,7 +82,7 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
             try:
                 from app.conversations import add_message, generate_title
                 if user_message:
-                    await add_message(conversation_id, "user", user_message)
+                    await add_message(conversation_id, "user", user_message, metadata=message_metadata)
                 await add_message(conversation_id, "assistant", accumulated, model_used=model_used)
                 # Auto-title: check if conversation still has no title
                 from app.db import get_pool
@@ -95,6 +96,14 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
                     asyncio.create_task(generate_title(conversation_id, user_message))
             except Exception as e:
                 log.warning("Failed to persist conversation messages: %s", e)
+        # Release concurrent stream lock
+        try:
+            from app.store import get_redis
+            _redis = get_redis()
+            lock_key = f"nova:chat:streaming:{conversation_id or session_id}"
+            await _redis.delete(lock_key)
+        except Exception:
+            pass  # Lock auto-expires via TTL if cleanup fails
 
 
 # ── Sandbox tier (runtime from DB) ────────────────────────────────────────────
@@ -295,6 +304,7 @@ class ChatRequest(BaseModel):
     custom_instructions: str | None = None
     web_search: bool = False
     deep_research: bool = False
+    metadata: dict | None = None  # channel tagging from bridge
 
 
 # ── Chat pod config cache ─────────────────────────────────────────────────────
@@ -396,6 +406,17 @@ async def chat_stream(req: ChatRequest, user: UserDep):
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # Concurrent stream lock — one stream per conversation at a time
+    from app.store import get_redis
+    lock_key = f"nova:chat:streaming:{conversation_id or session_id}"
+    _redis = get_redis()
+    if await _redis.exists(lock_key):
+        raise HTTPException(
+            status_code=409,
+            detail="Nova is currently responding. Try again in a moment."
+        )
+    await _redis.set(lock_key, "1", ex=120)
+
     # Extract last user message for persistence
     user_message = None
     if conversation_id and req.messages:
@@ -452,6 +473,8 @@ async def chat_stream(req: ChatRequest, user: UserDep):
             sandbox_token=sandbox_token,
             conversation_id=conversation_id,
             user_message=user_message,
+            session_id=session_id,
+            message_metadata=req.metadata,
         ),
         media_type="text/event-stream",
         headers={
