@@ -137,6 +137,7 @@ export default function Brain() {
   const [showBgStars, setShowBgStars] = useLocalStorage('brain.showBgStars', true)
   const [showInnerStars, setShowInnerStars] = useLocalStorage('brain.showInnerStars', false)
   const [showNebulae, setShowNebulae] = useLocalStorage('brain.showNebulae', true)
+  const [showEdges, setShowEdges] = useLocalStorage('brain.showEdges', true)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
@@ -309,6 +310,7 @@ export default function Brain() {
         showBackgroundStars={showBgStars}
         showInnerStars={showInnerStars}
         showNebulae={showNebulae}
+        showEdges={showEdges}
         className="w-full h-full"
       />
 
@@ -545,6 +547,20 @@ export default function Brain() {
                 />
                 <span className="text-[10px] text-stone-500 w-6 text-right">{bloomStrength.toFixed(1)}</span>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] text-stone-600 mb-1">Graph</div>
+              <button
+                onClick={() => setShowEdges((v: boolean) => !v)}
+                className={`block w-full text-left text-[11px] px-2 py-1 rounded transition-colors ${
+                  showEdges
+                    ? 'text-teal-400 bg-teal-500/10'
+                    : 'text-stone-600 hover:text-stone-400'
+                }`}
+              >
+                Connections
+              </button>
             </div>
 
             <div className="space-y-2">

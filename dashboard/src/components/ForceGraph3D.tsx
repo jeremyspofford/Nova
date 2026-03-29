@@ -101,6 +101,7 @@ interface ForceGraph3DProps {
   showBackgroundStars?: boolean
   showInnerStars?: boolean
   showNebulae?: boolean
+  showEdges?: boolean
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -612,6 +613,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showBackgroundStars = true,
   showInnerStars = false,
   showNebulae = true,
+  showEdges = true,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
@@ -635,6 +637,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showInnerStarsRef.current = showInnerStars
   const showNebulaeRef = useRef(showNebulae)
   showNebulaeRef.current = showNebulae
+  const showEdgesRef = useRef(showEdges)
+  useEffect(() => { showEdgesRef.current = showEdges }, [showEdges])
   // Activity visualization refs (imperative handle)
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
 
@@ -758,6 +762,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       .nodeThreeObjectExtend(false)
 
       // ── Link appearance ──────────────────────────────────────────────
+      .linkVisibility(() => showEdgesRef.current)
       .linkColor((link: any) => {
         const sourceNode = typeof link.source === 'object' ? link.source : null
         if (!sourceNode) return '#60a5fa'
@@ -766,6 +771,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       .linkOpacity(isLargeGraph ? 0.15 : 0.4)
       .linkWidth((link: any) => isLargeGraph ? 0.3 + (link.weight ?? 0) * 0.8 : 0.6 + (link.weight ?? 0) * 1.8)
       .linkDirectionalParticles((link: any) => {
+        if (!showEdgesRef.current) return 0
         if (neuralModeRef.current?.particlesAlways) {
           return Math.max(1, Math.ceil((link.weight ?? 0.5) * 2))
         }
