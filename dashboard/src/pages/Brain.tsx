@@ -119,7 +119,7 @@ export default function Brain() {
   // Graph data
   const { data: graph } = useQuery<GraphData>({
     queryKey: ['brain-graph'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full&max_nodes=2000'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full&max_nodes=500'),
     staleTime: 30_000,
     retry: 1,
   })

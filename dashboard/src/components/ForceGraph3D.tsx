@@ -21,6 +21,11 @@ import {
 // @ts-expect-error — three/examples not typed
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass'
 
+// Shared uniform — update once per frame, all materials see the new value
+const sharedUniforms = {
+  uTime: { value: 0 },
+}
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface GraphNode {
@@ -898,6 +903,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     const nodePos = new Vector3()
 
     const tick = () => {
+      sharedUniforms.uTime.value = Date.now() * 0.001
+
       // Slow auto-rotate
       if (spinningRef.current) {
         try { graph.scene().rotation.y += 0.001 } catch { /* ok */ }
