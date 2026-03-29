@@ -35,7 +35,7 @@ A single user can chat with Nova from the PWA or Telegram (or future channels) a
 ### Phase 2 (Roadmap)
 
 - Multi-user memory isolation (per-user engram graph)
-- Real-time conversation sync (live updates across channels)
+- Real-time conversation sync (live updates across channels without refresh)
 - Push notifications
 - Slack adapter
 - Conversation history management (archive, search, export)
@@ -56,6 +56,9 @@ A single user can chat with Nova from the PWA or Telegram (or future channels) a
 - New user sends `/link ABC123` to the bot
 - Bot validates code, creates the binding, confirms
 
+**Multiple users, no links:**
+- If more than one registered user exists and auto-link conditions aren't met, the bot replies: "Multiple Nova users detected. Ask your admin for a link code, or visit the dashboard to generate one."
+
 **Unlinking:**
 - Available from Settings > Chat Integrations > Telegram per user
 - Also via `/unlink` command in Telegram
@@ -63,16 +66,16 @@ A single user can chat with Nova from the PWA or Telegram (or future channels) a
 **Constraints:**
 - One Telegram account per Nova user
 - Re-linking replaces the old binding
-- Unlinked users who message the bot get: "Send /link <code> to connect your Nova account."
+- Unlinked users who message the bot get instructions pointing them to the dashboard or `/link` command
 
 ### 2. Conversation Unification
 
 **How Telegram messages join the same conversation as the PWA:**
 
 1. Telegram message arrives at the bridge
-2. Bridge resolves the sender: looks up `telegram:chat_id` to find the linked `user_id`
+2. Bridge resolves the sender: calls `POST /api/v1/linked-accounts/resolve` with platform=telegram and platform_id=chat_id to get the linked `user_id`
 3. Bridge fetches that user's single active conversation from the orchestrator (creates one if none exists)
-4. Bridge calls the same chat streaming endpoint the PWA uses, with the user's `conversation_id` and message
+4. Bridge calls `POST /api/v1/chat/stream` with that `conversation_id`, the message, and service auth headers
 5. Orchestrator processes it identically to a PWA message: memory injection, engram ingestion, tool use, streaming response
 6. Bridge collects the streamed response and sends it to Telegram
 7. When the user opens the PWA, all messages are already there — same database
@@ -87,37 +90,54 @@ A single user can chat with Nova from the PWA or Telegram (or future channels) a
 
 ### 3. Concurrent Message Handling
 
-If Nova is already responding to a message (from either channel), a message from the other channel receives a friendly response: "Nova is thinking — try again in a moment."
+**Lock mechanism:** When a streaming response begins for a conversation, the orchestrator sets a Redis key `nova:chat:streaming:{conversation_id}` with a 120-second TTL (auto-expires if the stream crashes). The key is deleted when streaming completes.
 
-This prevents race conditions where two streaming responses would conflict. Same behavior as not talking over someone on the phone.
+**Behavior:**
+- Before starting a new stream, the orchestrator checks for this key
+- If locked, returns HTTP 409 with body: `{"error": "Nova is currently responding. Try again in a moment."}`
+- This applies to all channels equally — if you send a message from the PWA while Nova is responding to a Telegram message (or vice versa, or same channel), you get the same 409
+- The bridge translates the 409 into a friendly Telegram message
+- The PWA chat UI shows the "Nova is thinking" state and disables the send button while streaming (this already works for same-session streams; the new lock makes it work cross-channel)
+
+**Rapid messages:** If a user sends multiple messages quickly from Telegram before Nova finishes responding, messages 2+ get the "try again" response. No automatic queuing — the user retries when ready. This matches natural conversation: wait for the other person to finish.
 
 ### 4. Chat-Bridge Changes
 
 **Removed responsibilities:**
 - No longer creates its own agents per Telegram user
 - No longer manages sessions in Redis DB 4
-- No longer calls the task streaming endpoint directly
+- No longer calls `/api/v1/tasks/stream` directly
 
 **New responsibilities:**
-- Resolves Telegram users to Nova users via linked accounts
-- Auto-links first user when conditions are met
-- Handles `/link` and `/unlink` commands
-- Calls the orchestrator chat endpoint on behalf of the linked user
+- Resolves Telegram users to Nova users via `POST /api/v1/linked-accounts/resolve`
+- Auto-links first user when conditions are met via `POST /api/v1/linked-accounts/auto-link`
+- Handles `/link` and `/unlink` commands via linked-accounts API
+- Calls `POST /api/v1/chat/stream` on behalf of the linked user (see Bridge Auth section)
 - Chunks long responses for Telegram's 4096-character message limit (split on paragraph boundaries)
 - Handles rich content gracefully: Telegram photos/voice become attachments, complex tool output degrades to simplified text
 
 **Unchanged:**
 - Telegram adapter (webhook and polling modes)
 - Message formatting (markdown with plaintext fallback)
-- Bot token configuration
 - Typing indicators
 
-**Bridge trust model:**
-- The bridge is a trusted internal service running inside the Docker network
-- It authenticates to the orchestrator with a service secret and can specify which user a message is from
-- External clients cannot impersonate users — only the bridge can
+### 5. Bridge Auth Model
 
-### 5. PWA Chat UI Changes
+The bridge is a trusted internal service running inside the Docker network. It needs to call `POST /api/v1/chat/stream`, which normally requires user-level JWT auth from the dashboard.
+
+**Mechanism: service-to-service impersonation**
+
+- New env var: `BRIDGE_SERVICE_SECRET` (shared between orchestrator and bridge, set in `.env`)
+- Bridge sends two headers on requests to the orchestrator:
+  - `X-Service-Secret: <bridge_service_secret>` — proves the caller is a trusted internal service
+  - `X-On-Behalf-Of: <user_id>` — identifies which user this request is for
+- Orchestrator's auth middleware recognizes this header pair: if `X-Service-Secret` matches the configured secret, it trusts the `X-On-Behalf-Of` user_id and skips JWT validation
+- This auth path is only honored when `X-Service-Secret` is valid — external clients cannot use `X-On-Behalf-Of` alone
+- `BRIDGE_SERVICE_SECRET` is auto-generated by `setup.sh` alongside the existing `ADMIN_SECRET`
+
+**Why not per-user JWTs in the bridge:** The bridge would need to obtain, store, and refresh JWT tokens for every linked user. Service-level trust is simpler and appropriate since the bridge runs inside the trusted Docker network.
+
+### 6. PWA Chat UI Changes
 
 **Removed:**
 - Conversation sidebar / conversation list
@@ -127,8 +147,9 @@ This prevents race conditions where two streaming responses would conflict. Same
 **New behavior:**
 - Chat page loads the user's single active conversation automatically
 - Messages from Telegram show a small channel indicator
-- If Nova is responding to a Telegram message, the PWA shows the streaming response live
-- "Nova is thinking" state reflects across channels
+- "Nova is thinking" state prevents sending while any channel is streaming (check the Redis lock or receive 409)
+
+**Phase 2 (not Phase 1):** Live cross-channel streaming — seeing Telegram-originated responses appear in real-time on the PWA. In Phase 1, Telegram messages appear when the user opens or refreshes the PWA. This is acceptable because the messages are in the same database; there's just no push mechanism yet.
 
 **Unchanged:**
 - Message rendering, markdown, activity feed
@@ -136,7 +157,7 @@ This prevents race conditions where two streaming responses would conflict. Same
 - Auto-scroll, draft persistence
 - All non-chat dashboard functionality
 
-### 6. Telegram Settings UI
+### 7. Telegram Settings UI
 
 **Location:** Settings > Chat Integrations > Telegram
 
@@ -144,7 +165,8 @@ This prevents race conditions where two streaming responses would conflict. Same
 - Text field, always visible (even when connected), pre-filled if configured
 - Save button
 - Connection status indicator (connected / disconnected / error)
-- Changing the token reconnects with the new bot
+- Saving the token writes to Redis runtime config (`nova:config:telegram.bot_token` in DB 1) and calls `POST /api/v1/bridge/reload-telegram` to trigger the bridge to teardown and re-setup the Telegram adapter with the new token
+- No .env edit or container restart required
 
 **Linked Users section:**
 - Table: Nova User | Telegram Username | Status | Actions
@@ -157,11 +179,11 @@ This prevents race conditions where two streaming responses would conflict. Same
 - Last message received timestamp
 
 **Configuration storage:**
-- Bot token: runtime config via Redis (dashboard-configurable, no .env edits required)
-- Link codes: Redis with 10-minute TTL
-- Linked accounts: orchestrator database
+- Bot token: `nova:config:telegram.bot_token` in Redis DB 1 (consistent with other runtime config)
+- Link codes: `nova:link:{code}` in Redis DB 1 with 10-minute TTL
+- Linked accounts: orchestrator database (linked_accounts table)
 
-### 7. External Access
+### 8. External Access
 
 Two supported options, documented with trade-offs. Users choose based on their priority.
 
@@ -183,18 +205,65 @@ Two supported options, documented with trade-offs. Users choose based on their p
 
 Scope for this project is documentation and configuration guidance only — no new infrastructure tooling.
 
-### 8. Orchestrator Changes
+### 9. Orchestrator Changes
 
-**New behaviors:**
-- Accept messages from the bridge on behalf of a linked user (bridge authenticates with a service secret)
-- Resolve platform accounts to Nova users
-- Auto-link first user when conditions are met (one registered user, no existing link for that platform)
-- Generate and validate link codes
-- Create and manage linked account bindings
-- Return 409 "Nova is thinking" when a conversation already has an active streaming response
+**New API endpoints:**
 
-**New database table:**
-- Linked accounts: stores which platform accounts are bound to which Nova users
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/v1/linked-accounts` | GET | User (JWT) | List linked accounts for the authenticated user |
+| `/api/v1/linked-accounts` | POST | User (JWT) | Manually link a platform account (admin) |
+| `/api/v1/linked-accounts/{id}` | DELETE | User (JWT) | Unlink a platform account |
+| `/api/v1/linked-accounts/resolve` | POST | Service (X-Service-Secret) | Map platform + platform_id to user_id + conversation_id. Used by bridge. |
+| `/api/v1/linked-accounts/auto-link` | POST | Service (X-Service-Secret) | Auto-link when one user exists with no link. Used by bridge. |
+| `/api/v1/linked-accounts/link-code` | POST | User (JWT) | Generate a 6-char link code (stored in Redis DB 1, 10-min TTL) |
+| `/api/v1/linked-accounts/redeem` | POST | Service (X-Service-Secret) | Validate a link code and create the binding. Used by bridge /link command. |
+| `/api/v1/bridge/reload-telegram` | POST | Admin (X-Admin-Secret) | Tell the bridge to teardown and re-setup Telegram adapter. Called by dashboard after saving bot token. |
+
+**Resolve endpoint response:**
+```json
+{
+  "user_id": "uuid",
+  "conversation_id": "uuid",
+  "username": "jeremy"
+}
+```
+If the user has no conversation yet, the resolve endpoint creates one and returns the new conversation_id.
+
+**New auth path on `/api/v1/chat/stream`:**
+- Accepts `X-Service-Secret` + `X-On-Behalf-Of` headers as an alternative to JWT
+- Only honored when `X-Service-Secret` matches the configured `BRIDGE_SERVICE_SECRET`
+- Treats the request as if the specified user made it
+
+**Concurrent stream lock:**
+- On stream start: `SET nova:chat:streaming:{conversation_id} 1 EX 120` in Redis DB 2
+- On stream end: `DEL nova:chat:streaming:{conversation_id}`
+- Before streaming: check key exists → return 409 if locked
+
+**New database migration — `linked_accounts` table:**
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID | Primary key |
+| user_id | UUID | FK to users table |
+| platform | TEXT | "telegram", "slack", etc. |
+| platform_id | TEXT | Platform-specific user/chat ID |
+| platform_username | TEXT | Display name (nullable) |
+| linked_at | TIMESTAMPTZ | When the link was created |
+
+**Constraints:** Unique on (platform, platform_id). Unique on (user_id, platform) — one link per platform per user.
+
+### 10. Migration Plan
+
+**Existing conversations:**
+- The conversations table schema is unchanged. The "one conversation per user" rule is enforced at the application layer, not the database.
+- Existing multi-conversation API endpoints (list, create, delete) remain in the codebase for backward compatibility with chat-api and potential external clients.
+- The PWA chat UI simply loads the most recent conversation and doesn't expose the list/create/delete UI. If a user has multiple existing conversations, the newest one becomes "the" conversation.
+- No data migration needed — existing conversations are preserved, the UI just stops showing a list.
+
+### 11. chat-api Service
+
+chat-api (port 8080) is the WebSocket streaming bridge for external clients. It is **out of scope for Phase 1**. It continues to work as-is with its own session management. External WebSocket clients are a separate channel that could be unified in a future phase using the same bridge auth pattern.
 
 **No changes to:**
 - Memory service, engram ingestion, LLM gateway
@@ -216,6 +285,8 @@ No PWA infrastructure work needed. The only dashboard changes are to the chat UI
 
 - **Telegram message length:** Responses exceeding 4096 characters are split on paragraph boundaries
 - **Rich content mismatch:** Telegram photos/voice become conversation attachments; complex Nova output (tool results, diagrams) degrades to text for Telegram
-- **Auto-link guard:** Auto-link only fires when exactly one registered user exists and no Telegram account is linked. Prevents a stranger from claiming the account if the bot token leaks.
-- **Bot token change:** Changing the token in settings disconnects the old bot and reconnects with the new one. Linked accounts persist (they're bound to Nova users, not bot identity).
+- **Auto-link guard:** Auto-link only fires when exactly one registered user exists and no Telegram account is linked. If multiple users exist with no links, the bot gives instructions to get a link code. Prevents a stranger from claiming the account if the bot token leaks.
+- **Bot token change:** Dashboard saves token to Redis and calls the bridge reload endpoint. The bridge tears down the old Telegram adapter and starts a new one. Linked accounts persist (they're bound to Nova users, not bot identity). No container restart needed.
 - **Service downtime:** If Nova services are down when a Telegram message arrives, the bridge returns a friendly error message rather than silently dropping the message.
+- **Stream crash:** The concurrent stream lock has a 120-second TTL, so even if a stream crashes without cleanup, the lock auto-expires and doesn't permanently block the conversation.
+- **Existing multi-conversation data:** Preserved in the database. PWA loads the most recent one. Old conversations are still accessible via API if needed, just not shown in the UI.
