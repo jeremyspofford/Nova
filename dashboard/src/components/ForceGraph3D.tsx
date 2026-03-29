@@ -35,19 +35,20 @@ const sharedUniforms = {
 interface GraphNode {
   id: string
   type: string
-  content: string
-  activation: number
   importance: number
-  access_count: number
   cluster_id?: number
   cluster_label?: string
+  // Full fields — only present from full endpoint or detail fetch
+  content?: string
+  activation?: number
+  access_count?: number
 }
 
 interface GraphEdge {
   source: string
   target: string
-  relation: string
   weight: number
+  relation?: string
 }
 
 interface ClusterInfo {
@@ -842,8 +843,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         return `<div style="background:rgba(9,9,11,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px 12px;max-width:300px;font-family:system-ui;font-size:12px;pointer-events:none;">
           ${clusterLine}
           <div style="color:#71717a;text-transform:uppercase;font-size:9px;letter-spacing:0.5px;margin-bottom:3px;">${type}</div>
-          <div style="color:#e4e4e7;line-height:1.4;">${node.content ?? ''}</div>
-          <div style="color:#71717a;font-size:10px;margin-top:4px;">${(node.access_count ?? 0).toLocaleString()} recalls</div>
+          <div style="color:#e4e4e7;line-height:1.4;">${node.content ?? node.type}</div>
+          ${node.access_count != null ? `<div style="color:#71717a;font-size:10px;margin-top:4px;">${node.access_count.toLocaleString()} recalls</div>` : ''}
         </div>`
       })
       .nodeThreeObject((node: any) => {

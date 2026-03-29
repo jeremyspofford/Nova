@@ -13,23 +13,24 @@ import type { ActivityStep } from '../stores/chat-store'
 interface GraphNode {
   id: string
   type: string
-  content: string
-  activation: number
   importance: number
-  access_count: number
-  confidence: number
-  source_type: string
-  superseded?: boolean
-  created_at?: string | null
   cluster_id?: number
   cluster_label?: string
+  // Full fields — only present from full endpoint or detail fetch
+  content?: string
+  activation?: number
+  access_count?: number
+  confidence?: number
+  source_type?: string
+  superseded?: boolean
+  created_at?: string | null
 }
 
 interface GraphEdge {
   source: string
   target: string
-  relation: string
   weight: number
+  relation?: string
 }
 
 interface ClusterInfo {
@@ -120,7 +121,7 @@ export default function Brain() {
   // Graph data
   const { data: graph } = useQuery<GraphData>({
     queryKey: ['brain-graph'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full&max_nodes=5000'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/graph/lightweight?max_nodes=2000'),
     staleTime: 30_000,
     retry: 1,
   })
@@ -499,9 +500,9 @@ export default function Brain() {
                                   setFocusNode({ id: node.id, ts: Date.now() })
                                 }}
                                 className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
-                                title={node.content}
+                                title={node.content ?? node.type}
                               >
-                                {node.content}
+                                {node.content ?? `${node.type} · ${(node.importance * 100).toFixed(0)}%`}
                               </button>
                             ))}
                           {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
@@ -655,14 +656,14 @@ export default function Brain() {
 
             <div className="p-5 space-y-4">
               {/* Content */}
-              <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content}</p>
+              <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content ?? selectedNodeData.type}</p>
 
               {/* Scores */}
               <div className="space-y-2 pt-3 border-t border-white/5">
                 <div className="text-[10px] text-stone-600 uppercase tracking-wider">Scores</div>
-                <ScoreBar value={selectedNodeData.activation} label="Activation" color="#f59e0b" />
+                <ScoreBar value={selectedNodeData.activation ?? 0} label="Activation" color="#f59e0b" />
                 <ScoreBar value={selectedNodeData.importance} label="Importance" color="#14b8a6" />
-                <ScoreBar value={selectedNodeData.confidence} label="Confidence" color="#818cf8" />
+                <ScoreBar value={selectedNodeData.confidence ?? 0} label="Confidence" color="#818cf8" />
               </div>
 
               {/* Metadata */}
@@ -675,7 +676,7 @@ export default function Brain() {
                   </div>
                   <div>
                     <div className="text-[10px] text-stone-600">Recalled</div>
-                    <div className="text-[11px] text-stone-300">{selectedNodeData.access_count.toLocaleString()} times</div>
+                    <div className="text-[11px] text-stone-300">{(selectedNodeData.access_count ?? 0).toLocaleString()} times</div>
                   </div>
                   {selectedNodeData.created_at && (
                     <div>
@@ -718,7 +719,7 @@ export default function Brain() {
                           }}
                         >
                           <span className="text-stone-600 shrink-0">{isOutgoing ? '\u2192' : '\u2190'}</span>
-                          <span className="text-stone-400 font-medium shrink-0">{edge.relation.replace(/_/g, ' ')}</span>
+                          <span className="text-stone-400 font-medium shrink-0">{(edge.relation ?? '').replace(/_/g, ' ')}</span>
                           <span className="flex-1 truncate text-stone-500">
                             {otherNode?.content ?? otherId.slice(0, 8)}
                           </span>
