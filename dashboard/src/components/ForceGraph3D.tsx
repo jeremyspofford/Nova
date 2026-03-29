@@ -2,7 +2,6 @@ import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 
 import ForceGraph3DLib from '3d-force-graph'
 import {
   Mesh,
-  MeshBasicMaterial,
   SphereGeometry,
   ShaderMaterial,
   Sprite,
@@ -619,7 +618,6 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
   const containerRef = useRef<HTMLDivElement>(null)
   const coreGeoRef = useRef(new SphereGeometry(1, 24, 24))
-  const hitGeoRef = useRef(new SphereGeometry(1, 8, 8))
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
   const initializedRef = useRef(false)
@@ -726,25 +724,16 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         const importance = node.importance ?? 0
         const radius = 2 + importance * 6
 
-        const group = new Group()
-
-        // Sphere — star glow shader (shared geometry, scaled per-node)
+        // Star core — shared geometry, scaled per-node
         const birthTime = sharedUniforms.uTime.value
         const mat = makeStarMaterial(color, importance, birthTime)
         const sphere = new Mesh(coreGeoRef.current, mat)
         sphere.scale.setScalar(radius)
-        group.add(sphere)
 
-        // Invisible hit target — larger radius for comfortable clicking
-        const hitMat = new MeshBasicMaterial({ visible: false })
-        const hitSphere = new Mesh(hitGeoRef.current, hitMat)
-        hitSphere.scale.setScalar(radius * 2.5)
-        hitSphere.renderOrder = -1
-        group.add(hitSphere)
-
-        // Text label — only for notable nodes, shown by proximity in render loop
-        const labelThreshold = isLargeGraph ? 0.5 : LABEL_MIN_IMPORTANCE
-        if (importance >= labelThreshold) {
+        // For small graphs, add labels to top-tier nodes
+        if (!isLargeGraph && importance >= LABEL_MIN_IMPORTANCE) {
+          const group = new Group()
+          group.add(sphere)
           const content = node.content ?? ''
           const labelTex = makeNodeLabelTexture(content, color)
           const labelMat = new SpriteMaterial({
@@ -759,9 +748,12 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
           labelSprite.visible = false
           labelSprite.name = 'nodeLabel'
           group.add(labelSprite)
+          return group
         }
 
-        return group
+        // Large graphs: return bare mesh — no group, no labels, no hit sphere
+        // 1 draw call per node instead of 2-3
+        return sphere
       })
       .nodeThreeObjectExtend(false)
 
