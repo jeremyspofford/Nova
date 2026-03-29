@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 
 import ForceGraph3DLib from '3d-force-graph'
 import {
   Mesh,
+  MeshBasicMaterial,
   SphereGeometry,
   ShaderMaterial,
   Sprite,
@@ -17,6 +18,9 @@ import {
   PointsMaterial,
   Points,
   FrontSide,
+  InstancedMesh,
+  InstancedBufferAttribute,
+  Object3D,
 } from 'three'
 // @ts-expect-error — three/examples not typed
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass'
@@ -201,30 +205,54 @@ function getGlowTexture(): CanvasTexture {
   return glowTextureCache
 }
 
-// ── Star glow shader ─────────────────────────────────────────────────────────
+// ── Instanced star glow shader ───────────────────────────────────────────────
+// All star nodes render via a single InstancedMesh (1-2 draw calls total).
+// Per-node data (color, importance, birth time, highlight) lives in
+// InstancedBufferAttributes instead of per-material uniforms.
 
-const starVertexShader = /* glsl */ `
-  varying vec3 vNormal;
-  varying vec3 vViewDir;
+const instancedStarVertexShader = /* glsl */ `
+  // Per-instance attributes
+  attribute vec3 aColor;
+  attribute float aImportance;
+  attribute float aBirthTime;
+  attribute float aHighlightStart;
+
+  uniform float uTime;
+
   varying float vFacing;
+  varying vec3 vColor;
+  varying float vImportance;
+  varying float vBirthTime;
+  varying float vHighlightStart;
+
   void main() {
-    vNormal = normalize(normalMatrix * normal);
-    vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-    vViewDir = normalize(-mvPos.xyz);
-    vFacing = dot(vNormal, vViewDir);
+    // Apply instance transform (position + scale from instanceMatrix)
+    vec4 worldPos = instanceMatrix * vec4(position, 1.0);
+    vec4 mvPos = modelViewMatrix * worldPos;
+
+    // Normal — for uniform scaling, normalMatrix is sufficient
+    vec3 transformedNormal = normalize(normalMatrix * normal);
+    vec3 viewDir = normalize(-mvPos.xyz);
+    vFacing = dot(transformedNormal, viewDir);
+
+    // Pass per-instance data to fragment
+    vColor = aColor;
+    vImportance = aImportance;
+    vBirthTime = aBirthTime;
+    vHighlightStart = aHighlightStart;
+
     gl_Position = projectionMatrix * mvPos;
   }
 `
 
-const starFragmentShader = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uOpacity;
-  uniform float uImportance;
-  uniform float uBirthTime;
-  uniform float uHighlightStart;
+const instancedStarFragmentShader = /* glsl */ `
   uniform float uTime;
 
   varying float vFacing;
+  varying vec3 vColor;
+  varying float vImportance;
+  varying float vBirthTime;
+  varying float vHighlightStart;
 
   void main() {
     // Soft radial falloff — facing=1 at center, 0 at rim
@@ -234,56 +262,131 @@ const starFragmentShader = /* glsl */ `
     float center = pow(max(vFacing, 0.0), 8.0);
 
     // Breathing animation — importance-based phase offset
-    float breathe = 1.0 + sin(uTime * 0.4 + uImportance * 6.28) * 0.08;
+    float breathe = 1.0 + sin(uTime * 0.4 + vImportance * 6.28) * 0.08;
 
     // Birth fade-in (1 second)
-    float age = uTime - uBirthTime;
+    float age = uTime - vBirthTime;
     float birthFade = clamp(age, 0.0, 1.0);
 
     // Highlight pulse (fades out over 2.5 seconds)
-    float highlightAge = uTime - uHighlightStart;
-    float highlight = uHighlightStart > 0.0
+    float highlightAge = uTime - vHighlightStart;
+    float highlight = vHighlightStart > 0.0
       ? max(0.0, 1.0 - highlightAge / 2.5) * 0.4
       : 0.0;
 
     // Combine: colored glow + white center
-    float brightness = (0.3 + uImportance * 0.7) * breathe;
-    vec3 col = uColor * glow * brightness + vec3(1.0) * center * brightness * 0.6;
-    col += uColor * highlight;
+    float opacity = 0.3 + vImportance * 0.7;
+    float brightness = opacity * breathe;
+    vec3 col = vColor * glow * brightness + vec3(1.0) * center * brightness * 0.6;
+    col += vColor * highlight;
 
     // Alpha: glow fades to transparent at rim
-    float alpha = glow * uOpacity * birthFade + center * 0.5 * birthFade;
+    float alpha = glow * opacity * birthFade + center * 0.5 * birthFade;
     alpha = clamp(alpha, 0.0, 1.0);
 
     gl_FragColor = vec4(col, alpha);
   }
 `
 
-function makeStarMaterial(
-  color: string,
-  importance: number,
-  birthTime: number,
-): ShaderMaterial {
-  const mat = new ShaderMaterial({
-    uniforms: {
-      uColor: { value: new Color(color) },
-      uOpacity: { value: 0.3 + importance * 0.7 },
-      uImportance: { value: importance },
-      uBirthTime: { value: birthTime },
-      uHighlightStart: { value: 0 },
-      uTime: sharedUniforms.uTime,  // shared reference — updated once per frame
-    },
-    vertexShader: starVertexShader,
-    fragmentShader: starFragmentShader,
+// ── InstancedMesh builder ────────────────────────────────────────────────────
+// Creates a single InstancedMesh for all star nodes. Returns the mesh and a
+// map from node ID to instance index for per-node attribute updates.
+
+function buildStarInstances(
+  nodes: any[], // eslint-disable-line @typescript-eslint/no-explicit-any
+  geometry: SphereGeometry,
+  clusters: ClusterInfo[] | undefined,
+  neuralEnabled: boolean,
+): { mesh: InstancedMesh; nodeIndexMap: Map<string, number> } {
+  const count = nodes.length
+  if (count === 0) {
+    return { mesh: new InstancedMesh(geometry, new MeshBasicMaterial(), 0), nodeIndexMap: new Map() }
+  }
+
+  const useClusterColors = (clusters?.length ?? 0) > 0
+
+  // Per-instance attribute arrays
+  const colors = new Float32Array(count * 3)
+  const importances = new Float32Array(count)
+  const birthTimes = new Float32Array(count)
+  const highlightStarts = new Float32Array(count)
+
+  const nodeIndexMap = new Map<string, number>()
+  const dummy = new Object3D()
+  const tmpColor = new Color()
+  const now = sharedUniforms.uTime.value
+
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i]
+    nodeIndexMap.set(node.id, i)
+
+    const importance = node.importance ?? 0
+    const color = getNodeColor(node, useClusterColors, neuralEnabled)
+
+    tmpColor.set(color)
+    colors[i * 3] = tmpColor.r
+    colors[i * 3 + 1] = tmpColor.g
+    colors[i * 3 + 2] = tmpColor.b
+
+    importances[i] = importance
+    birthTimes[i] = now
+    highlightStarts[i] = 0
+  }
+
+  // Clone geometry and add instance attributes
+  const instanceGeo = geometry.clone()
+  instanceGeo.setAttribute('aColor', new InstancedBufferAttribute(colors, 3))
+  instanceGeo.setAttribute('aImportance', new InstancedBufferAttribute(importances, 1))
+  instanceGeo.setAttribute('aBirthTime', new InstancedBufferAttribute(birthTimes, 1))
+  instanceGeo.setAttribute('aHighlightStart', new InstancedBufferAttribute(highlightStarts, 1))
+
+  const material = new ShaderMaterial({
+    uniforms: { uTime: sharedUniforms.uTime },
+    vertexShader: instancedStarVertexShader,
+    fragmentShader: instancedStarFragmentShader,
     transparent: true,
     side: FrontSide,
     depthWrite: false,
   })
-  Object.defineProperty(mat, 'opacity', {
-    get() { return mat.uniforms.uOpacity.value },
-    set(v: number) { mat.uniforms.uOpacity.value = v },
-  })
-  return mat
+
+  const mesh = new InstancedMesh(instanceGeo, material, count)
+
+  // Set instance matrices
+  for (let i = 0; i < count; i++) {
+    const node = nodes[i]
+    const importance = node.importance ?? 0
+    const radius = 2 + importance * 6
+    dummy.position.set(node.x ?? 0, node.y ?? 0, node.z ?? 0)
+    dummy.scale.setScalar(radius)
+    dummy.updateMatrix()
+    mesh.setMatrixAt(i, dummy.matrix)
+  }
+  mesh.instanceMatrix.needsUpdate = true
+  mesh.frustumCulled = false // Graph may exceed frustum during animation
+
+  return { mesh, nodeIndexMap }
+}
+
+// ── Position sync — update instance matrices from force-graph layout ─────────
+
+const _syncDummy = new Object3D()
+
+function syncInstancePositions(
+  mesh: InstancedMesh,
+  nodes: any[], // eslint-disable-line @typescript-eslint/no-explicit-any
+  nodeIndexMap: Map<string, number>,
+) {
+  for (const node of nodes) {
+    const i = nodeIndexMap.get(node.id)
+    if (i === undefined) continue
+    const importance = node.importance ?? 0
+    const radius = 2 + importance * 6
+    _syncDummy.position.set(node.x ?? 0, node.y ?? 0, node.z ?? 0)
+    _syncDummy.scale.setScalar(radius)
+    _syncDummy.updateMatrix()
+    mesh.setMatrixAt(i, _syncDummy.matrix)
+  }
+  mesh.instanceMatrix.needsUpdate = true
 }
 
 // ── Node label texture ───────────────────────────────────────────────────────
@@ -639,44 +742,41 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showNebulaeRef.current = showNebulae
   const showEdgesRef = useRef(showEdges)
   useEffect(() => { showEdgesRef.current = showEdges }, [showEdges])
+  // Instanced star rendering — single draw call for all nodes
+  const instancedMeshRef = useRef<InstancedMesh | null>(null)
+  const nodeIndexMapRef = useRef<Map<string, number>>(new Map())
   // Activity visualization refs (imperative handle)
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
 
   useImperativeHandle(ref, () => ({
     highlightNodes(ids: string[]) {
-      const graph = graphRef.current
-      if (!graph) return
+      const mesh = instancedMeshRef.current
+      if (!mesh) return
       const now = sharedUniforms.uTime.value
-      const data = graph.graphData()
-      for (const node of data.nodes) {
-        if (!ids.includes(node.id)) continue
-        const obj = (node as any).__threeObj
-        if (!obj) continue
-        obj.children.forEach((child: any) => {
-          if (child.material?.uniforms?.uHighlightStart) {
-            child.material.uniforms.uHighlightStart.value = now
-          }
-        })
+      const geo = mesh.geometry
+      const attr = geo.getAttribute('aHighlightStart') as InstancedBufferAttribute
+      if (!attr) return
+      for (const id of ids) {
+        const i = nodeIndexMapRef.current.get(id)
+        if (i !== undefined) attr.setX(i, now)
       }
+      attr.needsUpdate = true
     },
     pulseAll(durationMs: number) {
       globalPulseRef.current = { active: true, startTime: Date.now(), duration: durationMs }
     },
     fadeInNodes(ids: string[]) {
-      const graph = graphRef.current
-      if (!graph) return
+      const mesh = instancedMeshRef.current
+      if (!mesh) return
       const now = sharedUniforms.uTime.value
-      const data = graph.graphData()
-      for (const node of data.nodes) {
-        if (!ids.includes(node.id)) continue
-        const obj = (node as any).__threeObj
-        if (!obj) continue
-        obj.children.forEach((child: any) => {
-          if (child.material?.uniforms?.uBirthTime) {
-            child.material.uniforms.uBirthTime.value = now
-          }
-        })
+      const geo = mesh.geometry
+      const attr = geo.getAttribute('aBirthTime') as InstancedBufferAttribute
+      if (!attr) return
+      for (const id of ids) {
+        const i = nodeIndexMapRef.current.get(id)
+        if (i !== undefined) attr.setX(i, now)
       }
+      attr.needsUpdate = true
     },
   }))
 
@@ -690,9 +790,29 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     const el = containerRef.current
     if (!el || !nodes.length) return
 
-    // If already initialized, just update data
+    // If already initialized, just update data and rebuild instanced stars
     if (graphRef.current && initializedRef.current) {
-      updateGraphData(graphRef.current, nodes, edges, useClusterColors, layoutRef.current)
+      const graph = graphRef.current
+      updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current)
+
+      // Dispose old instanced mesh and rebuild with new nodes
+      if (instancedMeshRef.current) {
+        graph.scene().remove(instancedMeshRef.current)
+        instancedMeshRef.current.geometry.dispose()
+        ;(instancedMeshRef.current.material as ShaderMaterial).dispose()
+        instancedMeshRef.current = null
+      }
+      if (nodes.length > 0) {
+        const { mesh: newMesh, nodeIndexMap } = buildStarInstances(
+          nodes,
+          coreGeoRef.current,
+          clusters,
+          neuralModeRef.current?.enabled ?? false,
+        )
+        instancedMeshRef.current = newMesh
+        nodeIndexMapRef.current = nodeIndexMap
+        graph.scene().add(newMesh)
+      }
       return
     }
 
@@ -724,20 +844,20 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         </div>`
       })
       .nodeThreeObject((node: any) => {
-        const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
         const importance = node.importance ?? 0
         const radius = 2 + importance * 6
 
-        // Star core — shared geometry, scaled per-node
-        const birthTime = sharedUniforms.uTime.value
-        const mat = makeStarMaterial(color, importance, birthTime)
-        const sphere = new Mesh(coreGeoRef.current, mat)
-        sphere.scale.setScalar(radius)
+        // Invisible hit sphere for click/hover detection —
+        // visual rendering is handled by the single InstancedMesh
+        const hitMat = new MeshBasicMaterial({ visible: false })
+        const hitMesh = new Mesh(coreGeoRef.current.clone(), hitMat)
+        hitMesh.scale.setScalar(radius * 1.5) // slightly larger for comfortable clicking
 
         // For small graphs, add labels to top-tier nodes
         if (!isLargeGraph && importance >= LABEL_MIN_IMPORTANCE) {
+          const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
           const group = new Group()
-          group.add(sphere)
+          group.add(hitMesh)
           const content = node.content ?? ''
           const labelTex = makeNodeLabelTexture(content, color)
           const labelMat = new SpriteMaterial({
@@ -755,9 +875,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
           return group
         }
 
-        // Large graphs: return bare mesh — no group, no labels, no hit sphere
-        // 1 draw call per node instead of 2-3
-        return sphere
+        return hitMesh
       })
       .nodeThreeObjectExtend(false)
 
@@ -911,6 +1029,12 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       sharedUniforms.uTime.value = Date.now() * 0.001
       tickCount++
 
+      // Sync instanced star positions from force-graph layout
+      if (instancedMeshRef.current && nodeIndexMapRef.current.size > 0) {
+        const data = graph.graphData()
+        syncInstancePositions(instancedMeshRef.current, data.nodes, nodeIndexMapRef.current)
+      }
+
       // Slow auto-rotate
       if (spinningRef.current) {
         try { graph.scene().rotation.y += 0.001 } catch { /* ok */ }
@@ -993,6 +1117,20 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     // Load initial data
     updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current)
 
+    // Build instanced star rendering after data is loaded
+    const graphData = graph.graphData()
+    if (graphData.nodes.length > 0) {
+      const { mesh: starMesh, nodeIndexMap } = buildStarInstances(
+        graphData.nodes,
+        coreGeoRef.current,
+        clusters,
+        neuralModeRef.current?.enabled ?? false,
+      )
+      instancedMeshRef.current = starMesh
+      nodeIndexMapRef.current = nodeIndexMap
+      graph.scene().add(starMesh)
+    }
+
     // Handle resize
     const ro = new ResizeObserver(([entry]) => {
       const { width: w, height: h } = entry.contentRect
@@ -1007,6 +1145,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       if (starfieldRef.current) {
         disposeStarfield(starfieldRef.current)
         starfieldRef.current = null
+      }
+      // Dispose instanced star mesh
+      if (instancedMeshRef.current) {
+        instancedMeshRef.current.geometry.dispose()
+        ;(instancedMeshRef.current.material as ShaderMaterial).dispose()
+        instancedMeshRef.current = null
+        nodeIndexMapRef.current = new Map()
       }
       initializedRef.current = false
       graphRef.current = null
@@ -1046,15 +1191,22 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
   // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 
-  // Highlight selected node
+  // Highlight selected node via instanced attribute (nodeColor is dead code with nodeThreeObjectExtend(false))
   useEffect(() => {
-    const graph = graphRef.current
-    if (!graph) return
-    graph.nodeColor((node: any) => {
-      if (node.id === selectedId) return getCSSColor('--accent-300')
-      return getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
-    })
-  }, [selectedId, useClusterColors])
+    const mesh = instancedMeshRef.current
+    if (!mesh) return
+    const attr = mesh.geometry.getAttribute('aHighlightStart') as InstancedBufferAttribute | null
+    if (!attr) return
+    const now = sharedUniforms.uTime.value
+
+    if (selectedId) {
+      const i = nodeIndexMapRef.current.get(selectedId)
+      if (i !== undefined) {
+        attr.setX(i, now)
+        attr.needsUpdate = true
+      }
+    }
+  }, [selectedId])
 
   // Navigate camera to a cluster's centroid
   useEffect(() => {
