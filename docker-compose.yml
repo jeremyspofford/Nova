@@ -345,6 +345,7 @@ services:
       NOVA_ROOT: /nova
       SHELL_TIMEOUT_SECONDS: ${SHELL_TIMEOUT_SECONDS:-30}
       CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-}
+      BRIDGE_SERVICE_SECRET: ${BRIDGE_SERVICE_SECRET:-}
     # Mount the host workspace at /workspace so agents can read/write files.
     # Set NOVA_WORKSPACE in .env to point at any directory.
     # Default: ~/.nova/workspace (created by setup.sh)
@@ -451,6 +452,7 @@ services:
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
+      BRIDGE_SERVICE_SECRET: ${BRIDGE_SERVICE_SECRET:-}
     ports:
       - "8090:8090"
     depends_on:

@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     # API key for authenticating with orchestrator
     nova_api_key: str = ""
 
+    # Bridge service secret shared with orchestrator
+    bridge_service_secret: str = ""
+
     # Default agent settings for bridge sessions
     default_agent_name: str = "Nova"
     default_model: str = "auto"
