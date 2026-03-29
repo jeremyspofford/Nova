@@ -745,6 +745,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   // Instanced star rendering — single draw call for all nodes
   const instancedMeshRef = useRef<InstancedMesh | null>(null)
   const nodeIndexMapRef = useRef<Map<string, number>>(new Map())
+  // Skip per-frame position sync once the force simulation has cooled down
+  const simulationStableRef = useRef(false)
   // Activity visualization refs (imperative handle)
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
 
@@ -793,6 +795,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     // If already initialized, just update data and rebuild instanced stars
     if (graphRef.current && initializedRef.current) {
       const graph = graphRef.current
+      simulationStableRef.current = false
       updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current)
 
       // Dispose old instanced mesh and rebuild with new nodes
@@ -1000,6 +1003,16 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       }
     })
 
+    // ── Simulation stabilization — stop syncing positions once layout cools ──
+    graph.onEngineStop(() => {
+      simulationStableRef.current = true
+      // Final sync to ensure InstancedMesh reflects settled positions
+      if (instancedMeshRef.current && nodeIndexMapRef.current.size > 0) {
+        const data = graph.graphData()
+        syncInstancePositions(instancedMeshRef.current, data.nodes, nodeIndexMapRef.current)
+      }
+    })
+
     // ── Bloom post-processing ──────────────────────────────────────────
     try {
       const bloomStrength = neuralModeRef.current?.enabled
@@ -1029,8 +1042,9 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       sharedUniforms.uTime.value = Date.now() * 0.001
       tickCount++
 
-      // Sync instanced star positions from force-graph layout
-      if (instancedMeshRef.current && nodeIndexMapRef.current.size > 0) {
+      // Sync instanced star positions from force-graph layout.
+      // Skip once the simulation has stabilized — positions don't change until new data arrives.
+      if (instancedMeshRef.current && nodeIndexMapRef.current.size > 0 && !simulationStableRef.current) {
         const data = graph.graphData()
         syncInstancePositions(instancedMeshRef.current, data.nodes, nodeIndexMapRef.current)
       }
