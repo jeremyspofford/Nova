@@ -542,16 +542,241 @@ deploy-cloud-vm:   # Cloud VM: full stack (Option 5)
 deploy-nano:       # Ultra-light: combined process (Future)
 ```
 
-### Guided Setup Wizard
+### Deployment Wizard (`nova setup`)
 
-A `nova setup` CLI or interactive script that:
+An interactive CLI wizard that detects hardware, asks about the user's environment and preferences, and recommends + configures the right deployment option. Replaces the current single-machine `scripts/setup.sh`.
 
-1. Asks which deployment option (with the decision tree as guidance)
-2. Detects hardware (GPU, RAM, CPU — existing `detect_hardware.sh`)
-3. Generates `.env` with correct settings for the chosen option
-4. Generates a `nova-manifest.json` listing expected services and their locations
-5. For distributed options: generates configs for each machine
-6. Runs Docker Compose with the right file combination
+#### Step 1: Auto-Detect Current Machine
+
+Runs automatically before any questions. Extends the existing `scripts/detect_hardware.sh`:
+
+```
+Detecting hardware...
+  CPU:       Intel N95, 4 cores @ 3.4GHz (x86_64)
+  RAM:       8 GB
+  GPU:       None detected
+  Disk:      180 GB free
+  OS:        Linux (WSL2)
+  Docker:    v27.1.1
+  Tailscale: installed (3 devices on tailnet)
+```
+
+Detection covers:
+- **CPU:** cores, architecture (x86_64, aarch64), model name
+- **RAM:** total, available
+- **GPU:** vendor, model, VRAM (via `nvidia-smi`, `rocm-smi`, or Metal detection)
+- **Disk:** free space on target mount
+- **OS:** Linux (native/WSL2), macOS, architecture
+- **Docker:** installed, version, compose plugin version
+- **Tailscale:** installed? If yes, enumerate devices on the tailnet (gives us a view of available machines for distributed options without manual entry)
+- **Network:** LAN subnet (for detecting other machines without Tailscale)
+
+Output is stored as `data/hardware.json` (existing format, extended with Tailscale and network fields).
+
+#### Step 2: Inventory Questionnaire
+
+Asks about the user's broader environment — what they have, what they want, what they're willing to pay for. Questions are adaptive (skip irrelevant ones based on prior answers).
+
+**Machine inventory:**
+
+```
+What machines do you want Nova to use?
+
+  This machine:
+    Intel N95, 8GB RAM, no GPU (detected above)
+    Role: [Gateway + Brain] [Full stack] [Inference only] [Skip]
+
+  Other machines (check all that apply):
+    [ ] Desktop/workstation with GPU
+    [ ] Another mini PC or Raspberry Pi
+    [ ] Cloud VM (already running)
+    [ ] Cloud account (will provision new resources)
+    [ ] None — just this machine
+
+  (If Tailscale detected):
+  Found 3 devices on your tailnet:
+    dell-desktop (online, last seen: 2 min ago)
+    macbook-pro  (online)
+    cloud-vps    (offline, last seen: 3 days ago)
+  Want to include any of these? [Select devices]
+```
+
+For each additional machine the user selects or describes, probe or ask for specs:
+- If on Tailscale and online: attempt to SSH and run hardware detection remotely
+- If not reachable: ask user for approximate specs (RAM, GPU yes/no, always-on yes/no)
+
+**Preferences:**
+
+```
+Data privacy:
+  (a) Strict — everything stays on my hardware, no external calls
+  (b) Data local, cloud LLM APIs are fine
+  (c) No preference — convenience over privacy
+
+Cloud spending:
+  (a) Free only — no cloud costs
+  (b) Minimal (~$5-20/mo for API credits or a small VPS)
+  (c) Moderate ($20-100/mo)
+  (d) Whatever it takes
+
+Remote access:
+  (a) Local network only
+  (b) I need access when away from home
+  (c) Other people need access too
+
+Users:
+  (a) Just me
+  (b) A few (family/friends/small team)
+  (c) Many (team/organization)
+```
+
+#### Step 3: Recommendation Engine
+
+A deterministic scoring matrix (not an LLM call) that evaluates each deployment option against the user's hardware profile, machine inventory, and preference answers.
+
+**Scoring dimensions:**
+
+| Dimension | Weight | Inputs |
+|-----------|--------|--------|
+| Hardware fit | High | RAM, GPU, CPU arch vs option's minimum requirements |
+| Privacy alignment | High | User's privacy preference vs option's privacy model |
+| Budget fit | Medium | User's spending tolerance vs option's cost profile |
+| Complexity match | Medium | Number of machines, Tailscale familiarity, cloud experience |
+| Capability coverage | Medium | Does the option support all desired features (remote access, multi-user)? |
+
+**Scoring rules (examples):**
+- User has 8GB, no GPU, privacy=flexible, has a second machine with GPU on tailnet → **Option 3** scores highest
+- User has 16GB + GPU, privacy=strict → **Option 1** scores highest
+- User has 4GB RPi, cloud account, budget=moderate → **Option 4** scores highest
+- User has no hardware preference, budget=whatever → **Option 5** or **Option 6** based on user count
+
+**Output:**
+
+```
+Recommendation: Option 3 — Distributed Home Lab
+
+  This machine (n95-mini):
+    Role: Gateway + Brain (always-on)
+    Services: chat-api, dashboard, llm-gateway, orchestrator, memory-service,
+              recovery, postgres, redis
+    Estimated RAM: ~5.5 GB of 8 GB available
+    Profile: Core (ONNX embeddings, tuned postgres)
+
+  dell-desktop (via Tailscale):
+    Role: Inference (on-demand)
+    Services: Ollama (GPU)
+    Wake-on-LAN: enabled (N95 wakes Dell when needed)
+
+  Cloud fallback:
+    Anthropic API, Groq free tier
+    Estimated cost: $0-10/mo (fallback usage only)
+
+  Why this option:
+    - Your N95 has enough RAM for gateway + brain with Core profile
+    - Your Dell has a GPU for free local inference
+    - Cloud APIs fill in when the Dell is off
+    - Tailscale already connects both machines
+    - Data stays on your LAN; only LLM prompts hit cloud as fallback
+
+  [Accept] [See all options ranked] [Customize]
+```
+
+If the user picks "See all options ranked," show all 6 options with scores and disqualification reasons:
+
+```
+  #1  Option 3: Distributed Home Lab      ████████░░  82/100
+  #2  Option 2: Local + Cloud APIs        ██████░░░░  65/100  (all on N95, tight RAM)
+  #3  Option 4: Home Gateway + Cloud      █████░░░░░  58/100  (adds cloud cost)
+  #4  Option 1: Local Private             ███░░░░░░░  30/100  (no GPU — can't do local inference)
+  #5  Option 5: Cloud Only                ███░░░░░░░  28/100  (you have local hardware)
+  #6  Option 6: Cloud Scaled              █░░░░░░░░░  12/100  (overkill for single user)
+```
+
+#### Step 4: Config Generation
+
+Once the user accepts a recommendation (or customizes):
+
+1. **Generate `.env`** with correct settings:
+   - `NOVA_PROFILE=core`
+   - `NOVA_PRIVACY_MODE=flexible` (or `strict`)
+   - Service URLs pointing to correct Tailscale hostnames
+   - `NOVA_DEPLOYMENT_OPTION=3`
+   - LLM provider API keys (prompted if needed)
+
+2. **Generate `nova-manifest.json`**:
+   ```json
+   {
+     "option": 3,
+     "machines": {
+       "n95-mini": {
+         "role": "gateway+brain",
+         "tailscale_hostname": "n95-mini",
+         "profile": "core",
+         "services": ["postgres", "redis", "orchestrator", "memory-service",
+                      "llm-gateway", "chat-api", "dashboard", "recovery"],
+         "compose_files": ["docker-compose.yml", "docker-compose.gateway.yml",
+                           "docker-compose.brain.yml"]
+       },
+       "dell-desktop": {
+         "role": "inference",
+         "tailscale_hostname": "dell-desktop",
+         "profile": "full",
+         "services": ["ollama"],
+         "compose_files": ["docker-compose.inference.yml", "docker-compose.gpu.yml"],
+         "wol": {"mac": "AA:BB:CC:DD:EE:FF", "enabled": true}
+       }
+     },
+     "cloud_fallback": {
+       "providers": ["anthropic", "groq"],
+       "privacy_mode": "flexible"
+     },
+     "generated_at": "2026-03-29T14:00:00Z",
+     "nova_version": "1.0.0"
+   }
+   ```
+
+3. **For multi-machine setups: generate transfer bundle**:
+   - A `nova-inference-setup.tar.gz` containing the compose files, `.env`, and a setup script for the second machine
+   - Or: print step-by-step instructions for setting up the second machine
+   - Or: if Tailscale SSH is available, offer to deploy directly to the remote machine
+
+4. **Run deployment** on the current machine with the right compose file combination.
+
+#### Step 5: Post-Setup Validation
+
+After deployment, verify everything is working:
+
+```
+Verifying deployment...
+  [OK] PostgreSQL: healthy
+  [OK] Redis: healthy
+  [OK] Orchestrator: healthy
+  [OK] Memory-service: healthy (ONNX backend)
+  [OK] LLM Gateway: healthy
+  [OK] Chat API: healthy
+  [OK] Dashboard: healthy at http://localhost:3001
+  [--] Dell inference: unreachable (expected — Dell is asleep)
+  [OK] Cloud fallback: Anthropic API responding
+
+Nova is ready! Access dashboard at http://localhost:3001
+  Remote access: http://n95-mini.tailnet:3001
+```
+
+#### Dashboard First-Run Wizard
+
+If someone reaches the dashboard without having run the CLI wizard (e.g., ran raw `docker compose up`), the dashboard shows a setup wizard with the same questions in a web UI. This calls a `/api/v1/setup/detect` endpoint for hardware detection and `/api/v1/setup/recommend` for the scoring engine. The dashboard wizard is a convenience layer — the CLI is the authoritative path.
+
+#### Re-Running the Wizard
+
+`nova setup` is re-runnable. If a `nova-manifest.json` already exists, it shows the current configuration and asks what the user wants to change (add a machine, change option, reconfigure). It does not destroy existing data — it updates config and restarts services.
+
+#### Implementation Notes
+
+- The scoring engine is a Python module (`scripts/wizard/recommender.py` or similar) that can be imported by both the CLI and a FastAPI endpoint
+- Hardware detection extends `scripts/detect_hardware.sh` (or rewrites it in Python for portability)
+- Tailscale device enumeration: `tailscale status --json` gives all devices, hostnames, and online status
+- Remote hardware detection (if Tailscale SSH available): `ssh <device> "cat /proc/meminfo && nvidia-smi --query-gpu=name,memory.total --format=csv 2>/dev/null"`
+- The manifest format is versioned — future wizard versions can read and migrate old manifests
 
 ### Helm Charts (Phase 5)
 
@@ -654,14 +879,22 @@ When implementation begins, build in this order. Each phase is independently use
 - **Value:** Services can talk across machines with just env var changes
 - **Enables:** All deployment options beyond single-machine
 
-### Phase 2: Compose Tier Files + Setup Wizard
+### Phase 2: Compose Tier Files + Deployment Wizard
 - Split docker-compose.yml into gateway/brain/inference tier files
 - Inference tier compose file is self-contained (no base file dependency)
 - Create Makefile targets for common deployment configs
-- Build guided setup wizard (interactive, generates correct config per option)
 - Add `NOVA_PROFILE` env var for per-service runtime behavior
+- Build deployment wizard CLI (`nova setup`):
+  - Hardware auto-detection (extend `detect_hardware.sh`)
+  - Tailscale device enumeration
+  - Questionnaire (machine inventory, privacy, budget, remote access)
+  - Recommendation engine (deterministic scoring matrix)
+  - Config generation (`.env`, `nova-manifest.json`, compose file selection)
+  - Multi-machine transfer bundle generation
+  - Post-setup validation
+- Dashboard first-run wizard (web UI calling same scoring engine)
 - Document Options 1-3 (the Compose-based options)
-- **Value:** Deploy Nova across two machines (Options 1, 2, 3 fully functional)
+- **Value:** Deploy Nova across two machines (Options 1, 2, 3 fully functional); any user can run `nova setup` and get a working deployment matched to their hardware
 
 ### Phase 3: Health-Aware Inference Routing
 - Upgrade llm-gateway to probe multiple remote endpoints
@@ -754,3 +987,6 @@ These must be resolved before implementation:
 13. **Dashboard deployment manifest** — Format for telling the dashboard which services are intentionally omitted vs crashed?
 14. **Managed SaaS prerequisites** — What multi-tenant architecture changes are needed before SaaS is viable? Scope as a separate spec.
 15. **Edge/IoT prerequisites** — What real-time, sensor integration, and OTA update capabilities are needed? Scope as a separate spec.
+16. **Wizard UX** — CLI-only (Python/bash), or TUI with rich/textual for a nicer terminal experience? How much can we auto-detect vs. must ask?
+17. **Remote hardware probing** — If Tailscale SSH is available, should the wizard auto-probe other machines? Privacy/security implications of SSH-ing into user devices during setup.
+18. **Wizard re-run behavior** — When re-running after config changes (add a machine, change option), how do we handle services that are already running? Rolling restart? Full down/up?
