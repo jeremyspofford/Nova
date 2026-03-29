@@ -93,6 +93,17 @@ export async function apiFetch<T>(url: string, options: RequestInit = {}): Promi
   return resp.json() as Promise<T>
 }
 
+// ── Conversations ──────────────────────────────────────────────────────────────
+
+export async function getOrCreateActiveConversation(): Promise<string> {
+  const conversations = await apiFetch<any[]>('/api/v1/conversations')
+  if (conversations.length > 0) {
+    return conversations[0].id
+  }
+  const newConv = await apiFetch<any>('/api/v1/conversations', { method: 'POST' })
+  return newConv.id
+}
+
 // ── Agents ────────────────────────────────────────────────────────────────────
 export const getAgents = () => apiFetch<AgentInfo[]>('/api/v1/agents')
 
@@ -1037,3 +1048,28 @@ export const reindexMemory = (sources: string[], dryRun = false, since?: string)
 
 export const getReindexStatus = () =>
   apiFetch<ReindexStatusResponse>('/api/v1/engrams/reindex/status')
+
+// ── Linked Accounts ──────────────────────────────────────────────────────────
+
+export interface LinkedAccount {
+  id: string
+  user_id: string
+  display_name: string
+  email: string
+  platform: string
+  platform_id: string
+  platform_username: string | null
+  linked_at: string
+}
+
+export const getLinkedAccounts = () =>
+  apiFetch<LinkedAccount[]>('/api/v1/linked-accounts')
+
+export const deleteLinkedAccount = (id: string) =>
+  apiFetch<void>(`/api/v1/linked-accounts/${id}`, { method: 'DELETE' })
+
+export const generateLinkCode = () =>
+  apiFetch<{ code: string; ttl_seconds: number }>('/api/v1/linked-accounts/link-code', { method: 'POST' })
+
+export const reloadTelegramBot = () =>
+  apiFetch<void>('/bridge-api/reload-telegram', { method: 'POST' })

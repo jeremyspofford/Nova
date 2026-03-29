@@ -1,21 +1,290 @@
 import { useState, useCallback } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   MessageSquare, CheckCircle2, Loader2, Trash2,
   ExternalLink, ArrowRight, ArrowLeft, AlertTriangle,
+  Link2, Copy, Check,
 } from 'lucide-react'
 import { getChatIntegrationsStatus, patchEnv, manageComposeProfile, restartService } from '../../api-recovery'
 import type { ChatIntegrationsStatus } from '../../api-recovery'
-import { Section, Tabs } from '../../components/ui'
+import {
+  getLinkedAccounts, deleteLinkedAccount, generateLinkCode, reloadTelegramBot,
+} from '../../api'
+import type { LinkedAccount } from '../../api'
+import { Section, Tabs, Button, Skeleton, EmptyState } from '../../components/ui'
 import { ServiceStatusBadge } from './shared'
 
 // ── Telegram Setup ────────────────────────────────────────────────────────────
 
 interface TelegramState {
   token: string
-  loading: boolean
+  saving: boolean
   error: string
+  saved: boolean
 }
+
+function TelegramTokenSection({
+  status,
+  slackConfigured,
+  onDone,
+}: {
+  status: ChatIntegrationsStatus['telegram']
+  slackConfigured: boolean
+  onDone: () => void
+}) {
+  const [s, setS] = useState<TelegramState>({ token: '', saving: false, error: '', saved: false })
+  const set = (patch: Partial<TelegramState>) => setS(prev => ({ ...prev, ...patch }))
+
+  const handleSave = useCallback(async () => {
+    if (!s.token.trim()) return
+    set({ saving: true, error: '', saved: false })
+    try {
+      await patchEnv({ TELEGRAM_BOT_TOKEN: s.token.trim() })
+      await manageComposeProfile('bridges', 'start')
+      await reloadTelegramBot().catch(() => {/* bridge may not be up yet */})
+      set({ token: '', saving: false, saved: true })
+      setTimeout(() => set({ saved: false }), 3000)
+      onDone()
+    } catch (e: any) {
+      set({ error: e.message || 'Failed to save token', saving: false })
+    }
+  }, [s.token, onDone])
+
+  const handleDisconnect = useCallback(async () => {
+    set({ saving: true, error: '' })
+    try {
+      await patchEnv({ TELEGRAM_BOT_TOKEN: '' })
+      if (slackConfigured) {
+        await restartService('chat-bridge')
+      } else {
+        await manageComposeProfile('bridges', 'stop')
+      }
+      set({ token: '', saving: false })
+      onDone()
+    } catch (e: any) {
+      set({ error: e.message || 'Failed to disconnect', saving: false })
+    }
+  }, [slackConfigured, onDone])
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Bot Token</p>
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        Create a Telegram bot via{' '}
+        <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer"
+          className="text-teal-600 dark:text-teal-400 hover:underline inline-flex items-center gap-1">
+          @BotFather <ExternalLink size={12} />
+        </a>
+        {' '}and paste the bot token below.
+      </p>
+      <div className="flex gap-2">
+        <input
+          type="password"
+          placeholder={status.configured ? '••••••••••••• (token configured)' : 'Telegram bot token'}
+          value={s.token}
+          onChange={e => set({ token: e.target.value, error: '' })}
+          className="flex-1 rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm"
+        />
+        <button
+          onClick={handleSave}
+          disabled={!s.token.trim() || s.saving}
+          className="flex items-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 transition-colors whitespace-nowrap"
+        >
+          {s.saving ? <Loader2 size={14} className="animate-spin" /> : s.saved ? <Check size={14} /> : null}
+          {s.saved ? 'Saved' : 'Save Token'}
+        </button>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-neutral-500 dark:text-neutral-500">
+          Connection:{' '}
+        </span>
+        <ServiceStatusBadge configured={status.configured} running={status.container.running} />
+      </div>
+
+      {status.configured && (
+        <button onClick={handleDisconnect} disabled={s.saving}
+          className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-50">
+          {s.saving ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+          Disconnect Bot
+        </button>
+      )}
+
+      {s.error && <p className="text-sm text-red-600 dark:text-red-400">{s.error}</p>}
+
+      <p className="text-xs text-neutral-500 dark:text-neutral-500">
+        The token is stored in your Nova{' '}
+        <code className="bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">.env</code> file.
+      </p>
+    </div>
+  )
+}
+
+// ── Link Code Generator ───────────────────────────────────────────────────────
+
+function LinkCodeBox() {
+  const [code, setCode] = useState<{ code: string; ttl_seconds: number } | null>(null)
+  const [generating, setGenerating] = useState(false)
+  const [error, setError] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    setError('')
+    try {
+      const result = await generateLinkCode()
+      setCode(result)
+    } catch (e: any) {
+      setError(e.message || 'Failed to generate code')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const handleCopy = () => {
+    if (!code) return
+    navigator.clipboard.writeText(code.code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  if (code) {
+    const expiresMinutes = Math.ceil(code.ttl_seconds / 60)
+    return (
+      <div className="rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 p-4 space-y-2">
+        <p className="text-sm font-medium text-teal-800 dark:text-teal-300">Link Code Generated</p>
+        <div className="flex items-center gap-3">
+          <code className="text-2xl font-mono font-bold tracking-widest text-teal-700 dark:text-teal-300 select-all">
+            {code.code}
+          </code>
+          <button onClick={handleCopy}
+            className="flex items-center gap-1 text-xs text-teal-600 dark:text-teal-400 hover:text-teal-700 dark:hover:text-teal-300 transition-colors">
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
+        <p className="text-xs text-neutral-500 dark:text-neutral-400">
+          Send this code to the Telegram user — they should message the bot with <code className="bg-neutral-100 dark:bg-neutral-800 px-1 rounded">/link {code.code}</code>.
+          Expires in {expiresMinutes} minute{expiresMinutes !== 1 ? 's' : ''}.
+        </p>
+        <button onClick={() => setCode(null)} className="text-xs text-neutral-500 hover:text-neutral-700 dark:hover:text-neutral-300">
+          Dismiss
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleGenerate}
+        disabled={generating}
+        className="flex items-center gap-2 rounded-md border border-teal-600 text-teal-600 dark:text-teal-400 dark:border-teal-600 px-3 py-1.5 text-sm font-medium hover:bg-teal-50 dark:hover:bg-teal-900/20 disabled:opacity-50 transition-colors"
+      >
+        {generating ? <Loader2 size={14} className="animate-spin" /> : <Link2 size={14} />}
+        Generate Link Code
+      </button>
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  )
+}
+
+// ── Linked Users Table ────────────────────────────────────────────────────────
+
+function LinkedUsersTable() {
+  const queryClient = useQueryClient()
+
+  const { data: allAccounts = [], isLoading } = useQuery<LinkedAccount[]>({
+    queryKey: ['linked-accounts'],
+    queryFn: getLinkedAccounts,
+    staleTime: 10_000,
+    retry: 1,
+  })
+
+  const telegramAccounts = allAccounts.filter(a => a.platform === 'telegram')
+
+  const unlinkMutation = useMutation({
+    mutationFn: deleteLinkedAccount,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['linked-accounts'] })
+    },
+  })
+
+  if (isLoading) return <Skeleton lines={3} />
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Linked Users</p>
+        <LinkCodeBox />
+      </div>
+
+      {telegramAccounts.length === 0 ? (
+        <EmptyState
+          icon={Link2}
+          title="No linked accounts"
+          description="Generate a link code and share it with a Telegram user. They message the bot with /link <code> to connect their Nova account."
+        />
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-neutral-200 dark:border-neutral-700">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-neutral-50 dark:bg-neutral-800/50">
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Nova User</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Telegram Username</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Status</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100 dark:divide-neutral-800">
+              {telegramAccounts.map(account => (
+                <tr key={account.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800/30 transition-colors">
+                  <td className="px-4 py-3 text-neutral-900 dark:text-neutral-100">
+                    <div>{account.display_name}</div>
+                    <div className="text-xs text-neutral-500 dark:text-neutral-400">{account.email}</div>
+                  </td>
+                  <td className="px-4 py-3 text-neutral-700 dark:text-neutral-300">
+                    {account.platform_username ? (
+                      <span>@{account.platform_username}</span>
+                    ) : (
+                      <span className="text-neutral-400 dark:text-neutral-500">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
+                      <CheckCircle2 size={12} /> Linked
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => unlinkMutation.mutate(account.id)}
+                      disabled={unlinkMutation.isPending && unlinkMutation.variables === account.id}
+                      className="flex items-center gap-1.5 text-xs text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-50 transition-colors"
+                    >
+                      {unlinkMutation.isPending && unlinkMutation.variables === account.id
+                        ? <Loader2 size={12} className="animate-spin" />
+                        : <Trash2 size={12} />
+                      }
+                      Unlink
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {unlinkMutation.error && (
+        <p className="text-sm text-red-600 dark:text-red-400">
+          {(unlinkMutation.error as Error).message}
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ── Full Telegram Tab ─────────────────────────────────────────────────────────
 
 function TelegramSetup({
   status,
@@ -26,85 +295,13 @@ function TelegramSetup({
   slackConfigured: boolean
   onDone: () => void
 }) {
-  const [s, setS] = useState<TelegramState>({ token: '', loading: false, error: '' })
-  const set = (patch: Partial<TelegramState>) => setS(prev => ({ ...prev, ...patch }))
-
-  const handleConnect = useCallback(async () => {
-    set({ loading: true, error: '' })
-    try {
-      await patchEnv({ TELEGRAM_BOT_TOKEN: s.token.trim() })
-      await manageComposeProfile('bridges', 'start')
-      set({ token: '', loading: false })
-      onDone()
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to connect', loading: false })
-    }
-  }, [s.token, onDone])
-
-  const handleDisconnect = useCallback(async () => {
-    set({ loading: true, error: '' })
-    try {
-      await patchEnv({ TELEGRAM_BOT_TOKEN: '' })
-      if (slackConfigured) {
-        await restartService('chat-bridge')
-      } else {
-        await manageComposeProfile('bridges', 'stop')
-      }
-      set({ token: '', loading: false })
-      onDone()
-    } catch (e: any) {
-      set({ error: e.message || 'Failed to disconnect', loading: false })
-    }
-  }, [slackConfigured, onDone])
-
-  if (status.container.running && status.configured) {
-    return (
-      <div className="space-y-4">
-        <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 p-4">
-          <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400">
-            <CheckCircle2 size={18} />
-            <span className="font-medium">Telegram bot is active</span>
-          </div>
-          <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Your Telegram bot is connected and relaying messages to Nova.
-          </p>
-        </div>
-        <button onClick={handleDisconnect} disabled={s.loading}
-          className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 transition-colors disabled:opacity-50">
-          {s.loading ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-          Disconnect Bot
-        </button>
-        {s.error && <p className="text-sm text-red-600 dark:text-red-400">{s.error}</p>}
-      </div>
-    )
-  }
-
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        Create a Telegram bot via{' '}
-        <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer"
-          className="text-teal-600 dark:text-teal-400 hover:underline inline-flex items-center gap-1">
-          @BotFather <ExternalLink size={12} />
-        </a>
-        {' '}and paste the bot token below.
-      </p>
-      <input
-        type="password"
-        placeholder="Telegram bot token"
-        value={s.token}
-        onChange={e => set({ token: e.target.value, error: '' })}
-        className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-800 px-3 py-2 text-sm"
-      />
-      <button onClick={handleConnect} disabled={!s.token.trim() || s.loading}
-        className="flex items-center gap-2 rounded-md bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50 transition-colors">
-        {s.loading ? <Loader2 size={14} className="animate-spin" /> : null}
-        Connect
-      </button>
-      <p className="text-xs text-neutral-500 dark:text-neutral-500">
-        The token is stored in your Nova <code className="bg-neutral-100 dark:bg-neutral-800 px-1 py-0.5 rounded">.env</code> file.
-      </p>
-      {s.error && <p className="text-sm text-red-600 dark:text-red-400">{s.error}</p>}
+    <div className="space-y-6">
+      <TelegramTokenSection status={status} slackConfigured={slackConfigured} onDone={onDone} />
+
+      <div className="border-t border-neutral-200 dark:border-neutral-700 pt-6">
+        <LinkedUsersTable />
+      </div>
     </div>
   )
 }
