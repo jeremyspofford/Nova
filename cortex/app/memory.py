@@ -100,6 +100,58 @@ async def reflect_to_engrams(
         log.debug("Failed to reflect to engrams: %s", e)
 
 
+async def ingest_lesson(
+    goal_title: str,
+    maturation_phase: str | None,
+    approach: str,
+    outcome: str,
+    lesson: str,
+    goal_id: str | None = None,
+    failure_mode: str | None = None,
+) -> None:
+    """Ingest a reflection lesson into engrams for cross-goal learning.
+
+    Only called for reflections with non-null lessons (mid/best budget tier).
+    Routine successes without surprising lessons are not ingested.
+    """
+    if not settings.reflect_to_engrams:
+        return
+
+    # Skip routine successes with no surprising lesson
+    if outcome == "success" and not lesson:
+        return
+
+    phase_ctx = f" (phase: {maturation_phase})" if maturation_phase else ""
+    raw_text = (
+        f"Working on goal '{goal_title}'{phase_ctx}: "
+        f"tried {approach[:200]}. "
+        f"Result: {outcome}. "
+        f"Lesson: {lesson}"
+    )
+
+    metadata = {"drive": "serve", "outcome": outcome}
+    if goal_id:
+        metadata["goal_id"] = goal_id
+    if failure_mode:
+        metadata["failure_mode"] = failure_mode
+
+    try:
+        mem = get_memory()
+        await mem.post(
+            "/api/v1/engrams/ingest",
+            json={
+                "raw_text": raw_text,
+                "source_type": "cortex",
+                "source_id": "cortex-lesson",
+                "metadata": metadata,
+            },
+            timeout=10.0,
+        )
+        log.debug("Ingested lesson for goal '%s'", goal_title)
+    except Exception as e:
+        log.debug("Failed to ingest lesson: %s", e)
+
+
 async def maybe_consolidate() -> bool:
     """Trigger consolidation if enough time has passed since last run.
 

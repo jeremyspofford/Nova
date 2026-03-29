@@ -55,6 +55,10 @@ class Settings:
     planning_model: str = os.getenv("CORTEX_PLANNING_MODEL", "")  # empty = use DEFAULT_CHAT_MODEL
     reflection_model: str = os.getenv("CORTEX_REFLECTION_MODEL", "")
 
+    # Learning from experience
+    stuck_threshold_min: int = int(os.getenv("CORTEX_STUCK_THRESHOLD_MIN", "3"))
+    lesson_extraction_min_tier: str = os.getenv("CORTEX_LESSON_EXTRACTION_MIN_TIER", "mid")
+
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
 

@@ -147,3 +147,11 @@ async def journal(limit: int = Query(default=20, le=100)):
     """Recent journal entries from the Cortex conversation."""
     entries = await read_recent(limit)
     return {"entries": entries}
+
+
+@cortex_router.get("/reflections/{goal_id}")
+async def get_reflections(goal_id: UUID, limit: int = Query(default=20, le=100)):
+    """Reflections (experience log) for a specific goal."""
+    from .reflections import query_reflections
+    refs = await query_reflections(str(goal_id), limit=limit)
+    return {"reflections": refs, "count": len(refs)}

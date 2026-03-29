@@ -38,6 +38,9 @@ GOAL_SPEC_APPROVED = "goal.spec_approved"
 GOAL_SPEC_REJECTED = "goal.spec_rejected"
 GOAL_COMMENTED = "goal.commented"
 
+# Experience learning stimuli
+GOAL_STUCK = "goal.stuck"
+
 _redis: aioredis.Redis | None = None
 
 
