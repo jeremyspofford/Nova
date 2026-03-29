@@ -200,75 +200,84 @@ function getGlowTexture(): CanvasTexture {
   return glowTextureCache
 }
 
-// ── Fresnel orb shader ──────────────────────────────────────────────────────
+// ── Star glow shader ─────────────────────────────────────────────────────────
 
-const orbVertexShader = /* glsl */ `
+const starVertexShader = /* glsl */ `
   varying vec3 vNormal;
   varying vec3 vViewDir;
+  varying float vFacing;
   void main() {
     vNormal = normalize(normalMatrix * normal);
     vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
     vViewDir = normalize(-mvPos.xyz);
+    vFacing = dot(vNormal, vViewDir);
     gl_Position = projectionMatrix * mvPos;
   }
 `
 
-const orbFragmentShader = /* glsl */ `
+const starFragmentShader = /* glsl */ `
   uniform vec3 uColor;
   uniform float uOpacity;
-  uniform float uActivation;
+  uniform float uImportance;
+  uniform float uBirthTime;
+  uniform float uHighlightStart;
+  uniform float uTime;
 
-  varying vec3 vNormal;
-  varying vec3 vViewDir;
+  varying float vFacing;
 
   void main() {
-    float facing = dot(vNormal, vViewDir);
+    // Soft radial falloff — facing=1 at center, 0 at rim
+    float glow = pow(max(vFacing, 0.0), 1.8);
 
-    // Fresnel rim — bright edges like a holographic shield
-    float fresnel = 1.0 - facing;
-    fresnel = pow(fresnel, 2.2);
+    // Bright white-hot center point
+    float center = pow(max(vFacing, 0.0), 8.0);
 
-    // Core illumination — bright center falloff
-    float core = pow(facing, 1.6);
+    // Breathing animation — importance-based phase offset
+    float breathe = 1.0 + sin(uTime * 0.4 + uImportance * 6.28) * 0.08;
 
-    // Specular highlight — virtual light from upper-right
-    vec3 lightDir = normalize(vec3(0.4, 0.7, 0.6));
-    vec3 halfVec = normalize(vViewDir + lightDir);
-    float spec = pow(max(dot(vNormal, halfVec), 0.0), 32.0);
+    // Birth fade-in (1 second)
+    float age = uTime - uBirthTime;
+    float birthFade = clamp(age, 0.0, 1.0);
 
-    // Base color: darker away from view, lit center
-    vec3 baseCol = uColor * (0.25 + core * 0.55);
-    // Rim highlight (boosted color + white tint)
-    vec3 rimCol = uColor * 1.6 + vec3(0.2);
-    // Mix — rim glow blends over base
-    vec3 finalCol = mix(baseCol, rimCol, fresnel * 0.5);
-    // Specular catch — white-ish highlight for glassy depth
-    finalCol += vec3(1.0) * spec * 0.35;
-    // Subtle ambient so back-facing areas aren't pure black
-    finalCol += uColor * 0.06;
+    // Highlight pulse (fades out over 2.5 seconds)
+    float highlightAge = uTime - uHighlightStart;
+    float highlight = uHighlightStart > 0.0
+      ? max(0.0, 1.0 - highlightAge / 2.5) * 0.4
+      : 0.0;
 
-    // Alpha: slightly brighter at rim for glow
-    float alpha = uOpacity * (0.85 + fresnel * 0.15);
+    // Combine: colored glow + white center
+    float brightness = (0.3 + uImportance * 0.7) * breathe;
+    vec3 col = uColor * glow * brightness + vec3(1.0) * center * brightness * 0.6;
+    col += uColor * highlight;
 
-    gl_FragColor = vec4(finalCol, alpha);
+    // Alpha: glow fades to transparent at rim
+    float alpha = glow * uOpacity * birthFade + center * 0.5 * birthFade;
+    alpha = clamp(alpha, 0.0, 1.0);
+
+    gl_FragColor = vec4(col, alpha);
   }
 `
 
-function makeOrbMaterial(color: string, opacity: number, activation: number): ShaderMaterial {
+function makeStarMaterial(
+  color: string,
+  importance: number,
+  birthTime: number,
+): ShaderMaterial {
   const mat = new ShaderMaterial({
     uniforms: {
       uColor: { value: new Color(color) },
-      uOpacity: { value: opacity },
-      uActivation: { value: activation },
+      uOpacity: { value: 0.3 + importance * 0.7 },
+      uImportance: { value: importance },
+      uBirthTime: { value: birthTime },
+      uHighlightStart: { value: 0 },
+      uTime: sharedUniforms.uTime,  // shared reference — updated once per frame
     },
-    vertexShader: orbVertexShader,
-    fragmentShader: orbFragmentShader,
+    vertexShader: starVertexShader,
+    fragmentShader: starFragmentShader,
     transparent: true,
     side: FrontSide,
-    depthWrite: true,
+    depthWrite: false,
   })
-  // Sync .opacity reads/writes with the shader uniform so animation code
-  // that sets material.opacity directly still works.
   Object.defineProperty(mat, 'opacity', {
     get() { return mat.uniforms.uOpacity.value },
     set(v: number) { mat.uniforms.uOpacity.value = v },
@@ -706,9 +715,10 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
         const group = new Group()
 
-        // Sphere — Fresnel orb shader for lit, glassy depth
+        // Sphere — star glow shader
         const geo = new SphereGeometry(radius, segments, segments)
-        const mat = makeOrbMaterial(color, alpha, activation)
+        const birthTime = sharedUniforms.uTime.value
+        const mat = makeStarMaterial(color, importance, birthTime)
         const sphere = new Mesh(geo, mat)
         group.add(sphere)
 
