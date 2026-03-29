@@ -27,6 +27,10 @@ from .task_tracker import TaskOutcome, await_task
 
 log = logging.getLogger(__name__)
 
+# Track consecutive skips per goal to prevent infinite skip loops
+_consecutive_skips: dict[str, int] = {}
+MAX_CONSECUTIVE_SKIPS = 3
+
 ALL_DRIVES = [serve, maintain, improve, learn, reflect]
 
 
@@ -234,7 +238,6 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
     if state.budget_tier == "none":
         return f"Budget exhausted — skip LLM planning. Drive: {drive.name}"
 
-    # Build a compact prompt
     user_msg_summary = ""
     if state.user_messages:
         msgs = "; ".join(m["content"][:100] for m in state.user_messages[:3])
@@ -248,26 +251,71 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
     if state.memory_context:
         stimulus_summary += f"\n\nRelevant memories:\n{state.memory_context[:1000]}"
 
+    # Build rich goal context for serve drive
+    forced = False
+    goal_context_block = ""
+    if drive.name == "serve":
+        stale_goals = drive.context.get("stale_goals", [])
+        if stale_goals:
+            goal = stale_goals[0]
+            goal_id = goal.get("id", "")
+            skip_count = _consecutive_skips.get(goal_id, 0)
+            if skip_count >= MAX_CONSECUTIVE_SKIPS:
+                forced = True
+
+            parts = [f"Title: {goal.get('title', 'unknown')}"]
+            desc = goal.get("description")
+            if desc:
+                parts.append(f"Description: {desc[:300]}")
+            plan_data = goal.get("current_plan")
+            if plan_data and isinstance(plan_data, dict):
+                if plan_data.get("last_task_status") == "failed":
+                    parts.append(f"Last attempt FAILED: {plan_data.get('last_task_error', 'unknown')[:200]}")
+                elif plan_data.get("last_task_output"):
+                    parts.append(f"Last result: {plan_data['last_task_output'][:200]}")
+                if plan_data.get("plan"):
+                    parts.append(f"Previous plan: {plan_data['plan'][:200]}")
+            parts.append(f"Progress: iteration {goal.get('iteration', 0)}/{goal.get('max_iterations', 50)}")
+            cost = goal.get("cost_so_far_usd")
+            if cost:
+                limit = goal.get("max_cost_usd")
+                parts.append(f"Cost: ${cost:.2f}" + (f" / ${limit:.2f} limit" if limit else ""))
+            goal_context_block = "\n".join(parts)
+
+    skip_instruction = ""
+    if forced:
+        skip_instruction = (
+            "\n\nIMPORTANT: This goal has been skipped multiple times consecutively. "
+            "You MUST produce an actionable plan this time. Do NOT say 'skip'. "
+            "If the goal is unclear, create a task to gather more information or clarify requirements."
+        )
+    elif drive.name == "serve" and goal_context_block:
+        skip_instruction = (
+            '\n\nOnly say "skip" if you genuinely cannot identify ANY useful next step. '
+            "If the goal has a description, you should be able to plan work."
+        )
+
     prompt = f"""You are Nova's autonomous brain (Cortex). You are deciding what to do this cycle.
 
 Winning drive: {drive.name} (urgency {drive.urgency}, score {state.winner.score:.2f})
 Drive says: {drive.description}
 Proposed action: {drive.proposed_action or 'none specified'}
-Context: {json.dumps(drive.context, default=str)}
+
+{"Goal details:\n" + goal_context_block if goal_context_block else ""}
+Context: {json.dumps(drive.context, default=str)[:1000]}
 
 Budget: {state.budget_pct:.0f}% used today (tier: {state.budget_tier})
-Cycle: #{state.cycle_number}{user_msg_summary}{stimulus_summary}
+Cycle: #{state.cycle_number}{user_msg_summary}{stimulus_summary}{skip_instruction}
 
 Based on this, decide what SPECIFIC action to take. Be concise (1-3 sentences).
-If the drive is "serve" and there are stale goals, pick the highest-priority one and describe what to do next.
+If the drive is "serve", describe the next concrete task to dispatch for this goal.
 If the drive is "maintain" and services are degraded, describe the health issue.
-If nothing meaningful can be done, say "skip".
 
 Your response is the action plan (not code, just a description)."""
 
     try:
         llm = get_llm()
-        model = settings.planning_model or ""  # empty string = gateway uses default
+        model = settings.planning_model or ""
         resp = await llm.post("/complete", json={
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -279,7 +327,6 @@ Your response is the action plan (not code, just a description)."""
         })
         if resp.status_code == 200:
             data = resp.json()
-            # Capture the actual model the gateway resolved to
             state.resolved_model = data.get("model") or state.resolved_model
             return data.get("content", "No plan generated")
         else:
@@ -293,7 +340,38 @@ Your response is the action plan (not code, just a description)."""
 async def _execute_action(drive: DriveResult, plan: str, state: CycleState) -> str:
     """Execute the planned action. Returns outcome description."""
     if "skip" in plan.lower()[:20]:
+        # Track consecutive skips per goal
+        if drive.name == "serve":
+            stale_goals = drive.context.get("stale_goals", [])
+            if stale_goals:
+                goal_id = stale_goals[0]["id"]
+                _consecutive_skips[goal_id] = _consecutive_skips.get(goal_id, 0) + 1
+                log.info(
+                    "Goal %s skipped (%d consecutive)",
+                    goal_id, _consecutive_skips[goal_id],
+                )
+                # Update last_checked_at so we don't re-evaluate immediately
+                try:
+                    pool = get_pool()
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE goals SET last_checked_at = NOW(), updated_at = NOW() WHERE id = $1::uuid",
+                            goal_id,
+                        )
+                except Exception as e:
+                    log.warning("Failed to update last_checked_at on skip: %s", e)
+
+        # Mark as idle so adaptive timeout stays long (not 30s)
+        state.action_taken = "idle"
         return "Skipped — no meaningful action to take"
+
+    # Reset skip counter on successful action
+    if drive.name == "serve":
+        stale_goals = drive.context.get("stale_goals", [])
+        if stale_goals:
+            goal_id = stale_goals[0]["id"]
+            if goal_id in _consecutive_skips:
+                del _consecutive_skips[goal_id]
 
     if drive.name == "serve":
         return await _execute_serve(drive, plan, state)

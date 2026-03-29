@@ -27,8 +27,9 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
 
         stale_goals = await conn.fetch(
             """
-            SELECT id, title, priority, progress, check_interval_seconds, last_checked_at,
-                   maturation_status
+            SELECT id, title, description, current_plan, priority, progress,
+                   iteration, max_iterations, cost_so_far_usd, max_cost_usd,
+                   check_interval_seconds, last_checked_at, maturation_status
             FROM goals
             WHERE status = 'active'
               AND (
@@ -39,6 +40,8 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
                 OR maturation_status IN ('scoping', 'speccing', 'building', 'verifying')
               )
               AND (maturation_status IS NULL OR maturation_status != 'review')
+              AND (max_iterations IS NULL OR iteration < max_iterations)
+              AND (max_cost_usd IS NULL OR COALESCE(cost_so_far_usd, 0) < max_cost_usd)
             ORDER BY priority DESC
             LIMIT 5
             """,
@@ -88,8 +91,12 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
             urgency = min(1.0, urgency + 0.3)
 
     goal_summaries = [
-        {"id": str(g["id"]), "title": g["title"], "priority": g["priority"],
-         "progress": g["progress"], "maturation_status": g.get("maturation_status")}
+        {"id": str(g["id"]), "title": g["title"], "description": g["description"],
+         "current_plan": g["current_plan"], "priority": g["priority"],
+         "progress": g["progress"], "iteration": g["iteration"],
+         "max_iterations": g["max_iterations"], "cost_so_far_usd": float(g["cost_so_far_usd"] or 0),
+         "max_cost_usd": float(g["max_cost_usd"]) if g["max_cost_usd"] is not None else None,
+         "maturation_status": g.get("maturation_status")}
         for g in stale_goals
     ]
 

@@ -32,6 +32,8 @@ from app.tools.introspect_tools import INTROSPECT_TOOLS
 from app.tools.introspect_tools import execute_tool as _exec_introspect
 from app.tools.memory_tools import MEMORY_TOOLS
 from app.tools.memory_tools import execute_tool as _exec_memory
+from app.tools.intel_tools import INTEL_TOOLS
+from app.tools.intel_tools import execute_tool as _exec_intel
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -52,6 +54,7 @@ _REGISTRY: list[ToolGroup] = [
     ToolGroup("Diagnosis", "Self-Diagnosis",  "Diagnose task failures, check service health, analyse errors", DIAGNOSIS_TOOLS, _exec_diagnosis),
     ToolGroup("Introspect", "Platform Awareness", "Query platform config, knowledge sources, MCP servers, user profiles", INTROSPECT_TOOLS, _exec_introspect),
     ToolGroup("Memory", "Knowledge Retrieval", "Search, recall, and read from Nova's memory system", MEMORY_TOOLS, _exec_memory),
+    ToolGroup("Intel", "Intelligence Analysis", "Query intel feeds, create recommendations, check dismissed content", INTEL_TOOLS, _exec_intel),
 ]
 
 # Derived from registry — same shapes the rest of the codebase expects

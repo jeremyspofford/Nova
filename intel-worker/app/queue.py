@@ -1,4 +1,4 @@
-"""Dual-Redis queue helpers — delegates to nova-worker-common."""
+"""Engram queue helper — delegates to nova-worker-common."""
 import logging
 from urllib.parse import urlparse, urlunparse
 
@@ -8,24 +8,21 @@ from nova_worker_common.queue import (
     close_redis_client,
     create_redis_client,
     push_to_engram_queue as _push_engram,
-    push_to_notification_queue,
 )
 
 from app.config import settings
 
 log = logging.getLogger(__name__)
 
-_redis_intel: aioredis.Redis | None = None  # db6
 _redis_engram: aioredis.Redis | None = None  # db0
 
 
 async def init_queues() -> None:
-    global _redis_intel, _redis_engram
-    _redis_intel = await create_redis_client(settings.redis_url)
+    global _redis_engram
     parsed = urlparse(settings.redis_url)
     engram_url = urlunparse(parsed._replace(path="/0"))
     _redis_engram = await create_redis_client(engram_url)
-    log.info("Redis queues initialized (intel=db6, engram=db0)")
+    log.info("Redis queue initialized (engram=db0)")
 
 
 async def push_to_engram_queue(item: dict) -> None:
@@ -42,25 +39,8 @@ async def push_to_engram_queue(item: dict) -> None:
     )
 
 
-async def push_to_intel_queue(item: dict) -> None:
-    """Push notification to Cortex's intel new-items queue."""
-    await push_to_notification_queue(
-        _redis_intel,
-        queue_name="intel:new_items",
-        data={
-            "content_item_id": item.get("id", ""),
-            "feed_id": item.get("feed_id", ""),
-            "title": item.get("title", ""),
-            "category": item.get("category", ""),
-        },
-    )
-
-
 async def close_queues() -> None:
-    global _redis_intel, _redis_engram
-    if _redis_intel:
-        await close_redis_client(_redis_intel)
-        _redis_intel = None
+    global _redis_engram
     if _redis_engram:
         await close_redis_client(_redis_engram)
         _redis_engram = None

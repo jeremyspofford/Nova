@@ -6,13 +6,17 @@ on-demand instead of relying on pre-injected context. This gives agents
 control over what they retrieve and when, keeping the context window lean.
 
 Tools provided:
-  what_do_i_know    -- lightweight domain awareness (what topics/sources exist)
-  search_memory     -- semantic search across engrams (ranked results)
-  recall_topic      -- retrieve all engrams connected to an entity
-  read_source       -- fetch full content from a source record
+  what_do_i_know            -- lightweight domain awareness (what topics/sources exist)
+  search_memory             -- semantic search across engrams (ranked results)
+  recall_topic              -- retrieve all engrams connected to an entity
+  read_source               -- fetch full content from a source record
+  get_consolidation_status  -- recent consolidation cycle history
+  get_memory_stats          -- engram counts, graph stats, system health
+  trigger_consolidation     -- manually start a consolidation cycle
 """
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
@@ -126,6 +130,53 @@ MEMORY_TOOLS: list[ToolDefinition] = [
             "required": ["source_id"],
         },
     ),
+    ToolDefinition(
+        name="get_consolidation_status",
+        description=(
+            "Check the status and history of memory consolidation cycles. Returns "
+            "recent consolidation log entries showing when cycles ran, how long they "
+            "took, and what they did (pattern extraction, pruning, contradiction "
+            "resolution). Use this to verify consolidation is running and healthy."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of recent log entries to return (default: 5, max: 20)",
+                },
+            },
+            "required": [],
+        },
+    ),
+    ToolDefinition(
+        name="get_memory_stats",
+        description=(
+            "Get statistics about the memory system: total engram count, type breakdown, "
+            "edge counts, source counts, and ingestion queue depth. Use this to monitor "
+            "memory health and growth."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+    ToolDefinition(
+        name="trigger_consolidation",
+        description=(
+            "Manually trigger a memory consolidation cycle. Consolidation replays "
+            "recent engrams, extracts patterns, strengthens connections (Hebbian "
+            "learning), resolves contradictions, prunes weak memories, and updates "
+            "the self-model. Has a cooldown period — may return 429 if run too "
+            "frequently. Use sparingly, typically when you notice fragmented knowledge."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
 ]
 
 
@@ -142,6 +193,12 @@ async def execute_tool(name: str, arguments: dict) -> str:
             return await _recall_topic(arguments)
         elif name == "read_source":
             return await _read_source(arguments)
+        elif name == "get_consolidation_status":
+            return await _get_consolidation_status(arguments)
+        elif name == "get_memory_stats":
+            return await _get_memory_stats(arguments)
+        elif name == "trigger_consolidation":
+            return await _trigger_consolidation(arguments)
         else:
             return f"Unknown memory tool: {name}"
     except httpx.TimeoutException:
@@ -294,3 +351,89 @@ async def _read_source(args: dict) -> str:
         content = content[:15000] + f"\n\n[... truncated, {len(content)} chars total]"
 
     return f"{header}\n\n{content}"
+
+
+async def _get_consolidation_status(args: dict) -> str:
+    limit = min(args.get("limit", 5), 20)
+
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        resp = await c.get(
+            f"{MEMORY_BASE}/consolidation-log",
+            params={"limit": limit},
+        )
+        resp.raise_for_status()
+        entries = resp.json()
+
+    if not entries:
+        return "No consolidation cycles have run yet."
+
+    lines = [f"Recent consolidation cycles ({len(entries)} entries):"]
+    for entry in entries:
+        trigger = entry.get("trigger", "?")
+        ts = entry.get("started_at", entry.get("timestamp", "?"))
+        duration = entry.get("duration_seconds", entry.get("duration_s"))
+        dur_str = f" ({duration:.1f}s)" if duration is not None else ""
+        phases = entry.get("phases_completed", entry.get("phases", "?"))
+        lines.append(f"\n- [{trigger}] {ts}{dur_str} -- {phases} phases")
+        if entry.get("stats"):
+            stats = entry["stats"]
+            if isinstance(stats, str):
+                lines.append(f"  {stats}")
+            elif isinstance(stats, dict):
+                lines.append(f"  {json.dumps(stats, default=str)}")
+
+    return "\n".join(lines)
+
+
+async def _get_memory_stats(args: dict) -> str:
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        resp = await c.get(f"{MEMORY_BASE}/stats")
+        resp.raise_for_status()
+        data = resp.json()
+
+    lines = ["Memory system statistics:"]
+
+    if "total_engrams" in data:
+        lines.append(f"\nTotal engrams: {data['total_engrams']}")
+    elif "engram_count" in data:
+        lines.append(f"\nTotal engrams: {data['engram_count']}")
+
+    if data.get("by_type"):
+        lines.append("\nBy type:")
+        for etype, count in data["by_type"].items():
+            lines.append(f"  - {etype}: {count}")
+
+    if "total_edges" in data:
+        lines.append(f"\nTotal edges: {data['total_edges']}")
+    if "total_sources" in data:
+        lines.append(f"\nTotal sources: {data['total_sources']}")
+    if "ingestion_queue_depth" in data:
+        lines.append(f"\nIngestion queue depth: {data['ingestion_queue_depth']}")
+    if data.get("consolidation"):
+        c_info = data["consolidation"]
+        lines.append(f"\nLast consolidation: {c_info.get('last_run', 'never')}")
+
+    return "\n".join(lines)
+
+
+async def _trigger_consolidation(args: dict) -> str:
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        resp = await c.post(f"{MEMORY_BASE}/consolidate")
+        if resp.status_code == 429:
+            return (
+                "Consolidation is on cooldown. A cycle ran recently. "
+                "Use get_consolidation_status to check when the last cycle ran."
+            )
+        resp.raise_for_status()
+        data = resp.json()
+
+    lines = ["Consolidation cycle triggered successfully."]
+    if isinstance(data, dict):
+        if data.get("phases_completed"):
+            lines.append(f"Phases completed: {data['phases_completed']}")
+        if data.get("duration_seconds") is not None:
+            lines.append(f"Duration: {data['duration_seconds']:.1f}s")
+        if data.get("stats"):
+            lines.append(f"Stats: {json.dumps(data['stats'], default=str)}")
+
+    return "\n".join(lines)

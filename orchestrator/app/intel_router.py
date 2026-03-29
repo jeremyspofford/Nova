@@ -134,6 +134,21 @@ class IngestContentRequest(BaseModel):
     items: list[ContentItem]
 
 
+class CreateRecommendationRequest(BaseModel):
+    title: str
+    summary: str
+    rationale: str
+    grade: str
+    confidence: float
+    category: str = "other"
+    features: list[str] = []
+    complexity: str = "medium"
+    auto_implementable: bool = False
+    implementation_plan: str | None = None
+    source_content_ids: list[str] = []
+    engram_ids: list[str] = []
+
+
 class UpdateRecommendationRequest(BaseModel):
     status: str | None = None
     decided_by: str | None = None
@@ -338,6 +353,61 @@ async def intel_stats(_user: UserDep):
 
 
 # ── Recommendation endpoints ────────────────────────────────────────────────
+
+
+@intel_router.post("/api/v1/intel/recommendations", status_code=201)
+async def create_recommendation(req: CreateRecommendationRequest, _admin: AdminDep):
+    """Create an intel recommendation (used by Cortex after content analysis)."""
+    # Validate grade
+    if req.grade not in ("A", "B", "C"):
+        raise HTTPException(status_code=400, detail="grade must be A, B, or C")
+    # Validate confidence
+    if not (0 <= req.confidence <= 1):
+        raise HTTPException(status_code=400, detail="confidence must be between 0 and 1")
+    # Validate complexity
+    if req.complexity not in ("low", "medium", "high"):
+        raise HTTPException(status_code=400, detail="complexity must be low, medium, or high")
+
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO intel_recommendations
+                (title, summary, rationale, features, grade, confidence,
+                 category, auto_implementable, implementation_plan, complexity)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING *
+            """,
+            req.title, req.summary, req.rationale, req.features,
+            req.grade, req.confidence, req.category,
+            req.auto_implementable, req.implementation_plan, req.complexity,
+        )
+        rec_id = row["id"]
+
+        # Link source content items
+        for cid in req.source_content_ids:
+            await conn.execute(
+                """
+                INSERT INTO intel_recommendation_sources (recommendation_id, content_item_id)
+                VALUES ($1, $2::uuid)
+                ON CONFLICT DO NOTHING
+                """,
+                rec_id, cid,
+            )
+
+        # Link engrams
+        for eid in req.engram_ids:
+            await conn.execute(
+                """
+                INSERT INTO intel_recommendation_engrams (recommendation_id, engram_id)
+                VALUES ($1, $2::uuid)
+                ON CONFLICT DO NOTHING
+                """,
+                rec_id, eid,
+            )
+
+    log.info("Intel recommendation created: %s — %s (grade=%s)", rec_id, req.title, req.grade)
+    return {"id": str(rec_id), "title": req.title, "grade": req.grade, "status": "pending"}
 
 
 @intel_router.get("/api/v1/intel/recommendations")

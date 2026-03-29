@@ -122,6 +122,7 @@ async def get_drives():
                 "urgency": r.urgency,
                 "description": r.description,
                 "proposed_action": r.proposed_action,
+                "context": r.context,
             })
         except Exception as e:
             log.warning("Drive %s.assess() failed: %s", drive_module.__name__, e)

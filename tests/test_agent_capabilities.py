@@ -6,8 +6,22 @@ These tests verify:
 - Diagnostic tools return actionable data
 - Memory tools are accessible from agents
 - Service health check covers all services
+- Consolidation/stats tools are in the catalog
+- All 7 tool groups have representative tools
 """
+import os
+
+import httpx
 import pytest
+
+BASE = "http://localhost:8000/api/v1"
+HEADERS = {}
+
+
+@pytest.fixture(autouse=True)
+def _admin_headers():
+    secret = os.environ.get("NOVA_ADMIN_SECRET", "nova-admin-secret-change-me")
+    HEADERS["X-Admin-Secret"] = secret
 
 
 class TestAgentToolAvailability:
@@ -60,11 +74,10 @@ class TestAgentToolAvailability:
         }
         exposed = internal_only_tools & tool_names
         hidden = internal_only_tools - tool_names
-        if hidden:
-            pytest.xfail(
-                f"These tools are available to agents internally but not in the "
-                f"/api/v1/tools catalog: {hidden}"
-            )
+        assert not hidden, (
+            f"These tools are available to agents internally but not in the "
+            f"/api/v1/tools catalog: {hidden}"
+        )
 
 
 class TestDiagnosticTools:
@@ -155,15 +168,9 @@ class TestIntelRecommendationPipeline:
                 "category": "test",
             },
         )
-        # 405 = endpoint exists but POST not allowed; 404 = route not found
-        # Either means the CREATE endpoint is missing — this is the root cause
-        # of zero recommendations ever being generated.
-        if resp.status_code in (404, 405):
-            pytest.xfail(
-                "POST /api/v1/intel/recommendations not implemented — "
-                "this is required for the suggested goals pipeline to produce output"
-            )
-        assert resp.status_code in (200, 201)
+        assert resp.status_code in (200, 201), (
+            f"POST /api/v1/intel/recommendations failed: {resp.status_code} {resp.text[:200]}"
+        )
         rec = resp.json()
         # Cleanup if it was created
         if "id" in rec:
@@ -190,3 +197,65 @@ class TestIntelRecommendationPipeline:
         # items_this_week > 0 means content is being ingested from feeds
         assert "items_this_week" in stats
         # We don't assert > 0 because feeds might not have run yet in CI
+
+
+# ---------------------------------------------------------------------------
+# Task 4: Consolidation and memory stats tools in catalog
+# ---------------------------------------------------------------------------
+
+def _get_catalog_tool_names() -> list[str]:
+    """Fetch tool catalog and extract all tool names from nested categories."""
+    resp = httpx.get(f"{BASE}/tools", headers=HEADERS)
+    assert resp.status_code == 200
+    catalog = resp.json()
+    names = []
+    if isinstance(catalog, list):
+        for category in catalog:
+            for tool in category.get("tools", []):
+                names.append(tool["name"])
+    return names
+
+
+def test_consolidation_status_tool_in_catalog():
+    """get_consolidation_status tool should be in the tool catalog."""
+    tool_names = _get_catalog_tool_names()
+    assert "get_consolidation_status" in tool_names, (
+        f"get_consolidation_status not in tool catalog. Got: {sorted(tool_names)}"
+    )
+
+
+def test_memory_stats_tool_in_catalog():
+    """get_memory_stats tool should be in the tool catalog."""
+    tool_names = _get_catalog_tool_names()
+    assert "get_memory_stats" in tool_names, (
+        f"get_memory_stats not in tool catalog. Got: {sorted(tool_names)}"
+    )
+
+
+def test_trigger_consolidation_tool_in_catalog():
+    """trigger_consolidation tool should be in the tool catalog."""
+    tool_names = _get_catalog_tool_names()
+    assert "trigger_consolidation" in tool_names, (
+        f"trigger_consolidation not in tool catalog. Got: {sorted(tool_names)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task 5: All tool groups represented in catalog
+# ---------------------------------------------------------------------------
+
+def test_all_tool_groups_in_catalog():
+    """All 7 built-in tool groups should have their tools in the catalog."""
+    tool_names = set(_get_catalog_tool_names())
+
+    expected = {
+        "Code": "list_dir",
+        "Git": "git_status",
+        "Platform": "list_agents",
+        "Web": "web_search",
+        "Diagnosis": "diagnose_task",
+        "Memory": "search_memory",
+        "Introspect": "get_platform_config",
+    }
+    for group, sample in expected.items():
+        assert sample in tool_names, f"Tool '{sample}' from group '{group}' missing. Got: {sorted(tool_names)}"

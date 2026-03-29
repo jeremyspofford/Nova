@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from app.client import get_client
 from app.config import settings
 from app.fetchers import fetch_feed
-from app.queue import push_to_engram_queue, push_to_intel_queue
+from app.queue import push_to_engram_queue
 
 log = logging.getLogger(__name__)
 
@@ -94,7 +94,6 @@ async def run_polling_loop() -> None:
                             item["feed_name"] = feed_name
                             item["category"] = feed.get("category")
                             await push_to_engram_queue(item)
-                            await push_to_intel_queue(item)
                         log.info("Feed %s: %d fetched, %d new", feed_name, len(items), len(stored))
                     else:
                         log.warning("Feed %s: content POST failed (%s)", feed_name, post_resp.status_code)

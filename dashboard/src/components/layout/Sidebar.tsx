@@ -45,7 +45,7 @@ const navSections: NavSection[] = [
       { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
       { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member', debugOnly: true },
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
-      { to: '/sources', label: 'Sources', icon: Globe, minRole: 'member' },
+      { to: '/sources', label: 'Knowledge', icon: Globe, minRole: 'member' },
     ],
   },
   {

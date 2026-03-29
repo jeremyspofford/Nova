@@ -54,7 +54,7 @@ export function Sources() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Sources"
+        title="Knowledge"
         description="Knowledge sources and intelligence feeds powering Nova's memory"
         helpEntries={HELP_ENTRIES}
         actions={
