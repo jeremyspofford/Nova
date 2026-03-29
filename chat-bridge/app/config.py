@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # Bridge service secret shared with orchestrator
     bridge_service_secret: str = ""
 
+    # Admin secret for authenticated management endpoints (shared with dashboard)
+    nova_admin_secret: str = ""
+
     # Default agent settings for bridge sessions
     default_agent_name: str = "Nova"
     default_model: str = "auto"

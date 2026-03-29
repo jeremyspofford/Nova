@@ -453,6 +453,7 @@ services:
       SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
       SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
       BRIDGE_SERVICE_SECRET: ${BRIDGE_SERVICE_SECRET:-}
+      NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-changeme}
     ports:
       - "8090:8090"
     depends_on:

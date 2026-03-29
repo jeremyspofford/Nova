@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from nova_contracts.logging import configure_logging
 
 from app.adapters.base import PlatformAdapter
@@ -96,3 +96,39 @@ async def adapter_status():
             for a in ADAPTERS
         ]
     }
+
+
+@app.post("/reload-telegram")
+async def reload_telegram(request: Request):
+    """Reload Telegram adapter with new config. Called by dashboard after saving bot token."""
+    admin_secret = request.headers.get("X-Admin-Secret", "")
+    if admin_secret != settings.nova_admin_secret:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Read new token from Redis runtime config (DB 1 = nova:config:* store)
+    import redis.asyncio as aioredis
+    config_redis_url = settings.redis_url.rsplit("/", 1)[0] + "/1"
+    r = aioredis.from_url(config_redis_url, decode_responses=True)
+    try:
+        token = await r.get("nova:config:telegram.bot_token")
+    finally:
+        await r.aclose()
+
+    if not token:
+        raise HTTPException(status_code=400, detail="No bot token configured")
+
+    # Shutdown existing telegram adapter
+    for adapter in ADAPTERS:
+        if adapter.platform_name == "telegram":
+            await adapter.shutdown()
+            ADAPTERS.remove(adapter)
+            break
+
+    # Start new adapter with updated token
+    object.__setattr__(settings, "telegram_bot_token", token)
+    new_adapter = TelegramAdapter()  # reads from module-level settings
+    if new_adapter.is_configured():
+        await new_adapter.setup(app)
+        ADAPTERS.append(new_adapter)
+
+    return {"status": "reloaded"}
