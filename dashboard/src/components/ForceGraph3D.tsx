@@ -78,9 +78,9 @@ export interface NeuralModeConfig {
 }
 
 export interface ForceGraph3DHandle {
-  highlightNodes: (ids: string[], durationMs: number) => void
+  highlightNodes: (ids: string[]) => void
   pulseAll: (durationMs: number) => void
-  fadeInNodes: (ids: string[], durationMs: number) => void
+  fadeInNodes: (ids: string[]) => void
 }
 
 interface ForceGraph3DProps {
@@ -638,26 +638,43 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const showNebulaeRef = useRef(showNebulae)
   showNebulaeRef.current = showNebulae
   // Activity visualization refs (imperative handle)
-  const highlightedNodesRef = useRef<Set<string>>(new Set())
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
-  const fadeInNodesRef = useRef<Map<string, number>>(new Map()) // id -> birthTime
 
   useImperativeHandle(ref, () => ({
-    highlightNodes(ids: string[], durationMs: number) {
-      ids.forEach(id => highlightedNodesRef.current.add(id))
-      setTimeout(() => {
-        ids.forEach(id => highlightedNodesRef.current.delete(id))
-      }, durationMs)
+    highlightNodes(ids: string[]) {
+      const graph = graphRef.current
+      if (!graph) return
+      const now = sharedUniforms.uTime.value
+      const data = graph.graphData()
+      for (const node of data.nodes) {
+        if (!ids.includes(node.id)) continue
+        const obj = (node as any).__threeObj
+        if (!obj) continue
+        obj.children.forEach((child: any) => {
+          if (child.material?.uniforms?.uHighlightStart) {
+            child.material.uniforms.uHighlightStart.value = now
+          }
+        })
+      }
     },
     pulseAll(durationMs: number) {
       globalPulseRef.current = { active: true, startTime: Date.now(), duration: durationMs }
     },
-    fadeInNodes(ids: string[], durationMs: number) {
-      const now = Date.now()
-      ids.forEach(id => fadeInNodesRef.current.set(id, now))
-      setTimeout(() => {
-        ids.forEach(id => fadeInNodesRef.current.delete(id))
-      }, durationMs)
+    fadeInNodes(ids: string[]) {
+      const graph = graphRef.current
+      if (!graph) return
+      const now = sharedUniforms.uTime.value
+      const data = graph.graphData()
+      for (const node of data.nodes) {
+        if (!ids.includes(node.id)) continue
+        const obj = (node as any).__threeObj
+        if (!obj) continue
+        obj.children.forEach((child: any) => {
+          if (child.material?.uniforms?.uBirthTime) {
+            child.material.uniforms.uBirthTime.value = now
+          }
+        })
+      }
     },
   }))
 
@@ -941,22 +958,6 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         const neuralCfg = neuralModeRef.current
         if (neuralCfg?.enabled) {
           const time = Date.now() * 0.001
-          const rate = neuralCfg.breathingRate ?? 0.02
-          const amp = neuralCfg.breathingAmplitude ?? 0.05
-
-          // Per-node pulsation
-          const graphData = graph.graphData()
-          graphData.nodes.forEach((node: any, i: number) => {
-            const obj = node.__threeObj
-            if (!obj) return
-            const phase = i * 0.7
-            const scale = 1 + Math.sin(time * rate * Math.PI * 2 + phase) * amp
-            obj.children.forEach((child: any) => {
-              if (child.geometry) { // sphere
-                child.scale.setScalar(scale)
-              }
-            })
-          })
 
           // Global bloom breathing
           if (bloomPassRef.current) {
@@ -966,26 +967,6 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
           }
         }
       } catch { /* ok during init */ }
-
-      // ── Activity visualization: highlighted nodes ───────────────────
-      try {
-        if (highlightedNodesRef.current.size > 0) {
-          const graphData = graph.graphData()
-          graphData.nodes.forEach((node: any) => {
-            if (!highlightedNodesRef.current.has(node.id)) return
-            const obj = node.__threeObj
-            if (!obj) return
-            obj.children.forEach((child: any) => {
-              if (child.material?.opacity !== undefined) {
-                child.material.opacity = Math.min(1, child.material.opacity + 0.3)
-              }
-              if (child.isSprite) {
-                child.scale.multiplyScalar(1.5)
-              }
-            })
-          })
-        }
-      } catch { /* ok */ }
 
       // ── Activity visualization: global pulse ────────────────────────
       try {
@@ -997,27 +978,6 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
             const t = elapsed / globalPulseRef.current.duration
             bloomPassRef.current.strength += Math.sin(t * Math.PI) * 0.3
           }
-        }
-      } catch { /* ok */ }
-
-      // ── Activity visualization: fade-in nodes ──────────────────────
-      try {
-        if (fadeInNodesRef.current.size > 0) {
-          const now = Date.now()
-          const graphData = graph.graphData()
-          graphData.nodes.forEach((node: any) => {
-            const birthTime = fadeInNodesRef.current.get(node.id)
-            if (birthTime === undefined) return
-            const obj = node.__threeObj
-            if (!obj) return
-            const elapsed = now - birthTime
-            const alpha = Math.min(1, elapsed / 1000)
-            obj.children.forEach((child: any) => {
-              if (child.material?.opacity !== undefined) {
-                child.material.opacity *= alpha
-              }
-            })
-          })
         }
       } catch { /* ok */ }
 

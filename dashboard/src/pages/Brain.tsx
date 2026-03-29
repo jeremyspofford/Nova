@@ -175,7 +175,7 @@ export default function Brain() {
       const graphNodeIds = new Set(activeGraph.nodes.map(n => n.id))
       const matchingIds = _step.engram_ids.filter(id => graphNodeIds.has(id))
       if (matchingIds.length > 0) {
-        graphRef.current?.highlightNodes(matchingIds, 2500)
+        graphRef.current?.highlightNodes(matchingIds)
       }
     } else if (_step.step === 'memory' && _step.state === 'running') {
       // Fallback: no IDs yet (running state), show a subtle pulse
@@ -200,7 +200,7 @@ export default function Brain() {
         .filter(n => !prevNodeIdsRef.current.has(n.id))
         .map(n => n.id)
       if (newIds.length > 0) {
-        graphRef.current?.fadeInNodes(newIds, 1000)
+        graphRef.current?.fadeInNodes(newIds)
       }
     }
     prevNodeIdsRef.current = currentIds
