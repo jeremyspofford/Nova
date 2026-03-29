@@ -173,6 +173,7 @@ app.add_middleware(
 )
 
 from app.engram_router import router as engram_router
+from app.linked_accounts_router import router as linked_accounts_router
 
 app.include_router(health_router)
 app.include_router(router)
@@ -183,3 +184,4 @@ app.include_router(goals_router)
 app.include_router(intel_router)
 app.include_router(knowledge_router)
 app.include_router(engram_router)
+app.include_router(linked_accounts_router)
