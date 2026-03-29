@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, X, ChevronRight, Network, Settings, Menu, Mic } from 'lucide-react'
 import { apiFetch } from '../api'
+import { useLocalStorage } from '../hooks/useLocalStorage'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
@@ -133,13 +134,13 @@ export default function Brain() {
   const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
   const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
   const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
-  const [showBgStars, setShowBgStars] = useState(true)
-  const [showInnerStars, setShowInnerStars] = useState(false)
-  const [showNebulae, setShowNebulae] = useState(true)
+  const [showBgStars, setShowBgStars] = useLocalStorage('brain.showBgStars', true)
+  const [showInnerStars, setShowInnerStars] = useLocalStorage('brain.showInnerStars', false)
+  const [showNebulae, setShowNebulae] = useLocalStorage('brain.showNebulae', true)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
-  const [bloomStrength, setBloomStrength] = useState(1.5)
+  const [bloomStrength, setBloomStrength] = useLocalStorage('brain.bloomStrength', 1.5)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
