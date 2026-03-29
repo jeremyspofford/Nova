@@ -153,6 +153,32 @@ export default function Brain() {
 
   const activeGraph = searchActive && searchGraph ? searchGraph : graph
 
+  // Progressive enhancement — degrade gracefully at high node counts
+  const nodeCount = activeGraph?.nodes.length ?? 0
+  const perf = useMemo(() => {
+    // At >1000 nodes: hide edges, disable inner stars, cap bloom
+    if (nodeCount > 1000) return {
+      showEdges: false,
+      showInnerStars: false,
+      bloomStrength: Math.min(bloomStrength, 1.0),
+      particlesAlways: false,
+    }
+    // At >500 nodes: reduce particles, cap bloom
+    if (nodeCount > 500) return {
+      showEdges: showEdges,
+      showInnerStars: false,
+      bloomStrength: Math.min(bloomStrength, 1.2),
+      particlesAlways: false,
+    }
+    // Under 500: full quality
+    return {
+      showEdges,
+      showInnerStars,
+      bloomStrength,
+      particlesAlways: true,
+    }
+  }, [nodeCount, showEdges, showInnerStars, bloomStrength])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -304,13 +330,13 @@ export default function Brain() {
           enabled: true,
           breathingRate: 0.02,
           breathingAmplitude: 0.05,
-          bloomStrength,
-          particlesAlways: true,
+          bloomStrength: perf.bloomStrength,
+          particlesAlways: perf.particlesAlways,
         }}
         showBackgroundStars={showBgStars}
-        showInnerStars={showInnerStars}
+        showInnerStars={perf.showInnerStars}
         showNebulae={showNebulae}
-        showEdges={showEdges}
+        showEdges={perf.showEdges}
         className="w-full h-full"
       />
 
@@ -530,7 +556,14 @@ export default function Brain() {
               <X size={12} />
             </button>
 
-            <div className="text-[10px] text-stone-500 uppercase tracking-wider">Display</div>
+            <div>
+              <div className="text-[10px] text-stone-500 uppercase tracking-wider">Display</div>
+              {nodeCount > 500 && (
+                <div className="text-[9px] text-amber-500/60 mt-1">
+                  Auto-adjusted for {nodeCount.toLocaleString()} nodes
+                </div>
+              )}
+            </div>
 
             {/* Bloom strength */}
             <div className="space-y-1.5">
