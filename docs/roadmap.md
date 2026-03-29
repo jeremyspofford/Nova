@@ -556,6 +556,19 @@ Tests written during this analysis. Expand to cover the new code from Tiers 1-4.
 
 **Effort:** 2-3 weeks
 
+### Unified Chat — Phase 2
+
+Deepen chat system maturity with isolation, real-time sync, and multi-platform support.
+
+- **Multi-user memory isolation** — Per-user engram graph with scoped retrieval. Prerequisite for real multi-tenant semantics beyond RBAC role isolation.
+- **Real-time conversation sync** — Live cross-channel streaming via WebSocket push. Telegram replies appear in PWA without refresh.
+- **Push notifications** — VAPID keys, service worker push handlers. PWA notifies users of new messages when backgrounded.
+- **Slack adapter** — Same bridge pattern as Telegram. New adapter module in chat-bridge service.
+- **Conversation history management** — Archive, search, export of old messages. Parallel to consolidation for extended conversation context.
+- **Automated VPN/tunnel setup** — Scripted Cloudflare Tunnel and Tailscale configuration. Reduces friction on remote access setup wizard.
+
+**Effort:** 2-3 weeks
+
 ### P3: Additional Chat Platforms
 
 Extend chat-bridge adapter pattern. Each adapter is a module in the existing chat-bridge service.
