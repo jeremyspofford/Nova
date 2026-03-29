@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 
 import ForceGraph3DLib from '3d-force-graph'
 import {
   Mesh,
+  MeshBasicMaterial,
   SphereGeometry,
   ShaderMaterial,
   Sprite,
@@ -72,7 +73,7 @@ export interface NeuralModeConfig {
   enabled: boolean
   breathingRate?: number      // Hz, default 0.02
   breathingAmplitude?: number // 0-1, default 0.05
-  bloomStrength?: number      // default 1.2 (current default is 0.8)
+  bloomStrength?: number      // default 1.5 (current default is 1.0)
   particlesAlways?: boolean   // override large-graph particle disable
 }
 
@@ -617,6 +618,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const isLargeGraph = nodes.length > 200
   const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
   const containerRef = useRef<HTMLDivElement>(null)
+  const coreGeoRef = useRef(new SphereGeometry(1, 24, 24))
+  const hitGeoRef = useRef(new SphereGeometry(1, 8, 8))
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
   const initializedRef = useRef(false)
@@ -704,38 +707,23 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       .nodeThreeObject((node: any) => {
         const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
         const importance = node.importance ?? 0
-        const activation = node.activation ?? 0
-        // Smaller base radius for large graphs so clusters don't overlap
-        const baseRadius = isLargeGraph ? 1.2 : 2
-        const radiusScale = isLargeGraph ? 2.5 : 4
-        const radius = baseRadius + importance * radiusScale
-        const alpha = 0.7 + activation * 0.3
-        // Sphere detail — higher for smooth close-up, lower for large graphs
-        const segments = isLargeGraph ? 16 : 32
+        const radius = 2 + importance * 6
 
         const group = new Group()
 
-        // Sphere — star glow shader
-        const geo = new SphereGeometry(radius, segments, segments)
+        // Sphere — star glow shader (shared geometry, scaled per-node)
         const birthTime = sharedUniforms.uTime.value
         const mat = makeStarMaterial(color, importance, birthTime)
-        const sphere = new Mesh(geo, mat)
+        const sphere = new Mesh(coreGeoRef.current, mat)
+        sphere.scale.setScalar(radius)
         group.add(sphere)
 
-        // Glow sprite — skip for unimportant nodes in large graphs
-        if (!isLargeGraph || importance >= 0.3) {
-          const spriteMat = new SpriteMaterial({
-            map: getGlowTexture(),
-            color: new Color(color),
-            transparent: true,
-            opacity: 0.35 + activation * 0.25,
-            blending: AdditiveBlending,
-            depthWrite: false,
-          })
-          const sprite = new Sprite(spriteMat)
-          sprite.scale.set(radius * 3, radius * 3, 1)
-          group.add(sprite)
-        }
+        // Invisible hit target — larger radius for comfortable clicking
+        const hitMat = new MeshBasicMaterial({ visible: false })
+        const hitSphere = new Mesh(hitGeoRef.current, hitMat)
+        hitSphere.scale.setScalar(radius * 2.5)
+        hitSphere.renderOrder = -1
+        group.add(hitSphere)
 
         // Text label — only for notable nodes, shown by proximity in render loop
         const labelThreshold = isLargeGraph ? 0.5 : LABEL_MIN_IMPORTANCE
@@ -891,13 +879,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     // ── Bloom post-processing ──────────────────────────────────────────
     try {
       const bloomStrength = neuralModeRef.current?.enabled
-        ? (neuralModeRef.current.bloomStrength ?? 1.2)
-        : 0.8
+        ? (neuralModeRef.current.bloomStrength ?? 1.5)
+        : 1.0
       const bloomPass = new UnrealBloomPass(
         new Vector2(width, height),
-        bloomStrength,   // strength — full node glow
-        0.3,   // radius
-        0.5,   // threshold — glow sprites (additive) exceed this, labels (normal blend) don't
+        bloomStrength,   // strength
+        0.6,   // radius — wider halo for star glow
+        0.15,  // threshold — catch dimmer star cores
       )
       bloomPassRef.current = bloomPass
       graph.postProcessingComposer().addPass(bloomPass)
