@@ -45,9 +45,10 @@ class RedeemRequest(BaseModel):
 
 def _require_service_secret(request: Request):
     """Validate X-Service-Secret header for bridge-to-orchestrator trust."""
+    import hmac
     from .config import settings
     secret = request.headers.get("X-Service-Secret", "")
-    if not secret or secret != settings.bridge_service_secret:
+    if not secret or not settings.bridge_service_secret or not hmac.compare_digest(secret, settings.bridge_service_secret):
         raise HTTPException(status_code=403, detail="Invalid service secret")
 
 @router.post("/resolve", response_model=ResolveResponse)
@@ -90,7 +91,7 @@ async def redeem_endpoint(req: RedeemRequest, request: Request):
 @router.get("")
 async def list_links_endpoint(user: UserDep):
     """List all linked accounts (admin sees all, regular user sees own)."""
-    return await list_links()
+    return await list_links(user_id=None if user.is_admin else str(user.id))
 
 @router.delete("/{link_id}")
 async def delete_link_endpoint(link_id: str, user: UserDep):

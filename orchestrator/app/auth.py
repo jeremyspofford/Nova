@@ -221,7 +221,8 @@ async def require_user(
     service_secret = request.headers.get("X-Service-Secret", "")
     on_behalf_of = request.headers.get("X-On-Behalf-Of", "")
     if service_secret and on_behalf_of:
-        if service_secret == settings.bridge_service_secret and settings.bridge_service_secret:
+        import hmac
+        if settings.bridge_service_secret and hmac.compare_digest(service_secret, settings.bridge_service_secret):
             # Trusted internal service — look up the user
             from app.db import get_pool
             pool = get_pool()
