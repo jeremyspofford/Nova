@@ -1,6 +1,6 @@
 """
 Telegram adapter — receives messages via bot polling or webhook,
-sends them through the Nova bridge, and replies with the response.
+sends them through the Nova unified bridge, and replies with the response.
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from telegram.ext import (
 )
 
 from app.adapters.base import PlatformAdapter
-from app.bridge import get_or_create_session, reset_session, send_message
+from app import bridge
 from app.config import settings
 
 log = logging.getLogger(__name__)
@@ -44,7 +44,8 @@ class TelegramAdapter(PlatformAdapter):
 
         # Register handlers
         self._app.add_handler(CommandHandler("start", self._cmd_start))
-        self._app.add_handler(CommandHandler("new", self._cmd_new))
+        self._app.add_handler(CommandHandler("link", self._cmd_link))
+        self._app.add_handler(CommandHandler("unlink", self._cmd_unlink))
         self._app.add_handler(CommandHandler("status", self._cmd_status))
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
@@ -85,19 +86,65 @@ class TelegramAdapter(PlatformAdapter):
 
     async def _cmd_start(self, update: Update, context) -> None:
         await update.message.reply_text(
-            "Hi! I'm Nova. Send me a message and I'll respond.\n\n"
+            "Welcome to Nova!\n\n"
             "Commands:\n"
-            "/new - Start a new conversation\n"
-            "/status - Check connection status"
+            "/link <code> — Connect your Nova account\n"
+            "/unlink — Disconnect your Telegram from Nova\n"
+            "/status — Check connection status\n\n"
+            "If this is your first time, just send a message and Nova will connect automatically."
         )
 
-    async def _cmd_new(self, update: Update, context) -> None:
+    async def _cmd_link(self, update: Update, context) -> None:
         chat_id = str(update.effective_chat.id)
-        await reset_session("telegram", chat_id)
-        await update.message.reply_text("New conversation started.")
+        username = update.effective_user.username if update.effective_user else None
+        text = update.message.text or ""
+
+        # Extract code: "/link ABC123" → "ABC123"
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2 or not parts[1].strip():
+            await update.message.reply_text(
+                "Usage: /link <code>\n\nGenerate a link code from the Nova dashboard under Settings > Chat Integrations."
+            )
+            return
+
+        code = parts[1].strip()
+
+        try:
+            result = await bridge.redeem_link_code(code, "telegram", chat_id, username)
+        except Exception as e:
+            log.error("Error redeeming link code for chat_id=%s: %s", chat_id, e, exc_info=True)
+            await update.message.reply_text("Something went wrong. Please try again.")
+            return
+
+        if result:
+            await update.message.reply_text("Linked to Nova! You can start chatting.")
+        else:
+            await update.message.reply_text(
+                "Invalid or expired code. Generate a new one from the Nova dashboard."
+            )
+
+    async def _cmd_unlink(self, update: Update, context) -> None:
+        await update.message.reply_text(
+            "To unlink your account, visit Settings > Chat Integrations in the Nova dashboard."
+        )
 
     async def _cmd_status(self, update: Update, context) -> None:
-        await update.message.reply_text("Connected and ready.")
+        chat_id = str(update.effective_chat.id)
+
+        try:
+            user_info = await bridge.resolve_user("telegram", chat_id)
+        except Exception as e:
+            log.error("Error resolving user for status chat_id=%s: %s", chat_id, e, exc_info=True)
+            await update.message.reply_text("Could not check status. Please try again.")
+            return
+
+        if user_info:
+            display_name = user_info.get("display_name", "your Nova account")
+            await update.message.reply_text(f"Connected to Nova as {display_name}.")
+        else:
+            await update.message.reply_text(
+                "Not connected. Send /link <code> or just send a message to connect."
+            )
 
     # ── Message handler ───────────────────────────────────────────────
 
@@ -106,23 +153,41 @@ class TelegramAdapter(PlatformAdapter):
             return
 
         chat_id = str(update.effective_chat.id)
+        username = update.effective_user.username if update.effective_user else None
         user_text = update.message.text
 
-        # Show typing indicator
+        # Show typing indicator while processing
         await update.effective_chat.send_action(ChatAction.TYPING)
 
         try:
-            session_id, agent_id = await get_or_create_session("telegram", chat_id)
-            response = await send_message(session_id, agent_id, user_text)
+            # Resolve platform identity to Nova user
+            user_info = await bridge.resolve_user("telegram", chat_id)
 
-            if response:
-                # Try sending with markdown, fall back to plain text
+            if not user_info:
+                # Attempt auto-link (succeeds only for the first user / single-user installs)
+                auto_result = await bridge.try_auto_link("telegram", chat_id, username)
+                if auto_result:
+                    user_info = await bridge.resolve_user("telegram", chat_id)
+
+            if not user_info:
+                await update.message.reply_text(
+                    "I don't recognize your account. Send /link <code> to connect your Nova account."
+                )
+                return
+
+            user_id = user_info["user_id"]
+            conversation_id = user_info["conversation_id"]
+
+            response = await bridge.send_message(
+                user_id, conversation_id, user_text, channel="telegram"
+            )
+
+            chunks = bridge.chunk_message(response)
+            for chunk in chunks:
                 try:
-                    await update.message.reply_text(response, parse_mode=ParseMode.MARKDOWN)
+                    await update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN)
                 except Exception:
-                    await update.message.reply_text(response)
-            else:
-                await update.message.reply_text("I didn't get a response. Please try again.")
+                    await update.message.reply_text(chunk)
 
         except Exception as e:
             log.error("Error handling Telegram message: %s", e, exc_info=True)
