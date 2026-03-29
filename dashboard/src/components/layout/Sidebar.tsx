@@ -21,6 +21,7 @@ import { useAuth } from '../../stores/auth-store'
 import { useDebug } from '../../stores/debug-store'
 import { hasMinRole, type Role } from '../../lib/roles'
 import { useAttentionCount } from '../../hooks/useAttentionCount'
+import { useLocalStorage } from '../../hooks/useLocalStorage'
 
 type NavItem = {
   to: string
@@ -90,6 +91,7 @@ export function Sidebar({
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
   const { data: attentionCount = 0 } = useAttentionCount()
   const { isDebug } = useDebug()
+  const [brainEnabled] = useLocalStorage('brain.enabled', true)
 
   const isActive = (to: string) => {
     return location.pathname === to
@@ -116,7 +118,7 @@ export function Sidebar({
       <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-4">
         {navSections.map((section, sIdx) => {
           const visibleItems = section.items.filter(item =>
-            hasMinRole(userRole, item.minRole) && (!item.debugOnly || isDebug)
+            hasMinRole(userRole, item.minRole) && (!item.debugOnly || isDebug) && (item.to !== '/' || brainEnabled)
           )
           if (visibleItems.length === 0) return null
           return (

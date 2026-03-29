@@ -19,6 +19,7 @@ import {
 import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
 import { hasMinRole, type Role } from '../../lib/roles'
+import { useLocalStorage } from '../../hooks/useLocalStorage'
 
 type NavItem = {
   to: string
@@ -65,6 +66,7 @@ export function MobileNav() {
   const location = useLocation()
   const { user, authConfig } = useAuth()
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
+  const [brainEnabled] = useLocalStorage('brain.enabled', true)
 
   const isActive = (to: string) => {
     return location.pathname === to
@@ -75,7 +77,9 @@ export function MobileNav() {
     section.items.some(item => isActive(item.to)),
   )
 
-  const visibleTabs = primaryTabs.filter(tab => hasMinRole(userRole, tab.minRole))
+  const visibleTabs = primaryTabs.filter(tab =>
+    hasMinRole(userRole, tab.minRole) && (tab.to !== '/' || brainEnabled)
+  )
 
   return (
     <>
