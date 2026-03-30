@@ -28,6 +28,8 @@ import { Recovery } from './pages/Recovery'
 import { About } from './pages/About'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
+import { Skills } from './pages/Skills'
+import { Rules } from './pages/Rules'
 import { Expired } from './pages/Expired'
 import Friction from './pages/Friction'
 import Brain from './pages/Brain'
@@ -182,6 +184,8 @@ function AppShell() {
         <Route path="/intelligence" element={<AppLayout><Intelligence /></AppLayout>} />
         <Route path="/models" element={<AppLayout><Models /></AppLayout>} />
         <Route path="/users" element={<AppLayout><Users /></AppLayout>} />
+        <Route path="/skills" element={<AppLayout><Skills /></AppLayout>} />
+        <Route path="/rules" element={<AppLayout><Rules /></AppLayout>} />
         <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
         <Route path="/recovery" element={<AppLayout><Recovery /></AppLayout>} />
         <Route path="/about" element={<AppLayout><About /></AppLayout>} />

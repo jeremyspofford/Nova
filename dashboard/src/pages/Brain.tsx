@@ -346,9 +346,25 @@ export default function Brain() {
             <>
               <span className="text-[10px] text-stone-500">{engramStats.total_engrams.toLocaleString()} memories</span>
               <span className="w-px h-2.5 bg-white/[0.08]" />
-              <span className="text-[10px] text-stone-500">
-                {activeGraph?.clusters ? `${activeGraph.clusters.length} topics` : `${engramStats.total_edges.toLocaleString()} edges`}
-              </span>
+              <span className="text-[10px] text-stone-500">{engramStats.total_edges.toLocaleString()} edges</span>
+              {activeGraph?.clusters && (
+                <>
+                  <span className="w-px h-2.5 bg-white/[0.08]" />
+                  <span className="text-[10px] text-stone-500">{activeGraph.clusters.length} topics</span>
+                </>
+              )}
+              {engramStats.total_archived > 0 && (
+                <>
+                  <span className="w-px h-2.5 bg-white/[0.08]" />
+                  <span className="text-[10px] text-stone-500">{engramStats.total_archived} archived</span>
+                </>
+              )}
+              {routerStatus && routerStatus.observation_count > 0 && (
+                <>
+                  <span className="w-px h-2.5 bg-white/[0.08]" />
+                  <span className="text-[10px] text-stone-500">{routerStatus.observation_count} router obs</span>
+                </>
+              )}
             </>
           ) : (
             <span className="text-[10px] text-stone-600">loading...</span>

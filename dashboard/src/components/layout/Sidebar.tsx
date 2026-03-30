@@ -13,6 +13,8 @@ import {
   BarChart3,
   Settings,
   ChevronsLeft,
+  Wand2,
+  ShieldAlert,
   ChevronsRight,
   ChevronDown,
 } from 'lucide-react'
@@ -52,6 +54,8 @@ const navSections: NavSection[] = [
   {
     label: 'Configure',
     items: [
+      { to: '/skills', label: 'Skills', icon: Wand2, minRole: 'admin' },
+      { to: '/rules', label: 'Rules', icon: ShieldAlert, minRole: 'admin' },
       { to: '/pods', label: 'Pods', icon: Boxes, minRole: 'admin' },
       { to: '/models', label: 'Models', icon: Monitor, minRole: 'member' },
       { to: '/keys', label: 'Keys', icon: Shield, minRole: 'admin' },
