@@ -836,10 +836,11 @@ async def get_graph_lightweight(
     Payload is ~10x smaller than /graph?mode=full.
     """
     async with get_db() as session:
-        # Fetch minimal engram fields — no content or audit columns
+        # Fetch engram fields — include truncated content + source_type for sidebar/tooltips
         engrams_result = await session.execute(
             text("""
-                SELECT id::text, type, importance
+                SELECT id::text, type, importance,
+                       LEFT(content, 120) AS content_preview, source_type
                 FROM engrams
                 WHERE NOT superseded
                 ORDER BY importance DESC
@@ -848,7 +849,8 @@ async def get_graph_lightweight(
             {"limit": max_nodes},
         )
         all_engrams = [
-            {"id": r.id, "type": r.type, "importance": float(r.importance)}
+            {"id": r.id, "type": r.type, "importance": float(r.importance),
+             "content": r.content_preview, "source_type": r.source_type}
             for r in engrams_result
         ]
 
@@ -857,10 +859,10 @@ async def get_graph_lightweight(
 
         engram_ids = [e["id"] for e in all_engrams]
 
-        # Fetch slim edges — only source, target, weight
+        # Fetch slim edges — source, target, weight, relation
         edges_result = await session.execute(
             text("""
-                SELECT source_id::text, target_id::text, weight
+                SELECT source_id::text, target_id::text, weight, relation
                 FROM engram_edges
                 WHERE source_id = ANY(CAST(:ids AS uuid[]))
                   AND target_id = ANY(CAST(:ids AS uuid[]))
@@ -868,7 +870,8 @@ async def get_graph_lightweight(
             {"ids": engram_ids},
         )
         raw_edges = [
-            {"source_id": r.source_id, "target_id": r.target_id, "weight": float(r.weight)}
+            {"source_id": r.source_id, "target_id": r.target_id, "weight": float(r.weight),
+             "relation": r.relation}
             for r in edges_result
         ]
 
@@ -934,6 +937,8 @@ async def get_graph_lightweight(
                 "id": e["id"],
                 "type": e["type"],
                 "importance": round(e["importance"], 3),
+                "content": e.get("content"),
+                "source_type": e.get("source_type"),
                 "cluster_id": cid,
                 "cluster_label": clusters[cid]["label"] if e["id"] in engram_cluster and cid < len(clusters) else "Uncategorized",
             })
@@ -943,6 +948,7 @@ async def get_graph_lightweight(
                 "source": e["source_id"],
                 "target": e["target_id"],
                 "weight": round(e["weight"], 3),
+                "relation": e.get("relation"),
             }
             for e in raw_edges
         ]

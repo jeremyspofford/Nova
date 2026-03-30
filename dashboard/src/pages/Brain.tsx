@@ -154,24 +154,22 @@ export default function Brain() {
 
   const activeGraph = searchActive && searchGraph ? searchGraph : graph
 
-  // Progressive enhancement — degrade gracefully at high node counts
+  // Progressive enhancement — cap expensive effects at high node counts
+  // User toggles (showEdges, showInnerStars) always pass through; perf only limits bloom/particles
   const nodeCount = activeGraph?.nodes.length ?? 0
   const perf = useMemo(() => {
-    // At >1000 nodes: hide edges, disable inner stars, cap bloom
     if (nodeCount > 1000) return {
-      showEdges: false,
-      showInnerStars: false,
+      showEdges,
+      showInnerStars,
       bloomStrength: Math.min(bloomStrength, 1.0),
       particlesAlways: false,
     }
-    // At >500 nodes: reduce particles, cap bloom
     if (nodeCount > 500) return {
-      showEdges: showEdges,
-      showInnerStars: false,
+      showEdges,
+      showInnerStars,
       bloomStrength: Math.min(bloomStrength, 1.2),
       particlesAlways: false,
     }
-    // Under 500: full quality
     return {
       showEdges,
       showInnerStars,
@@ -269,9 +267,9 @@ export default function Brain() {
     staleTime: 60_000,
   })
 
-  // Merge: use full content from detail query, fall back to graph node data
+  // Merge: overlay full detail fields onto graph node data
   const selectedNodeData = selectedNodeBasic
-    ? { ...selectedNodeBasic, content: selectedNodeFull?.content ?? selectedNodeBasic.content }
+    ? { ...selectedNodeBasic, ...selectedNodeFull }
     : null
 
   // Handle search submit
