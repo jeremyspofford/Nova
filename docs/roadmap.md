@@ -503,27 +503,47 @@ Tests written during this analysis. Expand to cover the new code from Tiers 1-4.
 
 **Effort:** 2-3 weeks
 
-### P1: Brain Visual Overhaul `[spec]`
+### 🔄 P1: Brain Visual Overhaul `[spec]` — Partially Delivered 2026-03-29
 
-**Why:** The Brain page is Nova's primary interface — not a dashboard panel. Users will open the app and see the brain, talk to Nova via microphone, and watch memories glow during conversation. The current solid-sphere rendering, scattered-corners layout, and 4 FPS at 2000 nodes don't support this vision.
+**Why:** The Brain page is Nova's primary interface — not a dashboard panel. Users will open the app and see the brain, talk to Nova via microphone, and watch memories glow during conversation.
 
 **Spec:** `docs/superpowers/specs/2026-03-28-brain-visual-overhaul-design.md`
 
-**Three phases (each ships independently):**
+**Delivered (Phase 1 + Instanced Rendering):**
+- Star shader replaces Fresnel orbs (GPU-driven breathing/fade/highlight)
+- Per-node glow sprites removed (UnrealBloomPass handles halos)
+- Shared geometry across all nodes (coreGeoRef)
+- Per-frame forEach loops eliminated (3 loops removed)
+- Minimal HUD layout (stats pill, icon overlays, mic button, settings/topics overlays)
+- InstancedMesh rendering — 2000+ draw calls reduced to 1-2 via InstancedBufferAttributes
+- Post-stabilization optimization — stops syncing positions after force layout cools
+- Lightweight graph API (`/graph/lightweight`) — minimal payload endpoint exists in memory-service
+- Plans: `docs/superpowers/plans/2026-03-28-brain-overhaul-phase1.md`
 
-| Phase | What | Status |
-|---|---|---|
-| **1 — Star shader + layout** | Star-style nodes (soft glow, no hard edge), bloom-driven glow (remove 500 per-node sprites), shader-driven animation (eliminate 3 per-frame forEach loops), node cap at 500, minimal HUD layout (stats pill, icon overlays, mic button). Plan: `docs/superpowers/plans/2026-03-28-brain-overhaul-phase1.md` | Not Started |
-| **2 — Configurability** | Color mode toggle (domain/type/importance), edge style toggle (static/gradient/animated particles + speed slider), settings overlay panel | Not Started |
-| **3 — Polish** | Level-of-detail by zoom distance, fix texture cache VRAM leak, debounce search query, cache CSS color reads | Not Started |
+**Remaining — Brain Regression Fixes:**
 
-**Performance constraints (from spec amendments):**
-- P0: Cap `max_nodes` at 500 until instancing lands
-- P0: Breathing/fade-in/highlight animation via shader uniforms, not JS forEach
-- P1: Evaluate bloom vs sprites for glow (bloom likely wins at 500+ nodes)
-- P1: Shared geometry across nodes (prep for future InstancedMesh migration)
+Instanced rendering shipped but the lightweight API integration and settings persistence were reverted due to regressions. Fixes planned but not yet re-implemented.
 
-**Effort:** Phase 1: 1-2 days. Phase 2: 1 day. Phase 3: 0.5 day.
+| Fix | Description |
+|---|---|
+| **Lightweight API: add content preview** | Add `LEFT(content, 80)`, `source_type` to node query and `relation` to edge query. Keeps payload small (~380KB) while giving sidebar/connections usable labels. |
+| **Settings persistence** | Re-implement `useLocalStorage` hook for Brain display settings (background stars, bloom, edge visibility). Settings should survive page refresh. |
+| **Edge visibility toggle** | Re-add `showEdges` prop + settings toggle. Must not be overridden by progressive enhancement. |
+| **Progressive enhancement** | Auto-degrade visual quality at high node counts. Must only set defaults, not override explicit user toggles. |
+| **Detail modal data merge** | Spread full detail response into selectedNodeData (not just `content`). Fixes "Source unknown" and missing scores. |
+| **Brain feature flag** | Per-user toggle in Settings to completely disable Brain (redirect to Chat, hide nav link). |
+
+**Plan:** `.claude/plans/scalable-frolicking-storm.md`
+
+**Remaining — Phase 2 (Configurability):**
+- Color mode toggle (domain/type/importance)
+- Edge style toggle (static/gradient/animated particles + speed slider)
+
+**Remaining — Phase 3 (Polish):**
+- Level-of-detail by zoom distance
+- Fix texture cache VRAM leak
+- Debounce search query
+- Cache CSS color reads
 
 ### P2: Nova SDK & CLI `[spec]`
 
