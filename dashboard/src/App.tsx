@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { getAuthHeaders } from './api'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useLocalStorage } from './hooks/useLocalStorage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
 import { CommandPalette } from './components/CommandPalette'
@@ -122,6 +123,12 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function HomeRoute() {
+  const [brainEnabled] = useLocalStorage('brain.enabled', true)
+  if (!brainEnabled) return <Navigate to="/chat" replace />
+  return <AppLayout fullWidth><Brain /></AppLayout>
+}
+
 function AppShell() {
   // Optimistic: assume backend is up. Normal refreshes render instantly.
   // Only show startup screen if the health check actually fails.
@@ -160,7 +167,7 @@ function AppShell() {
         <Route path="/dev/components" element={<ComponentGallery />} />
 
         {/* Routes WITH sidebar */}
-        <Route path="/" element={<AppLayout fullWidth><Brain /></AppLayout>} />
+        <Route path="/" element={<HomeRoute />} />
         <Route path="/brain" element={<Navigate to="/" replace />} />
         <Route path="/chat" element={<AppLayout fullWidth><Chat /></AppLayout>} />
         <Route path="/tasks" element={<AppLayout><Tasks /></AppLayout>} />

@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Search, X, ChevronRight, Network, Settings, Menu, Mic } from 'lucide-react'
 import { apiFetch } from '../api'
+import { useLocalStorage } from '../hooks/useLocalStorage'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
@@ -12,23 +13,24 @@ import type { ActivityStep } from '../stores/chat-store'
 interface GraphNode {
   id: string
   type: string
-  content: string
-  activation: number
   importance: number
-  access_count: number
-  confidence: number
-  source_type: string
-  superseded?: boolean
-  created_at?: string | null
   cluster_id?: number
   cluster_label?: string
+  // Full fields — only present from full endpoint or detail fetch
+  content?: string
+  activation?: number
+  access_count?: number
+  confidence?: number
+  source_type?: string
+  superseded?: boolean
+  created_at?: string | null
 }
 
 interface GraphEdge {
   source: string
   target: string
-  relation: string
   weight: number
+  relation?: string
 }
 
 interface ClusterInfo {
@@ -119,7 +121,7 @@ export default function Brain() {
   // Graph data
   const { data: graph } = useQuery<GraphData>({
     queryKey: ['brain-graph'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph?mode=full&max_nodes=5000'),
+    queryFn: () => apiFetch('/mem/api/v1/engrams/graph/lightweight?max_nodes=2000'),
     staleTime: 30_000,
     retry: 1,
   })
@@ -133,13 +135,14 @@ export default function Brain() {
   const [focusCluster, setFocusCluster] = useState<{ id: number; ts: number } | null>(null)
   const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
   const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
-  const [showBgStars, setShowBgStars] = useState(true)
-  const [showInnerStars, setShowInnerStars] = useState(false)
-  const [showNebulae, setShowNebulae] = useState(true)
+  const [showBgStars, setShowBgStars] = useLocalStorage('brain.showBgStars', true)
+  const [showInnerStars, setShowInnerStars] = useLocalStorage('brain.showInnerStars', false)
+  const [showNebulae, setShowNebulae] = useLocalStorage('brain.showNebulae', true)
+  const [showEdges, setShowEdges] = useLocalStorage('brain.showEdges', true)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
-  const [bloomStrength, setBloomStrength] = useState(1.5)
+  const [bloomStrength, setBloomStrength] = useLocalStorage('brain.bloomStrength', 1.5)
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -150,6 +153,32 @@ export default function Brain() {
   })
 
   const activeGraph = searchActive && searchGraph ? searchGraph : graph
+
+  // Progressive enhancement — degrade gracefully at high node counts
+  const nodeCount = activeGraph?.nodes.length ?? 0
+  const perf = useMemo(() => {
+    // At >1000 nodes: hide edges, disable inner stars, cap bloom
+    if (nodeCount > 1000) return {
+      showEdges: false,
+      showInnerStars: false,
+      bloomStrength: Math.min(bloomStrength, 1.0),
+      particlesAlways: false,
+    }
+    // At >500 nodes: reduce particles, cap bloom
+    if (nodeCount > 500) return {
+      showEdges: showEdges,
+      showInnerStars: false,
+      bloomStrength: Math.min(bloomStrength, 1.2),
+      particlesAlways: false,
+    }
+    // Under 500: full quality
+    return {
+      showEdges,
+      showInnerStars,
+      bloomStrength,
+      particlesAlways: true,
+    }
+  }, [nodeCount, showEdges, showInnerStars, bloomStrength])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -302,12 +331,13 @@ export default function Brain() {
           enabled: true,
           breathingRate: 0.02,
           breathingAmplitude: 0.05,
-          bloomStrength,
-          particlesAlways: true,
+          bloomStrength: perf.bloomStrength,
+          particlesAlways: perf.particlesAlways,
         }}
         showBackgroundStars={showBgStars}
-        showInnerStars={showInnerStars}
+        showInnerStars={perf.showInnerStars}
         showNebulae={showNebulae}
+        showEdges={perf.showEdges}
         className="w-full h-full"
       />
 
@@ -470,9 +500,9 @@ export default function Brain() {
                                   setFocusNode({ id: node.id, ts: Date.now() })
                                 }}
                                 className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
-                                title={node.content}
+                                title={node.content ?? node.type}
                               >
-                                {node.content}
+                                {node.content ?? `${node.type} · ${(node.importance * 100).toFixed(0)}%`}
                               </button>
                             ))}
                           {activeGraph.nodes.filter(n => n.cluster_id === cluster.id).length > 12 && (
@@ -527,7 +557,14 @@ export default function Brain() {
               <X size={12} />
             </button>
 
-            <div className="text-[10px] text-stone-500 uppercase tracking-wider">Display</div>
+            <div>
+              <div className="text-[10px] text-stone-500 uppercase tracking-wider">Display</div>
+              {nodeCount > 500 && (
+                <div className="text-[9px] text-amber-500/60 mt-1">
+                  Auto-adjusted for {nodeCount.toLocaleString()} nodes
+                </div>
+              )}
+            </div>
 
             {/* Bloom strength */}
             <div className="space-y-1.5">
@@ -544,6 +581,20 @@ export default function Brain() {
                 />
                 <span className="text-[10px] text-stone-500 w-6 text-right">{bloomStrength.toFixed(1)}</span>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="text-[10px] text-stone-600 mb-1">Graph</div>
+              <button
+                onClick={() => setShowEdges((v: boolean) => !v)}
+                className={`block w-full text-left text-[11px] px-2 py-1 rounded transition-colors ${
+                  showEdges
+                    ? 'text-teal-400 bg-teal-500/10'
+                    : 'text-stone-600 hover:text-stone-400'
+                }`}
+              >
+                Connections
+              </button>
             </div>
 
             <div className="space-y-2">
@@ -605,14 +656,14 @@ export default function Brain() {
 
             <div className="p-5 space-y-4">
               {/* Content */}
-              <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content}</p>
+              <p className="text-sm text-stone-300 leading-relaxed">{selectedNodeData.content ?? selectedNodeData.type}</p>
 
               {/* Scores */}
               <div className="space-y-2 pt-3 border-t border-white/5">
                 <div className="text-[10px] text-stone-600 uppercase tracking-wider">Scores</div>
-                <ScoreBar value={selectedNodeData.activation} label="Activation" color="#f59e0b" />
+                <ScoreBar value={selectedNodeData.activation ?? 0} label="Activation" color="#f59e0b" />
                 <ScoreBar value={selectedNodeData.importance} label="Importance" color="#14b8a6" />
-                <ScoreBar value={selectedNodeData.confidence} label="Confidence" color="#818cf8" />
+                <ScoreBar value={selectedNodeData.confidence ?? 0} label="Confidence" color="#818cf8" />
               </div>
 
               {/* Metadata */}
@@ -625,7 +676,7 @@ export default function Brain() {
                   </div>
                   <div>
                     <div className="text-[10px] text-stone-600">Recalled</div>
-                    <div className="text-[11px] text-stone-300">{selectedNodeData.access_count.toLocaleString()} times</div>
+                    <div className="text-[11px] text-stone-300">{(selectedNodeData.access_count ?? 0).toLocaleString()} times</div>
                   </div>
                   {selectedNodeData.created_at && (
                     <div>
@@ -668,7 +719,7 @@ export default function Brain() {
                           }}
                         >
                           <span className="text-stone-600 shrink-0">{isOutgoing ? '\u2192' : '\u2190'}</span>
-                          <span className="text-stone-400 font-medium shrink-0">{edge.relation.replace(/_/g, ' ')}</span>
+                          <span className="text-stone-400 font-medium shrink-0">{(edge.relation ?? '').replace(/_/g, ' ')}</span>
                           <span className="flex-1 truncate text-stone-500">
                             {otherNode?.content ?? otherId.slice(0, 8)}
                           </span>

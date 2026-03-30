@@ -1073,3 +1073,23 @@ export const generateLinkCode = () =>
 
 export const reloadTelegramBot = () =>
   apiFetch<void>('/bridge-api/reload-telegram', { method: 'POST' })
+
+// ── Skills ──────────────────────────────────────────────────────────────────
+
+export const getSkills = () => apiFetch<any[]>('/api/v1/skills')
+export const createSkill = (data: Record<string, unknown>) =>
+  apiFetch('/api/v1/skills', { method: 'POST', body: JSON.stringify(data) })
+export const updateSkill = (id: string, data: Record<string, unknown>) =>
+  apiFetch(`/api/v1/skills/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteSkill = (id: string) =>
+  apiFetch(`/api/v1/skills/${id}`, { method: 'DELETE' })
+
+// ── Rules ───────────────────────────────────────────────────────────────────
+
+export const getRules = () => apiFetch<any[]>('/api/v1/rules')
+export const createRule = (data: Record<string, unknown>) =>
+  apiFetch('/api/v1/rules', { method: 'POST', body: JSON.stringify(data) })
+export const updateRule = (id: string, data: Record<string, unknown>) =>
+  apiFetch(`/api/v1/rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
+export const deleteRule = (id: string) =>
+  apiFetch(`/api/v1/rules/${id}`, { method: 'DELETE' })

@@ -24,6 +24,11 @@ from .drives import DriveContext, DriveResult, DriveWinner, evaluate
 from .drives import serve, maintain, improve, learn, reflect
 from .journal import read_user_replies_since, write_entry
 from .task_tracker import TaskOutcome, await_task
+from .reflections import (
+    query_reflections, format_reflection_history, record_reflection,
+    check_approach_blocked, count_consecutive_failures,
+    compute_stuck_threshold, compute_approach_hash, TIER_ORDER,
+)
 
 log = logging.getLogger(__name__)
 
@@ -54,6 +59,7 @@ class CycleState:
     goal_id: str | None = None
     dispatched_task_id: str | None = None
     task_outcome: TaskOutcome | None = None
+    plan_text: str | None = None
 
 
 async def _report_outcome(
@@ -181,6 +187,10 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         if state.dispatched_task_id:
             state.task_outcome = await _track_dispatched_task(state)
 
+        # Record structured reflection for learning
+        if state.task_outcome and state.goal_id and state.action_taken == "serve":
+            await _record_cycle_reflection(state)
+
         # ── REFLECT ──────────────────────────────────────────────────────
         await _reflect(state)
 
@@ -254,6 +264,7 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
     # Build rich goal context for serve drive
     forced = False
     goal_context_block = ""
+    reflection_history = ""
     if drive.name == "serve":
         stale_goals = drive.context.get("stale_goals", [])
         if stale_goals:
@@ -282,6 +293,17 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
                 parts.append(f"Cost: ${cost:.2f}" + (f" / ${limit:.2f} limit" if limit else ""))
             goal_context_block = "\n".join(parts)
 
+            # Query prior experience with this goal
+            reflection_history = ""
+            try:
+                phase = goal.get("maturation_status")
+                reflections = await query_reflections(goal_id, phase=phase, limit=5)
+                desc = goal.get("description") or ""
+                desc_hash = compute_approach_hash(desc) if desc else None
+                reflection_history = format_reflection_history(reflections, current_goal_desc_hash=desc_hash)
+            except Exception as e:
+                log.debug("Failed to query reflections for goal %s: %s", goal_id, e)
+
     skip_instruction = ""
     if forced:
         skip_instruction = (
@@ -302,6 +324,8 @@ Drive says: {drive.description}
 Proposed action: {drive.proposed_action or 'none specified'}
 
 {"Goal details:\n" + goal_context_block if goal_context_block else ""}
+{reflection_history}
+{"Do NOT repeat approaches that previously failed. Build on partial successes or try something new." if reflection_history else ""}
 Context: {json.dumps(drive.context, default=str)[:1000]}
 
 Budget: {state.budget_pct:.0f}% used today (tier: {state.budget_tier})
@@ -397,6 +421,30 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
     goal_id = goal["id"]
     state.goal_id = goal_id
 
+    # Check if this approach has already failed (oscillation prevention)
+    try:
+        is_blocked, failed = await check_approach_blocked(goal_id, plan, state.budget_tier)
+        if is_blocked:
+            log.info("Approach blocked for goal %s — already failed: %s", goal_id, failed[:2])
+            try:
+                llm = get_llm()
+                resp = await llm.post("/complete", json={
+                    "model": settings.planning_model or "",
+                    "messages": [{"role": "user", "content":
+                        "The following approaches have already failed for this goal:\n"
+                        + "\n".join(f"- {f}" for f in failed[:3])
+                        + "\n\nPropose a DIFFERENT strategy."}],
+                    "temperature": 0.5, "max_tokens": 300, "tier": "mid",
+                    "task_type": "planning",
+                    "metadata": {"agent_id": "cortex", "task_id": f"replan-{state.cycle_number}"},
+                })
+                if resp.status_code == 200:
+                    plan = resp.json().get("content", plan)
+            except Exception as e:
+                log.debug("Re-plan after dedup block failed: %s", e)
+    except Exception as e:
+        log.debug("Approach dedup check failed: %s", e)
+
     # Dispatch a pipeline task for this goal
     try:
         orch = get_orchestrator()
@@ -413,6 +461,7 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
             data = resp.json()
             task_id = data.get("task_id", "unknown")
             state.dispatched_task_id = task_id
+            state.plan_text = plan
 
             # Persist plan AFTER successful dispatch (iteration/progress updated after task completes)
             pool = get_pool()
@@ -653,6 +702,165 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 "Goal %s: task %s still running — noted for next cycle",
                 goal_id, outcome.task_id,
             )
+
+
+async def _record_cycle_reflection(state: CycleState) -> None:
+    """Record a structured reflection after a Serve drive cycle with a task outcome."""
+    outcome = state.task_outcome
+    if not outcome:
+        return
+
+    # Map task status to reflection outcome
+    if outcome.timed_out:
+        ref_outcome, ref_score = "timeout", 0.5
+    elif outcome.status == "complete" and outcome.findings_count == 0:
+        ref_outcome, ref_score = "success", outcome.score
+    elif outcome.status == "complete":
+        ref_outcome, ref_score = "partial", outcome.score
+    elif outcome.status == "failed":
+        ref_outcome, ref_score = "failure", outcome.score
+    elif outcome.status == "cancelled":
+        ref_outcome, ref_score = "cancelled", outcome.score
+    else:
+        ref_outcome, ref_score = "failure", 0.2
+
+    # Use the actual plan text stored during dispatch
+    approach = state.plan_text or state.outcome.split(" | ")[0] if state.outcome else "unknown approach"
+
+    # Get goal metadata
+    goal_title = ""
+    goal_description = ""
+    maturation_phase = None
+    max_iterations = 50
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT title, description, maturation_status, max_iterations FROM goals WHERE id = $1::uuid",
+                state.goal_id,
+            )
+            if row:
+                goal_title = row["title"]
+                goal_description = row["description"] or ""
+                maturation_phase = row["maturation_status"]
+                max_iterations = row["max_iterations"] or 50
+    except Exception as e:
+        log.debug("Failed to read goal metadata: %s", e)
+
+    context_snapshot = {
+        "budget_tier": state.budget_tier,
+        "model": state.resolved_model,
+        "findings_count": outcome.findings_count,
+        "task_cost_usd": outcome.total_cost_usd,
+        "memory_hits": len(state.engram_ids),
+        "goal_description_hash": compute_approach_hash(goal_description) if goal_description else None,
+    }
+
+    # LLM lesson extraction (only at mid/best tier, only for non-success)
+    lesson = None
+    failure_mode = None
+    tier_ok = TIER_ORDER.get(state.budget_tier, 0) >= TIER_ORDER.get(settings.lesson_extraction_min_tier, 2)
+    if tier_ok and ref_outcome in ("failure", "partial", "timeout"):
+        lesson, failure_mode = await _extract_lesson(
+            approach, ref_outcome, outcome.error or outcome.output or ""
+        )
+
+    try:
+        await record_reflection(
+            goal_id=state.goal_id,
+            cycle_number=state.cycle_number,
+            approach=approach,
+            outcome=ref_outcome,
+            outcome_score=ref_score,
+            task_id=outcome.task_id,
+            drive="serve",
+            maturation_phase=maturation_phase,
+            lesson=lesson,
+            failure_mode=failure_mode,
+            context_snapshot=context_snapshot,
+        )
+    except Exception as e:
+        log.warning("Failed to record reflection: %s", e)
+        return
+
+    # Stuck detection
+    try:
+        from .stimulus import emit, GOAL_STUCK
+        failure_count = await count_consecutive_failures(state.goal_id)
+        threshold = compute_stuck_threshold(max_iterations)
+        if failure_count >= threshold:
+            log.warning("Goal %s stuck: %d consecutive failures (threshold %d)",
+                        state.goal_id, failure_count, threshold)
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE goals SET maturation_status = 'review', updated_at = NOW() WHERE id = $1::uuid",
+                    state.goal_id,
+                )
+            all_refs = await query_reflections(state.goal_id, limit=20)
+            approaches_tried = [r["approach"][:80] for r in all_refs if r["outcome"] in ("failure", "timeout")]
+            await record_reflection(
+                goal_id=state.goal_id, cycle_number=state.cycle_number,
+                approach="escalation", outcome="escalated", outcome_score=0.0,
+                drive="serve", maturation_phase=maturation_phase,
+                lesson=f"Stuck after {failure_count} failures. Tried: {'; '.join(approaches_tried[:5])}",
+            )
+            await write_entry(
+                f"**Escalation** — Goal '{goal_title}' stuck after {failure_count} consecutive failures.\n\n"
+                f"Approaches tried:\n" + "\n".join(f"- {a}" for a in approaches_tried[:5])
+                + "\n\nMoving to 'review' status for human input.",
+                entry_type="escalation",
+                metadata={"goal_id": state.goal_id, "failure_count": failure_count, "action": "stuck_escalation"},
+            )
+            await emit(GOAL_STUCK, "cortex",
+                       payload={"goal_id": state.goal_id, "title": goal_title,
+                                "failure_count": failure_count, "approaches_tried": approaches_tried[:5]})
+    except Exception as e:
+        log.warning("Stuck detection failed for goal %s: %s", state.goal_id, e)
+
+    # Ingest lesson into engrams for cross-goal learning
+    if lesson:
+        try:
+            from .memory import ingest_lesson
+            await ingest_lesson(
+                goal_title=goal_title, maturation_phase=maturation_phase,
+                approach=approach, outcome=ref_outcome, lesson=lesson,
+                goal_id=state.goal_id, failure_mode=failure_mode,
+            )
+        except Exception as e:
+            log.debug("Lesson ingestion failed: %s", e)
+
+
+async def _extract_lesson(approach: str, outcome: str, detail: str) -> tuple[str | None, str | None]:
+    """Use LLM to extract a lesson and failure mode from a cycle outcome."""
+    prompt = (
+        f"A task was executed with this approach: {approach[:200]}\n"
+        f"Result: {outcome}\nDetails: {detail[:300]}\n\n"
+        "Extract:\n1. LESSON: One sentence about what to do differently (max 100 tokens)\n"
+        '2. FAILURE_MODE: Short category (e.g., "ambiguous requirements", "timeout")\n\n'
+        "Respond exactly:\nLESSON: <lesson>\nFAILURE_MODE: <category>"
+    )
+    try:
+        llm = get_llm()
+        resp = await llm.post("/complete", json={
+            "model": settings.planning_model or "",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1, "max_tokens": 100, "tier": "mid",
+            "task_type": "planning",
+            "metadata": {"agent_id": "cortex", "task_id": "lesson-extraction"},
+        })
+        if resp.status_code == 200:
+            text = resp.json().get("content", "")
+            lesson = failure_mode = None
+            for line in text.strip().split("\n"):
+                if line.startswith("LESSON:"):
+                    lesson = line[7:].strip()[:500]
+                elif line.startswith("FAILURE_MODE:"):
+                    failure_mode = line[13:].strip()[:200]
+            return lesson, failure_mode
+    except Exception as e:
+        log.debug("Lesson extraction LLM call failed: %s", e)
+    return None, None
 
 
 async def _reflect(state: CycleState) -> None:

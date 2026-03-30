@@ -32,6 +32,18 @@ from app.db import (
     list_api_keys,
     revoke_api_key,
 )
+from app.rules import (
+    list_rules, create_rule as _create_rule, update_rule as _update_rule,
+    delete_rule as _delete_rule, RuleCreate, RuleUpdate,
+)
+from app.skills import (
+    list_skills,
+    create_skill as _create_skill,
+    update_skill as _update_skill,
+    delete_skill as _delete_skill,
+    SkillCreate,
+    SkillUpdate,
+)
 from app.store import (
     create_agent,
     delete_agent,
@@ -721,6 +733,7 @@ async def list_available_tools(_admin: AdminDep):
     from app.tools.memory_tools import MEMORY_TOOLS
     from app.tools.introspect_tools import INTROSPECT_TOOLS
     from app.tools.intel_tools import INTEL_TOOLS
+    from app.tools.config_tools import CONFIG_TOOLS
     from app.pipeline.tools.registry import get_tools_by_server
 
     def _to_list(defs):
@@ -735,6 +748,7 @@ async def list_available_tools(_admin: AdminDep):
         {"category": "Memory Tools", "source": "builtin", "tools": _to_list(MEMORY_TOOLS)},
         {"category": "Introspection Tools", "source": "builtin", "tools": _to_list(INTROSPECT_TOOLS)},
         {"category": "Intel Tools", "source": "builtin", "tools": _to_list(INTEL_TOOLS)},
+        {"category": "Config Tools", "source": "builtin", "tools": _to_list(CONFIG_TOOLS)},
     ]
     categories.extend(get_tools_by_server())
     return categories
@@ -1213,3 +1227,59 @@ async def model_routing_stats(
         "fallback_rate_pct": fallback_rate,
         "category_distribution": {r["category"]: r["cnt"] for r in cat_rows},
     }
+
+
+# ── Skills CRUD ──────────────────────────────────────────────────────────────
+
+
+@router.get("/api/v1/skills")
+async def get_skills(_admin: AdminDep):
+    return await list_skills()
+
+
+@router.post("/api/v1/skills", status_code=201)
+async def create_skill_endpoint(req: SkillCreate, _admin: AdminDep):
+    return await _create_skill(req)
+
+
+@router.patch("/api/v1/skills/{skill_id}")
+async def update_skill_endpoint(skill_id: UUID, req: SkillUpdate, _admin: AdminDep):
+    result = await _update_skill(skill_id, req)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return result
+
+
+@router.delete("/api/v1/skills/{skill_id}", status_code=204)
+async def delete_skill_endpoint(skill_id: UUID, _admin: AdminDep):
+    ok = await _delete_skill(skill_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Cannot delete system skill")
+
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+
+
+@router.get("/api/v1/rules")
+async def get_rules(_admin: AdminDep):
+    return await list_rules()
+
+
+@router.post("/api/v1/rules", status_code=201)
+async def create_rule_endpoint(req: RuleCreate, _admin: AdminDep):
+    return await _create_rule(req)
+
+
+@router.patch("/api/v1/rules/{rule_id}")
+async def update_rule_endpoint(rule_id: UUID, req: RuleUpdate, _admin: AdminDep):
+    result = await _update_rule(rule_id, req)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Rule not found")
+    return result
+
+
+@router.delete("/api/v1/rules/{rule_id}", status_code=204)
+async def delete_rule_endpoint(rule_id: UUID, _admin: AdminDep):
+    ok = await _delete_rule(rule_id)
+    if not ok:
+        raise HTTPException(status_code=400, detail="Cannot delete system rule")

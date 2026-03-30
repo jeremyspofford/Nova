@@ -825,6 +825,137 @@ async def get_graph(
     }
 
 
+@engram_router.get("/graph/lightweight")
+async def get_graph_lightweight(
+    max_nodes: int = Query(default=2000, ge=10, le=5000),
+):
+    """Return a minimal subgraph for Brain rendering.
+
+    Returns only the fields needed for visualization (id, type, importance,
+    cluster_id, cluster_label) — no content, activation, confidence, etc.
+    Payload is ~10x smaller than /graph?mode=full.
+    """
+    async with get_db() as session:
+        # Fetch minimal engram fields — no content or audit columns
+        engrams_result = await session.execute(
+            text("""
+                SELECT id::text, type, importance
+                FROM engrams
+                WHERE NOT superseded
+                ORDER BY importance DESC
+                LIMIT :limit
+            """),
+            {"limit": max_nodes},
+        )
+        all_engrams = [
+            {"id": r.id, "type": r.type, "importance": float(r.importance)}
+            for r in engrams_result
+        ]
+
+        if not all_engrams:
+            return {"nodes": [], "edges": [], "clusters": [], "node_count": 0, "edge_count": 0}
+
+        engram_ids = [e["id"] for e in all_engrams]
+
+        # Fetch slim edges — only source, target, weight
+        edges_result = await session.execute(
+            text("""
+                SELECT source_id::text, target_id::text, weight
+                FROM engram_edges
+                WHERE source_id = ANY(CAST(:ids AS uuid[]))
+                  AND target_id = ANY(CAST(:ids AS uuid[]))
+            """),
+            {"ids": engram_ids},
+        )
+        raw_edges = [
+            {"source_id": r.source_id, "target_id": r.target_id, "weight": float(r.weight)}
+            for r in edges_result
+        ]
+
+        # ── Topic-based clustering (same logic as /graph?mode=full) ──────
+        topic_edges = await session.execute(
+            text("""
+                SELECT ee.source_id::text AS member_id,
+                       ee.target_id::text AS topic_id,
+                       LEFT(t.content, 200) AS topic_content
+                FROM engram_edges ee
+                JOIN engrams t ON t.id = ee.target_id
+                  AND t.type = 'topic' AND NOT t.superseded
+                WHERE ee.relation = 'part_of'
+                  AND ee.source_id = ANY(CAST(:ids AS uuid[]))
+            """),
+            {"ids": engram_ids},
+        )
+        topic_memberships = topic_edges.fetchall()
+
+        topic_ids_seen: dict[str, int] = {}
+        engram_cluster: dict[str, int] = {}
+        clusters: list[dict] = []
+
+        for row in topic_memberships:
+            if row.topic_id not in topic_ids_seen:
+                cluster_id = len(clusters)
+                topic_ids_seen[row.topic_id] = cluster_id
+                label = row.topic_content or "Unnamed Topic"
+                if label.startswith("TOPIC: "):
+                    label = label[7:]
+                if "\n" in label:
+                    label = label.split("\n")[0]
+                clusters.append({"id": cluster_id, "label": label.strip(), "count": 0})
+            cluster_id = topic_ids_seen[row.topic_id]
+            engram_cluster[row.member_id] = cluster_id
+            clusters[cluster_id]["count"] += 1
+
+        uncategorized_count = sum(
+            1 for e in all_engrams if e["id"] not in engram_cluster and e["type"] != "topic"
+        )
+        if uncategorized_count > 0:
+            uncat_id = len(clusters)
+            clusters.append({"id": uncat_id, "label": "Uncategorized", "count": uncategorized_count})
+            for e in all_engrams:
+                if e["id"] not in engram_cluster and e["type"] != "topic":
+                    engram_cluster[e["id"]] = uncat_id
+
+        for e in all_engrams:
+            if e["type"] == "topic" and e["id"] in topic_ids_seen:
+                engram_cluster[e["id"]] = topic_ids_seen[e["id"]]
+
+        clusters.sort(key=lambda c: -c["count"])
+        old_to_new = {c["id"]: i for i, c in enumerate(clusters)}
+        for c in clusters:
+            c["id"] = old_to_new[c["id"]]
+        engram_cluster = {eid: old_to_new[cid] for eid, cid in engram_cluster.items()}
+
+        # Build minimal response
+        nodes = []
+        for e in all_engrams:
+            cid = engram_cluster.get(e["id"], 0)
+            nodes.append({
+                "id": e["id"],
+                "type": e["type"],
+                "importance": round(e["importance"], 3),
+                "cluster_id": cid,
+                "cluster_label": clusters[cid]["label"] if e["id"] in engram_cluster and cid < len(clusters) else "Uncategorized",
+            })
+
+        edges = [
+            {
+                "source": e["source_id"],
+                "target": e["target_id"],
+                "weight": round(e["weight"], 3),
+            }
+            for e in raw_edges
+        ]
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "clusters": clusters,
+            "node_count": len(nodes),
+            "edge_count": len(edges),
+        }
+
+
 # ── Phase 7: Outcome Feedback ───────────────────────────────────────────
 
 

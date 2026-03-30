@@ -79,7 +79,6 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     const el = textareaRef.current
     if (!el) return
     el.style.height = 'auto'
-    // Allow taller expansion when there's a lot of content (e.g. prefilled task context)
     const maxH = el.value.split('\n').length > 5 ? 400 : 200
     el.style.height = `${Math.min(el.scrollHeight, maxH)}px`
   }
