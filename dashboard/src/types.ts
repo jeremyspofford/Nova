@@ -83,6 +83,7 @@ export interface PipelineTask {
   started_at: string | null
   completed_at: string | null
   metadata: Record<string, unknown>
+  summary: Record<string, unknown> | null
 }
 
 export interface GuardrailFinding {

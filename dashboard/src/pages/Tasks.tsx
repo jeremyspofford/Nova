@@ -17,10 +17,13 @@ import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
   reviewPipelineTask, getQueueStats, getPods, discoverModels,
   deletePipelineTask, bulkDeletePipelineTasks, bulkDeletePipelineTasksByIds,
-  getTaskFindings, getTaskReviews,
+  getTaskFindings, getTaskReviews, getTaskArtifacts,
   getPipelineStats, getPipelineLatency,
   clarifyPipelineTask,
 } from '../api'
+import type { TaskSummary, Artifact } from '../api'
+import ArtifactCard from '../components/ArtifactRenderer'
+import FileViewer from '../components/FileViewer'
 import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import { useChatStore } from '../stores/chat-store'
@@ -420,6 +423,92 @@ function ClarificationPanel({ task, onDone }: { task: PipelineTask; onDone: () =
   )
 }
 
+// ── Summary card ─────────────────────────────────────────────────────────────
+
+function SummaryCard({ summary, onFileClick }: { summary: TaskSummary; onFileClick: (p: string) => void }) {
+  const allFiles = [...(summary.files_created || []), ...(summary.files_modified || [])]
+  return (
+    <div className="mb-3 rounded-md border border-accent/20 bg-gradient-to-br from-surface to-surface-elevated p-3">
+      <p className="text-caption font-medium uppercase tracking-wide text-accent">Summary</p>
+      <p className="mt-1 text-compact text-content-primary">{summary.headline}</p>
+      {allFiles.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {allFiles.map(f => (
+            <button key={f} onClick={() => onFileClick(f)}
+                    className="rounded-full bg-surface-elevated px-2 py-0.5 text-caption text-accent hover:underline">
+              {f.split('/').pop()}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="mt-2 flex gap-3 text-caption text-content-tertiary">
+        {summary.findings_count > 0 && <span>{summary.findings_count} findings</span>}
+        {summary.review_verdict && <span>Review: {summary.review_verdict}</span>}
+        {summary.cost_usd != null && <span>${summary.cost_usd.toFixed(2)}</span>}
+        {summary.duration_s != null && <span>{summary.duration_s}s</span>}
+      </div>
+    </div>
+  )
+}
+
+// ── Task artifacts tab ───────────────────────────────────────────────────────
+
+function TaskArtifactsTab({ taskId, onFileClick }: { taskId: string; onFileClick: (p: string) => void }) {
+  const { data: artifacts = [], isLoading } = useQuery({
+    queryKey: ['task-artifacts', taskId],
+    queryFn: () => getTaskArtifacts(taskId),
+    staleTime: 10_000,
+  })
+  if (isLoading) return <Skeleton lines={3} />
+  if (artifacts.length === 0) return <p className="text-compact text-content-tertiary">No artifacts for this task.</p>
+  return (
+    <div className="space-y-2">
+      {artifacts.map(a => <ArtifactCard key={a.id} artifact={a} onFileClick={onFileClick} />)}
+    </div>
+  )
+}
+
+// ── Task details tab ─────────────────────────────────────────────────────────
+
+function TaskDetailsTab({ taskId, fallbackOutput, fallbackError }: {
+  taskId: string; fallbackOutput: string | null; fallbackError: string | null
+}) {
+  const { data: artifacts = [] } = useQuery({
+    queryKey: ['task-artifacts', taskId],
+    queryFn: () => getTaskArtifacts(taskId),
+    staleTime: 10_000,
+  })
+  const summary = artifacts.find(a => a.artifact_type === 'task_summary')
+
+  if (summary) {
+    return (
+      <div className="prose prose-invert max-w-none rounded-sm bg-surface-elevated p-3 text-compact markdown-body">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary.content}</ReactMarkdown>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {fallbackOutput ? (
+        <div className="rounded-sm bg-surface-elevated p-3 text-compact text-content-secondary markdown-body">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{fallbackOutput}</ReactMarkdown>
+        </div>
+      ) : (
+        <p className="text-compact text-content-tertiary">No output yet.</p>
+      )}
+      {fallbackError && (
+        <div>
+          <p className="mb-1 text-caption font-medium text-danger">Error</p>
+          <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-danger-dim p-3 text-mono-sm text-danger">
+            {fallbackError}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Task detail sheet ─────────────────────────────────────────────────────────
 
 export function TaskDetailSheet({
@@ -434,8 +523,9 @@ export function TaskDetailSheet({
   const [detailTab, setDetailTab] = useState(
     task?.status === 'pending_human_review' ? 'review'
       : task?.status === 'clarification_needed' ? 'clarify'
-      : 'output'
+      : 'details'
   )
+  const [viewingFile, setViewingFile] = useState<string | null>(null)
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { setPrefillInput } = useChatStore()
@@ -467,9 +557,10 @@ export function TaskDetailSheet({
   }
 
   const detailTabs = [
-    { id: 'output', label: 'Output' },
+    { id: 'details', label: 'Details' },
+    { id: 'artifacts', label: 'Artifacts' },
     { id: 'findings', label: 'Findings' },
-    { id: 'reviews', label: 'Code Review' },
+    { id: 'pipeline', label: 'Pipeline' },
     ...(needsReview ? [{ id: 'review', label: 'Review' }] : []),
     ...(needsClarification ? [{ id: 'clarify', label: 'Clarify' }] : []),
   ]
@@ -538,34 +629,24 @@ export function TaskDetailSheet({
           <PipelineStages stages={resolveStageStatuses(task)} />
         </div>
 
+        {/* Summary card */}
+        {task.summary && (
+          <SummaryCard summary={task.summary as unknown as TaskSummary} onFileClick={setViewingFile} />
+        )}
+
         {/* Tabs */}
         <Tabs tabs={detailTabs} activeTab={detailTab} onChange={setDetailTab} />
 
         {/* Tab content */}
         <div className="min-h-[120px]">
-          {detailTab === 'output' && (
-            <div className="space-y-3">
-              {task.output ? (
-                <div className="rounded-sm bg-surface-elevated p-3 text-compact text-content-secondary markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {task.output}
-                  </ReactMarkdown>
-                </div>
-              ) : (
-                <p className="text-compact text-content-tertiary">No output yet.</p>
-              )}
-              {task.error && (
-                <div>
-                  <p className="mb-1 text-caption font-medium text-danger">Error</p>
-                  <pre className="max-h-32 overflow-y-auto whitespace-pre-wrap break-words rounded-sm bg-danger-dim p-3 text-mono-sm text-danger">
-                    {task.error}
-                  </pre>
-                </div>
-              )}
-            </div>
+          {detailTab === 'details' && (
+            <TaskDetailsTab taskId={task.id} fallbackOutput={task.output} fallbackError={task.error} />
+          )}
+          {detailTab === 'artifacts' && (
+            <TaskArtifactsTab taskId={task.id} onFileClick={setViewingFile} />
           )}
           {detailTab === 'findings' && <TaskFindingsTab taskId={task.id} />}
-          {detailTab === 'reviews' && <TaskReviewsTab taskId={task.id} />}
+          {detailTab === 'pipeline' && <TaskReviewsTab taskId={task.id} />}
           {detailTab === 'review' && needsReview && (
             <ReviewPanel task={task} onDone={onClose} />
           )}
@@ -575,6 +656,8 @@ export function TaskDetailSheet({
         </div>
 
       </div>
+
+      {viewingFile && <FileViewer path={viewingFile} onClose={() => setViewingFile(null)} />}
     </Modal>
   )
 }

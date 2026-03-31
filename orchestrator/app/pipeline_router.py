@@ -191,7 +191,8 @@ async def list_pipeline_tasks(
             SELECT t.id, t.status, t.pod_id, t.goal_id, p.name AS pod_name,
                    t.user_input, t.output, t.error, t.current_stage,
                    t.retry_count, t.max_retries,
-                   t.queued_at, t.started_at, t.completed_at, t.metadata
+                   t.queued_at, t.started_at, t.completed_at, t.metadata,
+                   t.summary
             FROM tasks t
             LEFT JOIN pods p ON p.id = t.pod_id
             WHERE ($1::text IS NULL OR t.status = $1)
