@@ -94,7 +94,7 @@ Update the comment on line 48:
 shell_sandbox: str = "workspace"
 ```
 
-- [ ] **Step 4: Verify enum backward compat works**
+- [ ] **Step 5: Verify enum backward compat works**
 
 ```bash
 cd /home/jeremy/workspace/arialabs/nova && docker compose exec orchestrator python3 -c "
@@ -110,7 +110,7 @@ print('All assertions passed')
 "
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add orchestrator/app/tools/sandbox.py orchestrator/app/config.py
@@ -528,6 +528,10 @@ def get_code_tools(tier: "SandboxTier") -> list[ToolDefinition]:
 Add after the existing `GIT_TOOLS` list:
 
 ```python
+# Name-based lookup for stable parameter reuse across tiers
+_GIT_PARAMS = {t.name: t.parameters for t in GIT_TOOLS}
+
+
 def get_git_tools(tier: "SandboxTier") -> list[ToolDefinition]:
     """Generate git tool definitions with tier-appropriate descriptions."""
     from app.tools.sandbox import SandboxTier
@@ -541,26 +545,26 @@ def get_git_tools(tier: "SandboxTier") -> list[ToolDefinition]:
                     f"Show the working tree status of any git repository on the {scope}. "
                     "Returns staged, unstaged, and untracked file lists."
                 ),
-                parameters=GIT_TOOLS[0].parameters,
+                parameters=_GIT_PARAMS["git_status"],
             ),
             ToolDefinition(
                 name="git_diff",
                 description=(
                     f"Show unstaged or staged changes in any git repository on the {scope}."
                 ),
-                parameters=GIT_TOOLS[1].parameters,
+                parameters=_GIT_PARAMS["git_diff"],
             ),
             ToolDefinition(
                 name="git_log",
                 description=f"Show recent git commit history for any repo on the {scope}.",
-                parameters=GIT_TOOLS[2].parameters,
+                parameters=_GIT_PARAMS["git_log"],
             ),
             ToolDefinition(
                 name="git_commit",
                 description=(
                     f"Stage files and commit in any git repository on the {scope}."
                 ),
-                parameters=GIT_TOOLS[3].parameters,
+                parameters=_GIT_PARAMS["git_commit"],
             ),
         ]
 
