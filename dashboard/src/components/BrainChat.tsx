@@ -27,15 +27,18 @@ interface BrainChatProps {
 }
 
 export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainChatProps) {
-  const [messages, setMessages] = useState<Message[]>([])
+  // Shared chat state — same conversation as /chat page
+  const {
+    messages, setMessages,
+    sessionId, conversationId,
+    modelId: sharedModelId, setModelId,
+  } = useChatStore()
+
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const pendingTranscriptRef = useRef<string | null>(null)
-
-  // Use shared model from chat store (syncs with main Chat page)
-  const { modelId: sharedModelId, setModelId } = useChatStore()
 
   // Model catalog for picker
   const { data: providers } = useQuery({
@@ -57,10 +60,14 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   })
   const modelId = sharedModelId || resolved?.model || ''
 
-  // Auto-scroll when near bottom
-  const scrollToBottom = useCallback(() => {
+  // Scroll: force=true always scrolls (user sent a message), force=false only if near bottom (streaming)
+  const scrollToBottom = useCallback((force = false) => {
     const el = scrollRef.current
     if (!el) return
+    if (force) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+      return
+    }
     const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150
     if (isNearBottom) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
@@ -70,6 +77,24 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   useEffect(() => {
     scrollToBottom()
   }, [messages, scrollToBottom])
+
+  // Instant scroll to bottom on mount (shared store may have existing messages)
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-grow textarea as user types
+  const adjustInputHeight = useCallback(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 120) + 'px'
+  }, [])
+
+  useEffect(() => {
+    adjustInputHeight()
+  }, [input, adjustInputHeight])
 
   // Focus input after slide-in animation
   useEffect(() => {
@@ -151,6 +176,9 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
     }
     setMessages(prev => [...prev, userMsg])
 
+    // Always scroll to show the message the user just sent
+    setTimeout(() => scrollToBottom(true), 50)
+
     // Create assistant placeholder
     const assistantId = crypto.randomUUID()
     const assistantMsg: Message = {
@@ -173,7 +201,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
         content: m.content,
       }))
 
-      for await (const event of streamChat(history, modelId || undefined)) {
+      for await (const event of streamChat(history, modelId || undefined, sessionId, { conversation_id: conversationId ?? undefined })) {
         if (typeof event === 'string') {
           accumulated += event
           feedText(event)  // Feed to TTS sentence buffer
@@ -225,7 +253,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
       setIsStreaming(false)
       onStreamComplete?.()
     }
-  }, [input, isStreaming, messages, modelId, onActivityStep, onStreamComplete, feedText, flushBuffer])
+  }, [input, isStreaming, messages, sessionId, conversationId, modelId, onActivityStep, onStreamComplete, feedText, flushBuffer, setMessages, scrollToBottom])
 
   // Keep ref in sync so voice callbacks always call latest handleSubmit
   useEffect(() => {
@@ -376,7 +404,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={conversationMode ? 'Conversation mode active (Esc to exit)' : 'Ask Nova...'}
-            className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-lg px-3 py-2 text-sm text-stone-200 placeholder:text-stone-600 resize-none outline-none focus:border-teal-500/30 transition-colors"
+            className="flex-1 bg-white/[0.06] border border-white/[0.08] rounded-xl px-3 py-2.5 text-[13px] text-stone-200 placeholder:text-stone-600 resize-none outline-none focus:border-teal-500/40 focus:bg-white/[0.08] transition-all min-h-[38px] max-h-[120px] overflow-y-auto"
             rows={1}
             disabled={isStreaming || conversationMode}
           />

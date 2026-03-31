@@ -305,13 +305,39 @@ export default function Brain() {
     setSearchQuery('')
   }
 
+  // Mark the highest-importance node in each cluster as the "representative"
+  // for topic labels in the 3D graph. Max 20 labels to keep it clean.
+  const graphWithClusterReps = useMemo(() => {
+    if (!activeGraph?.nodes) return activeGraph
+    const bestPerCluster = new Map<number, { id: string; importance: number }>()
+    for (const node of activeGraph.nodes) {
+      if (node.cluster_id == null || !node.cluster_label) continue
+      const current = bestPerCluster.get(node.cluster_id)
+      if (!current || node.importance > current.importance) {
+        bestPerCluster.set(node.cluster_id, { id: node.id, importance: node.importance })
+      }
+    }
+    // Keep only top 20 clusters by importance of their representative
+    const topReps = new Set(
+      [...bestPerCluster.values()]
+        .sort((a, b) => b.importance - a.importance)
+        .slice(0, 20)
+        .map(r => r.id)
+    )
+    const annotatedNodes = activeGraph.nodes.map(n => ({
+      ...n,
+      _isClusterRep: topReps.has(n.id),
+    }))
+    return { ...activeGraph, nodes: annotatedNodes }
+  }, [activeGraph])
+
   const filteredGraphData = useMemo(() => {
-    if (!activeGraph || !typeFilter) return activeGraph
-    const filteredNodes = activeGraph.nodes.filter(n => n.type === typeFilter)
+    if (!graphWithClusterReps || !typeFilter) return graphWithClusterReps
+    const filteredNodes = graphWithClusterReps.nodes.filter(n => n.type === typeFilter)
     const nodeIds = new Set(filteredNodes.map(n => n.id))
-    const filteredEdges = activeGraph.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
-    return { ...activeGraph, nodes: filteredNodes, edges: filteredEdges }
-  }, [activeGraph, typeFilter])
+    const filteredEdges = graphWithClusterReps.edges.filter(e => nodeIds.has(e.source) && nodeIds.has(e.target))
+    return { ...graphWithClusterReps, nodes: filteredNodes, edges: filteredEdges }
+  }, [graphWithClusterReps, typeFilter])
 
 
   // Navigate to node (explore from here)
@@ -382,7 +408,7 @@ export default function Brain() {
         </div>
 
         {/* Right controls */}
-        <div className="flex items-center gap-1 shrink-0">
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setTopicsOpen(v => !v)}
             className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150
@@ -393,21 +419,26 @@ export default function Brain() {
             Explore
           </button>
           <button
-            onClick={() => setSettingsOpen(v => !v)}
-            className="w-8 h-8 rounded-lg flex items-center justify-center text-stone-500 hover:text-stone-300 hover:bg-white/5 transition-colors"
-            title="Display settings"
-          >
-            <Settings size={15} />
-          </button>
-          <button
             onClick={() => setChatOpen(c => !c)}
-            className={`ml-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150 ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150 ${
               chatOpen
                 ? 'bg-teal-500 text-white'
                 : 'bg-stone-800 text-stone-400 hover:text-stone-300'
             }`}
           >
             Chat
+          </button>
+          <div className="w-px h-5 bg-white/10 mx-0.5" />
+          <button
+            onClick={() => setSettingsOpen(v => !v)}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 ${
+              settingsOpen
+                ? 'text-teal-400 bg-teal-500/15'
+                : 'text-stone-500 hover:text-stone-300 hover:bg-white/5'
+            }`}
+            title="Display settings"
+          >
+            <Settings size={15} />
           </button>
         </div>
       </div>

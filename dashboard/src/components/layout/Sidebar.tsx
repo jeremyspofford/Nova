@@ -41,10 +41,10 @@ export const navSections: NavSection[] = [
   {
     // Core — no label, always visible
     items: [
-      { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
-      { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
-      { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
       { to: '/', label: 'Brain', icon: Brain, minRole: 'guest' },
+      { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
+      { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
+      { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
       { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member', debugOnly: true },
     ],
   },

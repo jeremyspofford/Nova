@@ -423,46 +423,46 @@ function makeNodeLabelTexture(text: string, color: string): CanvasTexture {
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, w, h)
 
-  // Truncate long text
-  const label = text.length > 40 ? text.slice(0, 38) + '...' : text
+  // Topic labels: clean, readable, concise
+  const label = text.length > 28 ? text.slice(0, 26) + '...' : text
 
-  ctx.font = '600 24px system-ui'
+  ctx.font = '600 22px system-ui'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
 
   // Measure text for background pill
   const metrics = ctx.measureText(label)
   const textW = metrics.width
-  const padX = 20
-  const padY = 10
+  const padX = 18
+  const padY = 8
   const pillW = textW + padX * 2
-  const pillH = 32 + padY * 2
+  const pillH = 28 + padY * 2
   const pillX = (w - pillW) / 2
   const pillY = (h - pillH) / 2
 
-  // Fully opaque dark pill — blocks glow bleed-through
-  ctx.fillStyle = '#09090b'
+  // Semi-transparent dark pill with slight teal tint
+  ctx.fillStyle = 'rgba(8, 45, 42, 0.75)'
   ctx.beginPath()
-  ctx.roundRect(pillX, pillY, pillW, pillH, 8)
+  ctx.roundRect(pillX, pillY, pillW, pillH, 10)
   ctx.fill()
 
-  // Border in type color (stronger)
+  // Subtle border in type color
   ctx.strokeStyle = color
-  ctx.globalAlpha = 0.7
-  ctx.lineWidth = 2
+  ctx.globalAlpha = 0.4
+  ctx.lineWidth = 1.5
   ctx.beginPath()
-  ctx.roundRect(pillX, pillY, pillW, pillH, 8)
+  ctx.roundRect(pillX, pillY, pillW, pillH, 10)
   ctx.stroke()
 
-  // Thick dark outline — absorbs bloom bleed from nearby nodes
+  // Dark outline to separate from bloom
   ctx.globalAlpha = 1
-  ctx.strokeStyle = '#09090b'
-  ctx.lineWidth = 6
+  ctx.strokeStyle = 'rgba(8, 45, 42, 0.9)'
+  ctx.lineWidth = 4
   ctx.lineJoin = 'round'
   ctx.strokeText(label, w / 2, h / 2)
 
-  // Muted text — bright enough to read, dim enough to dodge bloom threshold
-  ctx.fillStyle = '#a1a1aa'
+  // Bright text — topic names should be clearly readable
+  ctx.fillStyle = '#e4e4e7'
   ctx.fillText(label, w / 2, h / 2)
 
   const tex = new CanvasTexture(canvas)
@@ -709,8 +709,8 @@ function disposeStarfield(group: Group) {
 // ── Progressive label visibility threshold ───────────────────────────────────
 // Camera must be within this distance for node labels to appear.
 // Mimics Obsidian's "zoom in to read" behavior.
-const LABEL_SHOW_DISTANCE = 350
-const LABEL_MIN_IMPORTANCE = 0.3
+const LABEL_SHOW_DISTANCE = 500  // Topic labels visible from farther away
+const LABEL_MIN_IMPORTANCE = 0.3 // (no longer used — cluster rep logic in Brain.tsx)
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -893,13 +893,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         const hitMesh = new Mesh(coreGeoRef.current.clone(), hitMat)
         hitMesh.scale.setScalar(radius * 1.5) // slightly larger for comfortable clicking
 
-        // For small graphs, add labels to top-tier nodes
-        if (!isLargeGraph && importance >= LABEL_MIN_IMPORTANCE) {
+        // Show topic labels: one per cluster, on the most important node in that cluster.
+        // Works on all graph sizes — max ~20 labels keeps it clean.
+        if (node._isClusterRep && node.cluster_label) {
           const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
           const group = new Group()
           group.add(hitMesh)
-          const content = node.content ?? ''
-          const labelTex = makeNodeLabelTexture(content, color)
+          const labelTex = makeNodeLabelTexture(node.cluster_label, color)
           const labelMat = new SpriteMaterial({
             map: labelTex,
             transparent: true,
@@ -908,7 +908,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
           })
           const labelSprite = new Sprite(labelMat)
           labelSprite.scale.set(28, 3.5, 1)
-          labelSprite.position.set(0, -(radius + 4), 0)
+          labelSprite.position.set(0, -(radius + 5), 0)
           labelSprite.visible = false
           labelSprite.name = 'nodeLabel'
           group.add(labelSprite)
