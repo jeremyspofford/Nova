@@ -29,7 +29,7 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
     urgency = 0.0
     description_parts = []
 
-    # Urgency rises with cycles since last reflection (0.1 per 10 cycles, cap 0.5)
+    # Urgency rises with cycles since last reflection (0.1 per 10 cycles, cap 0.8)
     cycle_urgency = min(0.8, (_cycles_since_reflect // 10) * 0.1)
     if cycle_urgency > 0:
         urgency = max(urgency, cycle_urgency)
