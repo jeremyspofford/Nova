@@ -988,6 +988,14 @@ async def _persist_stage_records(
             # ── Code review verdicts ──────────────────────────────────
             if agent.role == "code_review":
                 import json as _json
+                raw_issues = result.get("issues", [])
+                if isinstance(raw_issues, str):
+                    try:
+                        raw_issues = _json.loads(raw_issues)
+                    except (ValueError, TypeError):
+                        raw_issues = []
+                if not isinstance(raw_issues, list):
+                    raw_issues = []
                 await conn.execute(
                     """
                     INSERT INTO code_reviews
@@ -998,7 +1006,7 @@ async def _persist_stage_records(
                     session_id,
                     iteration + 1,
                     result.get("verdict", "pass"),
-                    _json.dumps(result.get("issues", [])),
+                    _json.dumps(raw_issues),
                     result.get("summary"),
                 )
 

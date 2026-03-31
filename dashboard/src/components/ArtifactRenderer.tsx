@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import DOMPurify from 'dompurify'
-import { Copy, Check, FileText, FileCode, GitBranch, Box } from 'lucide-react'
+import { Copy, Check, Download, FileText, FileCode, GitBranch, Box } from 'lucide-react'
 import type { Artifact } from '../api'
 
 const MARKDOWN_TYPES = new Set(['documentation', 'task_summary', 'decision_record', 'api_contract'])
@@ -17,10 +17,13 @@ function typeIcon(t: string) {
 }
 
 /* ── Mermaid sub-component ──────────────────────────────── */
-function MermaidDiagram({ content }: { content: string }) {
+export function MermaidDiagram({ content }: { content: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState(false)
+
+  // Strip ```mermaid fences if present (agent output wraps in fences)
+  const cleaned = content.replace(/^```mermaid\s*\n?/, '').replace(/\n?```\s*$/, '').trim()
 
   useEffect(() => {
     let cancelled = false
@@ -30,7 +33,7 @@ function MermaidDiagram({ content }: { content: string }) {
         const mermaid = (await import('mermaid')).default
         mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
         const id = `mermaid-${Math.random().toString(36).slice(2)}`
-        const { svg: rendered } = await mermaid.render(id, content)
+        const { svg: rendered } = await mermaid.render(id, cleaned)
         // Sanitize SVG output even though mermaid uses securityLevel: 'strict'
         const clean = DOMPurify.sanitize(rendered, { USE_PROFILES: { svg: true, svgFilters: true } })
         if (!cancelled) setSvg(clean)
@@ -41,7 +44,7 @@ function MermaidDiagram({ content }: { content: string }) {
 
     render()
     return () => { cancelled = true }
-  }, [content])
+  }, [cleaned])
 
   if (error) {
     return (
@@ -85,6 +88,16 @@ export default function ArtifactCard({
     setTimeout(() => setCopied(false), 1500)
   }
 
+  const downloadContent = () => {
+    const blob = new Blob([artifact.content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = artifact.file_path?.split('/').pop() ?? artifact.name ?? 'artifact'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   /* ── content renderer ─────────────────────────────────── */
   function renderContent() {
     const t = artifact.artifact_type
@@ -101,7 +114,7 @@ export default function ArtifactCard({
 
     if (CODE_TYPES.has(t)) {
       return (
-        <pre className="overflow-x-auto text-mono-sm text-content-secondary leading-relaxed">
+        <pre className="whitespace-pre-wrap break-words text-mono-sm text-content-secondary leading-relaxed">
           <code>{artifact.content}</code>
         </pre>
       )
@@ -169,6 +182,14 @@ export default function ArtifactCard({
 
         <span className="flex-1" />
 
+        <button
+          type="button"
+          onClick={downloadContent}
+          className="p-1.5 rounded-sm text-content-tertiary hover:text-content-primary hover:bg-surface-elevated transition-colors duration-150 shrink-0"
+          title="Download"
+        >
+          <Download className="w-3.5 h-3.5" />
+        </button>
         <button
           type="button"
           onClick={copyContent}

@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
+import { BarChart3 } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
@@ -17,7 +18,7 @@ import {
 import clsx from 'clsx'
 import { useTheme } from '../stores/theme-store'
 import { PageHeader } from '../components/layout/PageHeader'
-import { Card, Tabs, Metric } from '../components/ui'
+import { Card, Tabs, Metric, EmptyState } from '../components/ui'
 
 const HELP_ENTRIES = [
   { term: 'Tokens', definition: 'The units AI models process — input tokens are your prompt, output tokens are the response. Cost is calculated per token.' },
@@ -169,9 +170,15 @@ export function Usage() {
           <p className="mb-4 text-caption text-content-tertiary">{VIEW_DESCRIPTIONS[view]}</p>
 
           {chartData.length === 0 ? (
-            <p className="py-8 text-center text-compact text-content-tertiary">
-              {isLoading ? 'Loading...' : 'No data for this period'}
-            </p>
+            isLoading ? (
+              <p className="py-8 text-center text-compact text-content-tertiary">Loading...</p>
+            ) : (
+              <EmptyState
+                icon={BarChart3}
+                title="No usage data yet"
+                description="Usage tracking starts when Nova processes its first task. Costs, tokens, and model usage will appear here."
+              />
+            )
           ) : isHorizontal ? (
             <ResponsiveContainer width="100%" height={Math.max(180, chartData.length * 36)}>
               <BarChart

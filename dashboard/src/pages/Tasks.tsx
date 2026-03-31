@@ -22,7 +22,7 @@ import {
   clarifyPipelineTask,
 } from '../api'
 import type { TaskSummary, Artifact } from '../api'
-import ArtifactCard from '../components/ArtifactRenderer'
+import ArtifactCard, { MermaidDiagram } from '../components/ArtifactRenderer'
 import FileViewer from '../components/FileViewer'
 import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
@@ -34,6 +34,16 @@ import {
   Tabs, Textarea, StatusDot, DataList, Tooltip,
 } from '../components/ui'
 import type { SemanticColor } from '../lib/design-tokens'
+
+/* ── Render mermaid code blocks as diagrams inside markdown ── */
+const markdownComponents = {
+  code({ className, children }: { className?: string; children?: React.ReactNode }) {
+    if (className === 'language-mermaid') {
+      return <MermaidDiagram content={String(children).replace(/\n$/, '')} />
+    }
+    return <code className={className}>{children}</code>
+  },
+}
 
 const HELP_ENTRIES = [
   { term: 'Pipeline', definition: 'The 5-stage agent chain that processes every task — Context gathers info, Task executes, Guardrail validates safety, Code Review checks quality, Decision determines success.' },
@@ -259,7 +269,7 @@ function CodeReviewSection({ reviews }: { reviews: CodeReviewVerdict[] }) {
             <span className="text-caption text-content-tertiary">Iteration {r.iteration}</span>
           </div>
           {r.summary && <p className="text-caption text-content-secondary">{r.summary}</p>}
-          {r.issues?.length > 0 && (
+          {Array.isArray(r.issues) && r.issues.length > 0 && (
             <ul className="space-y-1 pl-2 border-l-2 border-border-subtle">
               {r.issues.map((iss, j) => (
                 <li key={j} className="text-caption text-content-secondary">
@@ -483,7 +493,7 @@ function TaskDetailsTab({ taskId, fallbackOutput, fallbackError }: {
   if (summary) {
     return (
       <div className="prose prose-invert max-w-none rounded-sm bg-surface-elevated p-3 text-compact markdown-body">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{summary.content}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{summary.content}</ReactMarkdown>
       </div>
     )
   }
@@ -492,7 +502,7 @@ function TaskDetailsTab({ taskId, fallbackOutput, fallbackError }: {
     <div className="space-y-3">
       {fallbackOutput ? (
         <div className="rounded-sm bg-surface-elevated p-3 text-compact text-content-secondary markdown-body">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{fallbackOutput}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{fallbackOutput}</ReactMarkdown>
         </div>
       ) : (
         <p className="text-compact text-content-tertiary">No output yet.</p>
@@ -817,7 +827,7 @@ function TaskRow({
   return (
     <div
       onClick={(e) => {
-        if (isTerminal && e.shiftKey) {
+        if (e.shiftKey) {
           e.preventDefault()
           onToggleSelect(task.id, true)
         } else {
@@ -832,15 +842,13 @@ function TaskRow({
       )}
     >
       {/* Selection checkbox */}
-      {isTerminal && (
-        <div onClick={e => e.stopPropagation()}>
-          <Checkbox
-            checked={selected}
-            onChange={() => onToggleSelect(task.id, false)}
-            className="mr-0"
-          />
-        </div>
-      )}
+      <div onClick={e => e.stopPropagation()}>
+        <Checkbox
+          checked={selected}
+          onChange={() => onToggleSelect(task.id, false)}
+          className="mr-0"
+        />
+      </div>
 
       {/* Status dot */}
       <StatusDot
@@ -1198,11 +1206,11 @@ export function Tasks() {
       {selectedIds.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-2 rounded-lg bg-surface-elevated border border-border-subtle">
           <Checkbox
-            checked={selectedIds.size === filteredTasks.filter(t => ['complete', 'failed', 'cancelled'].includes(t.status)).length}
-            indeterminate={selectedIds.size > 0 && selectedIds.size < filteredTasks.filter(t => ['complete', 'failed', 'cancelled'].includes(t.status)).length}
+            checked={selectedIds.size === filteredTasks.length}
+            indeterminate={selectedIds.size > 0 && selectedIds.size < filteredTasks.length}
             onChange={(checked) => {
               if (checked) {
-                setSelectedIds(new Set(filteredTasks.filter(t => ['complete', 'failed', 'cancelled'].includes(t.status)).map(t => t.id)))
+                setSelectedIds(new Set(filteredTasks.map(t => t.id)))
               } else {
                 setSelectedIds(new Set())
               }

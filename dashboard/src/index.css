@@ -308,7 +308,8 @@ html.dark .skeleton {
   padding: 0.75em 1em;
   background: rgb(var(--neutral-900));
   border-radius: 8px;
-  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .dark .markdown-body pre {
   background: rgb(var(--neutral-950));
