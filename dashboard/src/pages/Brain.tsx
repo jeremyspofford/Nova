@@ -377,7 +377,10 @@ export default function Brain() {
     : '#71717a'
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#000000] pt-[52px]" style={{ background: '#000000' }}>
+    <div
+      className="relative w-full h-full overflow-hidden pt-[52px]"
+      style={{ background: viewMode === 'galaxy' ? '#000000' : '#0c0a09' }}
+    >
       {/* Full-viewport graph */}
       {viewMode === 'galaxy' ? (
         <ForceGraph3D
@@ -426,7 +429,11 @@ export default function Brain() {
       )}
 
       {/* ── HUD: Glass top bar ──────────────────────────────────────── */}
-      <div className="fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 glass-overlay border-b border-white/[0.12] border-t-white/[0.20]">
+      <div className={`fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 border-b ${
+        viewMode === 'galaxy'
+          ? 'glass-overlay border-white/[0.12] border-t-white/[0.20]'
+          : 'bg-[#0c0a09]/95 backdrop-blur-sm border-stone-800/60'
+      }`}>
         {/* Logo mark */}
         <img src={avatarUrl} alt="Nova" className="w-7 h-7 rounded-full object-cover mr-2 shrink-0" />
         <span className="text-base font-semibold text-stone-200 shrink-0 mr-3">Brain</span>
