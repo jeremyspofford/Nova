@@ -337,9 +337,9 @@ const HELP_ENTRIES = [
   { term: 'System Skills', definition: 'Built-in skills marked with a lock icon. These cannot be deleted but can be disabled.' },
 ]
 
-// ── Main page ───────────────────────────────────────────────────────────────
+// ── Skills body (shared between standalone page and Settings section) ───────
 
-export function Skills() {
+export function SkillsContent() {
   const qc = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -362,34 +362,29 @@ export function Skills() {
   const activeCount = skills.filter((s: any) => s.enabled !== false).length
 
   return (
-    <div className="space-y-6 px-4 py-6 sm:px-6">
-      <PageHeader
-        title="Skills"
-        description="Reusable prompt templates injected into agent conversations."
-        helpEntries={HELP_ENTRIES}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />}
-              onClick={() => qc.invalidateQueries({ queryKey: ['skills'] })}
-              disabled={isFetching}
-            />
-            <Button
-              icon={<Plus size={14} />}
-              onClick={() => setCreateOpen(true)}
-            >
-              New Skill
-            </Button>
-          </div>
-        }
-      />
-
-      {/* Metrics row */}
-      <div className="flex flex-wrap gap-6">
-        <Metric label="Total Skills" value={skills.length} icon={<Wand2 size={12} />} />
-        <Metric label="Active" value={activeCount} />
+    <div className="space-y-5">
+      {/* Actions + metrics */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex flex-wrap gap-6">
+          <Metric label="Total Skills" value={skills.length} icon={<Wand2 size={12} />} />
+          <Metric label="Active" value={activeCount} />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />}
+            onClick={() => qc.invalidateQueries({ queryKey: ['skills'] })}
+            disabled={isFetching}
+          />
+          <Button
+            size="sm"
+            icon={<Plus size={14} />}
+            onClick={() => setCreateOpen(true)}
+          >
+            New Skill
+          </Button>
+        </div>
       </div>
 
       {isLoading && (
@@ -441,6 +436,21 @@ export function Skills() {
         destructive
         confirmText={deletingSkill?.name}
       />
+    </div>
+  )
+}
+
+// ── Main page ───────────────────────────────────────────────────────────────
+
+export function Skills() {
+  return (
+    <div className="space-y-6 px-4 py-6 sm:px-6">
+      <PageHeader
+        title="Skills"
+        description="Reusable prompt templates injected into agent conversations."
+        helpEntries={HELP_ENTRIES}
+      />
+      <SkillsContent />
     </div>
   )
 }

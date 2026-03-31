@@ -350,9 +350,9 @@ function EndpointCard({
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Agent endpoints content (shared between standalone page and Integrations tab) ──
 
-export function AgentEndpoints() {
+export function AgentEndpointsContent() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [formKey, setFormKey] = useState(0)
@@ -378,22 +378,20 @@ export function AgentEndpoints() {
   }
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Agent Endpoints"
-        description="Connect Nova to external agent systems using A2A (Google Agent-to-Agent) or ACP (BeeAI Agent Communication Protocol)."
-        actions={
-          <Button
-            icon={<Plus size={14} />}
-            onClick={() => {
-              setFormKey(k => k + 1)
-              setShowForm(v => !v)
-            }}
-          >
-            {showForm ? 'Cancel' : 'Add Endpoint'}
-          </Button>
-        }
-      />
+    <div className="space-y-5">
+      {/* Actions */}
+      <div className="flex items-center justify-between">
+        <div />
+        <Button
+          icon={<Plus size={14} />}
+          onClick={() => {
+            setFormKey(k => k + 1)
+            setShowForm(v => !v)
+          }}
+        >
+          {showForm ? 'Cancel' : 'Add Endpoint'}
+        </Button>
+      </div>
 
       {showForm && (
         <EndpointForm key={formKey} onDone={handleFormDone} />
@@ -432,6 +430,20 @@ export function AgentEndpoints() {
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         destructive
       />
+    </div>
+  )
+}
+
+// ── Agent Endpoints page (standalone) ────────────────────────────────────────
+
+export function AgentEndpoints() {
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Agent Endpoints"
+        description="Connect Nova to external agent systems using A2A (Google Agent-to-Agent) or ACP (BeeAI Agent Communication Protocol)."
+      />
+      <AgentEndpointsContent />
     </div>
   )
 }

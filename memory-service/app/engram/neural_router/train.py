@@ -51,8 +51,12 @@ async def assemble_training_data(tenant_id: str) -> list[dict]:
     """
     examples: list[dict] = []
 
+    max_obs = settings.neural_router_max_training_obs
+
     async with get_db() as session:
-        # Fetch all labeled observations for this tenant
+        # Fetch most recent labeled observations for this tenant, capped to
+        # bound memory usage (each obs expands to N surfaced-engram examples
+        # with 768-dim embeddings).
         rows = await session.execute(
             text("""
                 SELECT id, query_embedding::text, query_text,
@@ -60,11 +64,14 @@ async def assemble_training_data(tenant_id: str) -> list[dict]:
                 FROM retrieval_log
                 WHERE tenant_id = CAST(:tid AS uuid)
                   AND engrams_used IS NOT NULL
-                ORDER BY created_at
+                ORDER BY created_at DESC
+                LIMIT :cap
             """),
-            {"tid": tenant_id},
+            {"tid": tenant_id, "cap": max_obs},
         )
         observations = rows.fetchall()
+        # Reverse to restore chronological order (oldest-first) for temporal split
+        observations = list(reversed(observations))
 
         if not observations:
             return examples
@@ -208,6 +215,9 @@ def train_model(
     else:
         train_q_emb = train_e_emb = val_q_emb = val_e_emb = None
         model = ScalarReranker()
+
+    # Free the Python-list copies — all data now lives in tensors
+    del train_examples, val_examples
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -415,6 +425,13 @@ async def train_for_tenant(tenant_id: str) -> None:
 async def startup_probe(r: aioredis.Redis) -> None:
     """Check for tenants that need training but have no active model."""
     log.info("Running startup probe...")
+
+    # Drain stale signals left from previous crash-loop restarts so we
+    # don't accumulate duplicate work in the queue.
+    drained = await r.delete("neural_router:train_signal")
+    if drained:
+        log.info("Startup probe: drained stale train signal queue")
+
     async with get_db() as session:
         # Find tenants with enough labeled observations but no active model
         rows = await session.execute(

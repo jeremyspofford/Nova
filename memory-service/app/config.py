@@ -83,6 +83,7 @@ class Settings(BaseSettings):
     neural_router_validation_split: float = 0.2
     neural_router_min_precision_gain: float = 0.0
     neural_router_max_inactive_models: int = 5
+    neural_router_max_training_obs: int = 500    # cap observations to bound memory
 
     # Service
     service_host: str = "0.0.0.0"

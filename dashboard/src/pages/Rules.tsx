@@ -366,9 +366,9 @@ const HELP_ENTRIES = [
   { term: 'Chat', definition: 'You can ask Nova to create or modify rules in the Chat page. Say "create a rule that prevents X" and Nova will handle it.' },
 ]
 
-// ── Main page ────────────────────────────────────────────────────────────────
+// ── Rules body (shared between standalone page and Settings section) ────────
 
-export function Rules() {
+export function RulesContent() {
   const qc = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [deletingRule, setDeletingRule] = useState<Rule | null>(null)
@@ -391,26 +391,21 @@ export function Rules() {
   const system = rules.filter((r: Rule) => r.is_system)
 
   return (
-    <div className="space-y-6 px-4 py-6 sm:px-6">
-      <PageHeader
-        title="Rules"
-        description="Constraints on agent behavior. Rules check tool calls before execution."
-        helpEntries={HELP_ENTRIES}
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm"
-              icon={<RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />}
-              onClick={() => qc.invalidateQueries({ queryKey: ['rules'] })}
-              disabled={isFetching} />
-            <Button icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>New Rule</Button>
-          </div>
-        }
-      />
-
-      <div className="flex flex-wrap gap-6">
-        <Metric label="Total Rules" value={rules.length} icon={<ShieldAlert size={12} />} />
-        <Metric label="Active" value={active.length} />
-        <Metric label="System" value={system.length} />
+    <div className="space-y-5">
+      {/* Actions + metrics */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex flex-wrap gap-6">
+          <Metric label="Total Rules" value={rules.length} icon={<ShieldAlert size={12} />} />
+          <Metric label="Active" value={active.length} />
+          <Metric label="System" value={system.length} />
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm"
+            icon={<RefreshCw size={14} className={isFetching ? 'animate-spin' : ''} />}
+            onClick={() => qc.invalidateQueries({ queryKey: ['rules'] })}
+            disabled={isFetching} />
+          <Button size="sm" icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>New Rule</Button>
+        </div>
       </div>
 
       {isLoading && (
@@ -455,6 +450,21 @@ export function Rules() {
         destructive
         confirmText={deletingRule?.name}
       />
+    </div>
+  )
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
+
+export function Rules() {
+  return (
+    <div className="space-y-6 px-4 py-6 sm:px-6">
+      <PageHeader
+        title="Rules"
+        description="Constraints on agent behavior. Rules check tool calls before execution."
+        helpEntries={HELP_ENTRIES}
+      />
+      <RulesContent />
     </div>
   )
 }

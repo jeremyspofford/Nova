@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
 import { CommandPalette } from './components/CommandPalette'
 import { StartupScreen } from './components/StartupScreen'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { ChatProvider } from './stores/chat-store'
 import { ThemeProvider } from './stores/theme-store'
 import { DebugProvider } from './stores/debug-store'
@@ -14,22 +15,17 @@ import { ToastProvider } from './components/ToastProvider'
 import { Login } from './pages/Login'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
-import { Keys } from './pages/Keys'
-import { MCP } from './pages/MCP'
+import { Integrations } from './pages/Integrations'
 import { Settings } from './pages/Settings'
 import { Models } from './pages/Models'
 import { Tasks } from './pages/Tasks'
 import { Pods } from './pages/Pods'
-import { AgentEndpoints } from './pages/AgentEndpoints'
 import { Goals } from './pages/Goals'
-import { Intelligence } from './pages/Intelligence'
 import { Sources } from './pages/Sources'
 import { Recovery } from './pages/Recovery'
 import { About } from './pages/About'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
-import { Skills } from './pages/Skills'
-import { Rules } from './pages/Rules'
 import { Expired } from './pages/Expired'
 import Friction from './pages/Friction'
 import Brain from './pages/Brain'
@@ -128,7 +124,7 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
 function HomeRoute() {
   const [brainEnabled] = useLocalStorage('brain.enabled', true)
   if (!brainEnabled) return <Navigate to="/chat" replace />
-  return <AppLayout fullWidth><Brain /></AppLayout>
+  return <AppLayout fullWidth><ErrorBoundary><Brain /></ErrorBoundary></AppLayout>
 }
 
 function AppShell() {
@@ -171,24 +167,27 @@ function AppShell() {
         {/* Routes WITH sidebar */}
         <Route path="/" element={<HomeRoute />} />
         <Route path="/brain" element={<Navigate to="/" replace />} />
-        <Route path="/chat" element={<AppLayout fullWidth><Chat /></AppLayout>} />
-        <Route path="/tasks" element={<AppLayout><Tasks /></AppLayout>} />
-        <Route path="/friction" element={<AppLayout><Friction /></AppLayout>} />
-        <Route path="/pods" element={<AppLayout><Pods /></AppLayout>} />
-        <Route path="/usage" element={<AppLayout><Usage /></AppLayout>} />
-        <Route path="/keys" element={<AppLayout><Keys /></AppLayout>} />
-        <Route path="/mcp" element={<AppLayout><MCP /></AppLayout>} />
-        <Route path="/agents" element={<AppLayout><AgentEndpoints /></AppLayout>} />
-        <Route path="/goals" element={<AppLayout><Goals /></AppLayout>} />
-        <Route path="/sources" element={<AppLayout><Sources /></AppLayout>} />
-        <Route path="/intelligence" element={<AppLayout><Intelligence /></AppLayout>} />
-        <Route path="/models" element={<AppLayout><Models /></AppLayout>} />
-        <Route path="/users" element={<AppLayout><Users /></AppLayout>} />
-        <Route path="/skills" element={<AppLayout><Skills /></AppLayout>} />
-        <Route path="/rules" element={<AppLayout><Rules /></AppLayout>} />
-        <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
-        <Route path="/recovery" element={<AppLayout><Recovery /></AppLayout>} />
-        <Route path="/about" element={<AppLayout><About /></AppLayout>} />
+        <Route path="/chat" element={<AppLayout fullWidth><ErrorBoundary><Chat /></ErrorBoundary></AppLayout>} />
+        <Route path="/tasks" element={<AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout>} />
+        <Route path="/friction" element={<AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout>} />
+        <Route path="/pods" element={<AppLayout><ErrorBoundary><Pods /></ErrorBoundary></AppLayout>} />
+        <Route path="/usage" element={<AppLayout><ErrorBoundary><Usage /></ErrorBoundary></AppLayout>} />
+        <Route path="/goals" element={<AppLayout><ErrorBoundary><Goals /></ErrorBoundary></AppLayout>} />
+        <Route path="/sources" element={<AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout>} />
+        <Route path="/integrations" element={<AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout>} />
+        <Route path="/models" element={<AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout>} />
+        <Route path="/users" element={<AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout>} />
+        <Route path="/settings" element={<AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout>} />
+        <Route path="/recovery" element={<AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout>} />
+        <Route path="/about" element={<AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout>} />
+
+        {/* Redirects for old routes */}
+        <Route path="/intelligence" element={<Navigate to="/sources#recommendations" replace />} />
+        <Route path="/mcp" element={<Navigate to="/integrations" replace />} />
+        <Route path="/agents" element={<Navigate to="/integrations#agents" replace />} />
+        <Route path="/keys" element={<Navigate to="/settings#keys" replace />} />
+        <Route path="/skills" element={<Navigate to="/settings#behavior" replace />} />
+        <Route path="/rules" element={<Navigate to="/settings#behavior" replace />} />
       </Routes>
     </BrowserRouter>
     </ChatProvider>

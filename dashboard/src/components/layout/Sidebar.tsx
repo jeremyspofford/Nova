@@ -8,15 +8,13 @@ import {
   Brain,
   Boxes,
   Monitor,
-  Shield,
   Plug,
   BarChart3,
   Settings,
   ChevronsLeft,
-  Wand2,
-  ShieldAlert,
   ChevronsRight,
   ChevronDown,
+  Users,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
@@ -25,7 +23,7 @@ import { hasMinRole, type Role } from '../../lib/roles'
 import { useAttentionCount } from '../../hooks/useAttentionCount'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
 
-type NavItem = {
+export type NavItem = {
   to: string
   debugOnly?: boolean
   label: string
@@ -34,43 +32,41 @@ type NavItem = {
   badge?: number
 }
 
-type NavSection = {
+export type NavSection = {
   label?: string
   items: NavItem[]
 }
 
-const navSections: NavSection[] = [
+export const navSections: NavSection[] = [
   {
     // Core — no label, always visible
     items: [
-      { to: '/', label: 'Brain', icon: Brain, minRole: 'guest' },
       { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
-      { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
-      { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member', debugOnly: true },
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
-      { to: '/sources', label: 'Knowledge', icon: Globe, minRole: 'member' },
+      { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
+      { to: '/', label: 'Brain', icon: Brain, minRole: 'guest' },
+      { to: '/friction', label: 'Friction', icon: AlertTriangle, minRole: 'member', debugOnly: true },
     ],
   },
   {
-    label: 'Configure',
+    label: 'Knowledge',
     items: [
-      { to: '/skills', label: 'Skills', icon: Wand2, minRole: 'admin' },
-      { to: '/rules', label: 'Rules', icon: ShieldAlert, minRole: 'admin' },
+      { to: '/sources', label: 'Sources', icon: Globe, minRole: 'member' },
+    ],
+  },
+  {
+    label: 'Infrastructure',
+    items: [
       { to: '/pods', label: 'Pods', icon: Boxes, minRole: 'admin' },
       { to: '/models', label: 'Models', icon: Monitor, minRole: 'member' },
-      { to: '/keys', label: 'Keys', icon: Shield, minRole: 'admin' },
-      { to: '/mcp', label: 'Integrations', icon: Plug, minRole: 'admin' },
-    ],
-  },
-  {
-    label: 'Monitor',
-    items: [
-      { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
+      { to: '/integrations', label: 'Integrations', icon: Plug, minRole: 'admin' },
     ],
   },
   {
     label: 'System',
     items: [
+      { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
+      { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
     ],
   },

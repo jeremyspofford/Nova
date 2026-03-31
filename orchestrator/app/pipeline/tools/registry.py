@@ -64,8 +64,14 @@ async def load_mcp_servers() -> int:
             rows = await conn.fetch(
                 "SELECT * FROM mcp_servers WHERE enabled = TRUE"
             )
-        for row in rows:
-            if await _connect_server(dict(row)):
+        results = await asyncio.gather(
+            *(_connect_server(dict(row)) for row in rows),
+            return_exceptions=True,
+        )
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                log.error("MCP server '%s' raised during connect: %s", rows[i]["name"], result)
+            elif result:
                 connected += 1
     except Exception as e:
         log.error("Failed to load MCP servers from DB: %s", e)
@@ -79,13 +85,17 @@ async def stop_all_servers() -> None:
     Called in the orchestrator lifespan shutdown.
     """
     async with _registry_lock:
-        for name, client in list(_active_clients.items()):
-            try:
-                await client.stop()
-            except Exception as e:
-                log.warning("Error stopping MCP server '%s': %s", name, e)
+        clients = list(_active_clients.items())
         _active_clients.clear()
-        log.info("All MCP servers stopped")
+
+    async def _stop_one(name: str, client: "StdioMCPClient | HTTPMCPClient") -> None:
+        try:
+            await client.stop()
+        except Exception as e:
+            log.warning("Error stopping MCP server '%s': %s", name, e)
+
+    await asyncio.gather(*(_stop_one(n, c) for n, c in clients))
+    log.info("All MCP servers stopped")
 
 
 # ── Server management ─────────────────────────────────────────────────────────

@@ -483,9 +483,9 @@ const HELP_ENTRIES = [
   { term: 'Server', definition: 'A program implementing the MCP protocol that provides one or more tools for Nova to use during tasks.' },
 ]
 
-// ── MCP page ──────────────────────────────────────────────────────────────────
+// ── MCP content (shared between standalone page and Integrations tab) ────────
 
-export function MCP() {
+export function MCPContent() {
   const qc = useQueryClient()
   const [showForm, setShowForm] = useState(false)
   const [prefill, setPrefill] = useState<PrefillValues | null>(null)
@@ -559,24 +559,21 @@ export function MCP() {
   })
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Integrations"
-        description="Connect MCP servers to extend Nova with additional tools. Any server implementing the MCP spec can be added here."
-        actions={
-          <Button
-            icon={<Plus size={14} />}
-            onClick={() => {
-              setPrefill(null)
-              setFormKey(k => k + 1)
-              setShowForm(v => !v)
-            }}
-          >
-            {showForm ? 'Cancel' : 'Add Server'}
-          </Button>
-        }
-        helpEntries={HELP_ENTRIES}
-      />
+    <div className="space-y-5">
+      {/* Actions */}
+      <div className="flex items-center justify-between">
+        <div />
+        <Button
+          icon={<Plus size={14} />}
+          onClick={() => {
+            setPrefill(null)
+            setFormKey(k => k + 1)
+            setShowForm(v => !v)
+          }}
+        >
+          {showForm ? 'Cancel' : 'Add Server'}
+        </Button>
+      </div>
 
       {/* Add / edit server form */}
       {showForm && (
@@ -686,6 +683,21 @@ export function MCP() {
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         destructive
       />
+    </div>
+  )
+}
+
+// ── MCP page (standalone) ────────────────────────────────────────────────────
+
+export function MCP() {
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="Integrations"
+        description="Connect MCP servers to extend Nova with additional tools. Any server implementing the MCP spec can be added here."
+        helpEntries={HELP_ENTRIES}
+      />
+      <MCPContent />
     </div>
   )
 }

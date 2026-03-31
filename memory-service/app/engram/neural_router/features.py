@@ -81,7 +81,7 @@ def extract_scalar_features(
         ]
         rows.append(row)
 
-    return torch.tensor(rows, dtype=torch.float32) if rows else torch.zeros(0, 26)
+    return torch.tensor(rows, dtype=torch.float32) if rows else torch.zeros(0, 25)
 
 
 def extract_embedding_features(

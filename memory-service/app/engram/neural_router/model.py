@@ -17,7 +17,7 @@ class ScalarReranker(nn.Module):
     Output: relevance probability (0-1) per candidate
     """
 
-    SCALAR_DIM = 26
+    SCALAR_DIM = 25
 
     def __init__(self) -> None:
         super().__init__()
@@ -52,7 +52,7 @@ class EmbeddingReranker(nn.Module):
     Output: relevance probability (0-1) per candidate
     """
 
-    SCALAR_DIM = 26
+    SCALAR_DIM = 25
     EMBED_DIM = 768
     PROJECT_DIM = 32
 
@@ -61,7 +61,7 @@ class EmbeddingReranker(nn.Module):
         self.query_proj = nn.Linear(self.EMBED_DIM, self.PROJECT_DIM)
         self.engram_proj = nn.Linear(self.EMBED_DIM, self.PROJECT_DIM)
 
-        # scalar(25) + dot(1) + difference(32) = 58
+        # scalar(25) + dot(1) + diff(32) = 58
         combined_dim = self.SCALAR_DIM + 1 + self.PROJECT_DIM
         self.net = nn.Sequential(
             nn.Linear(combined_dim, 64),

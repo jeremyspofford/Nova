@@ -11,7 +11,9 @@ import {
 import type { TableColumn } from '../components/ui'
 import type { ApiKey } from '../types'
 
-export function Keys() {
+// ── Keys body (shared between standalone page and Settings section) ─────────
+
+export function KeysContent() {
   const qc = useQueryClient()
   const { data: keys = [], isLoading } = useQuery({ queryKey: ['keys'], queryFn: getKeys })
 
@@ -100,16 +102,13 @@ export function Keys() {
   ]
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="API Keys"
-        description="Keys let external clients call Nova's OpenAI-compatible API. Each key has its own rate limit and usage tracking."
-        actions={
-          <Button icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>
-            Create Key
-          </Button>
-        }
-      />
+    <div className="space-y-5">
+      {/* Action row */}
+      <div className="flex justify-end">
+        <Button size="sm" icon={<Plus size={14} />} onClick={() => setCreateOpen(true)}>
+          Create Key
+        </Button>
+      </div>
 
       {/* New key banner */}
       {newKey && (
@@ -207,6 +206,20 @@ export function Keys() {
         onConfirm={() => revokeTarget && revokeMutation.mutate(revokeTarget.id)}
         destructive
       />
+    </div>
+  )
+}
+
+// ── Main page ───────────────────────────────────────────────────────────────
+
+export function Keys() {
+  return (
+    <div className="space-y-6">
+      <PageHeader
+        title="API Keys"
+        description="Keys let external clients call Nova's OpenAI-compatible API. Each key has its own rate limit and usage tracking."
+      />
+      <KeysContent />
     </div>
   )
 }

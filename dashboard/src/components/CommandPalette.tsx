@@ -1,57 +1,50 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createPortal } from 'react-dom'
-import {
-  Search,
-  MessageSquare,
-  ListTodo,
-  Target,
-  Brain,
-  Boxes,
-  Monitor,
-  Shield,
-  Plug,
-  BarChart3,
-  Settings,
-  HeartPulse,
-  Users,
-  Plus,
-  ArrowRight,
-} from 'lucide-react'
+import { Search, Plus, ArrowRight } from 'lucide-react'
 import clsx from 'clsx'
+import { navSections } from './layout/Sidebar'
+import { NAV_GROUPS } from '../pages/Settings'
 
 type PaletteItem = {
   id: string
   label: string
-  icon: typeof MessageSquare
+  icon: React.ElementType
   category: 'Pages' | 'Settings' | 'Actions'
   action: () => void
 }
 
 function usePaletteItems(navigate: ReturnType<typeof useNavigate>): PaletteItem[] {
-  return [
-    // Pages
-    { id: 'page-chat', label: 'Chat', icon: MessageSquare, category: 'Pages', action: () => navigate('/chat') },
-    { id: 'page-tasks', label: 'Tasks', icon: ListTodo, category: 'Pages', action: () => navigate('/tasks') },
-    { id: 'page-goals', label: 'Goals', icon: Target, category: 'Pages', action: () => navigate('/goals') },
-    { id: 'page-brain', label: 'Brain', icon: Brain, category: 'Pages', action: () => navigate('/') },
-    { id: 'page-pods', label: 'Pods', icon: Boxes, category: 'Pages', action: () => navigate('/pods') },
-    { id: 'page-models', label: 'Models', icon: Monitor, category: 'Pages', action: () => navigate('/models') },
-    { id: 'page-keys', label: 'Keys', icon: Shield, category: 'Pages', action: () => navigate('/keys') },
-    { id: 'page-integrations', label: 'Integrations', icon: Plug, category: 'Pages', action: () => navigate('/mcp') },
-    { id: 'page-usage', label: 'Usage', icon: BarChart3, category: 'Pages', action: () => navigate('/usage') },
-    { id: 'page-settings', label: 'Settings', icon: Settings, category: 'Pages', action: () => navigate('/settings') },
-    { id: 'page-recovery', label: 'Recovery', icon: HeartPulse, category: 'Pages', action: () => navigate('/recovery') },
-    { id: 'page-users', label: 'Users', icon: Users, category: 'Pages', action: () => navigate('/users') },
-    // Settings sections
-    { id: 'settings-general', label: 'General Settings', icon: Settings, category: 'Settings', action: () => navigate('/settings?tab=general') },
-    { id: 'settings-ai', label: 'AI & Models Settings', icon: Monitor, category: 'Settings', action: () => navigate('/settings?tab=ai') },
-    { id: 'settings-connections', label: 'Connection Settings', icon: Plug, category: 'Settings', action: () => navigate('/settings?tab=connections') },
-    { id: 'settings-appearance', label: 'Appearance Settings', icon: Settings, category: 'Settings', action: () => navigate('/settings?tab=appearance') },
-    // Actions
-    { id: 'action-new-task', label: 'New Task', icon: Plus, category: 'Actions', action: () => navigate('/tasks') },
-    { id: 'action-new-goal', label: 'New Goal', icon: Plus, category: 'Actions', action: () => navigate('/goals') },
-  ]
+  return useMemo(() => {
+    // Pages — generated from sidebar navSections
+    const pageItems: PaletteItem[] = navSections
+      .flatMap(section => section.items)
+      .filter(item => !item.debugOnly)
+      .map(item => ({
+        id: `page-${item.to.replace(/^\//, '') || 'brain'}`,
+        label: item.label,
+        icon: item.icon,
+        category: 'Pages' as const,
+        action: () => navigate(item.to),
+      }))
+
+    // Settings sections — generated from NAV_GROUPS
+    const settingsItems: PaletteItem[] = NAV_GROUPS.map(group => ({
+      id: `settings-${group.id}`,
+      label: `${group.label} Settings`,
+      icon: group.icon,
+      category: 'Settings' as const,
+      action: () => navigate(`/settings#${group.id}`),
+    }))
+
+    // Actions — hardcoded, not derived from nav data
+    const actionItems: PaletteItem[] = [
+      { id: 'action-new-task', label: 'New Task', icon: Plus, category: 'Actions' as const, action: () => navigate('/tasks') },
+      { id: 'action-new-goal', label: 'New Goal', icon: Plus, category: 'Actions' as const, action: () => navigate('/goals') },
+    ]
+
+    return [...pageItems, ...settingsItems, ...actionItems]
+  }, [navigate])
 }
 
 export function CommandPalette() {

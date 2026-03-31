@@ -7,9 +7,9 @@ import {
   Brain,
   Ellipsis,
   X,
+  Globe,
   Boxes,
   Monitor,
-  Shield,
   Plug,
   BarChart3,
   Settings,
@@ -37,26 +37,26 @@ const primaryTabs: NavItem[] = [
 
 const moreItems: { label?: string; items: NavItem[] }[] = [
   {
-    label: 'Configure',
+    label: 'Knowledge',
     items: [
-      { to: '/pods', label: 'Pods', icon: Boxes, minRole: 'admin' },
-      { to: '/models', label: 'Models', icon: Monitor, minRole: 'member' },
-      { to: '/keys', label: 'Keys', icon: Shield, minRole: 'admin' },
-      { to: '/mcp', label: 'Integrations', icon: Plug, minRole: 'admin' },
+      { to: '/sources', label: 'Sources', icon: Globe, minRole: 'member' },
     ],
   },
   {
-    label: 'Monitor',
+    label: 'Infrastructure',
     items: [
-      { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
+      { to: '/pods', label: 'Pods', icon: Boxes, minRole: 'admin' },
+      { to: '/models', label: 'Models', icon: Monitor, minRole: 'member' },
+      { to: '/integrations', label: 'Integrations', icon: Plug, minRole: 'admin' },
     ],
   },
   {
     label: 'System',
     items: [
+      { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
+      { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
       { to: '/recovery', label: 'Recovery', icon: HeartPulse, minRole: 'admin' },
-      { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
     ],
   },
 ]

@@ -16,18 +16,18 @@ input[type="number"] {
 
 /* ── Theme CSS custom properties (defaults = teal accent, stone neutral) ──── */
 :root {
-  /* accent: teal */
-  --accent-50:  240 253 250;
-  --accent-100: 204 251 241;
-  --accent-200: 153 246 228;
-  --accent-300: 94 234 212;
-  --accent-400: 45 212 191;
-  --accent-500: 20 184 166;
-  --accent-600: 13 148 136;
-  --accent-700: 15 118 110;
-  --accent-800: 17 94 89;
-  --accent-900: 19 78 74;
-  --accent-950: 4 47 46;
+  /* accent: Nova teal (custom — not stock Tailwind) */
+  --accent-50:  236 253 249;
+  --accent-100: 204 251 240;
+  --accent-200: 150 243 227;
+  --accent-300: 92 232 208;
+  --accent-400: 36 201 184;
+  --accent-500: 25 168 158;
+  --accent-600: 22 142 133;
+  --accent-700: 20 116 108;
+  --accent-800: 17 93 87;
+  --accent-900: 16 77 72;
+  --accent-950: 8 45 42;
 
   /* card surface (light: white, dark: neutral-900) */
   --card: 255 255 255;

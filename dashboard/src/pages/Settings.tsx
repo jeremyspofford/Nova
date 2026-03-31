@@ -1,15 +1,17 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Bot, Wrench, Palette, Users, Bug, Database, Lock,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
   FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell, Mic,
-  Brain, GitMerge,
+  Brain, GitMerge, Wand2, ShieldAlert, Key,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
-import { Section, Button, ConfirmDialog, Toast } from '../components/ui'
+import { Section, Button, ConfirmDialog, Toast, SearchInput } from '../components/ui'
+import { Tabs } from '../components/ui/Tabs'
+import { useTabHash } from '../hooks/useTabHash'
 import { ConfigField, useConfigValue } from './settings/shared'
 import { LLMRoutingSection } from './settings/LLMRoutingSection'
 import { ProviderStatusSection } from './settings/ProviderStatusSection'
@@ -28,6 +30,9 @@ import { ToolPermissionsSection } from './settings/ToolPermissionsSection'
 import { SandboxSection } from './settings/SandboxSection'
 import { DebugSection } from './settings/DebugSection'
 import { UsersSection } from './settings/UsersSection'
+import { SkillsSection } from './settings/SkillsSection'
+import { RulesSection } from './settings/RulesSection'
+import { KeysSection } from './settings/KeysSection'
 import { SelfModelSection } from './settings/SelfModelSection'
 import { ConsolidationSection } from './settings/ConsolidationSection'
 import { MaintenanceSection } from './settings/MaintenanceSection'
@@ -36,7 +41,7 @@ import { RouterStatusSection } from './settings/RouterStatusSection'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
 
-// ── Sidebar navigation structure ─────────────────────────────────────────────
+// ── Tab / navigation structure ──────────────────────────────────────────────
 
 interface NavItem {
   id: string
@@ -45,13 +50,17 @@ interface NavItem {
 }
 
 interface NavGroup {
+  id: string
   label: string
+  icon: React.ElementType
   items: NavItem[]
 }
 
-const NAV_GROUPS: NavGroup[] = [
+export const NAV_GROUPS: NavGroup[] = [
   {
+    id: 'general',
     label: 'General',
+    icon: Bot,
     items: [
       { id: 'identity', label: 'Nova Identity', icon: Bot },
       { id: 'appearance', label: 'Appearance', icon: Palette },
@@ -59,16 +68,30 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: 'security',
     label: 'Security',
+    icon: Lock,
     items: [
       { id: 'users', label: 'Users', icon: Users },
       { id: 'trusted-networks', label: 'Trusted Networks', icon: Lock },
       { id: 'guest-access', label: 'Guest Access', icon: Shield },
       { id: 'sandbox', label: 'Agent Sandbox', icon: Shield },
+      { id: 'keys', label: 'API Keys', icon: Key },
     ],
   },
   {
+    id: 'behavior',
+    label: 'Behavior',
+    icon: Wand2,
+    items: [
+      { id: 'skills', label: 'Skills', icon: Wand2 },
+      { id: 'rules', label: 'Rules', icon: ShieldAlert },
+    ],
+  },
+  {
+    id: 'ai',
     label: 'AI & Pipeline',
+    icon: RadioIcon,
     items: [
       { id: 'llm-routing', label: 'LLM Routing', icon: RadioIcon },
       { id: 'provider-status', label: 'Provider Status', icon: Activity },
@@ -79,7 +102,9 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: 'memory',
     label: 'Memory',
+    icon: Brain,
     items: [
       { id: 'self-model', label: 'Self-Model', icon: Brain },
       { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
@@ -89,7 +114,9 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: 'connections',
     label: 'Connections',
+    icon: Globe,
     items: [
       { id: 'remote-access', label: 'Remote Access', icon: Globe },
       { id: 'chat-integrations', label: 'Chat Integrations', icon: MessageSquare },
@@ -97,7 +124,9 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: 'system',
     label: 'System',
+    icon: Wrench,
     items: [
       { id: 'setup-wizard', label: 'Setup Wizard', icon: RotateCcw },
       { id: 'developer-tools', label: 'Developer Tools', icon: FileCode },
@@ -108,119 +137,35 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ]
 
-const ALL_SECTION_IDS = NAV_GROUPS.flatMap(g => g.items.map(i => i.id))
+const TAB_IDS = NAV_GROUPS.map(g => g.id) as readonly string[]
 
-// ── Active section tracking via IntersectionObserver ─────────────────────────
+const TABS = NAV_GROUPS.map(g => ({ id: g.id, label: g.label, icon: g.icon }))
 
-function useActiveSection() {
-  const [active, setActive] = useState(() => {
-    const hash = window.location.hash.replace('#', '')
-    return ALL_SECTION_IDS.includes(hash) ? hash : ALL_SECTION_IDS[0]
-  })
-
-  const observerRef = useRef<IntersectionObserver | null>(null)
-
-  useEffect(() => {
-    const onHash = () => {
-      const h = window.location.hash.replace('#', '')
-      if (ALL_SECTION_IDS.includes(h)) {
-        setActive(h)
-        const el = document.getElementById(h)
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }
-    }
-    window.addEventListener('hashchange', onHash)
-
-    // Scroll to initial hash
-    if (window.location.hash) {
-      setTimeout(onHash, 100)
-    }
-
-    return () => window.removeEventListener('hashchange', onHash)
-  }, [])
-
-  const setupObserver = useCallback((container: HTMLDivElement | null) => {
-    if (observerRef.current) {
-      observerRef.current.disconnect()
-    }
-    if (!container) return
-
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting && entry.intersectionRatio > 0.2) {
-            const id = entry.target.id
-            if (ALL_SECTION_IDS.includes(id)) {
-              setActive(id)
-              // Update hash silently without triggering scroll
-              history.replaceState(null, '', `#${id}`)
-            }
-          }
-        }
-      },
-      {
-        root: null,
-        rootMargin: '-80px 0px -60% 0px',
-        threshold: 0.2,
-      },
-    )
-
-    ALL_SECTION_IDS.forEach(id => {
-      const el = document.getElementById(id)
-      if (el) observerRef.current!.observe(el)
-    })
-
-    return () => observerRef.current?.disconnect()
-  }, [])
-
-  return { active, setActive, setupObserver }
+/** Map every section id to its parent tab id for deep-link resolution. */
+const SECTION_TO_TAB: Record<string, string> = {}
+for (const group of NAV_GROUPS) {
+  for (const item of group.items) {
+    SECTION_TO_TAB[item.id] = group.id
+  }
 }
 
-// ── Sidebar nav component ────────────────────────────────────────────────────
+/**
+ * Resolve the initial tab from the URL hash.
+ * Supports both `#tab=ai` (new format) and legacy `#llm-routing` (bare section id).
+ */
+function resolveInitialTab(): string {
+  const hash = window.location.hash.slice(1)
+  if (!hash) return 'general'
 
-function SettingsSidebar({ active, isAuthenticated }: { active: string; isAuthenticated: boolean }) {
-  return (
-    <nav className="w-48 shrink-0 hidden lg:block sticky top-20 self-start max-h-[calc(100vh-6rem)] overflow-y-auto">
-      <div className="space-y-5">
-        {NAV_GROUPS.map(group => {
-          const items = group.items.filter(item => {
-            // Hide account if not authenticated
-            if (item.id === 'account' && !isAuthenticated) return false
-            return true
-          })
-          if (items.length === 0) return null
+  // New format: #tab=ai
+  const params = new URLSearchParams(hash)
+  const tabVal = params.get('tab')
+  if (tabVal && TAB_IDS.includes(tabVal)) return tabVal
 
-          return (
-            <div key={group.label}>
-              <p className="text-micro font-semibold uppercase tracking-wider text-content-tertiary mb-2 px-2">
-                {group.label}
-              </p>
-              <div className="space-y-0.5">
-                {items.map(item => {
-                  const Icon = item.icon
-                  const isActive = active === item.id
-                  return (
-                    <a
-                      key={item.id}
-                      href={`#${item.id}`}
-                      className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-caption font-medium transition-colors ${
-                        isActive
-                          ? 'bg-surface-elevated text-accent'
-                          : 'text-content-secondary hover:text-content-primary hover:bg-surface-card-hover'
-                      }`}
-                    >
-                      <Icon size={14} className="shrink-0" />
-                      {item.label}
-                    </a>
-                  )
-                })}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </nav>
-  )
+  // Legacy format: #llm-routing (bare section id)
+  if (SECTION_TO_TAB[hash]) return SECTION_TO_TAB[hash]
+
+  return 'general'
 }
 
 // ── Setup Wizard re-run ──────────────────────────────────────────────────────
@@ -382,9 +327,9 @@ function DataManagementSection() {
 
 export function Settings() {
   const qc = useQueryClient()
-  const { active, setupObserver } = useActiveSection()
   const { isAuthenticated } = useAuth()
-  const contentRef = useRef<HTMLDivElement | null>(null)
+  const [activeTab, setActiveTab] = useTabHash(resolveInitialTab() as string, TAB_IDS)
+  const [search, setSearch] = useState('')
 
   const { data: entries = [], isLoading, error } = useQuery({
     queryKey: ['platform-config'],
@@ -408,14 +353,52 @@ export function Settings() {
   const novaPersona = useConfigValue(entries, 'nova.persona', '')
   const novaGreeting = useConfigValue(entries, 'nova.greeting', '')
   const retentionDays = useConfigValue(entries, 'task_history_retention_days', '')
+  const voiceOpenAIKey = useConfigValue(entries, 'voice.openai_api_key', '')
+  const voiceSttProvider = useConfigValue(entries, 'voice.stt_provider', 'openai')
+  const voiceTtsProvider = useConfigValue(entries, 'voice.tts_provider', 'openai')
+  const voiceTtsVoice = useConfigValue(entries, 'voice.tts_voice', 'nova')
+  const voiceTtsModel = useConfigValue(entries, 'voice.tts_model', 'tts-1')
 
   const [brainEnabled, setBrainEnabled] = useLocalStorage('brain.enabled', true)
 
-  // Setup observer when content mounts
-  const setContentRef = useCallback((el: HTMLDivElement | null) => {
-    contentRef.current = el
-    setupObserver(el)
-  }, [setupObserver])
+  // Legacy deep-link: scroll to a specific section within the active tab.
+  // e.g. #llm-routing → activate "ai" tab, then scroll to the llm-routing element.
+  useEffect(() => {
+    const hash = window.location.hash.slice(1)
+    if (hash && SECTION_TO_TAB[hash]) {
+      // Allow the tab content to mount first, then scroll
+      requestAnimationFrame(() => {
+        const el = document.getElementById(hash)
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      })
+    }
+  }, []) // Only on initial mount
+
+  // Determine which sections match the search query
+  const searchLower = search.toLowerCase().trim()
+  const matchingGroups = useMemo(() => {
+    if (!searchLower) return null // null = no search active, use normal tab filtering
+    return NAV_GROUPS
+      .map(group => ({
+        ...group,
+        items: group.items.filter(item => item.label.toLowerCase().includes(searchLower)),
+      }))
+      .filter(group => group.items.length > 0)
+  }, [searchLower])
+
+  // When searching, determine which sections to show
+  const visibleSections = useMemo<Set<string>>(() => {
+    if (matchingGroups) {
+      // Search mode: show matched sections across all tabs
+      return new Set(matchingGroups.flatMap(g => g.items.map(i => i.id)))
+    }
+    // Normal tab mode: show sections for active tab
+    const group = NAV_GROUPS.find(g => g.id === activeTab)
+    return new Set(group ? group.items.map(i => i.id) : [])
+  }, [matchingGroups, activeTab])
+
+  /** Render a section only if it's in the visible set. */
+  const show = (id: string) => visibleSections.has(id)
 
   if (isLoading) return (
     <div className="px-4 py-6 sm:px-6 space-y-6">
@@ -438,15 +421,31 @@ export function Settings() {
         description="Runtime configuration for this Nova instance. Changes take effect immediately."
       />
 
-      <div className="flex gap-8">
-        {/* Sidebar */}
-        <SettingsSidebar active={active} isAuthenticated={isAuthenticated} />
+      {/* Search + tabs */}
+      <div className="space-y-3 mb-6">
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search settings..."
+          debounceMs={150}
+          className="max-w-sm"
+        />
+        {!searchLower && (
+          <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />
+        )}
+        {searchLower && matchingGroups && matchingGroups.length === 0 && (
+          <p className="text-compact text-content-tertiary py-4">
+            No settings matching "{search}"
+          </p>
+        )}
+      </div>
 
-        {/* Content */}
-        <div ref={setContentRef} className="flex-1 min-w-0 space-y-6 [&>div]:scroll-mt-24">
+      {/* Content — only visible sections render */}
+      <div className="space-y-6">
 
-          {/* ── General ──────────────────────────────────────────────── */}
+        {/* ── General ──────────────────────────────────────────────── */}
 
+        {show('identity') && (
           <div id="identity">
             <Section icon={Bot} title="Nova Identity" description="How Nova presents itself. Changes appear in the next Chat session.">
               <ConfigField label="Name" configKey="nova.name" value={novaName} placeholder="Nova" description="Shown in the dashboard header and chat UI." onSave={handleSave} saving={saveMutation.isPending} />
@@ -469,7 +468,9 @@ export function Settings() {
               />
             </Section>
           </div>
+        )}
 
+        {show('appearance') && (
           <div id="appearance">
             <AppearanceSection />
             <div className="mt-4 px-4 py-3 rounded-md border border-border-subtle bg-surface-card">
@@ -492,59 +493,99 @@ export function Settings() {
               </div>
             </div>
           </div>
+        )}
 
-          {isAuthenticated && (
-            <div id="account">
-              <AccountSection />
-            </div>
-          )}
+        {show('account') && isAuthenticated && (
+          <div id="account">
+            <AccountSection />
+          </div>
+        )}
 
-          {/* ── Security ──────────────────────────────────────────────── */}
+        {/* ── Security ──────────────────────────────────────────────── */}
 
+        {show('users') && (
           <div id="users">
             <UsersSection />
           </div>
+        )}
 
+        {show('trusted-networks') && (
           <div id="trusted-networks">
             <TrustedNetworksSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
+        )}
 
+        {show('guest-access') && (
           <div id="guest-access">
             <GuestAccessSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
+        )}
 
+        {show('sandbox') && (
           <div id="sandbox">
             <SandboxSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
+        )}
 
-          {/* ── AI & Pipeline ─────────────────────────────────────────── */}
+        {show('keys') && (
+          <div id="keys">
+            <KeysSection />
+          </div>
+        )}
 
+        {/* ── Behavior ─────────────────────────────────────────────── */}
+
+        {show('skills') && (
+          <div id="skills">
+            <SkillsSection />
+          </div>
+        )}
+
+        {show('rules') && (
+          <div id="rules">
+            <RulesSection />
+          </div>
+        )}
+
+        {/* ── AI & Pipeline ─────────────────────────────────────────── */}
+
+        {show('llm-routing') && (
           <div id="llm-routing">
             <LLMRoutingSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
+        )}
 
+        {show('provider-status') && (
           <div id="provider-status">
             <ProviderStatusSection />
           </div>
+        )}
 
+        {show('pipeline-models') && (
           <div id="pipeline-models">
             <PipelineModelsSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
+        )}
 
+        {show('context-budgets') && (
           <div id="context-budgets">
             <ContextBudgetSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
+        )}
 
+        {show('tool-permissions') && (
           <div id="tool-permissions">
             <ToolPermissionsSection />
           </div>
+        )}
 
+        {show('voice') && (
           <div id="voice">
             <Section icon={Mic} title="Voice" description="Speech recognition and synthesis settings. Requires docker compose --profile voice.">
               <ConfigField
                 label="OpenAI API Key (for Whisper + TTS)"
                 configKey="voice.openai_api_key"
-                value={useConfigValue(entries, 'voice.openai_api_key', '')}
+                value={voiceOpenAIKey}
                 description="Used for speech recognition and text-to-speech. Same key as the LLM provider."
                 onSave={handleSave}
                 saving={saveMutation.isPending}
@@ -552,7 +593,7 @@ export function Settings() {
               <ConfigField
                 label="STT Provider"
                 configKey="voice.stt_provider"
-                value={useConfigValue(entries, 'voice.stt_provider', 'openai')}
+                value={voiceSttProvider}
                 description="Speech-to-text: openai (Whisper), deepgram"
                 onSave={handleSave}
                 saving={saveMutation.isPending}
@@ -560,7 +601,7 @@ export function Settings() {
               <ConfigField
                 label="TTS Provider"
                 configKey="voice.tts_provider"
-                value={useConfigValue(entries, 'voice.tts_provider', 'openai')}
+                value={voiceTtsProvider}
                 description="Text-to-speech: openai, elevenlabs"
                 onSave={handleSave}
                 saving={saveMutation.isPending}
@@ -568,7 +609,7 @@ export function Settings() {
               <ConfigField
                 label="Voice"
                 configKey="voice.tts_voice"
-                value={useConfigValue(entries, 'voice.tts_voice', 'nova')}
+                value={voiceTtsVoice}
                 description="OpenAI voices: alloy, echo, fable, onyx, nova, shimmer"
                 onSave={handleSave}
                 saving={saveMutation.isPending}
@@ -576,7 +617,7 @@ export function Settings() {
               <ConfigField
                 label="TTS Model"
                 configKey="voice.tts_model"
-                value={useConfigValue(entries, 'voice.tts_model', 'tts-1')}
+                value={voiceTtsModel}
                 description="tts-1 (fast, ~200ms) or tts-1-hd (quality, ~500ms)"
                 onSave={handleSave}
                 saving={saveMutation.isPending}
@@ -608,66 +649,92 @@ export function Settings() {
               </div>
             </Section>
           </div>
+        )}
 
-          {/* ── Memory ───────────────────────────────────────────────────── */}
+        {/* ── Memory ───────────────────────────────────────────────────── */}
 
+        {show('self-model') && (
           <div id="self-model">
             <SelfModelSection />
           </div>
+        )}
 
+        {show('consolidation') && (
           <div id="consolidation">
             <ConsolidationSection />
           </div>
+        )}
 
+        {show('maintenance') && (
           <div id="maintenance">
             <MaintenanceSection />
           </div>
+        )}
 
+        {show('engram-sources') && (
           <div id="engram-sources">
             <EngramSourcesSection />
           </div>
+        )}
 
+        {show('router-status') && (
           <div id="router-status">
             <RouterStatusSection />
           </div>
+        )}
 
-          {/* ── Connections ──────────────────────────────────────────── */}
+        {/* ── Connections ──────────────────────────────────────────── */}
 
+        {show('remote-access') && (
           <div id="remote-access">
             <RemoteAccessSection />
           </div>
+        )}
 
+        {show('chat-integrations') && (
           <div id="chat-integrations">
             <ChatIntegrationsSection />
           </div>
+        )}
 
+        {show('notifications') && (
           <div id="notifications">
             <NotificationsSection />
           </div>
+        )}
 
-          {/* ── System ───────────────────────────────────────────────── */}
+        {/* ── System ───────────────────────────────────────────────── */}
 
+        {show('setup-wizard') && (
           <div id="setup-wizard">
             <SetupWizardSection onSave={handleSave} />
           </div>
+        )}
 
+        {show('developer-tools') && (
           <div id="developer-tools">
             <DeveloperResourcesSection />
           </div>
+        )}
 
+        {show('debug') && (
           <div id="debug">
             <DebugSection />
           </div>
+        )}
 
+        {show('data') && (
           <div id="data">
             <DataManagementSection />
           </div>
+        )}
 
+        {show('recovery') && (
           <div id="recovery">
             <RecoverySection />
           </div>
+        )}
 
-        </div>
       </div>
 
       {saveMutation.isError && (

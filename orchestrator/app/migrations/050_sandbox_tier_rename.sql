@@ -16,15 +16,6 @@ UPDATE platform_config
 SET description = 'Agent filesystem access tier: workspace (user projects), home (home directory), root (full host), isolated (no access)'
 WHERE key = 'shell.sandbox';
 
--- Pod-level sandbox configs (stored in pods.config JSONB)
-UPDATE pods
-SET config = jsonb_set(config, '{sandbox}', '"home"')
-WHERE config->>'sandbox' = 'nova';
-
-UPDATE pods
-SET config = jsonb_set(config, '{sandbox}', '"root"')
-WHERE config->>'sandbox' = 'host';
-
--- Direct sandbox column on pods table (used by pipeline executor)
+-- Pod-level sandbox column on pods table (used by pipeline executor)
 UPDATE pods SET sandbox = 'home' WHERE sandbox = 'nova';
 UPDATE pods SET sandbox = 'root' WHERE sandbox = 'host';
