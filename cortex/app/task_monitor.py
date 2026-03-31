@@ -74,47 +74,62 @@ async def _monitor_loop() -> None:
     poll_interval = settings.task_poll_interval  # 10s
     max_age = settings.task_poll_max_wait  # 300s
 
-    while _pending:
-        await asyncio.sleep(poll_interval)
-        done_ids = []
+    try:
+        while _pending:
+            await asyncio.sleep(poll_interval)
+            done_ids = []
 
-        for task_id, pt in list(_pending.items()):
-            task = await get_task_status(task_id)
-            if task is None:
-                # Service unreachable — check age-based timeout
-                age = time.monotonic() - pt.dispatched_at
-                if age > max_age:
-                    log.warning("Task %s timed out after %.0fs (no response)", task_id, age)
-                    _completed.append((pt, TaskOutcome(
-                        task_id=task_id, status="unknown", score=0.5, confidence=0.2,
-                        timed_out=True,
-                    )))
-                    done_ids.append(task_id)
-                continue
+            for task_id, pt in list(_pending.items()):
+                try:
+                    task = await get_task_status(task_id)
+                except Exception as e:
+                    log.warning("Error polling task %s: %s", task_id, e)
+                    task = None
 
-            status = task.get("status", "unknown")
-            if status in _TERMINAL:
-                outcome = _score_task(task, timed_out=False)
-                log.info(
-                    "Task %s finished: status=%s score=%.1f (monitored %.0fs)",
-                    task_id, outcome.status, outcome.score,
-                    time.monotonic() - pt.dispatched_at,
-                )
-                _completed.append((pt, outcome))
-                done_ids.append(task_id)
-            else:
-                # Check age-based timeout
-                age = time.monotonic() - pt.dispatched_at
-                if age > max_age:
-                    outcome = _score_task(task, timed_out=True)
-                    log.warning(
-                        "Task %s timed out after %.0fs (status=%s)",
-                        task_id, age, status,
+                if task is None:
+                    # Service unreachable — check age-based timeout
+                    age = time.monotonic() - pt.dispatched_at
+                    if age > max_age:
+                        log.warning("Task %s timed out after %.0fs (no response)", task_id, age)
+                        _completed.append((pt, TaskOutcome(
+                            task_id=task_id, status="unknown", score=0.5, confidence=0.2,
+                            timed_out=True,
+                        )))
+                        done_ids.append(task_id)
+                    continue
+
+                status = task.get("status", "unknown")
+                if status in _TERMINAL:
+                    outcome = _score_task(task, timed_out=False)
+                    log.info(
+                        "Task %s finished: status=%s score=%.1f (monitored %.0fs)",
+                        task_id, outcome.status, outcome.score,
+                        time.monotonic() - pt.dispatched_at,
                     )
                     _completed.append((pt, outcome))
                     done_ids.append(task_id)
+                else:
+                    # Check age-based timeout
+                    age = time.monotonic() - pt.dispatched_at
+                    if age > max_age:
+                        outcome = _score_task(task, timed_out=True)
+                        log.warning(
+                            "Task %s timed out after %.0fs (status=%s)",
+                            task_id, age, status,
+                        )
+                        _completed.append((pt, outcome))
+                        done_ids.append(task_id)
 
-        for tid in done_ids:
-            del _pending[tid]
+            for tid in done_ids:
+                del _pending[tid]
+
+    except Exception as e:
+        log.error("Monitor loop crashed: %s — failing all pending tasks", e, exc_info=True)
+        for task_id, pt in list(_pending.items()):
+            _completed.append((pt, TaskOutcome(
+                task_id=task_id, status="failed", score=0.2, confidence=0.5,
+                error=f"Monitor crashed: {e}", timed_out=False,
+            )))
+        _pending.clear()
 
     log.debug("Monitor loop exiting — no pending tasks")

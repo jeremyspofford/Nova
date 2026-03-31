@@ -112,7 +112,7 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
         priority=1,
         urgency=round(urgency, 2),
         description=f"{active_count} active goals, {len(stale_goals)} need attention",
-        proposed_action=f"Work on goal: {stale_goals[0]['title']}" if stale_goals else None,
+        proposed_action=f"Work on one of {len(stale_goals)} stale goals" if stale_goals else None,
         context={
             "stale_goals": goal_summaries,
             "active_tasks": active_tasks,

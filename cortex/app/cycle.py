@@ -24,7 +24,7 @@ from .drives import DriveContext, DriveResult, DriveWinner, evaluate
 from .drives import serve, maintain, improve, learn, reflect
 from .journal import read_user_replies_since, write_entry
 from . import task_monitor
-from .task_tracker import TaskOutcome, await_task
+from .task_tracker import TaskOutcome
 from .reflections import (
     query_reflections, format_reflection_history, record_reflection,
     check_approach_blocked, count_consecutive_failures,
@@ -75,7 +75,6 @@ class CycleState:
     resolved_model: str | None = None
     goal_id: str | None = None
     selected_goal: dict | None = None  # Set by _plan_action for _execute_serve
-    dispatched_task_id: str | None = None
     task_outcome: TaskOutcome | None = None
     plan_text: str | None = None
 
@@ -155,6 +154,20 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
                     "Processed background result: task %s goal %s status=%s",
                     pending.task_id, pending.goal_id, outcome.status,
                 )
+                # Record reflection for completed background tasks
+                if outcome.status in ("complete", "failed"):
+                    bg_state = CycleState(
+                        cycle_number=pending.cycle_dispatched,
+                        goal_id=pending.goal_id,
+                        action_taken="serve",
+                        task_outcome=outcome,
+                        plan_text=pending.plan_text,
+                        outcome=f"Background task {pending.task_id}: {outcome.status}",
+                    )
+                    try:
+                        await _record_cycle_reflection(bg_state)
+                    except Exception as e2:
+                        log.debug("Failed to record background reflection: %s", e2)
             except Exception as e:
                 log.warning("Failed to process background task %s: %s", pending.task_id, e)
 
@@ -578,56 +591,6 @@ async def _execute_learn(drive: DriveResult, plan: str, state: CycleState) -> st
         return f"Investigating capability gaps: {gap_types}. Plan: {plan[:200]}"
     return f"Learning action: {plan[:200]}"
 
-
-async def _track_dispatched_task(state: CycleState) -> TaskOutcome | None:
-    """Poll a dispatched task to completion and update goal progress accordingly."""
-    task_id = state.dispatched_task_id
-    if not task_id or task_id == "unknown":
-        return None
-
-    try:
-        outcome = await await_task(task_id)
-    except Exception as e:
-        log.warning("Task tracking failed for %s: %s", task_id, e)
-        return None
-
-    # Update the outcome description with the actual result
-    if outcome.timed_out:
-        state.outcome += f" | Task {task_id} still running after {settings.task_poll_max_wait}s"
-    elif outcome.status == "complete":
-        summary = (outcome.output or "")[:200]
-        state.outcome += f" | Task completed: {summary}"
-    elif outcome.status == "failed":
-        err = (outcome.error or "unknown error")[:200]
-        state.outcome += f" | Task FAILED: {err}"
-    elif outcome.status == "cancelled":
-        state.outcome += f" | Task cancelled"
-
-    # Update goal progress based on task result
-    if state.goal_id:
-        try:
-            await _update_goal_progress(state.goal_id, outcome, state.cycle_number)
-        except Exception as e:
-            log.warning("Failed to update goal progress for %s: %s", state.goal_id, e)
-
-    # Journal notable task outcomes
-    if outcome.status == "failed":
-        try:
-            await write_entry(
-                f"**Task failure** — task {task_id} for goal {state.goal_id}: "
-                f"{(outcome.error or 'unknown')[:300]}",
-                entry_type="escalation",
-                metadata={
-                    "cycle": state.cycle_number,
-                    "task_id": task_id,
-                    "goal_id": state.goal_id,
-                    "task_status": outcome.status,
-                },
-            )
-        except Exception as e:
-            log.debug("Failed to journal task failure: %s", e)
-
-    return outcome
 
 
 async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) -> None:
