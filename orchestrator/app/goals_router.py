@@ -411,3 +411,45 @@ async def get_goal_scope(goal_id: UUID, _user: UserDep):
     if not row:
         raise HTTPException(status_code=404, detail="Goal not found")
     return row["scope_analysis"] or {}
+
+
+# ── Goal Iterations & Artifacts ──────────────────────────────────────────────
+
+@goals_router.get("/api/v1/goals/{goal_id}/iterations")
+async def list_goal_iterations(
+    goal_id: UUID, _user: UserDep,
+    limit: int = Query(default=50),
+    offset: int = Query(default=0),
+):
+    """List goal iteration history for timeline display."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT id, goal_id, attempt, cycle_number, plan_text,
+                      task_id, task_status, task_summary, cost_usd,
+                      files_touched, plan_adjustment, created_at
+               FROM goal_iterations
+               WHERE goal_id = $1
+               ORDER BY attempt DESC
+               LIMIT $2 OFFSET $3""",
+            goal_id, limit, offset,
+        )
+    return [dict(r) for r in rows]
+
+
+@goals_router.get("/api/v1/goals/{goal_id}/artifacts")
+async def list_goal_artifacts(goal_id: UUID, _user: UserDep):
+    """List all artifacts across all tasks for a goal."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """SELECT a.*,
+                      (SELECT gi.attempt FROM goal_iterations gi
+                       WHERE gi.task_id = a.task_id LIMIT 1) as attempt
+               FROM artifacts a
+               JOIN tasks t ON a.task_id = t.id
+               WHERE t.goal_id = $1
+               ORDER BY a.created_at DESC""",
+            goal_id,
+        )
+    return [dict(r) for r in rows]
