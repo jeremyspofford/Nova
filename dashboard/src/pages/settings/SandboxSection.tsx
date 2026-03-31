@@ -6,7 +6,7 @@ import { getPods, updatePod } from '../../api'
 
 // ── Tier definitions ────────────────────────────────────────────────────────
 
-type TierValue = 'workspace' | 'nova' | 'host' | 'isolated'
+type TierValue = 'workspace' | 'home' | 'root' | 'isolated'
 
 const TIERS: {
   value: TierValue
@@ -21,7 +21,7 @@ const TIERS: {
     label: 'Workspace',
     tagline: 'Project-scoped access',
     bullets: [
-      'Read & write files in /workspace',
+      'Read & write files in configured workspace',
       'Shell commands scoped to workspace',
       'Git operations scoped to workspace',
       'Blocks sudo, curl|sh, privilege escalation',
@@ -30,26 +30,26 @@ const TIERS: {
     dot: 'bg-emerald-500',
   },
   {
-    value: 'nova',
-    label: 'Nova',
-    tagline: 'Self-modification access',
+    value: 'home',
+    label: 'Home',
+    tagline: 'Home directory access',
     bullets: [
-      'Read & write Nova source code (/nova)',
-      'Shell commands scoped to Nova root',
-      'Git operations on Nova repo',
+      'Read & write files in home directory',
+      'Shell commands scoped to home',
+      'Git operations on any repo in home',
       'Blocks sudo, curl|sh, privilege escalation',
     ],
-    ring: 'ring-amber-500/60',
-    dot: 'bg-amber-500',
+    ring: 'ring-sky-500/60',
+    dot: 'bg-sky-500',
   },
   {
-    value: 'host',
-    label: 'Host',
-    tagline: 'Full system access',
+    value: 'root',
+    label: 'Root',
+    tagline: 'Full host access',
     bullets: [
-      'Unrestricted filesystem read & write',
-      'Unrestricted shell commands',
-      'Unrestricted git operations',
+      'Read & write files on host filesystem',
+      'Shell commands with cwd on host',
+      'Git operations on any host repo',
       'Only blocks fork bombs, mkfs, dd, rm -rf /',
     ],
     ring: 'ring-red-500/60',
@@ -73,14 +73,14 @@ const TIERS: {
 // ── Capability comparison table ─────────────────────────────────────────────
 
 const CAPABILITY_ROWS: { label: string; values: Record<TierValue, string> }[] = [
-  { label: 'Filesystem scope', values: { workspace: '/workspace', nova: '/nova', host: '/ (entire system)', isolated: 'None' } },
-  { label: 'File read & write', values: { workspace: 'Scoped', nova: 'Scoped', host: 'Unrestricted', isolated: 'Blocked' } },
-  { label: 'Shell commands', values: { workspace: 'Scoped', nova: 'Scoped', host: 'Unrestricted', isolated: 'Blocked' } },
-  { label: 'Git operations', values: { workspace: 'Scoped', nova: 'Scoped', host: 'Unrestricted', isolated: 'Blocked' } },
-  { label: 'sudo / su', values: { workspace: 'Blocked', nova: 'Blocked', host: 'Allowed', isolated: 'N/A' } },
-  { label: 'Remote exec (curl|sh)', values: { workspace: 'Blocked', nova: 'Blocked', host: 'Allowed', isolated: 'N/A' } },
-  { label: 'Destructive commands', values: { workspace: 'Blocked', nova: 'Blocked', host: 'Blocked', isolated: 'N/A' } },
-  { label: 'Best for', values: { workspace: 'Project work', nova: 'Self-update', host: 'Sysadmin', isolated: 'Reasoning' } },
+  { label: 'Filesystem scope', values: { workspace: '/workspace', home: '~ (home dir)', root: '/ (entire host)', isolated: 'None' } },
+  { label: 'File read & write', values: { workspace: 'Scoped', home: 'Scoped', root: 'Unrestricted', isolated: 'Blocked' } },
+  { label: 'Shell commands', values: { workspace: 'Scoped', home: 'Scoped', root: 'Unrestricted', isolated: 'Blocked' } },
+  { label: 'Git operations', values: { workspace: 'Scoped', home: 'Scoped', root: 'Unrestricted', isolated: 'Blocked' } },
+  { label: 'sudo / su', values: { workspace: 'Blocked', home: 'Blocked', root: 'Allowed', isolated: 'N/A' } },
+  { label: 'Remote exec (curl|sh)', values: { workspace: 'Blocked', home: 'Blocked', root: 'Allowed', isolated: 'N/A' } },
+  { label: 'Destructive commands', values: { workspace: 'Blocked', home: 'Blocked', root: 'Blocked', isolated: 'N/A' } },
+  { label: 'Best for', values: { workspace: 'Project work', home: 'Multi-project', root: 'Sysadmin', isolated: 'Reasoning' } },
 ]
 
 function cellColor(value: string): string {
