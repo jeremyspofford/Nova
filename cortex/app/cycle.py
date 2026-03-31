@@ -23,6 +23,7 @@ from .db import get_pool
 from .drives import DriveContext, DriveResult, DriveWinner, evaluate
 from .drives import serve, maintain, improve, learn, reflect
 from .journal import read_user_replies_since, write_entry
+from . import task_monitor
 from .task_tracker import TaskOutcome, await_task
 from .reflections import (
     query_reflections, format_reflection_history, record_reflection,
@@ -91,6 +92,7 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
     """Execute one complete thinking cycle. Returns the cycle state for logging."""
     state = CycleState()
     state.stimuli = stimuli or []
+    completed_tasks: list[tuple[task_monitor.PendingTask, TaskOutcome]] = []
 
     try:
         # ── PERCEIVE ──────────────────────────────────────────────────────
@@ -126,6 +128,18 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
                 await _sweep_zombie_goals()
             except Exception as e:
                 log.warning("Zombie sweep failed: %s", e)
+
+        # Collect results from background task monitor
+        completed_tasks = task_monitor.collect_completed()
+        for pending, outcome in completed_tasks:
+            try:
+                await _update_goal_progress(pending.goal_id, outcome, pending.cycle_dispatched)
+                log.info(
+                    "Processed background result: task %s goal %s status=%s",
+                    pending.task_id, pending.goal_id, outcome.status,
+                )
+            except Exception as e:
+                log.warning("Failed to process background task %s: %s", pending.task_id, e)
 
         # Query engram memory for context
         goal_context = ""
@@ -190,13 +204,17 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         state.outcome = await _execute_action(drive, plan, state)
 
         # ── TRACK ────────────────────────────────────────────────────────
-        # If a pipeline task was dispatched, poll for completion and update goal
-        if state.dispatched_task_id:
-            state.task_outcome = await _track_dispatched_task(state)
-
-        # Record structured reflection for learning
-        if state.task_outcome and state.goal_id and state.action_taken == "serve":
-            await _record_cycle_reflection(state)
+        # Background monitor handles task polling — results collected in PERCEIVE.
+        # Record cycle reflection for completed tasks from this cycle if available.
+        if state.goal_id and state.action_taken == "serve":
+            # Check if any just-collected results are for this cycle's goal
+            for pending, outcome in completed_tasks:
+                if pending.goal_id == state.goal_id:
+                    state.task_outcome = outcome
+                    state.plan_text = pending.plan_text
+                    break
+            if state.task_outcome:
+                await _record_cycle_reflection(state)
 
         # ── REFLECT ──────────────────────────────────────────────────────
         await _reflect(state)
@@ -474,8 +492,9 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
         if resp.status_code in (200, 201, 202):
             data = resp.json()
             task_id = data.get("task_id", "unknown")
-            state.dispatched_task_id = task_id
-            state.plan_text = plan
+
+            # Register for background monitoring instead of blocking poll
+            task_monitor.dispatch(task_id, goal_id, state.cycle_number, plan)
 
             # Persist plan AFTER successful dispatch (iteration/progress updated after task completes)
             pool = get_pool()
