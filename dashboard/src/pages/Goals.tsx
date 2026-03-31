@@ -7,13 +7,12 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
-import { apiFetch, getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getPipelineTasks, getGoalStats, getIntelRecommendations, updateRecommendation, type Goal, type IntelRecommendation } from '../api'
-import type { PipelineTask } from '../types'
-import { TaskDetailSheet } from './Tasks'
+import { apiFetch, getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getGoalStats, getIntelRecommendations, updateRecommendation, getGoalIterations, type Goal, type GoalIteration, type IntelRecommendation } from '../api'
+import FileViewer from '../components/FileViewer'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
   Badge, Button, Card, ConfirmDialog, EmptyState, Input,
-  Metric, Modal, ProgressBar, Select, Skeleton, StatusDot, Textarea, Toast, Tooltip,
+  Metric, Modal, ProgressBar, Select, Skeleton, Textarea, Toast, Tooltip,
 } from '../components/ui'
 import { DiscussionThread } from '../components/DiscussionThread'
 import { RecommendationCard } from '../components/intel/RecommendationCard'
@@ -382,6 +381,99 @@ function EditGoalModal({
   )
 }
 
+// ── Goal timeline ────────────────────────────────────────────────────────────
+
+function buildNarrative(iterations: GoalIteration[]): string {
+  if (iterations.length === 0) return 'No activity yet.'
+  const parts: string[] = []
+  const chronological = [...iterations].reverse()
+  for (const it of chronological) {
+    if (it.task_status === 'complete') {
+      parts.push(it.task_summary || 'Completed a task.')
+    } else if (it.task_status === 'failed') {
+      parts.push(`Failed: ${it.task_summary || 'unknown error'}.`)
+    }
+  }
+  return parts.join(' ') || 'Work in progress.'
+}
+
+function GoalTimeline({ goalId, onFileClick }: { goalId: string; onFileClick: (p: string) => void }) {
+  const { data: iterations = [], isLoading } = useQuery({
+    queryKey: ['goal-iterations', goalId],
+    queryFn: () => getGoalIterations(goalId),
+    staleTime: 10_000,
+  })
+
+  if (isLoading) return <Skeleton lines={4} />
+  if (iterations.length === 0) return <p className="text-compact text-content-tertiary">No iteration history yet.</p>
+
+  const narrative = buildNarrative(iterations.slice(0, 5))
+
+  return (
+    <div>
+      {/* Progress narrative */}
+      <div className="mb-4 rounded-md border border-accent/20 bg-gradient-to-br from-surface to-surface-elevated p-3">
+        <p className="text-caption font-medium uppercase tracking-wide text-accent">
+          Progress — {iterations.length} attempt{iterations.length !== 1 ? 's' : ''}
+        </p>
+        <p className="mt-1 text-compact text-content-primary">{narrative}</p>
+      </div>
+
+      {/* Timeline */}
+      <div className="space-y-0">
+        {iterations.map((it, i) => (
+          <div key={it.id} className="relative pb-4 pl-6">
+            {/* Connector line */}
+            {i < iterations.length - 1 && (
+              <div className="absolute left-[9px] top-5 h-full w-0.5 bg-border" />
+            )}
+            {/* Status dot */}
+            <div className={`absolute left-1 top-1.5 h-3 w-3 rounded-full border-2 border-surface ${
+              it.task_status === 'complete' ? 'bg-success' :
+              it.task_status === 'failed' ? 'bg-danger' : 'bg-content-tertiary'
+            }`} />
+
+            <div className="rounded-md border border-border bg-surface-elevated p-2.5">
+              <div className="mb-1 text-caption text-content-tertiary">
+                Attempt {it.attempt} — {new Date(it.created_at).toLocaleString()}
+              </div>
+
+              {/* Plan adjustment callout */}
+              {it.plan_adjustment && (
+                <div className="mb-2 rounded-sm border border-warning-dim/30 bg-warning-dim/10 px-2 py-1 text-caption text-warning">
+                  {it.plan_adjustment}
+                </div>
+              )}
+
+              <p className="text-compact font-medium text-content-primary">
+                {it.task_summary || it.plan_text || 'No details'}
+              </p>
+
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-caption">
+                <span className={
+                  it.task_status === 'complete' ? 'text-success' :
+                  it.task_status === 'failed' ? 'text-danger' : 'text-content-tertiary'
+                }>
+                  {it.task_status || 'pending'}
+                </span>
+                {(it.files_touched || []).map((f: string) => (
+                  <button key={f} onClick={() => onFileClick(f)}
+                          className="text-accent hover:underline">
+                    {f.split('/').pop()}
+                  </button>
+                ))}
+                {Number(it.cost_usd) > 0 && (
+                  <span className="text-content-tertiary">${Number(it.cost_usd).toFixed(2)}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Goal card ──────────────────────────────────────────────────────────────────
 
 function GoalCard({ goal }: { goal: Goal }) {
@@ -393,7 +485,7 @@ function GoalCard({ goal }: { goal: Goal }) {
   const [rejectFeedback, setRejectFeedback] = useState('')
   const [showRejectForm, setShowRejectForm] = useState(false)
   const qc = useQueryClient()
-  const [selectedTask, setSelectedTask] = useState<PipelineTask | null>(null)
+  const [viewingFile, setViewingFile] = useState<string | null>(null)
 
   const remove = useMutation({
     mutationFn: () => deleteGoal(goal.id),
@@ -452,13 +544,6 @@ function GoalCard({ goal }: { goal: Goal }) {
       setToast({ variant: 'success', message: 'Spec rejected. Goal will re-scope.' })
     },
     onError: (e) => setToast({ variant: 'error', message: `Failed to reject: ${e}` }),
-  })
-
-  const { data: goalTasks } = useQuery({
-    queryKey: ['goal-tasks', goal.id],
-    queryFn: () => getPipelineTasks({ goal_id: goal.id, limit: 5 }),
-    enabled: expanded,
-    staleTime: 10_000,
   })
 
   const progressPct = Math.round(goal.progress * 100)
@@ -621,56 +706,9 @@ function GoalCard({ goal }: { goal: Goal }) {
               </div>
             )}
 
-            {/* Current Plan */}
-            {(() => {
-              const plan = goal.current_plan as Record<string, unknown> | null
-              return plan?.plan ? (
-                <div className="mt-2 p-2.5 rounded-sm bg-surface-elevated">
-                  <span className="text-caption font-medium text-content-secondary">Last Plan</span>
-                  <p className="mt-1 text-caption text-content-secondary whitespace-pre-wrap">
-                    {String(plan.plan)}
-                  </p>
-                </div>
-              ) : null
-            })()}
-
-            {/* Recent Tasks */}
-            <div className="mt-2">
-              <span className="text-caption font-medium text-content-secondary">Recent Tasks</span>
-              {goalTasks && goalTasks.length > 0 ? (
-                <div className="mt-1 space-y-1">
-                  {goalTasks.map(t => (
-                    <div
-                      key={t.id}
-                      onClick={() => setSelectedTask(t)}
-                      className="flex items-center gap-2 text-caption cursor-pointer rounded-sm px-1 -mx-1 py-0.5 hover:bg-surface-card-hover transition-colors"
-                    >
-                      <StatusDot status={
-                        t.status === 'complete' ? 'success'
-                        : t.status === 'failed' ? 'danger'
-                        : t.status === 'cancelled' ? 'neutral'
-                        : 'warning'
-                      } />
-                      <span className="flex-1 truncate text-content-secondary">{t.user_input.replace(/^\[Cortex goal work\]\s*/, '')}</span>
-                      <span className={clsx(
-                        'shrink-0 px-1.5 py-0.5 rounded text-micro font-medium',
-                        t.status === 'complete' ? 'bg-emerald-900/30 text-emerald-400'
-                        : t.status === 'failed' ? 'bg-red-900/30 text-red-400'
-                        : 'bg-neutral-700 text-neutral-300',
-                      )}>
-                        {t.status}
-                      </span>
-                      {t.queued_at && (
-                        <span className="shrink-0 text-content-tertiary">
-                          {formatDistanceToNow(new Date(t.queued_at), { addSuffix: true })}
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-1 text-caption text-content-tertiary">No tasks dispatched yet.</p>
-              )}
+            {/* Goal Timeline */}
+            <div className="mt-2" onClick={e => e.stopPropagation()}>
+              <GoalTimeline goalId={goal.id} onFileClick={setViewingFile} />
             </div>
 
             {/* Maturation & Discussion */}
@@ -781,13 +819,6 @@ function GoalCard({ goal }: { goal: Goal }) {
         )}
       </Card>
 
-      {/* Task detail modal */}
-      <TaskDetailSheet
-        task={selectedTask}
-        open={!!selectedTask}
-        onClose={() => setSelectedTask(null)}
-      />
-
       {/* Confirm delete */}
       <ConfirmDialog
         open={confirmDelete}
@@ -806,6 +837,9 @@ function GoalCard({ goal }: { goal: Goal }) {
       {editing && (
         <EditGoalModal goal={goal} open={editing} onClose={() => setEditing(false)} />
       )}
+
+      {/* File viewer modal */}
+      {viewingFile && <FileViewer path={viewingFile} onClose={() => setViewingFile(null)} />}
 
       {toast && (
         <Toast variant={toast.variant} message={toast.message} onDismiss={() => setToast(null)} />
