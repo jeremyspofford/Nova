@@ -716,7 +716,9 @@ def _build_self_knowledge() -> str:
         "-- inspect and commit changes.\n"
         "\n"
         "**Platform (Agent Management):** list_agents, get_agent_info, create_agent, "
-        "update_agent, delete_agent, list_models -- manage agents and view available models.\n"
+        "update_agent, delete_agent, list_models, create_task, create_goal "
+        "-- manage agents, create tasks for pipeline execution, create goals for "
+        "ongoing autonomous work.\n"
         "\n"
         "**Web (Internet Access):** web_search, web_fetch "
         "-- search the internet and fetch web pages.\n"
@@ -757,7 +759,10 @@ def _build_self_knowledge() -> str:
         "- **Intel data needs verification.** I use query_intel_content to check actual feed "
         "content, not guess what's been ingested.\n"
         "- **Admit uncertainty.** If I can't verify something, I say so rather than "
-        "making a confident claim. \"I don't know\" is better than a hallucinated answer."
+        "making a confident claim. \"I don't know\" is better than a hallucinated answer.\n"
+        "- **Create goals for ongoing work, tasks for one-shot work.** If a user describes "
+        "a recurring objective or strategic aim, use create_goal. If they want something done "
+        "once, use create_task. If they just need an answer, respond directly in chat.\n"
     )
 
 
