@@ -73,6 +73,16 @@ def evaluate(results: list[DriveResult], budget_tier: str) -> DriveWinner | None
         return None
 
     scored.sort(key=lambda w: w.score, reverse=True)
+
+    # Mandatory reflect: prevent indefinite deferral
+    for w in scored:
+        if w.result.name == "reflect":
+            cycles = w.result.context.get("cycles_since_reflect", 0)
+            if cycles > 100:
+                log.info("Mandatory reflect: %d cycles since last reflection", cycles)
+                return w
+            break
+
     winner = scored[0]
     log.info(
         "Drive evaluation: winner=%s score=%.2f (urgency=%.2f, tier=%s) | %s",

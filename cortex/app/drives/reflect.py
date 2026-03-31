@@ -30,7 +30,7 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
     description_parts = []
 
     # Urgency rises with cycles since last reflection (0.1 per 10 cycles, cap 0.5)
-    cycle_urgency = min(0.5, (_cycles_since_reflect // 10) * 0.1)
+    cycle_urgency = min(0.8, (_cycles_since_reflect // 10) * 0.1)
     if cycle_urgency > 0:
         urgency = max(urgency, cycle_urgency)
         description_parts.append(f"{_cycles_since_reflect} cycles since last reflection")
@@ -44,13 +44,13 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
 
     if urgency == 0.0:
         return DriveResult(
-            name="reflect", priority=5, urgency=0.0,
+            name="reflect", priority=3, urgency=0.0,
             description="No reflection needed yet",
         )
 
     return DriveResult(
         name="reflect",
-        priority=5,
+        priority=3,
         urgency=round(urgency, 2),
         description="; ".join(description_parts),
         proposed_action="Review recent drive patterns and outcomes, write reflection engram",
