@@ -120,6 +120,13 @@ async def run_cycle(stimuli: list[dict] | None = None) -> CycleState:
         except Exception as e:
             log.warning("Schedule check failed: %s", e)
 
+        # Periodic zombie goal cleanup
+        if state.cycle_number % 100 == 0:
+            try:
+                await _sweep_zombie_goals()
+            except Exception as e:
+                log.warning("Zombie sweep failed: %s", e)
+
         # Query engram memory for context
         goal_context = ""
         if state.stimuli:
@@ -709,6 +716,97 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 "Goal %s: task %s still running — noted for next cycle",
                 goal_id, outcome.task_id,
             )
+
+        # ── Check if goal has reached its limits ──
+        await _check_goal_limits(conn, goal_id, row)
+
+
+async def _check_goal_limits(conn, goal_id: str, original_row) -> None:
+    """Check if goal has hit max_iterations or max_cost and transition accordingly."""
+    # Re-read current state (may have been updated by the branch above)
+    row = await conn.fetchrow(
+        "SELECT iteration, max_iterations, cost_so_far_usd, max_cost_usd, title, status FROM goals WHERE id = $1::uuid",
+        goal_id,
+    )
+    if not row or row["status"] != "active":
+        return
+
+    max_iterations = row["max_iterations"]
+    max_cost_usd = row["max_cost_usd"]
+    iteration = row["iteration"]
+    cost = float(row["cost_so_far_usd"] or 0)
+    title = row["title"] or "unknown"
+
+    # Max iterations reached -> completed (natural lifecycle end)
+    if max_iterations is not None and iteration >= max_iterations:
+        await conn.execute(
+            "UPDATE goals SET status = 'completed', progress = 100.0, updated_at = NOW() WHERE id = $1::uuid",
+            goal_id,
+        )
+        log.info("Goal %s completed: max_iterations reached (%d/%d)", goal_id, iteration, max_iterations)
+        try:
+            from .stimulus import emit, GOAL_COMPLETED
+            await emit(GOAL_COMPLETED, "cortex", payload={"goal_id": goal_id, "title": title, "reason": "max_iterations"})
+        except Exception as e:
+            log.debug("Failed to emit goal.completed stimulus: %s", e)
+        try:
+            await write_entry(
+                f"**Goal completed** — \"{title}\" reached max iterations ({iteration}/{max_iterations})",
+                entry_type="narration",
+                metadata={"goal_id": goal_id, "reason": "max_iterations"},
+            )
+        except Exception:
+            pass
+        return
+
+    # Max cost reached -> paused (needs user decision)
+    if max_cost_usd is not None and cost >= max_cost_usd:
+        await conn.execute(
+            """UPDATE goals SET status = 'paused',
+                  current_plan = jsonb_set(COALESCE(current_plan, '{}'::jsonb), '{paused_reason}', '"budget_exhausted"'),
+                  updated_at = NOW()
+               WHERE id = $1::uuid""",
+            goal_id,
+        )
+        log.info("Goal %s paused: budget exhausted ($%.2f/$%.2f)", goal_id, cost, max_cost_usd)
+        try:
+            from .stimulus import emit, GOAL_BUDGET_PAUSED
+            await emit(GOAL_BUDGET_PAUSED, "cortex", payload={"goal_id": goal_id, "title": title, "cost": cost, "limit": max_cost_usd})
+        except Exception as e:
+            log.debug("Failed to emit goal.budget_paused stimulus: %s", e)
+        try:
+            await write_entry(
+                f"**Goal paused** — \"{title}\" budget exhausted (${cost:.2f}/${max_cost_usd:.2f})",
+                entry_type="escalation",
+                metadata={"goal_id": goal_id, "reason": "budget_exhausted"},
+            )
+        except Exception:
+            pass
+
+
+async def _sweep_zombie_goals() -> None:
+    """Periodic cleanup: transition goals that already hit their limits."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        # Goals past max_iterations -> completed
+        completed = await conn.fetch(
+            """UPDATE goals SET status = 'completed', progress = 100.0, updated_at = NOW()
+               WHERE status = 'active' AND max_iterations IS NOT NULL AND iteration >= max_iterations
+               RETURNING id, title""",
+        )
+        for row in completed:
+            log.info("Zombie sweep: goal %s '%s' completed (max_iterations reached)", row["id"], row["title"])
+
+        # Goals past max_cost -> paused
+        paused = await conn.fetch(
+            """UPDATE goals SET status = 'paused',
+                  current_plan = jsonb_set(COALESCE(current_plan, '{}'::jsonb), '{paused_reason}', '"budget_exhausted"'),
+                  updated_at = NOW()
+               WHERE status = 'active' AND max_cost_usd IS NOT NULL AND cost_so_far_usd >= max_cost_usd
+               RETURNING id, title""",
+        )
+        for row in paused:
+            log.info("Zombie sweep: goal %s '%s' paused (budget exhausted)", row["id"], row["title"])
 
 
 async def _record_cycle_reflection(state: CycleState) -> None:

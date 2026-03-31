@@ -40,6 +40,8 @@ GOAL_COMMENTED = "goal.commented"
 
 # Experience learning stimuli
 GOAL_STUCK = "goal.stuck"
+GOAL_COMPLETED = "goal.completed"
+GOAL_BUDGET_PAUSED = "goal.budget_paused"
 
 _redis: aioredis.Redis | None = None
 
