@@ -61,6 +61,46 @@ async def _publish_notification(notification_type: str, task_id: str, title: str
         logger.warning(f"Notification publish failed (non-fatal): {e}")
 
 
+# ── Task summary builder ─────────────────────────────────────────────────────
+
+def _build_task_summary(
+    output: str,
+    state: PipelineState,
+    cost_usd: float,
+    started_at: object | None,
+) -> dict:
+    """Build structured summary from pipeline output. No LLM call."""
+    import re
+    from datetime import datetime, timezone
+
+    task_result = state.completed.get("task", {})
+    files_changed = task_result.get("files_changed", [])
+    commands_run = task_result.get("commands_run", [])
+    review = state.completed.get("code_review", {})
+
+    # Headline: first 1-2 sentences, max 200 chars
+    text = (output or "").strip()
+    sentences = re.split(r'(?<=[.!?])\s+', text[:500])
+    headline = sentences[0] if sentences else text[:200]
+    if len(headline) > 200:
+        headline = headline[:197] + "..."
+
+    duration_s = None
+    if started_at:
+        duration_s = round((datetime.now(timezone.utc) - started_at).total_seconds())
+
+    return {
+        "headline": headline,
+        "files_created": [],
+        "files_modified": files_changed,
+        "commands_run": commands_run[:10],
+        "findings_count": 0,
+        "review_verdict": review.get("verdict"),
+        "cost_usd": round(cost_usd, 4) if cost_usd else 0,
+        "duration_s": duration_s,
+    }
+
+
 # ── Data classes for DB rows ───────────────────────────────────────────────────
 
 @dataclass
@@ -1157,6 +1197,32 @@ async def _complete_task(task_id: str, output: str, state: PipelineState) -> Non
             )
     except Exception:
         logger.debug("Task %s: cost rollup failed (columns may not exist yet)", task_id)
+
+    # Build and persist structured summary
+    try:
+        import json as _json
+        async with pool.acquire() as conn:
+            started_row = await conn.fetchrow(
+                "SELECT started_at FROM tasks WHERE id = $1::uuid", task_id,
+            )
+            cost_row = await conn.fetchrow(
+                "SELECT total_cost_usd FROM tasks WHERE id = $1::uuid", task_id,
+            )
+            findings_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM guardrail_findings WHERE task_id = $1::uuid", task_id,
+            )
+            summary = _build_task_summary(
+                output, state,
+                cost_usd=float(cost_row["total_cost_usd"] or 0),
+                started_at=started_row["started_at"],
+            )
+            summary["findings_count"] = findings_count
+            await conn.execute(
+                "UPDATE tasks SET summary = $1::jsonb WHERE id = $2::uuid",
+                _json.dumps(summary), task_id,
+            )
+    except Exception as e:
+        logger.warning("Failed to build task summary for %s: %s", task_id, e)
 
     await _audit(task_id, "task_complete", "info", {"flags": list(state.flags)})
     logger.info(f"Task {task_id} complete")
