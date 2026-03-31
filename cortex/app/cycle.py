@@ -619,7 +619,7 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             new_iteration = iteration + 1
             # Progress: blend iteration ratio with a completion boost
             iter_ratio = min(new_iteration / max_iterations, 1.0)
-            new_progress = min(round(iter_ratio * 100, 1), 100.0)
+            new_progress = min(round(iter_ratio, 3), 1.0)
 
             plan_update = {
                 **current_plan,
@@ -647,7 +647,7 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             )
             log.info(
                 "Goal %s: iteration %d/%d, progress %.1f%% (task %s complete)",
-                goal_id, new_iteration, max_iterations, new_progress, outcome.task_id,
+                goal_id, new_iteration, max_iterations, new_progress * 100, outcome.task_id,
             )
 
         elif outcome.status == "failed":
@@ -774,7 +774,7 @@ async def _check_goal_limits(conn, goal_id: str, original_row) -> None:
     # Max iterations reached -> completed (natural lifecycle end)
     if max_iterations is not None and iteration >= max_iterations:
         await conn.execute(
-            "UPDATE goals SET status = 'completed', progress = 100.0, updated_at = NOW() WHERE id = $1::uuid",
+            "UPDATE goals SET status = 'completed', progress = 1.0, updated_at = NOW() WHERE id = $1::uuid",
             goal_id,
         )
         log.info("Goal %s completed: max_iterations reached (%d/%d)", goal_id, iteration, max_iterations)
@@ -824,7 +824,7 @@ async def _sweep_zombie_goals() -> None:
     async with pool.acquire() as conn:
         # Goals past max_iterations -> completed
         completed = await conn.fetch(
-            """UPDATE goals SET status = 'completed', progress = 100.0, updated_at = NOW()
+            """UPDATE goals SET status = 'completed', progress = 1.0, updated_at = NOW()
                WHERE status = 'active' AND max_iterations IS NOT NULL AND iteration >= max_iterations
                RETURNING id, title""",
         )

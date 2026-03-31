@@ -437,6 +437,8 @@ function ClarificationPanel({ task, onDone }: { task: PipelineTask; onDone: () =
 
 function SummaryCard({ summary, onFileClick }: { summary: TaskSummary; onFileClick: (p: string) => void }) {
   const allFiles = [...(summary.files_created || []), ...(summary.files_modified || [])]
+  // Don't render empty summary card
+  if (!summary.headline && allFiles.length === 0) return null
   return (
     <div className="mb-3 rounded-md border border-accent/20 bg-gradient-to-br from-surface to-surface-elevated p-3">
       <p className="text-caption font-medium uppercase tracking-wide text-accent">Summary</p>

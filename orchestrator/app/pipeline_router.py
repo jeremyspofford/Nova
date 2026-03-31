@@ -305,27 +305,33 @@ async def clarify_pipeline_task(
 
 
 @router.delete("/api/v1/pipeline/tasks/{task_id}", status_code=204)
-async def delete_pipeline_task(task_id: str, _admin: AdminDep) -> None:
+async def delete_pipeline_task(
+    task_id: str,
+    _admin: AdminDep,
+    force: bool = Query(default=False, description="Cancel active task before deleting"),
+) -> None:
     """
-    Delete a single terminal task (complete/failed/cancelled) and all related records.
+    Delete a task and all related records.
     FK CASCADE handles guardrail_findings, code_reviews, artifacts, agent_sessions.
-    Admin-only.
+    With force=true, cancels active tasks first. Admin-only.
     """
     pool = get_pool()
     async with pool.acquire() as conn:
+        if force:
+            await conn.execute(
+                """
+                UPDATE tasks SET status = 'cancelled', completed_at = now()
+                WHERE id = $1::uuid
+                  AND status NOT IN ('complete', 'failed', 'cancelled')
+                """,
+                task_id,
+            )
         result = await conn.execute(
-            """
-            DELETE FROM tasks
-            WHERE id = $1::uuid
-              AND status IN ('complete', 'failed', 'cancelled')
-            """,
+            "DELETE FROM tasks WHERE id = $1::uuid",
             task_id,
         )
     if result == "DELETE 0":
-        raise HTTPException(
-            status_code=409,
-            detail="Task not found or not in a terminal state (complete/failed/cancelled)",
-        )
+        raise HTTPException(status_code=404, detail="Task not found")
 
 
 @router.delete("/api/v1/pipeline/tasks")
@@ -337,14 +343,18 @@ async def bulk_delete_pipeline_tasks(
     ),
     ids: str = Query(
         default="",
-        description="Comma-separated task UUIDs to delete (only terminal tasks)",
+        description="Comma-separated task UUIDs to delete",
+    ),
+    force: bool = Query(
+        default=False,
+        description="Cancel active tasks before deleting",
     ),
 ) -> dict:
     """
-    Bulk delete terminal tasks — by status filter or by specific IDs.
-    Only tasks in terminal states can be deleted. Admin-only.
+    Bulk delete tasks — by status filter or by specific IDs.
+    With force=true, active tasks are cancelled first then deleted. Admin-only.
     """
-    ALLOWED = {"complete", "failed", "cancelled", "pending_human_review", "clarification_needed"}
+    TERMINAL = {"complete", "failed", "cancelled", "pending_human_review", "clarification_needed"}
     pool = get_pool()
 
     # Mode 1: delete by specific IDs
@@ -353,29 +363,36 @@ async def bulk_delete_pipeline_tasks(
         if not task_ids:
             raise HTTPException(status_code=400, detail="No valid IDs provided")
         async with pool.acquire() as conn:
+            if force:
+                # Cancel any active tasks first
+                await conn.execute(
+                    """
+                    UPDATE tasks
+                    SET status = 'cancelled', completed_at = now()
+                    WHERE id = ANY($1::uuid[])
+                      AND status NOT IN ('complete', 'failed', 'cancelled')
+                    """,
+                    task_ids,
+                )
             result = await conn.execute(
-                """
-                DELETE FROM tasks
-                WHERE id = ANY($1::uuid[])
-                  AND status = ANY($2::text[])
-                """,
+                "DELETE FROM tasks WHERE id = ANY($1::uuid[])",
                 task_ids,
-                list(ALLOWED),
             )
         deleted = int(result.split()[-1])
-        log.info("Bulk deleted %d tasks by IDs (%d requested)", deleted, len(task_ids))
+        log.info("Bulk deleted %d tasks by IDs (%d requested, force=%s)", deleted, len(task_ids), force)
         return {"deleted": deleted, "ids": task_ids}
 
     # Mode 2: delete by status filter (original behavior)
     requested = {s.strip() for s in status.split(",") if s.strip()}
     if not requested:
         requested = {"complete", "failed", "cancelled"}
-    invalid = requested - ALLOWED
-    if invalid:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Can only bulk-delete terminal statuses. Invalid: {invalid}",
-        )
+    if not force:
+        invalid = requested - TERMINAL
+        if invalid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Can only bulk-delete terminal statuses without force=true. Invalid: {invalid}",
+            )
 
     async with pool.acquire() as conn:
         result = await conn.execute(

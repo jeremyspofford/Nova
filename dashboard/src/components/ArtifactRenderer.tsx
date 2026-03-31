@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import DOMPurify from 'dompurify'
 import { Copy, Check, Download, FileText, FileCode, GitBranch, Box } from 'lucide-react'
 import type { Artifact } from '../api'
+import { getWorkspaceFile } from '../api'
 
 const MARKDOWN_TYPES = new Set(['documentation', 'task_summary', 'decision_record', 'api_contract'])
 const CODE_TYPES = new Set(['code', 'test', 'config', 'schema'])
@@ -71,6 +72,16 @@ export function MermaidDiagram({ content }: { content: string }) {
   )
 }
 
+/* ── Render mermaid code blocks inside markdown artifacts ── */
+const markdownComponents = {
+  code({ className, children }: { className?: string; children?: React.ReactNode }) {
+    if (className === 'language-mermaid') {
+      return <MermaidDiagram content={String(children).replace(/\n$/, '')} />
+    }
+    return <code className={className}>{children}</code>
+  },
+}
+
 /* ── Main component ─────────────────────────────────────── */
 export default function ArtifactCard({
   artifact,
@@ -88,8 +99,16 @@ export default function ArtifactCard({
     setTimeout(() => setCopied(false), 1500)
   }
 
-  const downloadContent = () => {
-    const blob = new Blob([artifact.content], { type: 'text/plain' })
+  const downloadContent = async () => {
+    let text = artifact.content
+    // Fetch live workspace file if available
+    if (artifact.file_path) {
+      try {
+        const file = await getWorkspaceFile(artifact.file_path)
+        if (file.content) text = file.content
+      } catch { /* fall back to artifact content */ }
+    }
+    const blob = new Blob([text], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -105,7 +124,7 @@ export default function ArtifactCard({
     if (MARKDOWN_TYPES.has(t)) {
       return (
         <div className="markdown-body text-compact text-content-secondary">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
             {artifact.content}
           </ReactMarkdown>
         </div>

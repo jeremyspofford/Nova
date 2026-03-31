@@ -221,17 +221,17 @@ export const getWorkspaceFile = (path: string) =>
   apiFetch<WorkspaceFile>(`/api/v1/workspace/files?path=${encodeURIComponent(path)}`)
 
 export const deletePipelineTask = (task_id: string) =>
-  apiFetch<void>(`/api/v1/pipeline/tasks/${task_id}`, { method: 'DELETE' })
+  apiFetch<void>(`/api/v1/pipeline/tasks/${task_id}?force=true`, { method: 'DELETE' })
 
 export const bulkDeletePipelineTasks = (statuses = 'complete,failed,cancelled,pending_human_review,clarification_needed') =>
   apiFetch<{ deleted: number; statuses: string[] }>(
-    `/api/v1/pipeline/tasks?status=${encodeURIComponent(statuses)}`,
+    `/api/v1/pipeline/tasks?status=${encodeURIComponent(statuses)}&force=true`,
     { method: 'DELETE' },
   )
 
 export const bulkDeletePipelineTasksByIds = (ids: string[]) =>
   apiFetch<{ deleted: number; ids: string[] }>(
-    `/api/v1/pipeline/tasks?ids=${encodeURIComponent(ids.join(','))}`,
+    `/api/v1/pipeline/tasks?ids=${encodeURIComponent(ids.join(','))}&force=true`,
     { method: 'DELETE' },
   )
 
