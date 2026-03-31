@@ -177,6 +177,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
             onChange={onModelChange}
             models={modelPickerItems}
             className="w-72"
+            buttonClassName="flex items-center justify-between gap-2 w-full px-3 py-1.5 bg-stone-700 rounded-full text-[13px] font-mono text-stone-300 border-none cursor-pointer"
           />
           <Tooltip content="Manage models">
             <button
@@ -366,8 +367,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || voice?.conversationMode}
-            className="flex items-center justify-center rounded-full bg-accent p-2.5 text-neutral-950 hover:bg-accent-hover disabled:opacity-40 transition-colors duration-fast shrink-0"
-            style={{ height: '40px', width: '40px' }}
+            className="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-600 text-white flex items-center justify-center shadow-[0_0_12px_rgba(25,168,158,0.3)] hover:shadow-[0_0_20px_rgba(25,168,158,0.4)] disabled:opacity-40 transition-all duration-150 shrink-0"
           >
             <Send size={16} />
           </button>

@@ -71,3 +71,40 @@ def get_root() -> Path:
     elif tier == SandboxTier.isolated:
         raise PermissionError("Filesystem access disabled in isolated sandbox tier")
     return Path(settings.workspace_root).resolve()
+
+
+# ── Self-modification overlay ────────────────────────────────────────────────
+
+NOVA_SOURCE_ROOT = Path("/nova")
+
+_self_mod_var: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "self_modification", default=False,
+)
+
+
+def set_self_modification(enabled: bool) -> contextvars.Token:
+    """Set whether self-modification is enabled for the current context."""
+    return _self_mod_var.set(enabled)
+
+
+def reset_self_modification(token: contextvars.Token) -> None:
+    _self_mod_var.reset(token)
+
+
+def is_self_modification_enabled() -> bool:
+    return _self_mod_var.get()
+
+
+async def read_self_modification_config() -> bool:
+    """Read nova.self_modification from platform_config."""
+    try:
+        from app.db import get_pool
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT value #>> '{}' AS val FROM platform_config "
+                "WHERE key = 'nova.self_modification'"
+            )
+        return row and row["val"] == "true"
+    except Exception:
+        return False

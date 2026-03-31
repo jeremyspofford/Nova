@@ -243,6 +243,10 @@ html.dark .skeleton {
   0% { opacity: 0; transform: scale(0.95); }
   100% { opacity: 1; transform: scale(1); }
 }
+@keyframes slideInLeft {
+  0% { opacity: 0; transform: translateX(-12px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
 
 /* ── Markdown rendering in chat bubbles ──────────────────────────────────── */
 .markdown-body > :first-child { margin-top: 0; }

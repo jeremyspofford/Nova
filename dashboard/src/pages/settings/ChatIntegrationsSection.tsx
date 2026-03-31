@@ -551,7 +551,7 @@ export function ChatIntegrationsSection() {
         className="mb-4"
       />
 
-      <div className="max-w-xl">
+      <div>
         {tab === 'telegram' && <TelegramSetup status={tgStatus} slackConfigured={slackStatus.configured} onDone={refresh} />}
         {tab === 'slack' && <SlackSetup status={slackStatus} telegramConfigured={tgStatus.configured} onDone={refresh} />}
       </div>

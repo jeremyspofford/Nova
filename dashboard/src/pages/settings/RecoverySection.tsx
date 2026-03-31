@@ -8,6 +8,8 @@ export function RecoverySection() {
       icon={Shield}
       title="Recovery"
       description="Database backups with restore, and factory reset. Recovery service also available directly at port 8888."
+      collapsible
+      defaultOpen={false}
     >
       <div className="space-y-6">
         <RecoveryBackupSection />

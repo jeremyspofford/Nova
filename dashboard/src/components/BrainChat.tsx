@@ -252,19 +252,14 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   const silencePct = silenceCountdown > 0 ? (silenceCountdown / silenceTimeoutMs) * 100 : 0
 
   return (
-    <div className="absolute top-0 right-0 h-full w-[380px] z-20 flex flex-col bg-black/70 backdrop-blur-xl border-l border-white/[0.06] animate-slide-in-right">
+    <div className="fixed bottom-5 right-5 z-20 w-[420px] lg:w-[420px] md:w-[360px] h-[calc(100vh-80px)] flex flex-col overflow-hidden rounded-2xl bg-[rgba(8,45,42,0.35)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)] border border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)] shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]">
       {/* Header */}
-      <div className="shrink-0 px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-medium text-stone-200 shrink-0">Chat</span>
-          <ModelPicker
-            value={modelId}
-            onChange={setModelId}
-            models={models}
-            className="w-48"
-          />
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="shrink-0 min-h-[48px] flex items-center px-4 border-b border-[rgba(68,64,60,0.55)]">
+        <span className="text-sm font-semibold text-stone-200">Chat with Nova</span>
+        <span className="ml-2 px-2.5 py-0.5 text-[11px] font-mono text-teal-400 bg-teal-500/15 rounded-full truncate max-w-[140px]">
+          {modelId || 'auto'}
+        </span>
+        <div className="ml-auto flex items-center gap-2">
           {voiceAvailable && (
             <button
               onClick={() => setMuted(m => !m)}
@@ -274,7 +269,13 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
               {muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
             </button>
           )}
-          <button onClick={onClose} className="text-stone-500 hover:text-stone-300 transition-colors">
+          <ModelPicker
+            value={modelId}
+            onChange={setModelId}
+            models={models}
+            className="w-36"
+          />
+          <button onClick={onClose} className="text-stone-500 hover:text-stone-300 transition-colors" title="Minimize chat">
             <X size={16} />
           </button>
         </div>
@@ -288,13 +289,25 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
             <p className="text-xs text-stone-700">Watch the graph respond as Nova thinks.</p>
           </div>
         )}
-        {messages.map(msg => (
-          <MessageBubble key={msg.id} message={msg} />
-        ))}
+        {messages.map(msg => {
+          const activatedCount = msg.activitySteps
+            ?.filter(s => s.engram_ids && s.engram_ids.length > 0)
+            .reduce((sum, s) => sum + (s.engram_ids?.length ?? 0), 0) ?? 0
+          return (
+            <div key={msg.id}>
+              <MessageBubble message={msg} />
+              {activatedCount > 0 && (
+                <span className="text-[11px] italic text-stone-500 mt-1 block pl-1">
+                  ({activatedCount} node{activatedCount !== 1 ? 's' : ''} activated)
+                </span>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Input */}
-      <div className="shrink-0 px-3 pb-3 pt-2 border-t border-white/[0.06]">
+      <div className="shrink-0 px-3 pb-3 pt-2 border-t border-[rgba(68,64,60,0.55)]">
         {/* Conversation mode status bar */}
         {conversationMode && (
           <div className="flex items-center gap-2 px-2 py-1.5 mb-2 rounded-md border text-xs relative overflow-hidden"

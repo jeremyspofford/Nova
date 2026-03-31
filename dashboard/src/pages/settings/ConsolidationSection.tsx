@@ -71,7 +71,7 @@ export function ConsolidationSection() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   return (
-    <Section icon={GitMerge} title="Consolidation" description="Memory maintenance cycles — replays recent memories, extracts patterns, resolves contradictions, and prunes weak connections.">
+    <Section icon={GitMerge} title="Consolidation" description="Memory maintenance cycles — replays recent memories, extracts patterns, resolves contradictions, and prunes weak connections." collapsible defaultOpen={false}>
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-compact font-semibold text-content-primary">Consolidation History</h3>

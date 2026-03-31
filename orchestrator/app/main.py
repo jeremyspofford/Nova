@@ -110,6 +110,10 @@ async def lifespan(app: FastAPI):
     primary = await ensure_primary_agent()
     log.info("Primary agent ready: %s model=%s", primary.id, primary.config.model)
 
+    # Ensure Nova self-modification workspace exists
+    from pathlib import Path
+    Path("/nova/workspace").mkdir(parents=True, exist_ok=True)
+
     # Load MCP servers from DB and connect to enabled ones
     from app.pipeline.tools import load_mcp_servers
     mcp_count = await load_mcp_servers()

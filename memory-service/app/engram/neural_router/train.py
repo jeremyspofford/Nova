@@ -216,7 +216,8 @@ def train_model(
         train_q_emb = train_e_emb = val_q_emb = val_e_emb = None
         model = ScalarReranker()
 
-    # Free the Python-list copies — all data now lives in tensors
+    # Save val labels before freeing the Python-list copies
+    val_label_list = [e["label"] for e in val_examples]
     del train_examples, val_examples
 
     optimizer = torch.optim.Adam(
@@ -281,7 +282,7 @@ def train_model(
 
     precision = _precision_at_k(
         val_scores.squeeze().tolist(),
-        [e["label"] for e in val_examples],
+        val_label_list,
         k=20,
     )
     log.info("Validation precision@20: %.4f", precision)

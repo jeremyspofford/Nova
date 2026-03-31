@@ -30,13 +30,13 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
       </div>
 
       {/* Bubble */}
-      <div className={isUser ? 'max-w-[80%]' : 'flex-1 min-w-0 max-w-[85%]'}>
+      <div className={isUser ? 'ml-auto max-w-[85%]' : 'flex-1 min-w-0 max-w-[85%]'}>
         <div
           className={clsx(
-            'text-compact leading-relaxed rounded-lg px-4 py-3',
+            'text-compact leading-relaxed',
             isUser
-              ? 'bg-accent-dim text-content-primary whitespace-pre-wrap'
-              : 'bg-surface-card border border-border-subtle text-content-primary markdown-body overflow-x-auto dark:bg-surface-card/80 dark:backdrop-blur-md dark:border-white/[0.06]',
+              ? 'bg-stone-800 text-content-primary whitespace-pre-wrap rounded-xl px-4 py-3'
+              : 'bg-stone-800/60 border-l-2 border-teal-800 text-content-primary markdown-body overflow-x-auto rounded-r-xl px-5 py-[18px]',
           )}
         >
           {!isUser && message.activitySteps && message.activitySteps.length > 0 && (

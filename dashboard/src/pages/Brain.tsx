@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, X, ChevronRight, Network, Settings, Menu, Mic } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { Search, X, ChevronRight, Network, Settings } from 'lucide-react'
 import { apiFetch } from '../api'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { BrainChat } from '../components/BrainChat'
@@ -115,8 +115,8 @@ function ScoreBar({ value, label, color }: { value: number; label: string; color
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function Brain() {
-  const queryClient = useQueryClient()
   const graphRef = useRef<ForceGraph3DHandle>(null)
+  const [sidebarCollapsed] = useLocalStorage('nova-sidebar-collapsed', false)
 
   // Graph data
   const { data: graph } = useQuery<GraphData>({
@@ -200,26 +200,46 @@ export default function Brain() {
 
   // Activity step handler — highlights actual retrieved engrams when IDs are available
   const handleActivityStep = useCallback((_step: ActivityStep) => {
-    if (!activeGraph?.nodes) return
-    if (_step.step === 'memory' && _step.state === 'done' && _step.engram_ids?.length) {
-      // Real engram IDs from the memory retrieval — highlight exactly what Nova recalled
-      const graphNodeIds = new Set(activeGraph.nodes.map(n => n.id))
-      const matchingIds = _step.engram_ids.filter(id => graphNodeIds.has(id))
-      if (matchingIds.length > 0) {
-        graphRef.current?.highlightNodes(matchingIds)
+    if (_step.step === 'memory' && _step.state === 'running') {
+      graphRef.current?.pulseAll(1500)
+    }
+    if (_step.step === 'memory' && _step.state === 'done') {
+      let nodesToHighlight: string[] = []
+
+      // Prefer real engram IDs if available
+      if (_step.engram_ids?.length && activeGraph?.nodes) {
+        const graphNodeIds = new Set(activeGraph.nodes.map(n => n.id))
+        nodesToHighlight = _step.engram_ids.filter(id => graphNodeIds.has(id))
       }
-    } else if (_step.step === 'memory' && _step.state === 'running') {
-      // Fallback: no IDs yet (running state), show a subtle pulse
-      graphRef.current?.pulseAll(1000)
+
+      // Fallback: random nodes for visual effect
+      if (nodesToHighlight.length === 0 && activeGraph?.nodes?.length) {
+        const shuffled = [...activeGraph.nodes].sort(() => Math.random() - 0.5)
+        nodesToHighlight = shuffled.slice(0, Math.min(25, shuffled.length)).map(n => n.id)
+      }
+
+      if (nodesToHighlight.length > 0) {
+        // Fire nodes in staggered cascade — looks like neurons firing
+        const batch1 = nodesToHighlight.slice(0, 8)
+        const batch2 = nodesToHighlight.slice(8, 16)
+        const batch3 = nodesToHighlight.slice(16)
+
+        graphRef.current?.highlightNodes(batch1)
+        if (batch2.length > 0) {
+          setTimeout(() => graphRef.current?.highlightNodes(batch2), 300)
+        }
+        if (batch3.length > 0) {
+          setTimeout(() => graphRef.current?.highlightNodes(batch3), 600)
+        }
+      }
     }
     if (_step.step === 'generating' && _step.state === 'running') {
       graphRef.current?.pulseAll(2000)
     }
   }, [activeGraph])
 
-  const handleStreamComplete = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['brain-graph'] })
-  }, [queryClient])
+  // No-op: don't invalidate graph on stream complete to keep the view stable
+  const handleStreamComplete = useCallback(() => {}, [])
 
   // Track previous node IDs for fade-in animation
   const prevNodeIdsRef = useRef<Set<string>>(new Set())
@@ -293,6 +313,7 @@ export default function Brain() {
     return { ...activeGraph, nodes: filteredNodes, edges: filteredEdges }
   }, [activeGraph, typeFilter])
 
+
   // Navigate to node (explore from here)
   const exploreNode = (nodeId: string) => {
     setFocusNode({ id: nodeId, ts: Date.now() })
@@ -308,7 +329,7 @@ export default function Brain() {
     : '#71717a'
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-black">
+    <div className="relative w-full h-screen overflow-hidden bg-black pt-[52px]">
       {/* Full-viewport graph */}
       <ForceGraph3D
         ref={graphRef}
@@ -339,107 +360,115 @@ export default function Brain() {
         className="w-full h-full"
       />
 
-      {/* ── HUD: Stats pill top-center ─────────────────────────────── */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
-        <div className="bg-black/40 backdrop-blur-sm border border-white/[0.06] rounded-full px-3.5 py-1 flex items-center gap-2">
+      {/* ── HUD: Glass top bar ──────────────────────────────────────── */}
+      <div className="fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 bg-[rgba(8,45,42,0.30)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)] border-b border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)] shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]">
+        {/* Logo mark */}
+        <div className="w-7 h-7 rounded-full bg-teal-500 flex items-center justify-center text-white text-sm font-bold mr-2 shrink-0">N</div>
+        <span className="text-base font-semibold text-stone-200 shrink-0">Brain</span>
+
+        {/* Center stats */}
+        <div className="flex-1 text-center text-xs font-mono text-stone-400 truncate px-4">
           {engramStats ? (
             <>
-              <span className="text-[10px] text-stone-500">{engramStats.total_engrams.toLocaleString()} memories</span>
-              <span className="w-px h-2.5 bg-white/[0.08]" />
-              <span className="text-[10px] text-stone-500">{engramStats.total_edges.toLocaleString()} edges</span>
-              {activeGraph?.clusters && (
-                <>
-                  <span className="w-px h-2.5 bg-white/[0.08]" />
-                  <span className="text-[10px] text-stone-500">{activeGraph.clusters.length} topics</span>
-                </>
-              )}
-              {engramStats.total_archived > 0 && (
-                <>
-                  <span className="w-px h-2.5 bg-white/[0.08]" />
-                  <span className="text-[10px] text-stone-500">{engramStats.total_archived} archived</span>
-                </>
-              )}
-              {routerStatus && routerStatus.observation_count > 0 && (
-                <>
-                  <span className="w-px h-2.5 bg-white/[0.08]" />
-                  <span className="text-[10px] text-stone-500">{routerStatus.observation_count} router obs</span>
-                </>
-              )}
+              {engramStats.total_engrams.toLocaleString()} memories
+              {' \u00b7 '}{engramStats.total_edges.toLocaleString()} edges
+              {' \u00b7 '}{activeGraph?.clusters?.length ?? 0} topics
+              {engramStats.total_archived > 0 && <> {' \u00b7 '}{engramStats.total_archived} archived</>}
+              {routerStatus && routerStatus.observation_count > 0 && <> {' \u00b7 '}{routerStatus.observation_count} router obs</>}
             </>
           ) : (
-            <span className="text-[10px] text-stone-600">loading...</span>
+            <span className="text-stone-600">loading...</span>
           )}
         </div>
-      </div>
 
-      {/* ── HUD: Topics icon top-left ──────────────────────────────── */}
-      <button
-        onClick={() => setTopicsOpen(v => !v)}
-        className="absolute top-3 left-3 z-10 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/[0.06] flex items-center justify-center text-stone-600 hover:text-stone-300 transition-colors"
-        title="Topics & Search"
-      >
-        <Menu size={14} />
-      </button>
-
-      {/* ── HUD: Settings icon top-right ───────────────────────────── */}
-      <button
-        onClick={() => setSettingsOpen(v => !v)}
-        className="absolute top-3 right-3 z-10 w-8 h-8 rounded-full bg-black/40 backdrop-blur-sm border border-white/[0.06] flex items-center justify-center text-stone-600 hover:text-stone-300 transition-colors"
-        title="Display settings"
-      >
-        <Settings size={14} />
-      </button>
-
-      {/* ── HUD: Search hint bottom-left ───────────────────────────── */}
-      <div className="absolute bottom-5 left-3 z-10">
-        <div className="bg-black/30 rounded-full px-2.5 py-1">
-          <span className="text-[9px] text-stone-700">/ search</span>
+        {/* Right controls */}
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => setTopicsOpen(v => !v)}
+            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150
+              ${topicsOpen
+                ? 'bg-teal-500 text-white'
+                : 'bg-stone-800 text-stone-400 hover:text-stone-300'}`}
+          >
+            Explore
+          </button>
+          <button
+            onClick={() => setSettingsOpen(v => !v)}
+            className="w-8 h-8 rounded-lg flex items-center justify-center text-stone-500 hover:text-stone-300 hover:bg-white/5 transition-colors"
+            title="Display settings"
+          >
+            <Settings size={15} />
+          </button>
+          <button
+            onClick={() => setChatOpen(c => !c)}
+            className={`ml-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors duration-150 ${
+              chatOpen
+                ? 'bg-teal-500 text-white'
+                : 'bg-stone-800 text-stone-400 hover:text-stone-300'
+            }`}
+          >
+            Chat
+          </button>
         </div>
       </div>
+
 
       {/* ── Overlay: Topics & Search ───────────────────────────────── */}
       {topicsOpen && (
-        <div
-          className="absolute inset-0 z-20"
-          onClick={(e) => { if (e.target === e.currentTarget) setTopicsOpen(false) }}
-        >
-          <div className="absolute top-0 left-0 w-[280px] h-full bg-black/80 backdrop-blur-md border-r border-white/[0.06] p-4 overflow-y-auto scrollbar-thin">
-            {/* Close */}
-            <button
-              onClick={() => setTopicsOpen(false)}
-              className="absolute top-3 right-3 text-stone-600 hover:text-stone-300 transition-colors"
-            >
-              <X size={14} />
-            </button>
+          <div className="fixed top-[72px] w-[320px] max-h-[calc(100vh-92px)]
+                          z-20 rounded-2xl
+                          bg-[rgba(8,45,42,0.30)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)]
+                          border border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)]
+                          shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]
+                          p-5 overflow-y-auto scrollbar-thin
+                          animate-[scaleIn_150ms_ease-out]"
+               style={{ left: sidebarCollapsed ? 76 : 256 }}>
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <span className="text-[11px] font-semibold uppercase tracking-widest text-stone-400">
+                Memory Explorer
+              </span>
+              <button
+                onClick={() => setTopicsOpen(false)}
+                className="w-6 h-6 rounded-md flex items-center justify-center
+                           text-stone-500 hover:text-stone-200 hover:bg-white/10 transition-all duration-150"
+              >
+                <X size={13} />
+              </button>
+            </div>
 
             {/* Search */}
-            <form onSubmit={handleSearch} className="flex items-center gap-1.5 border border-white/10 rounded-lg px-3 py-1.5 mb-4">
-              <Search size={13} className="text-stone-600 shrink-0" />
+            <form onSubmit={handleSearch} className="flex items-center gap-2
+                          bg-[rgba(250,250,249,0.04)] border border-[rgba(68,64,60,0.5)]
+                          focus-within:border-teal-500/50 focus-within:bg-[rgba(250,250,249,0.06)]
+                          rounded-xl px-3 py-2 mb-5 transition-all duration-150">
+              <Search size={14} className="text-stone-500 shrink-0" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={e => { setSearchQuery(e.target.value); if (!e.target.value) clearSearch() }}
                 placeholder="Search memories..."
-                className="bg-transparent text-sm text-stone-300 placeholder:text-stone-700 outline-none flex-1"
+                className="bg-transparent text-[13px] text-stone-200 placeholder:text-stone-600 outline-none flex-1"
               />
               {searchActive && (
-                <button type="button" onClick={clearSearch} className="text-stone-600 hover:text-stone-300">
-                  <X size={11} />
+                <button type="button" onClick={clearSearch}
+                        className="text-stone-500 hover:text-stone-200 transition-colors">
+                  <X size={12} />
                 </button>
               )}
             </form>
 
             {/* Type distribution filter */}
             {engramStats?.by_type && (
-              <div className="mb-3 pb-3 border-b border-white/5">
-                <p className="text-[10px] uppercase tracking-wider text-stone-500 mb-2 px-1">Filter by type</p>
-                <div className="flex flex-wrap gap-1">
+              <div className="mb-4 pb-4 border-b border-[rgba(68,64,60,0.3)]">
+                <p className="text-[10px] uppercase tracking-widest text-stone-500 mb-2.5 font-medium">Filter by type</p>
+                <div className="flex flex-wrap gap-1.5">
                   <button
                     onClick={() => setTypeFilter(null)}
-                    className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                    className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border transition-all duration-150 ${
                       !typeFilter
-                        ? 'border-white/20 text-white bg-white/10'
-                        : 'border-white/5 text-stone-600 hover:text-stone-400'
+                        ? 'border-teal-500/30 text-teal-300 bg-teal-500/15 shadow-[0_0_8px_rgba(25,168,158,0.1)]'
+                        : 'border-[rgba(68,64,60,0.4)] text-stone-500 hover:text-stone-300 hover:border-[rgba(68,64,60,0.6)]'
                     }`}
                   >
                     All
@@ -448,12 +477,12 @@ export default function Brain() {
                     <button
                       key={type}
                       onClick={() => setTypeFilter(typeFilter === type ? null : type)}
-                      className={`text-[10px] px-2 py-0.5 rounded border transition-colors ${
+                      className={`text-[10px] font-medium px-2.5 py-1 rounded-lg border transition-all duration-150 ${
                         typeFilter === type
-                          ? TYPE_FILTER_CLASSES[type] ?? 'border-white/20 text-white'
+                          ? TYPE_FILTER_CLASSES[type] ?? 'border-teal-500/30 text-teal-300 bg-teal-500/15'
                           : typeFilter
-                            ? 'border-white/5 text-stone-700 hover:text-stone-500'
-                            : 'border-white/5 text-stone-500 hover:text-stone-300'
+                            ? 'border-[rgba(68,64,60,0.3)] text-stone-600 hover:text-stone-400'
+                            : 'border-[rgba(68,64,60,0.4)] text-stone-400 hover:text-stone-200 hover:border-[rgba(68,64,60,0.6)]'
                       }`}
                     >
                       {type === 'self_model' ? 'self model' : type} ({total})
@@ -466,9 +495,10 @@ export default function Brain() {
             {/* Topic/cluster list */}
             {activeGraph && activeGraph.clusters && activeGraph.clusters.length > 0 ? (
               <>
-                <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1 pb-1.5 mb-1 border-b border-white/5">
+                <div className="text-[10px] text-stone-500 uppercase tracking-widest font-medium pb-2 mb-2 border-b border-[rgba(68,64,60,0.3)]">
                   {activeGraph.clusters.length} topics
                 </div>
+                <div className="space-y-0.5">
                 {activeGraph.clusters.slice(0, 30).map(cluster => {
                   const color = CLUSTER_COLORS[cluster.id % CLUSTER_COLORS.length]
                   const isExpanded = expandedClusterId === cluster.id
@@ -481,25 +511,27 @@ export default function Brain() {
                           setFocusCluster({ id: cluster.id, ts: Date.now() })
                           setExpandedClusterId(isExpanded ? null : cluster.id)
                         }}
-                        className={`flex items-center gap-1.5 w-full text-left text-[11px] rounded px-1.5 py-1 transition-colors ${
-                          isFocused ? 'bg-white/10' : 'hover:bg-white/5'
+                        className={`flex items-center gap-2 w-full text-left text-[11px] rounded-lg px-2.5 py-1.5 transition-all duration-150 ${
+                          isFocused
+                            ? 'bg-[rgba(250,250,249,0.08)] shadow-[inset_0_0_0_1px_rgba(250,250,249,0.06)]'
+                            : 'hover:bg-[rgba(250,250,249,0.04)]'
                         }`}
                       >
                         <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: color, boxShadow: `0 0 6px ${color}` }}
+                          className="w-2.5 h-2.5 rounded-full shrink-0"
+                          style={{ backgroundColor: color, boxShadow: `0 0 8px ${color}40` }}
                         />
-                        <span className="text-stone-300 truncate flex-1" title={cluster.label}>
+                        <span className="text-stone-200 truncate flex-1 font-medium" title={cluster.label}>
                           {cluster.label}
                         </span>
-                        <span className="text-stone-600 text-[10px] shrink-0">{cluster.count}</span>
+                        <span className="text-stone-500 text-[10px] font-mono shrink-0">{cluster.count}</span>
                         <ChevronRight
-                          size={10}
-                          className={`text-stone-600 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          size={11}
+                          className={`text-stone-500 shrink-0 transition-transform duration-150 ${isExpanded ? 'rotate-90' : ''}`}
                         />
                       </button>
                       {isExpanded && (
-                        <div className="pl-5 pr-1 py-0.5 space-y-px">
+                        <div className="pl-6 pr-1 py-1 space-y-0.5 ml-1 border-l border-[rgba(68,64,60,0.3)]">
                           {activeGraph.nodes
                             .filter(n => n.cluster_id === cluster.id)
                             .sort((a, b) => b.importance - a.importance)
@@ -513,7 +545,8 @@ export default function Brain() {
                                   setSelectedNode(node.id)
                                   setFocusNode({ id: node.id, ts: Date.now() })
                                 }}
-                                className="block w-full text-left text-[10px] text-stone-500 hover:text-stone-200 truncate rounded px-1 py-0.5 hover:bg-white/5 transition-colors"
+                                className="block w-full text-left text-[10px] text-stone-400 hover:text-stone-100
+                                           truncate rounded-md px-2 py-1 hover:bg-[rgba(250,250,249,0.06)] transition-all duration-150"
                                 title={node.content ?? node.type}
                               >
                                 {node.content ?? `${node.type} · ${(node.importance * 100).toFixed(0)}%`}
@@ -529,15 +562,16 @@ export default function Brain() {
                     </div>
                   )
                 })}
+                </div>
                 {activeGraph.clusters.length > 30 && (
-                  <div className="text-[10px] text-stone-600 px-1.5 pt-1 border-t border-white/5 mt-1">
+                  <div className="text-[10px] text-stone-500 px-2.5 pt-2 mt-1 border-t border-[rgba(68,64,60,0.3)]">
                     +{activeGraph.clusters.length - 30} smaller clusters
                   </div>
                 )}
               </>
             ) : activeGraph ? (
               <>
-                <div className="text-[10px] text-stone-600 uppercase tracking-wider px-1 pb-1.5 mb-1 border-b border-white/5">
+                <div className="text-[10px] text-stone-500 uppercase tracking-widest font-medium pb-2 mb-2 border-b border-[rgba(68,64,60,0.3)]">
                   Types
                 </div>
                 {Array.from(new Set(activeGraph.nodes.map(n => n.type))).map(type => (
@@ -554,7 +588,6 @@ export default function Brain() {
               </>
             ) : null}
           </div>
-        </div>
       )}
 
       {/* ── Overlay: Display Settings ──────────────────────────────── */}
@@ -563,7 +596,11 @@ export default function Brain() {
           className="absolute inset-0 z-20"
           onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false) }}
         >
-          <div className="absolute top-12 right-3 w-[220px] bg-black/80 backdrop-blur-md border border-white/[0.08] rounded-xl p-4 space-y-4">
+          <div className="absolute top-[60px] right-3 w-[240px]
+                          bg-[rgba(8,45,42,0.30)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)]
+                          border border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)] rounded-2xl
+                          shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]
+                          p-5 space-y-4">
             <button
               onClick={() => setSettingsOpen(false)}
               className="absolute top-3 right-3 text-stone-600 hover:text-stone-300 transition-colors"
@@ -751,17 +788,6 @@ export default function Brain() {
             </div>
           </div>
         </div>
-      )}
-
-      {/* ── HUD: Mic button bottom-center ──────────────────────────── */}
-      {!chatOpen && (
-        <button
-          onClick={() => setChatOpen(true)}
-          className="absolute bottom-5 left-1/2 -translate-x-1/2 z-10 w-12 h-12 rounded-full bg-teal-500/15 border-2 border-teal-500/40 flex items-center justify-center text-teal-400 hover:bg-teal-500/25 transition-colors shadow-[0_0_20px_rgba(20,184,166,0.15)]"
-          title="Chat with Nova (press /)"
-        >
-          <Mic size={18} />
-        </button>
       )}
 
       {/* ── Chat Panel ────────────────────────────────────────────────────── */}

@@ -95,6 +95,8 @@ function cellColor(value: string): string {
 
 export function SandboxSection({ entries, onSave, saving }: ConfigSectionProps) {
   const current = useConfigValue(entries, 'shell.sandbox', 'workspace') as TierValue
+  const selfModRaw = useConfigValue(entries, 'nova.self_modification', 'false')
+  const selfMod = selfModRaw === 'true'
   const [saved, setSaved] = useState(false)
   const [showTable, setShowTable] = useState(false)
 
@@ -221,6 +223,40 @@ export function SandboxSection({ entries, onSave, saving }: ConfigSectionProps) 
           </table>
         </div>
       )}
+
+      {/* ── Self-modification toggle ──────────────────────────────── */}
+      <div className="mt-6 pt-4 border-t border-border-subtle">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-compact font-medium text-content-primary">Self-Modification</div>
+            <div className="text-caption text-content-tertiary mt-0.5">
+              Allow Nova to read and modify its own source code and work in a dedicated workspace.
+              Independent of the sandbox tier above.
+            </div>
+          </div>
+          <button
+            onClick={() => onSave('nova.self_modification', selfMod ? 'false' : 'true')}
+            disabled={saving}
+            className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${
+              selfMod ? 'bg-amber-500' : 'bg-stone-700'
+            }`}
+            aria-label={selfMod ? 'Disable self-modification' : 'Enable self-modification'}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+              selfMod ? 'translate-x-5' : ''
+            }`} />
+          </button>
+        </div>
+        {selfMod && (
+          <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+            <p className="text-caption text-amber-600 dark:text-amber-400">
+              Nova can modify its own services, configuration, and pipelines.
+              Changes are made in <code className="text-mono-sm bg-surface-elevated px-1 rounded">nova/</code> and{' '}
+              <code className="text-mono-sm bg-surface-elevated px-1 rounded">nova/workspace/</code>.
+            </p>
+          </div>
+        )}
+      </div>
     </Section>
   )
 }

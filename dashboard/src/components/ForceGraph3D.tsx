@@ -28,6 +28,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 // Shared uniform — update once per frame, all materials see the new value
 const sharedUniforms = {
   uTime: { value: 0 },
+  uDimOthers: { value: 0.0 },
 }
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -225,6 +226,7 @@ const instancedStarVertexShader = /* glsl */ `
   varying float vImportance;
   varying float vBirthTime;
   varying float vHighlightStart;
+  varying float vIsHighlighted;
 
   void main() {
     // Apply instance transform (position + scale from instanceMatrix)
@@ -235,6 +237,10 @@ const instancedStarVertexShader = /* glsl */ `
     vec3 transformedNormal = normalize(normalMatrix * normal);
     vec3 viewDir = normalize(-mvPos.xyz);
     vFacing = dot(transformedNormal, viewDir);
+
+    // Determine if this node is currently highlighted
+    float highlightAge = uTime - aHighlightStart;
+    vIsHighlighted = (aHighlightStart > 0.0 && highlightAge < 5.0) ? 1.0 : 0.0;
 
     // Pass per-instance data to fragment
     vColor = aColor;
@@ -248,12 +254,14 @@ const instancedStarVertexShader = /* glsl */ `
 
 const instancedStarFragmentShader = /* glsl */ `
   uniform float uTime;
+  uniform float uDimOthers;
 
   varying float vFacing;
   varying vec3 vColor;
   varying float vImportance;
   varying float vBirthTime;
   varying float vHighlightStart;
+  varying float vIsHighlighted;
 
   void main() {
     // Soft radial falloff — facing=1 at center, 0 at rim
@@ -269,17 +277,25 @@ const instancedStarFragmentShader = /* glsl */ `
     float age = uTime - vBirthTime;
     float birthFade = clamp(age, 0.0, 1.0);
 
-    // Highlight pulse (fades out over 2.5 seconds)
+    // Highlight pulse (fades out over 5.0 seconds)
     float highlightAge = uTime - vHighlightStart;
     float highlight = vHighlightStart > 0.0
-      ? max(0.0, 1.0 - highlightAge / 2.5) * 0.4
+      ? max(0.0, 1.0 - highlightAge / 5.0) * 0.7
       : 0.0;
 
     // Combine: colored glow + white center
     float opacity = 0.3 + vImportance * 0.7;
     float brightness = opacity * breathe;
     vec3 col = vColor * glow * brightness + vec3(1.0) * center * brightness * 0.6;
-    col += vColor * highlight;
+    // Highlight uses amber to look like neural activation
+    vec3 amberHighlight = vec3(0.98, 0.75, 0.14); // #FBBF24 amber-400
+    col += amberHighlight * highlight;
+
+    // Dim non-highlighted nodes when activation cascade is running
+    if (uDimOthers > 0.0 && vIsHighlighted < 0.5) {
+      float dimFactor = mix(1.0, 0.2, uDimOthers);
+      col *= dimFactor;
+    }
 
     // Alpha: glow fades to transparent at rim
     float alpha = glow * opacity * birthFade + center * 0.5 * birthFade;
@@ -342,7 +358,7 @@ function buildStarInstances(
   instanceGeo.setAttribute('aHighlightStart', new InstancedBufferAttribute(highlightStarts, 1))
 
   const material = new ShaderMaterial({
-    uniforms: { uTime: sharedUniforms.uTime },
+    uniforms: { uTime: sharedUniforms.uTime, uDimOthers: sharedUniforms.uDimOthers },
     vertexShader: instancedStarVertexShader,
     fragmentShader: instancedStarFragmentShader,
     transparent: true,
@@ -764,6 +780,26 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         if (i !== undefined) attr.setX(i, now)
       }
       attr.needsUpdate = true
+
+      // Dim non-highlighted nodes during activation cascade
+      sharedUniforms.uDimOthers.value = 1.0
+      const dimStart = performance.now()
+      const dimDuration = 5000 // match highlight duration
+      const fadeDim = () => {
+        const elapsed = performance.now() - dimStart
+        if (elapsed >= dimDuration) {
+          sharedUniforms.uDimOthers.value = 0.0
+          return
+        }
+        // Hold at full dim for 3s, then fade out over remaining 2s
+        if (elapsed < 3000) {
+          sharedUniforms.uDimOthers.value = 1.0
+        } else {
+          sharedUniforms.uDimOthers.value = 1.0 - (elapsed - 3000) / 2000
+        }
+        requestAnimationFrame(fadeDim)
+      }
+      requestAnimationFrame(fadeDim)
     },
     pulseAll(durationMs: number) {
       globalPulseRef.current = { active: true, startTime: Date.now(), duration: durationMs }

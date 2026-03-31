@@ -107,10 +107,10 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Brain,
     items: [
       { id: 'self-model', label: 'Self-Model', icon: Brain },
-      { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
-      { id: 'maintenance', label: 'Maintenance', icon: Wrench },
       { id: 'engram-sources', label: 'Engram Sources', icon: Database },
       { id: 'router-status', label: 'Neural Router', icon: Activity },
+      { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+      { id: 'consolidation', label: 'Consolidation', icon: GitMerge },
     ],
   },
   {
@@ -659,18 +659,6 @@ export function Settings() {
           </div>
         )}
 
-        {show('consolidation') && (
-          <div id="consolidation">
-            <ConsolidationSection />
-          </div>
-        )}
-
-        {show('maintenance') && (
-          <div id="maintenance">
-            <MaintenanceSection />
-          </div>
-        )}
-
         {show('engram-sources') && (
           <div id="engram-sources">
             <EngramSourcesSection />
@@ -680,6 +668,18 @@ export function Settings() {
         {show('router-status') && (
           <div id="router-status">
             <RouterStatusSection />
+          </div>
+        )}
+
+        {show('maintenance') && (
+          <div id="maintenance">
+            <MaintenanceSection />
+          </div>
+        )}
+
+        {show('consolidation') && (
+          <div id="consolidation">
+            <ConsolidationSection />
           </div>
         )}
 

@@ -24,7 +24,10 @@ from nova_contracts import (
 
 from app.agents.runner import run_agent_turn, run_agent_turn_streaming
 from app.auth import AdminDep, ApiKeyDep, UserDep
-from app.tools.sandbox import SandboxTier, set_sandbox, reset_sandbox
+from app.tools.sandbox import (
+    SandboxTier, set_sandbox, reset_sandbox,
+    read_self_modification_config, set_self_modification, reset_self_modification,
+)
 from app.db import (
     create_api_key_record,
     generate_api_key,
@@ -88,7 +91,10 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
     finally:
         await update_agent_status(agent_id, AgentStatus.idle)
         if sandbox_token is not None:
-            reset_sandbox(sandbox_token)
+            try:
+                reset_sandbox(sandbox_token)
+            except ValueError:
+                pass  # Token from copied async context — var expires naturally
         # Persist messages to conversation if conversation_id provided
         if conversation_id and accumulated:
             try:
@@ -222,9 +228,11 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
     session_id = req.session_id or str(uuid4())
     await update_agent_status(str(req.agent_id), AgentStatus.running)
 
-    # Set sandbox tier from DB config for this request
+    # Set sandbox tier and self-modification flag from DB config
     tier = await _get_sandbox_tier()
     sandbox_token = set_sandbox(tier)
+    self_mod = await read_self_modification_config()
+    self_mod_token = set_self_modification(self_mod)
     try:
         result = await run_agent_turn(
             agent_id=str(req.agent_id),
@@ -240,6 +248,7 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
         await update_agent_status(str(req.agent_id), AgentStatus.idle)
         return result
     finally:
+        reset_self_modification(self_mod_token)
         reset_sandbox(sandbox_token)
 
 
@@ -255,9 +264,11 @@ async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
     session_id = req.session_id or str(uuid4())
     await update_agent_status(str(req.agent_id), AgentStatus.running)
 
-    # Set sandbox tier from DB config for this request
+    # Set sandbox tier and self-modification flag from DB config
     tier = await _get_sandbox_tier()
     sandbox_token = set_sandbox(tier)
+    self_mod = await read_self_modification_config()
+    self_mod_token = set_self_modification(self_mod)
 
     return StreamingResponse(
         _sse_stream(
@@ -466,9 +477,11 @@ async def chat_stream(req: ChatRequest, user: UserDep):
 
     await update_agent_status(str(agent.id), AgentStatus.running)
 
-    # Set sandbox tier from DB config for this request
+    # Set sandbox tier and self-modification flag from DB config
     tier = await _get_sandbox_tier()
     sandbox_token = set_sandbox(tier)
+    self_mod = await read_self_modification_config()
+    self_mod_token = set_self_modification(self_mod)
 
     return StreamingResponse(
         _sse_stream(

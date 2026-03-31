@@ -628,7 +628,18 @@ def _sandbox_context() -> str:
             f"You have no filesystem or shell access. You can only respond with text."
         ),
     }
-    return descriptions.get(tier, f"Sandbox tier: {tier.value}\nFilesystem root: {root}")
+    base = descriptions.get(tier, f"Sandbox tier: {tier.value}\nFilesystem root: {root}")
+
+    from app.tools.sandbox import is_self_modification_enabled, NOVA_SOURCE_ROOT
+    if is_self_modification_enabled():
+        base += (
+            f"\n\nSelf-modification: ENABLED\n"
+            f"Nova source code: {NOVA_SOURCE_ROOT}  (read/write access to Nova's own services)\n"
+            f"Scratch workspace: {NOVA_SOURCE_ROOT}/workspace  (clone repos, build artifacts, temp work)\n"
+            f"Changes to Nova's code take effect after the affected service restarts."
+        )
+
+    return base
 
 
 def _build_self_knowledge() -> str:

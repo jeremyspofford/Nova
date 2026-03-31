@@ -18,6 +18,7 @@ type ModelPickerProps = {
   models: ModelItem[]
   showAuto?: boolean
   className?: string
+  buttonClassName?: string
 }
 
 export function ModelPicker({
@@ -26,6 +27,7 @@ export function ModelPicker({
   models,
   showAuto = false,
   className,
+  buttonClassName,
 }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
   const [flipUp, setFlipUp] = useState(false)
@@ -83,8 +85,7 @@ export function ModelPicker({
         type="button"
         onClick={toggleOpen}
         className={clsx(
-          'flex items-center justify-between gap-2 w-full h-9 rounded-sm border border-border bg-surface-input px-3',
-          'text-compact text-content-primary',
+          buttonClassName ?? 'flex items-center justify-between gap-2 w-full h-9 rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary',
           'outline-none transition-colors duration-fast',
           'focus:border-border-focus focus:ring-2 focus:ring-accent-500/40',
           'hover:bg-surface-card-hover',

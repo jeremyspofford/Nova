@@ -8,6 +8,8 @@ export function KeysSection() {
       icon={Key}
       title="API Keys"
       description="Keys let external clients call Nova's OpenAI-compatible API. Each key has its own rate limit and usage tracking."
+      collapsible
+      defaultOpen={false}
     >
       <KeysContent />
     </Section>

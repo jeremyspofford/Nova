@@ -310,6 +310,14 @@ def _resolve_path(relative: str) -> Path:
     # Workspace tier (default)
     candidate = (root / relative).resolve()
     if not str(candidate).startswith(str(root)):
+        # Check self-modification overlay: allow /nova paths
+        from app.tools.sandbox import is_self_modification_enabled, NOVA_SOURCE_ROOT
+        if is_self_modification_enabled():
+            nova_root = str(NOVA_SOURCE_ROOT)
+            if relative.startswith("/nova") or relative.startswith("nova"):
+                nova_candidate = Path(relative if relative.startswith("/") else f"/nova/{relative.removeprefix('nova/')}").resolve()
+                if str(nova_candidate).startswith(nova_root):
+                    return nova_candidate
         raise ValueError(
             f"Path '{relative}' resolves outside sandbox root '{root}'. "
             "Directory traversal is not permitted."

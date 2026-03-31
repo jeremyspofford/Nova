@@ -681,7 +681,7 @@ async def _run_agent(
     from .agents.code_review   import CodeReviewAgent
     from .agents.decision      import DecisionAgent
     from .agents.post_pipeline import DocumentationAgent, DiagrammingAgent, SecurityReviewAgent, MemoryExtractionAgent
-    from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox
+    from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox, read_self_modification_config, set_self_modification, reset_self_modification
 
     # Resolve model: per-task override → agent → complexity → stage default → pod → auto
     # A "tier:<name>" value (e.g. "tier:cheap") delegates to the gateway's tier
@@ -817,6 +817,8 @@ async def _run_agent(
         except Exception:
             pass  # DB unavailable — safe default
     sandbox_token = set_sandbox(tier)
+    self_mod = await read_self_modification_config()
+    self_mod_token = set_self_modification(self_mod)
 
     start = time.monotonic()
     try:
@@ -933,6 +935,10 @@ async def _run_agent(
         )
         return None, session_id
     finally:
+        try:
+            reset_self_modification(self_mod_token)
+        except ValueError:
+            pass  # Token from different context copy — var expires naturally
         reset_sandbox(sandbox_token)
 
 

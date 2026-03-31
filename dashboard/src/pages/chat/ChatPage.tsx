@@ -9,6 +9,9 @@ import { useVoiceChat } from '../../hooks/useVoiceChat'
 import { ModelManagerModal, getHiddenModels } from '../../components/ModelManagerModal'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
+import { ThreadRail } from '../../components/chat/ThreadRail'
+import { ContextPanel } from '../../components/chat/ContextPanel'
+import { useLocalStorage } from '../../hooks/useLocalStorage'
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -42,6 +45,7 @@ export function Chat() {
   const [messageQueue, setMessageQueue] = useState<string[]>([])
   const [modelManagerOpen, setModelManagerOpen] = useState(false)
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(() => getHiddenModels())
+  const [contextCollapsed, setContextCollapsed] = useLocalStorage('chat.contextCollapsed', false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -441,72 +445,100 @@ export function Chat() {
   }
 
   return (
-    <div ref={containerRef} className="flex flex-col h-full overflow-hidden bg-surface-root">
-      {messages.length === 0 ? (
-        /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
-        <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
-          {greeting && (
-            <div className="max-w-5xl w-full mb-8">
-              <MessageBubble message={{
-                id: 'greeting',
-                role: 'assistant',
-                content: greeting,
-                timestamp: new Date(),
-              }} />
-            </div>
-          )}
-          <div className="w-full max-w-5xl">
-            <ChatInput {...chatInputProps} />
-          </div>
-        </div>
-      ) : (
-        /* Active chat: scrollable messages + bottom-pinned input */
-        <>
-          <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
-              {greeting && (
+    <div className="flex h-full w-full overflow-hidden">
+      {/* Thread Rail - collapsible conversation list (hidden below md) */}
+      <div className="hidden md:block h-full">
+        <ThreadRail />
+      </div>
+
+      {/* Chat Area */}
+      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root">
+        {messages.length === 0 ? (
+          /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
+          <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
+            {greeting && (
+              <div className="max-w-[780px] w-full mb-8 mx-auto">
                 <MessageBubble message={{
                   id: 'greeting',
                   role: 'assistant',
                   content: greeting,
                   timestamp: new Date(),
                 }} />
-              )}
-              {messages.map(msg => (
-                <MessageBubble key={msg.id} message={msg} />
-              ))}
-
-              {error && (
-                <div className="rounded-sm border border-danger/30 bg-danger-dim px-4 py-3 text-compact text-danger">
-                  {error}
-                </div>
-              )}
-
-              <div ref={bottomRef} />
-            </div>
-          </div>
-
-          {(streamingStatus || messageQueue.length > 0) && (
-            <p className="text-caption text-content-tertiary text-center py-1 min-h-6">
-              {streamingStatus && <>{aiName} is {streamingStatus}</>}
-              {streamingStatus && messageQueue.length > 0 && ' \u00b7 '}
-              {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
-            </p>
-          )}
-
-          <div className="shrink-0 w-full px-4 pb-4">
-            <div className="max-w-5xl mx-auto">
+              </div>
+            )}
+            <div className="w-full max-w-[780px] mx-auto">
               <ChatInput {...chatInputProps} />
             </div>
           </div>
-        </>
-      )}
+        ) : (
+          /* Active chat: scrollable messages + bottom-pinned input */
+          <>
+            <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <div className="max-w-[780px] mx-auto px-4 py-6 space-y-6">
+                {greeting && (
+                  <MessageBubble message={{
+                    id: 'greeting',
+                    role: 'assistant',
+                    content: greeting,
+                    timestamp: new Date(),
+                  }} />
+                )}
+                {messages.map((msg, idx) => (
+                  <div key={msg.id}>
+                    {/* Memory access dots between consecutive AI messages */}
+                    {msg.role === 'assistant' && idx > 0 && messages[idx - 1]?.role === 'assistant' && (
+                      <div className="flex justify-center gap-1.5 py-1 mb-6">
+                        <div className="w-[3px] h-[3px] rounded-full bg-teal-500/30" />
+                        <div className="w-[3px] h-[3px] rounded-full bg-teal-500/40" />
+                        <div className="w-[3px] h-[3px] rounded-full bg-teal-500/20" />
+                      </div>
+                    )}
+                    <MessageBubble message={msg} />
+                  </div>
+                ))}
 
-      <ModelManagerModal
-        open={modelManagerOpen}
-        onClose={() => setModelManagerOpen(false)}
-        onSave={setHiddenModels}
-      />
+                {error && (
+                  <div className="rounded-sm border border-danger/30 bg-danger-dim px-4 py-3 text-compact text-danger">
+                    {error}
+                  </div>
+                )}
+
+                <div ref={bottomRef} />
+              </div>
+            </div>
+
+            {(streamingStatus || messageQueue.length > 0) && (
+              <p className="text-caption text-content-tertiary text-center py-1 min-h-6">
+                {streamingStatus && <>{aiName} is {streamingStatus}</>}
+                {streamingStatus && messageQueue.length > 0 && ' \u00b7 '}
+                {messageQueue.length > 0 && `${messageQueue.length} message${messageQueue.length > 1 ? 's' : ''} queued`}
+              </p>
+            )}
+
+            <div className="shrink-0 w-full px-4 pb-4">
+              <div className="max-w-[780px] mx-auto">
+                <ChatInput {...chatInputProps} />
+              </div>
+            </div>
+          </>
+        )}
+
+        <ModelManagerModal
+          open={modelManagerOpen}
+          onClose={() => setModelManagerOpen(false)}
+          onSave={setHiddenModels}
+        />
+      </div>
+
+      {/* Context Panel - live activity (hidden below md) */}
+      <div className="hidden md:flex h-full">
+        <ContextPanel
+          messages={messages}
+          isStreaming={isStreaming}
+          collapsed={contextCollapsed}
+          onToggle={() => setContextCollapsed(c => !c)}
+        />
+      </div>
     </div>
   )
 }
