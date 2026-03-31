@@ -111,6 +111,8 @@ interface ForceGraph3DProps {
   showEdges?: boolean
   showCelestialObjects?: boolean
   showClusterGalaxies?: boolean
+  showMilkyWay?: boolean
+  showAsteroids?: boolean
   clusterSeparation?: number
 }
 
@@ -675,7 +677,7 @@ function makeClusterHaloTexture(r: number, g: number, b: number): CanvasTexture 
   return new CanvasTexture(canvas)
 }
 
-function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean; celestialObjects: boolean }): Group {
+function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean; celestialObjects: boolean; milkyWay: boolean; asteroids: boolean }): Group {
   const group = new Group()
   group.name = 'starfield'
 
@@ -734,8 +736,6 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       // Suns (additive blending — glow through bloom)
       { tex: makeSunTexture(255, 230, 150), x: 2200,  y: 800,   z: 1500, s: 120, op: 0.35, additive: true }, // yellow-white
       { tex: makeSunTexture(220, 80, 40),   x: -1800, y: -1200, z: 600,  s: 40,  op: 0.3,  additive: true }, // red dwarf
-      // Black hole — opaque core with additive accretion glow rendered separately
-      { tex: makeBlackHoleTexture(), x: -800, y: 400, z: -2500, s: 140, op: 0.85, additive: false },
     ]
 
     for (const c of celestials) {
@@ -749,6 +749,39 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       sprite.scale.set(c.s, c.s, 1)
       group.add(sprite)
     }
+
+    // Black hole — two layers for proper occlusion
+    // Layer 1: opaque event horizon core (blocks stars behind it)
+    const bhCoreCanvas = document.createElement('canvas')
+    bhCoreCanvas.width = bhCoreCanvas.height = 128
+    const bhCtx = bhCoreCanvas.getContext('2d')!
+    const bhGrad = bhCtx.createRadialGradient(64, 64, 0, 64, 64, 64)
+    bhGrad.addColorStop(0, 'rgba(0,0,0,1)')
+    bhGrad.addColorStop(0.5, 'rgba(0,0,0,1)')
+    bhGrad.addColorStop(0.75, 'rgba(0,0,0,0.8)')
+    bhGrad.addColorStop(1, 'rgba(0,0,0,0)')
+    bhCtx.fillStyle = bhGrad
+    bhCtx.beginPath(); bhCtx.arc(64, 64, 64, 0, Math.PI * 2); bhCtx.fill()
+    const bhCoreMat = new SpriteMaterial({
+      map: new CanvasTexture(bhCoreCanvas), transparent: true, opacity: 1.0,
+      depthWrite: true,
+    })
+    const bhCore = new Sprite(bhCoreMat)
+    bhCore.position.set(-800, 400, -2500)
+    bhCore.scale.set(50, 50, 1)
+    bhCore.renderOrder = 1
+    group.add(bhCore)
+
+    // Layer 2: accretion disk glow (renders on top)
+    const bhDiskMat = new SpriteMaterial({
+      map: makeBlackHoleTexture(), transparent: true, opacity: 0.9,
+      blending: AdditiveBlending, depthWrite: false,
+    })
+    const bhDisk = new Sprite(bhDiskMat)
+    bhDisk.position.set(-800, 400, -2500)
+    bhDisk.scale.set(160, 160, 1)
+    bhDisk.renderOrder = 2
+    group.add(bhDisk)
   }
 
   // ── Deep-field stars — static backdrop ──
@@ -812,50 +845,74 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     farStars.renderOrder = -2
     group.add(farStars)
 
-    // Milky Way band — flattened disc of faint stars creating a galactic plane
-    const milkyCount = 3000
+  }
+
+  // ── Milky Way band — flattened disc of stars creating a galactic plane ──
+  if (options.milkyWay) {
+    const milkyCount = 5000
     const milkyPos = new Float32Array(milkyCount * 3)
     const milkyCol = new Float32Array(milkyCount * 3)
     for (let i = 0; i < milkyCount; i++) {
-      const r = 2000 + Math.random() * 7000
+      const r = 1500 + Math.random() * 8000
       const theta = Math.random() * Math.PI * 2
-      // Flatten to a disc — concentrated near y=0 with gaussian-ish falloff
-      const ySpread = (Math.random() + Math.random() + Math.random() - 1.5) * 600
+      // Flatten to a disc with gaussian-ish y falloff — denser near the plane
+      const ySpread = (Math.random() + Math.random() + Math.random() - 1.5) * 400
       milkyPos[i * 3]     = r * Math.cos(theta)
       milkyPos[i * 3 + 1] = ySpread
       milkyPos[i * 3 + 2] = r * Math.sin(theta)
-      // Warm white to pale blue
+      // Warm white to pale blue, brighter near center
+      const centerFade = Math.min(1, r / 5000)
       const warmth = Math.random()
-      milkyCol[i * 3]     = 0.7 + warmth * 0.3
-      milkyCol[i * 3 + 1] = 0.7 + warmth * 0.2
-      milkyCol[i * 3 + 2] = 0.8 + Math.random() * 0.2
+      milkyCol[i * 3]     = (0.7 + warmth * 0.3) * (0.6 + centerFade * 0.4)
+      milkyCol[i * 3 + 1] = (0.7 + warmth * 0.2) * (0.6 + centerFade * 0.4)
+      milkyCol[i * 3 + 2] = (0.8 + Math.random() * 0.2) * (0.6 + centerFade * 0.4)
     }
     const milkyGeo = new BufferGeometry()
     milkyGeo.setAttribute('position', new Float32BufferAttribute(milkyPos, 3))
     milkyGeo.setAttribute('color', new Float32BufferAttribute(milkyCol, 3))
     const milkyWay = new Points(milkyGeo, new PointsMaterial({
-      size: 1.2, vertexColors: true, transparent: true, opacity: 0.18,
+      size: 1.8, vertexColors: true, transparent: true, opacity: 0.35,
       sizeAttenuation: false, depthTest: false, depthWrite: false,
     }))
     milkyWay.renderOrder = -1
     group.add(milkyWay)
 
-    // Asteroid field — small rocky particles scattered in the mid-field
-    const asteroidCount = 200
+    // Milky Way core glow — concentrated bright band at center
+    const coreTex = makeNebulaTexture(200, 190, 170)
+    const coreMat = new SpriteMaterial({
+      map: coreTex, transparent: true, opacity: 0.06,
+      blending: AdditiveBlending, depthWrite: false,
+    })
+    const coreSprite = new Sprite(coreMat)
+    coreSprite.position.set(0, 0, -3000)
+    coreSprite.scale.set(4000, 600, 1)
+    group.add(coreSprite)
+  }
+
+  // ── Asteroid field — rocky particles in orbital bands ──
+  if (options.asteroids) {
+    const asteroidCount = 400
     const asteroidPos = new Float32Array(asteroidCount * 3)
+    const asteroidCol = new Float32Array(asteroidCount * 3)
     for (let i = 0; i < asteroidCount; i++) {
-      const r = 1200 + Math.random() * 2500
+      const r = 800 + Math.random() * 2000
       const theta = Math.random() * Math.PI * 2
-      // Slightly flattened — asteroids tend to orbit in a plane
-      const ySpread = (Math.random() - 0.5) * 800
-      asteroidPos[i * 3]     = r * Math.cos(theta) + (Math.random() - 0.5) * 200
+      // Flattened orbital plane with some scatter
+      const ySpread = (Math.random() - 0.5) * 400
+      asteroidPos[i * 3]     = r * Math.cos(theta) + (Math.random() - 0.5) * 150
       asteroidPos[i * 3 + 1] = ySpread
-      asteroidPos[i * 3 + 2] = r * Math.sin(theta) + (Math.random() - 0.5) * 200
+      asteroidPos[i * 3 + 2] = r * Math.sin(theta) + (Math.random() - 0.5) * 150
+      // Rocky browns and greys
+      const shade = 0.2 + Math.random() * 0.25
+      asteroidCol[i * 3]     = shade * (1.0 + Math.random() * 0.3)
+      asteroidCol[i * 3 + 1] = shade * (0.85 + Math.random() * 0.15)
+      asteroidCol[i * 3 + 2] = shade * (0.7 + Math.random() * 0.15)
     }
     const asteroidGeo = new BufferGeometry()
     asteroidGeo.setAttribute('position', new Float32BufferAttribute(asteroidPos, 3))
+    asteroidGeo.setAttribute('color', new Float32BufferAttribute(asteroidCol, 3))
     const asteroids = new Points(asteroidGeo, new PointsMaterial({
-      size: 2.5, color: 0x665544, transparent: true, opacity: 0.35,
+      size: 3, vertexColors: true, transparent: true, opacity: 0.5,
       sizeAttenuation: true, depthWrite: false,
     }))
     group.add(asteroids)
@@ -978,6 +1035,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showEdges = true,
   showCelestialObjects = true,
   showClusterGalaxies = true,
+  showMilkyWay = true,
+  showAsteroids = true,
   clusterSeparation = 0.3,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
@@ -1007,6 +1066,10 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showCelestialRef.current = showCelestialObjects
   const showClusterGalaxiesRef = useRef(showClusterGalaxies)
   showClusterGalaxiesRef.current = showClusterGalaxies
+  const showMilkyWayRef = useRef(showMilkyWay)
+  showMilkyWayRef.current = showMilkyWay
+  const showAsteroidsRef = useRef(showAsteroids)
+  showAsteroidsRef.current = showAsteroids
   const clusterSeparationRef = useRef(clusterSeparation)
   clusterSeparationRef.current = clusterSeparation
   const showEdgesRef = useRef(showEdges)
@@ -1456,9 +1519,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     graphRef.current = graph
     initializedRef.current = true
 
+    // Push camera far plane to see distant stars and milky way
+    const camera = graph.camera()
+    if (camera) { camera.far = 25000; camera.updateProjectionMatrix() }
+
     // Attach starfield if galaxy mode at init
     if (bgColorRef.current === 'galaxy') {
-      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current, celestialObjects: showCelestialRef.current })
+      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current, celestialObjects: showCelestialRef.current, milkyWay: showMilkyWayRef.current, asteroids: showAsteroidsRef.current })
       graph.scene().add(sf)
       starfieldRef.current = sf
     }
@@ -1530,13 +1597,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     if (bgColor === 'galaxy') {
       graph.backgroundColor('#000000')
-      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae, celestialObjects: showCelestialObjects })
+      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae, celestialObjects: showCelestialObjects, milkyWay: showMilkyWay, asteroids: showAsteroids })
       scene.add(sf)
       starfieldRef.current = sf
     } else {
       graph.backgroundColor(bgColor)
     }
-  }, [bgColor, showBackgroundStars, showInnerStars, showNebulae])
+  }, [bgColor, showBackgroundStars, showInnerStars, showNebulae, showMilkyWay, showAsteroids])
 
   // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 
