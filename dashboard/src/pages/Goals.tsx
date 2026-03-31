@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Target, Plus, Trash2, DollarSign,
@@ -8,6 +9,8 @@ import {
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
 import { apiFetch, getGoals, createGoal, updateGoal, deleteGoal, triggerGoal, getGoalStats, getIntelRecommendations, updateRecommendation, getGoalIterations, type Goal, type GoalIteration, type IntelRecommendation } from '../api'
+import { useLocalStorage } from '../hooks/useLocalStorage'
+import { useToast } from '../components/ToastProvider'
 import FileViewer from '../components/FileViewer'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
@@ -398,6 +401,7 @@ function buildNarrative(iterations: GoalIteration[]): string {
 }
 
 function GoalTimeline({ goalId, onFileClick }: { goalId: string; onFileClick: (p: string) => void }) {
+  const navigate = useNavigate()
   const { data: iterations = [], isLoading } = useQuery({
     queryKey: ['goal-iterations', goalId],
     queryFn: () => getGoalIterations(goalId),
@@ -456,6 +460,15 @@ function GoalTimeline({ goalId, onFileClick }: { goalId: string; onFileClick: (p
                 }>
                   {it.task_status || 'pending'}
                 </span>
+                {it.task_id && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); navigate(`/tasks?id=${it.task_id}`) }}
+                    className="text-accent hover:underline font-medium"
+                    title={`View task ${it.task_id}`}
+                  >
+                    View task
+                  </button>
+                )}
                 {(it.files_touched || []).map((f: string) => (
                   <button key={f} onClick={() => onFileClick(f)}
                           className="text-accent hover:underline">
@@ -858,6 +871,30 @@ export function Goals() {
   const [pageView, setPageView] = useState<PageView>('goals')
   const [expandedRecId, setExpandedRecId] = useState<string | null>(null)
   const qc = useQueryClient()
+  const [directCreation] = useLocalStorage('goals.directCreation', false)
+  const [request, setRequest] = useState('')
+  const [sending, setSending] = useState(false)
+  const { addToast } = useToast()
+
+  const handleRequest = async () => {
+    if (!request.trim() || sending) return
+    setSending(true)
+    try {
+      await apiFetch('/api/v1/pipeline/tasks', {
+        method: 'POST',
+        body: JSON.stringify({
+          user_input: request.trim(),
+          metadata: { source: 'goals_page' },
+        }),
+      })
+      setRequest('')
+      addToast({ variant: 'success', message: 'Request sent to Nova' })
+    } catch (err) {
+      addToast({ variant: 'error', message: 'Failed to send request' })
+    } finally {
+      setSending(false)
+    }
+  }
 
   const apiStatus = statusFilter === 'all' ? undefined : statusFilter
 
@@ -899,12 +936,30 @@ export function Goals() {
         description="Define autonomous objectives for Nova to pursue"
         helpEntries={HELP_ENTRIES}
         actions={
-          <Button
-            icon={<Plus size={14} />}
-            onClick={() => setShowCreate(true)}
-          >
-            New Goal
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* Request input — always visible */}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={request}
+                onChange={e => setRequest(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleRequest()}
+                placeholder="Tell Nova what you want to achieve..."
+                disabled={sending}
+                className="flex-1 h-9 rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors"
+              />
+              <Button onClick={handleRequest} disabled={!request.trim() || sending} size="sm">
+                {sending ? 'Sending...' : 'Request'}
+              </Button>
+            </div>
+
+            {/* Direct creation button — only when setting enabled */}
+            {directCreation && (
+              <Button variant="outline" size="sm" onClick={() => setShowCreate(true)}>
+                <Plus className="w-3.5 h-3.5 mr-1" /> Create Directly
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -1030,8 +1085,8 @@ export function Goals() {
         </>
       )}
 
-      {/* Create goal modal */}
-      <CreateGoalModal open={showCreate} onClose={() => setShowCreate(false)} />
+      {/* Create goal modal — only when direct creation is enabled */}
+      {directCreation && <CreateGoalModal open={showCreate} onClose={() => setShowCreate(false)} />}
     </div>
   )
 }
