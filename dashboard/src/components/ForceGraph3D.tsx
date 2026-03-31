@@ -689,11 +689,14 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
   // ── Nebulae — distant color clouds ──
   if (options.nebulae) {
   const nebulae = [
-    { x: 700,  y: 300,  z: -500, s: 500, r: 100, g: 60,  b: 180, op: 0.15 },
-    { x: -500, y: -400, z: 600,  s: 400, r: 40,  g: 80,  b: 160, op: 0.12 },
-    { x: 300,  y: 700,  z: 400,  s: 350, r: 160, g: 40,  b: 80,  op: 0.08 },
-    { x: -700, y: 200,  z: -300, s: 550, r: 30,  g: 100, b: 120, op: 0.10 },
-    { x: 100,  y: -600, z: -700, s: 280, r: 140, g: 100, b: 40,  op: 0.06 },
+    { x: 2500,  y: 1200,  z: -2000, s: 800,  r: 100, g: 60,  b: 180, op: 0.12 },
+    { x: -2200, y: -1500, z: 2400,  s: 700,  r: 40,  g: 80,  b: 160, op: 0.10 },
+    { x: 1200,  y: 2800,  z: 1600,  s: 600,  r: 160, g: 40,  b: 80,  op: 0.07 },
+    { x: -3000, y: 800,   z: -1200, s: 900,  r: 30,  g: 100, b: 120, op: 0.08 },
+    { x: 400,   y: -2400, z: -2800, s: 500,  r: 140, g: 100, b: 40,  op: 0.06 },
+    { x: 3500,  y: -600,  z: 1800,  s: 650,  r: 80,  g: 40,  b: 140, op: 0.07 },
+    { x: -1800, y: 3000,  z: -800,  s: 550,  r: 50,  g: 120, b: 100, op: 0.06 },
+    { x: 800,   y: -3200, z: 2200,  s: 750,  r: 120, g: 60,  b: 60,  op: 0.05 },
   ]
 
   for (const n of nebulae) {
@@ -710,10 +713,12 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
 
   // ── Distant galaxies — tiny elliptical blobs ──
   const galaxies = [
-    { x: 900,  y: 500,  z: -400, w: 70, h: 25, rot: 0.3 },
-    { x: -800, y: -300, z: 800,  w: 50, h: 18, rot: -0.5 },
-    { x: 400,  y: -700, z: -600, w: 60, h: 22, rot: 0.8 },
-    { x: -300, y: 800,  z: -500, w: 45, h: 16, rot: -0.2 },
+    { x: 4000,  y: 2000,  z: -3000, w: 90,  h: 30, rot: 0.3 },
+    { x: -3500, y: -1500, z: 3500,  w: 70,  h: 22, rot: -0.5 },
+    { x: 2000,  y: -3500, z: -2500, w: 80,  h: 28, rot: 0.8 },
+    { x: -1500, y: 4000,  z: -2000, w: 60,  h: 20, rot: -0.2 },
+    { x: 5000,  y: -800,  z: 1500,  w: 50,  h: 18, rot: 0.6 },
+    { x: -4500, y: 1200,  z: -3000, w: 65,  h: 24, rot: -0.4 },
   ]
 
   for (const g of galaxies) {
@@ -733,14 +738,19 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
   // ── Celestial objects — planets, suns, black hole ──
   if (options.celestialObjects) {
     const celestials: { tex: CanvasTexture; x: number; y: number; z: number; s: number; op: number; additive: boolean }[] = [
-      // Planets (normal blending — solid look)
-      { tex: makePlanetTexture(180, 140, 60, true),  x: 1800,  y: -400, z: -1200, s: 80,  op: 0.5,  additive: false }, // gas giant
-      { tex: makePlanetTexture(100, 120, 140),        x: -1600, y: 600,  z: 900,   s: 35,  op: 0.4,  additive: false }, // rocky
-      { tex: makePlanetTexture(140, 200, 200, true),  x: 500,   y: 1400, z: -1800, s: 50,  op: 0.45, additive: false }, // ice world
-      { tex: makeRingedPlanetTexture(190, 150, 80),   x: -1200, y: -800, z: -2000, s: 90,  op: 0.5,  additive: false }, // ringed
+      // Planets (normal blending — solid look) — scattered far from center
+      { tex: makePlanetTexture(180, 140, 60, true),  x: 3500,  y: -1200, z: -2800, s: 100, op: 0.55, additive: false }, // gas giant
+      { tex: makePlanetTexture(100, 120, 140),        x: -3200, y: 1800,  z: 2200,  s: 40,  op: 0.45, additive: false }, // rocky
+      { tex: makePlanetTexture(140, 200, 200, true),  x: 1800,  y: 3500,  z: -3200, s: 55,  op: 0.5,  additive: false }, // ice world
+      { tex: makeRingedPlanetTexture(190, 150, 80),   x: -2800, y: -2000, z: -3500, s: 110, op: 0.55, additive: false }, // ringed saturn
+      { tex: makePlanetTexture(200, 100, 80, true),   x: 4200,  y: 600,   z: 1800,  s: 70,  op: 0.45, additive: false }, // mars-like
+      { tex: makePlanetTexture(60, 80, 160),          x: -1500, y: -3800, z: -1200, s: 85,  op: 0.5,  additive: false }, // neptune-like
+      { tex: makeRingedPlanetTexture(140, 160, 180),  x: 2500,  y: -3000, z: 2800,  s: 95,  op: 0.5,  additive: false }, // ice ringed
+      { tex: makePlanetTexture(220, 180, 120),        x: -4000, y: 2500,  z: -800,  s: 45,  op: 0.4,  additive: false }, // desert world
       // Suns (additive blending — glow through bloom)
-      { tex: makeSunTexture(255, 230, 150), x: 2200,  y: 800,   z: 1500, s: 120, op: 0.35, additive: true }, // yellow-white
-      { tex: makeSunTexture(220, 80, 40),   x: -1800, y: -1200, z: 600,  s: 40,  op: 0.3,  additive: true }, // red dwarf
+      { tex: makeSunTexture(255, 230, 150), x: 4500,  y: 1800,  z: 3200,  s: 150, op: 0.4, additive: true }, // yellow-white
+      { tex: makeSunTexture(220, 80, 40),   x: -4000, y: -2800, z: 1500,  s: 60,  op: 0.35, additive: true }, // red dwarf
+      { tex: makeSunTexture(180, 200, 255), x: -2000, y: 4200,  z: -2500, s: 90,  op: 0.3, additive: true }, // blue giant
     ]
 
     for (const c of celestials) {
@@ -772,8 +782,8 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       depthWrite: true,
     })
     const bhCore = new Sprite(bhCoreMat)
-    bhCore.position.set(-800, 400, -2500)
-    bhCore.scale.set(50, 50, 1)
+    bhCore.position.set(-3000, 1200, -5000)
+    bhCore.scale.set(60, 60, 1)
     bhCore.renderOrder = 1
     group.add(bhCore)
 
@@ -783,8 +793,8 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       blending: AdditiveBlending, depthWrite: false,
     })
     const bhDisk = new Sprite(bhDiskMat)
-    bhDisk.position.set(-800, 400, -2500)
-    bhDisk.scale.set(160, 160, 1)
+    bhDisk.position.set(-3000, 1200, -5000)
+    bhDisk.scale.set(200, 200, 1)
     bhDisk.renderOrder = 2
     group.add(bhDisk)
   }
@@ -793,19 +803,28 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
   if (options.solarSystems && options.celestialObjects) {
     const solarSystems = [
       { // Yellow-white sun system
-        cx: 2200, cy: 800, cz: 1500,
+        cx: 4500, cy: 1800, cz: 3200,
         planets: [
-          { r: 8, g: 150, b: 180, size: 8, orbit: 180, speed: 0.15, tilt: 0.2 },
-          { r: 180, g: 140, b: 80, size: 12, orbit: 280, speed: 0.08, tilt: -0.1, ring: true },
-          { r: 100, g: 160, b: 200, size: 6, orbit: 380, speed: 0.05, tilt: 0.3 },
-          { r: 160, g: 100, b: 60, size: 5, orbit: 140, speed: 0.25, tilt: -0.15 },
+          { r: 160, g: 100, b: 60,  size: 8,  orbit: 220, speed: 0.25, tilt: -0.15 },
+          { r: 8,   g: 150, b: 180, size: 10, orbit: 320, speed: 0.15, tilt: 0.2 },
+          { r: 180, g: 140, b: 80,  size: 16, orbit: 450, speed: 0.08, tilt: -0.1, ring: true },
+          { r: 100, g: 160, b: 200, size: 9,  orbit: 600, speed: 0.04, tilt: 0.3 },
         ],
       },
       { // Red dwarf system — fewer, closer planets
-        cx: -1800, cy: -1200, cz: 600,
+        cx: -4000, cy: -2800, cz: 1500,
         planets: [
-          { r: 140, g: 80, b: 60, size: 5, orbit: 60, speed: 0.3, tilt: 0.1 },
-          { r: 80, g: 120, b: 140, size: 7, orbit: 100, speed: 0.18, tilt: -0.2 },
+          { r: 140, g: 80,  b: 60,  size: 7, orbit: 80,  speed: 0.35, tilt: 0.1 },
+          { r: 80,  g: 120, b: 140, size: 9, orbit: 140, speed: 0.2,  tilt: -0.2 },
+          { r: 200, g: 160, b: 100, size: 6, orbit: 200, speed: 0.12, tilt: 0.15 },
+        ],
+      },
+      { // Blue giant system — large orbits, big planets
+        cx: -2000, cy: 4200, cz: -2500,
+        planets: [
+          { r: 60,  g: 100, b: 180, size: 12, orbit: 300, speed: 0.1,  tilt: 0.25 },
+          { r: 140, g: 180, b: 200, size: 18, orbit: 500, speed: 0.06, tilt: -0.15, ring: true },
+          { r: 180, g: 120, b: 80,  size: 8,  orbit: 180, speed: 0.2,  tilt: 0.1 },
         ],
       },
     ]
@@ -837,12 +856,12 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
   // ── Deep-field stars — static backdrop ──
   if (options.bgStars) {
     // Layer 1: primary deep stars — constant pixel size, always visible
-    const deepCount = 5000
+    const deepCount = 6000
     const deepPos = new Float32Array(deepCount * 3)
     const deepCol = new Float32Array(deepCount * 3)
 
     for (let i = 0; i < deepCount; i++) {
-      const r = 3500 + Math.random() * 5500
+      const r = 2000 + Math.random() * 8000
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(2 * Math.random() - 1)
       deepPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
@@ -876,10 +895,10 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     group.add(deepStars)
 
     // Layer 2: ultra-distant faint stars — fills the void when zoomed out
-    const farCount = 4000
+    const farCount = 8000
     const farPos = new Float32Array(farCount * 3)
     for (let i = 0; i < farCount; i++) {
-      const r = 8000 + Math.random() * 6000
+      const r = 8000 + Math.random() * 16000
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(2 * Math.random() - 1)
       farPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
@@ -899,11 +918,11 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
 
   // ── Milky Way band — flattened disc of stars creating a galactic plane ──
   if (options.milkyWay) {
-    const milkyCount = 5000
+    const milkyCount = 6000
     const milkyPos = new Float32Array(milkyCount * 3)
     const milkyCol = new Float32Array(milkyCount * 3)
     for (let i = 0; i < milkyCount; i++) {
-      const r = 1500 + Math.random() * 8000
+      const r = 2000 + Math.random() * 14000
       const theta = Math.random() * Math.PI * 2
       // Flatten to a disc with gaussian-ish y falloff — denser near the plane
       const ySpread = (Math.random() + Math.random() + Math.random() - 1.5) * 400
@@ -934,18 +953,18 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       blending: AdditiveBlending, depthWrite: false,
     })
     const coreSprite = new Sprite(coreMat)
-    coreSprite.position.set(0, 0, -3000)
-    coreSprite.scale.set(4000, 600, 1)
+    coreSprite.position.set(0, 0, -6000)
+    coreSprite.scale.set(8000, 800, 1)
     group.add(coreSprite)
   }
 
   // ── Asteroid field — rocky particles in orbital bands ──
   if (options.asteroids) {
-    const asteroidCount = 400
+    const asteroidCount = 500
     const asteroidPos = new Float32Array(asteroidCount * 3)
     const asteroidCol = new Float32Array(asteroidCount * 3)
     for (let i = 0; i < asteroidCount; i++) {
-      const r = 800 + Math.random() * 2000
+      const r = 1500 + Math.random() * 3500
       const theta = Math.random() * Math.PI * 2
       // Flattened orbital plane with some scatter
       const ySpread = (Math.random() - 0.5) * 400
@@ -1361,8 +1380,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       // naturally. No artificial sphere positioning.
       .d3AlphaDecay(0.04)
       .d3VelocityDecay(0.4)
-      .warmupTicks(250)
-      .cooldownTicks(150)
+      .warmupTicks(500)
+      .cooldownTicks(0)
 
     try {
       if (isLargeGraph) {
@@ -1585,9 +1604,9 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     graphRef.current = graph
     initializedRef.current = true
 
-    // Push camera far plane to see distant stars and milky way
+    // Push camera far plane to see distant stars, milky way, and solar systems
     const camera = graph.camera()
-    if (camera) { camera.far = 25000; camera.updateProjectionMatrix() }
+    if (camera) { camera.far = 50000; camera.updateProjectionMatrix() }
 
     // Attach starfield if galaxy mode at init
     if (bgColorRef.current === 'galaxy') {

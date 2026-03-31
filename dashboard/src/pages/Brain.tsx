@@ -741,7 +741,7 @@ export default function Brain() {
           className="absolute inset-0 z-20 flex items-center justify-center"
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedNode(null) }}
         >
-          <div className="w-[480px] max-h-[70vh] overflow-y-auto glass-overlay border border-white/[0.12] border-t-white/[0.20] rounded-xl scrollbar-thin">
+          <div className="w-[480px] max-h-[70vh] overflow-y-auto glass-overlay border border-white/[0.12] border-t-white/[0.20] rounded-xl scrollbar-thin" style={{ background: 'rgba(5, 23, 22, 0.80)' }}>
             {/* Header */}
             <div className="sticky top-0 bg-stone-950/95 border-b border-white/[0.08] px-5 py-3.5 flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
