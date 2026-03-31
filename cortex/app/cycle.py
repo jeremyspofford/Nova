@@ -270,7 +270,9 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
         if stale_goals:
             goal = stale_goals[0]
             goal_id = goal.get("id", "")
-            skip_count = _consecutive_skips.get(goal_id, 0)
+            plan_data = goal.get("current_plan") or {}
+            db_skip_count = plan_data.get("consecutive_skips", 0) if isinstance(plan_data, dict) else 0
+            skip_count = max(db_skip_count, _consecutive_skips.get(goal_id, 0))
             if skip_count >= MAX_CONSECUTIVE_SKIPS:
                 forced = True
 
@@ -374,12 +376,17 @@ async def _execute_action(drive: DriveResult, plan: str, state: CycleState) -> s
                     "Goal %s skipped (%d consecutive)",
                     goal_id, _consecutive_skips[goal_id],
                 )
-                # Update last_checked_at so we don't re-evaluate immediately
+                # Update last_checked_at and persist skip count so it survives restarts
                 try:
                     pool = get_pool()
                     async with pool.acquire() as conn:
                         await conn.execute(
-                            "UPDATE goals SET last_checked_at = NOW(), updated_at = NOW() WHERE id = $1::uuid",
+                            """UPDATE goals SET
+                                 last_checked_at = NOW(),
+                                 current_plan = jsonb_set(COALESCE(current_plan, '{}'::jsonb), '{consecutive_skips}', $1::text::jsonb),
+                                 updated_at = NOW()
+                               WHERE id = $2::uuid""",
+                            str(_consecutive_skips[goal_id]),
                             goal_id,
                         )
                 except Exception as e:
@@ -472,7 +479,7 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
                            current_plan = $1::jsonb,
                            updated_at = NOW()
                        WHERE id = $2::uuid""",
-                    json.dumps({"plan": plan, "cycle": state.cycle_number, "task_id": task_id}),
+                    json.dumps({"plan": plan, "cycle": state.cycle_number, "task_id": task_id, "consecutive_skips": 0}),
                     goal_id,
                 )
 
