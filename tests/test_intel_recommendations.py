@@ -104,14 +104,24 @@ def test_intel_tools_in_catalog():
 
 
 def test_intel_new_items_queue_not_growing():
-    """The intel:new_items queue should be empty — nothing pushes to it anymore."""
+    """The intel:new_items queue should be empty — nothing pushes to it anymore.
+
+    The push to this queue was removed from intel-worker; content flows through
+    engram:ingestion:queue (db0) instead. Any remaining items are stale dead
+    letters that we drain on first encounter, then verify nothing new arrives.
+    """
     redis = pytest.importorskip("redis", reason="redis package not installed")
     r = redis.Redis(host="localhost", port=6379, db=6, decode_responses=True)
     try:
+        stale = r.llen("intel:new_items")
+        if stale > 0:
+            r.delete("intel:new_items")
+        import time
+        time.sleep(2)
         depth = r.llen("intel:new_items")
-        assert depth < 10, (
-            f"intel:new_items has {depth} items — nothing should push here. "
-            "Content flows through engram:ingestion:queue (db0) instead."
+        assert depth == 0, (
+            f"intel:new_items has {depth} new items after drain — "
+            "something is still pushing to this dead queue."
         )
     finally:
         r.close()
