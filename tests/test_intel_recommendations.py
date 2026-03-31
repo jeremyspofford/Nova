@@ -104,14 +104,14 @@ def test_intel_tools_in_catalog():
 
 
 def test_intel_new_items_queue_not_growing():
-    """The intel:new_items queue should not accumulate unbounded dead letters."""
+    """The intel:new_items queue should be empty — nothing pushes to it anymore."""
     redis = pytest.importorskip("redis", reason="redis package not installed")
     r = redis.Redis(host="localhost", port=6379, db=6, decode_responses=True)
     try:
         depth = r.llen("intel:new_items")
-        assert depth < 10000, (
-            f"intel:new_items has {depth} items — no consumer. "
-            "Remove the push or add a consumer."
+        assert depth < 10, (
+            f"intel:new_items has {depth} items — nothing should push here. "
+            "Content flows through engram:ingestion:queue (db0) instead."
         )
     finally:
         r.close()
