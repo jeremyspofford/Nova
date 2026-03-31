@@ -13,6 +13,7 @@ Tools provided:
   get_consolidation_status  -- recent consolidation cycle history
   get_memory_stats          -- engram counts, graph stats, system health
   trigger_consolidation     -- manually start a consolidation cycle
+  get_router_status         -- neural router mode (cosine vs trained reranker)
 """
 from __future__ import annotations
 
@@ -168,8 +169,22 @@ MEMORY_TOOLS: list[ToolDefinition] = [
             "Manually trigger a memory consolidation cycle. Consolidation replays "
             "recent engrams, extracts patterns, strengthens connections (Hebbian "
             "learning), resolves contradictions, prunes weak memories, and updates "
-            "the self-model. Has a cooldown period — may return 429 if run too "
-            "frequently. Use sparingly, typically when you notice fragmented knowledge."
+            "the self-model. Will be skipped if a cycle is already running. "
+            "Use sparingly, typically when you notice fragmented knowledge."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+    ToolDefinition(
+        name="get_router_status",
+        description=(
+            "Check the Neural Router status — whether memory retrieval uses basic "
+            "cosine similarity or a trained ML reranker. The router trains automatically "
+            "after 200+ labeled retrieval observations. Returns mode, observation counts, "
+            "and whether training is ready. Use this to understand your own retrieval quality."
         ),
         parameters={
             "type": "object",
@@ -199,6 +214,8 @@ async def execute_tool(name: str, arguments: dict) -> str:
             return await _get_memory_stats(arguments)
         elif name == "trigger_consolidation":
             return await _trigger_consolidation(arguments)
+        elif name == "get_router_status":
+            return await _get_router_status(arguments)
         else:
             return f"Unknown memory tool: {name}"
     except httpx.TimeoutException:
@@ -362,25 +379,42 @@ async def _get_consolidation_status(args: dict) -> str:
             params={"limit": limit},
         )
         resp.raise_for_status()
-        entries = resp.json()
+        data = resp.json()
 
+    entries = data.get("entries", []) if isinstance(data, dict) else data
     if not entries:
         return "No consolidation cycles have run yet."
 
     lines = [f"Recent consolidation cycles ({len(entries)} entries):"]
     for entry in entries:
         trigger = entry.get("trigger", "?")
-        ts = entry.get("started_at", entry.get("timestamp", "?"))
-        duration = entry.get("duration_seconds", entry.get("duration_s"))
-        dur_str = f" ({duration:.1f}s)" if duration is not None else ""
-        phases = entry.get("phases_completed", entry.get("phases", "?"))
-        lines.append(f"\n- [{trigger}] {ts}{dur_str} -- {phases} phases")
-        if entry.get("stats"):
-            stats = entry["stats"]
-            if isinstance(stats, str):
-                lines.append(f"  {stats}")
-            elif isinstance(stats, dict):
-                lines.append(f"  {json.dumps(stats, default=str)}")
+        ts = entry.get("created_at", "?")
+        duration_ms = entry.get("duration_ms")
+        dur_str = f" ({duration_ms / 1000:.1f}s)" if duration_ms is not None else ""
+
+        parts = []
+        if entry.get("engrams_reviewed"):
+            parts.append(f"{entry['engrams_reviewed']} reviewed")
+        if entry.get("schemas_created"):
+            parts.append(f"{entry['schemas_created']} schemas")
+        if entry.get("topics_created"):
+            parts.append(f"{entry['topics_created']} topics")
+        if entry.get("edges_strengthened"):
+            parts.append(f"{entry['edges_strengthened']} edges strengthened")
+        if entry.get("edges_pruned"):
+            parts.append(f"{entry['edges_pruned']} pruned")
+        if entry.get("contradictions_resolved"):
+            parts.append(f"{entry['contradictions_resolved']} contradictions resolved")
+        if entry.get("engrams_merged"):
+            parts.append(f"{entry['engrams_merged']} merged")
+        summary = ", ".join(parts) if parts else "no changes"
+
+        lines.append(f"\n- [{trigger}] {ts}{dur_str}")
+        lines.append(f"  {summary}")
+
+        sm = entry.get("self_model_updates")
+        if sm and isinstance(sm, dict) and sm.get("maturity_stage"):
+            lines.append(f"  Self-model: {sm['maturity_stage']} ({sm.get('total_engrams', '?')} engrams, {sm.get('schema_count', '?')} schemas)")
 
     return "\n".join(lines)
 
@@ -393,47 +427,105 @@ async def _get_memory_stats(args: dict) -> str:
 
     lines = ["Memory system statistics:"]
 
-    if "total_engrams" in data:
-        lines.append(f"\nTotal engrams: {data['total_engrams']}")
-    elif "engram_count" in data:
-        lines.append(f"\nTotal engrams: {data['engram_count']}")
+    total = data.get("total_engrams", data.get("engram_count"))
+    if total is not None:
+        lines.append(f"\nTotal engrams: {total}")
+    if "total_edges" in data:
+        lines.append(f"Total edges: {data['total_edges']}")
+    if "total_archived" in data:
+        lines.append(f"Archived: {data['total_archived']}")
 
     if data.get("by_type"):
         lines.append("\nBy type:")
-        for etype, count in data["by_type"].items():
-            lines.append(f"  - {etype}: {count}")
+        for etype, info in data["by_type"].items():
+            if isinstance(info, dict):
+                superseded = info.get("superseded", 0)
+                sup_note = f" ({superseded} superseded)" if superseded else ""
+                lines.append(f"  - {etype}: {info.get('total', '?')}{sup_note}")
+            else:
+                lines.append(f"  - {etype}: {info}")
 
-    if "total_edges" in data:
-        lines.append(f"\nTotal edges: {data['total_edges']}")
-    if "total_sources" in data:
-        lines.append(f"\nTotal sources: {data['total_sources']}")
-    if "ingestion_queue_depth" in data:
-        lines.append(f"\nIngestion queue depth: {data['ingestion_queue_depth']}")
-    if data.get("consolidation"):
-        c_info = data["consolidation"]
-        lines.append(f"\nLast consolidation: {c_info.get('last_run', 'never')}")
+    if data.get("by_relation"):
+        top_relations = sorted(
+            data["by_relation"].items(),
+            key=lambda x: x[1].get("count", 0) if isinstance(x[1], dict) else x[1],
+            reverse=True,
+        )[:5]
+        lines.append("\nTop edge types:")
+        for rel, info in top_relations:
+            if isinstance(info, dict):
+                lines.append(f"  - {rel}: {info['count']} (avg weight: {info.get('avg_weight', '?')})")
+            else:
+                lines.append(f"  - {rel}: {info}")
+
+    if data.get("by_source_type"):
+        lines.append("\nBy source:")
+        for stype, count in data["by_source_type"].items():
+            lines.append(f"  - {stype}: {count}")
 
     return "\n".join(lines)
 
 
 async def _trigger_consolidation(args: dict) -> str:
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as c:
         resp = await c.post(f"{MEMORY_BASE}/consolidate")
-        if resp.status_code == 429:
-            return (
-                "Consolidation is on cooldown. A cycle ran recently. "
-                "Use get_consolidation_status to check when the last cycle ran."
-            )
         resp.raise_for_status()
         data = resp.json()
 
-    lines = ["Consolidation cycle triggered successfully."]
+    if isinstance(data, dict) and data.get("skipped"):
+        return (
+            f"Consolidation skipped: {data.get('reason', 'already running')}. "
+            "Use get_consolidation_status to check when the last cycle ran."
+        )
+
+    lines = ["Consolidation cycle completed."]
     if isinstance(data, dict):
-        if data.get("phases_completed"):
-            lines.append(f"Phases completed: {data['phases_completed']}")
-        if data.get("duration_seconds") is not None:
-            lines.append(f"Duration: {data['duration_seconds']:.1f}s")
-        if data.get("stats"):
-            lines.append(f"Stats: {json.dumps(data['stats'], default=str)}")
+        parts = []
+        if data.get("engrams_reviewed"):
+            parts.append(f"{data['engrams_reviewed']} engrams reviewed")
+        if data.get("schemas_created"):
+            parts.append(f"{data['schemas_created']} schemas created")
+        if data.get("topics_created"):
+            parts.append(f"{data['topics_created']} topics created")
+        if data.get("edges_strengthened"):
+            parts.append(f"{data['edges_strengthened']} edges strengthened")
+        if data.get("edges_pruned"):
+            parts.append(f"{data['edges_pruned']} edges pruned")
+        if data.get("contradictions_resolved"):
+            parts.append(f"{data['contradictions_resolved']} contradictions resolved")
+        if parts:
+            lines.append(", ".join(parts))
+        sm = data.get("self_model_updates")
+        if sm and isinstance(sm, dict) and sm.get("maturity_stage"):
+            lines.append(f"Self-model: {sm['maturity_stage']}")
+
+    return "\n".join(lines)
+
+
+async def _get_router_status(args: dict) -> str:
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as c:
+        resp = await c.get(f"{MEMORY_BASE}/router-status")
+        resp.raise_for_status()
+        data = resp.json()
+
+    mode = data.get("mode", "unknown")
+    obs = data.get("observation_count", 0)
+    labeled = data.get("labeled_count", 0)
+    model_loaded = data.get("model_loaded", False)
+
+    lines = [f"Neural Router: {mode}"]
+    lines.append(f"Observations: {obs} total, {labeled} labeled")
+
+    if model_loaded:
+        arch = data.get("architecture", "unknown")
+        lines.append(f"Trained model active ({arch}) -- retrieval uses learned ranking")
+    elif labeled >= 200:
+        lines.append("Ready for training -- enough labeled data, model not yet trained")
+    else:
+        lines.append(f"Collecting data -- {labeled}/200 labeled observations needed before training")
+        lines.append("Currently using cosine similarity only for retrieval ranking")
+
+    if data.get("message"):
+        lines.append(f"Status: {data['message']}")
 
     return "\n".join(lines)

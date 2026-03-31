@@ -108,6 +108,9 @@ interface ForceGraph3DProps {
   showInnerStars?: boolean
   showNebulae?: boolean
   showEdges?: boolean
+  showCelestialObjects?: boolean
+  showClusterGalaxies?: boolean
+  clusterSeparation?: number
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -528,7 +531,150 @@ function makeGalaxyTexture(): CanvasTexture {
   return new CanvasTexture(canvas)
 }
 
-function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean }): Group {
+// ── Celestial object textures ────────────────────────────────────────────────
+
+function makePlanetTexture(r: number, g: number, b: number, atmosphere = false): CanvasTexture {
+  const size = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const cx = size / 2, cy = size / 2, rad = size * 0.38
+
+  if (atmosphere) {
+    const atm = ctx.createRadialGradient(cx - rad * 0.2, cy - rad * 0.1, rad * 0.9, cx, cy, rad * 1.4)
+    atm.addColorStop(0, `rgba(${Math.min(255, r + 80)},${Math.min(255, g + 80)},${Math.min(255, b + 100)},0.12)`)
+    atm.addColorStop(1, 'rgba(0,0,0,0)')
+    ctx.fillStyle = atm
+    ctx.beginPath(); ctx.arc(cx, cy, rad * 1.4, 0, Math.PI * 2); ctx.fill()
+  }
+
+  const bodyGrad = ctx.createRadialGradient(cx - rad * 0.35, cy - rad * 0.35, 0, cx, cy, rad)
+  bodyGrad.addColorStop(0, `rgba(${Math.min(255, r + 60)},${Math.min(255, g + 60)},${Math.min(255, b + 60)},1)`)
+  bodyGrad.addColorStop(0.5, `rgba(${r},${g},${b},1)`)
+  bodyGrad.addColorStop(0.8, `rgba(${Math.floor(r * 0.4)},${Math.floor(g * 0.4)},${Math.floor(b * 0.4)},1)`)
+  bodyGrad.addColorStop(1, `rgba(${Math.floor(r * 0.15)},${Math.floor(g * 0.15)},${Math.floor(b * 0.15)},0.9)`)
+  ctx.fillStyle = bodyGrad
+  ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.fill()
+
+  // Subtle color banding
+  ctx.save(); ctx.globalAlpha = 0.08
+  ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.clip()
+  for (let i = 0; i < 3; i++) {
+    const y = cy - rad * 0.3 + i * rad * 0.35
+    const band = ctx.createLinearGradient(cx - rad, y, cx + rad, y + 4)
+    band.addColorStop(0, 'transparent')
+    band.addColorStop(0.3, `rgba(${Math.min(255, r + 40)},${Math.min(255, g + 30)},${Math.min(255, b + 20)},0.5)`)
+    band.addColorStop(0.7, `rgba(${Math.min(255, r + 40)},${Math.min(255, g + 30)},${Math.min(255, b + 20)},0.3)`)
+    band.addColorStop(1, 'transparent')
+    ctx.fillStyle = band; ctx.fillRect(cx - rad, y, rad * 2, 4)
+  }
+  ctx.restore()
+  return new CanvasTexture(canvas)
+}
+
+function makeRingedPlanetTexture(r: number, g: number, b: number): CanvasTexture {
+  const size = 192
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const cx = size / 2, cy = size / 2, planetRad = size * 0.2
+
+  // Ring (behind planet on bottom half)
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(1, 0.35); ctx.rotate(-0.15)
+  const ringGrad = ctx.createRadialGradient(0, 0, planetRad * 1.3, 0, 0, planetRad * 2.8)
+  ringGrad.addColorStop(0, 'rgba(0,0,0,0)')
+  ringGrad.addColorStop(0.15, `rgba(${Math.min(255, r + 40)},${Math.min(255, g + 30)},${Math.min(255, b + 20)},0.5)`)
+  ringGrad.addColorStop(0.3, `rgba(${r},${g},${b},0.6)`)
+  ringGrad.addColorStop(0.5, `rgba(${Math.min(255, r + 60)},${Math.min(255, g + 50)},${Math.min(255, b + 30)},0.4)`)
+  ringGrad.addColorStop(0.7, `rgba(${r},${g},${b},0.3)`)
+  ringGrad.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = ringGrad
+  ctx.beginPath(); ctx.arc(0, 0, planetRad * 2.8, 0, Math.PI * 2); ctx.fill()
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.beginPath(); ctx.arc(0, 0, planetRad * 1.3, 0, Math.PI * 2); ctx.fill()
+  ctx.globalCompositeOperation = 'source-over'
+  ctx.restore()
+
+  // Planet body
+  const bodyGrad = ctx.createRadialGradient(cx - planetRad * 0.3, cy - planetRad * 0.3, 0, cx, cy, planetRad)
+  bodyGrad.addColorStop(0, `rgba(${Math.min(255, r + 50)},${Math.min(255, g + 50)},${Math.min(255, b + 50)},1)`)
+  bodyGrad.addColorStop(0.6, `rgba(${r},${g},${b},1)`)
+  bodyGrad.addColorStop(1, `rgba(${Math.floor(r * 0.3)},${Math.floor(g * 0.3)},${Math.floor(b * 0.3)},1)`)
+  ctx.fillStyle = bodyGrad
+  ctx.beginPath(); ctx.arc(cx, cy, planetRad, 0, Math.PI * 2); ctx.fill()
+  return new CanvasTexture(canvas)
+}
+
+function makeSunTexture(r: number, g: number, b: number): CanvasTexture {
+  const size = 128
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const corona = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+  corona.addColorStop(0, 'rgba(255,255,255,0.9)')
+  corona.addColorStop(0.08, 'rgba(255,255,240,0.7)')
+  corona.addColorStop(0.2, `rgba(${r},${g},${b},0.4)`)
+  corona.addColorStop(0.5, `rgba(${r},${g},${b},0.08)`)
+  corona.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = corona; ctx.fillRect(0, 0, size, size)
+  return new CanvasTexture(canvas)
+}
+
+function makeBlackHoleTexture(): CanvasTexture {
+  const size = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const cx = size / 2, cy = size / 2
+
+  // Teal accretion disk
+  ctx.save(); ctx.translate(cx, cy); ctx.scale(1, 0.4); ctx.rotate(0.2)
+  const disk = ctx.createRadialGradient(0, 0, size * 0.08, 0, 0, size * 0.45)
+  disk.addColorStop(0, 'rgba(0,0,0,0)')
+  disk.addColorStop(0.2, 'rgba(25,168,158,0.0)')
+  disk.addColorStop(0.32, 'rgba(25,168,158,0.6)')
+  disk.addColorStop(0.42, 'rgba(180,240,235,0.5)')
+  disk.addColorStop(0.48, 'rgba(255,255,255,0.45)')
+  disk.addColorStop(0.55, 'rgba(25,168,158,0.6)')
+  disk.addColorStop(0.7, 'rgba(25,168,158,0.15)')
+  disk.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = disk
+  ctx.beginPath(); ctx.arc(0, 0, size * 0.45, 0, Math.PI * 2); ctx.fill()
+  // Gravitational lensing highlight
+  const lens = ctx.createRadialGradient(size * 0.12, -size * 0.02, size * 0.15, 0, 0, size * 0.42)
+  lens.addColorStop(0, 'rgba(100,220,210,0.3)')
+  lens.addColorStop(0.5, 'rgba(25,168,158,0.08)')
+  lens.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = lens
+  ctx.beginPath(); ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2); ctx.fill()
+  ctx.restore()
+
+  // Event horizon
+  const dark = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.15)
+  dark.addColorStop(0, 'rgba(0,0,0,1)')
+  dark.addColorStop(0.4, 'rgba(0,0,0,1)')
+  dark.addColorStop(0.7, 'rgba(0,0,0,0.6)')
+  dark.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = dark
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.15, 0, Math.PI * 2); ctx.fill()
+  return new CanvasTexture(canvas)
+}
+
+function makeClusterHaloTexture(r: number, g: number, b: number): CanvasTexture {
+  const size = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = canvas.height = size
+  const ctx = canvas.getContext('2d')!
+  const grad = ctx.createRadialGradient(size * 0.45, size * 0.48, 0, size / 2, size / 2, size / 2)
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.2)`)
+  grad.addColorStop(0.3, `rgba(${r},${g},${b},0.08)`)
+  grad.addColorStop(0.6, `rgba(${r},${g},${b},0.03)`)
+  grad.addColorStop(1, 'rgba(0,0,0,0)')
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, size, size)
+  return new CanvasTexture(canvas)
+}
+
+function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean; celestialObjects: boolean }): Group {
   const group = new Group()
   group.name = 'starfield'
 
@@ -575,6 +721,34 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     group.add(sprite)
   }
   } // end nebulae
+
+  // ── Celestial objects — planets, suns, black hole ──
+  if (options.celestialObjects) {
+    const celestials: { tex: CanvasTexture; x: number; y: number; z: number; s: number; op: number; additive: boolean }[] = [
+      // Planets (normal blending — solid look)
+      { tex: makePlanetTexture(180, 140, 60, true),  x: 1800,  y: -400, z: -1200, s: 80,  op: 0.5,  additive: false }, // gas giant
+      { tex: makePlanetTexture(100, 120, 140),        x: -1600, y: 600,  z: 900,   s: 35,  op: 0.4,  additive: false }, // rocky
+      { tex: makePlanetTexture(140, 200, 200, true),  x: 500,   y: 1400, z: -1800, s: 50,  op: 0.45, additive: false }, // ice world
+      { tex: makeRingedPlanetTexture(190, 150, 80),   x: -1200, y: -800, z: -2000, s: 90,  op: 0.5,  additive: false }, // ringed
+      // Suns (additive blending — glow through bloom)
+      { tex: makeSunTexture(255, 230, 150), x: 2200,  y: 800,   z: 1500, s: 120, op: 0.35, additive: true }, // yellow-white
+      { tex: makeSunTexture(220, 80, 40),   x: -1800, y: -1200, z: 600,  s: 40,  op: 0.3,  additive: true }, // red dwarf
+      // Black hole (additive for accretion disk glow)
+      { tex: makeBlackHoleTexture(), x: -800, y: 400, z: -2500, s: 140, op: 0.4, additive: true },
+    ]
+
+    for (const c of celestials) {
+      const mat = new SpriteMaterial({
+        map: c.tex, transparent: true, opacity: c.op,
+        blending: c.additive ? AdditiveBlending : undefined,
+        depthWrite: false,
+      })
+      const sprite = new Sprite(mat)
+      sprite.position.set(c.x, c.y, c.z)
+      sprite.scale.set(c.s, c.s, 1)
+      group.add(sprite)
+    }
+  }
 
   // ── Deep-field stars — static backdrop ──
   if (options.bgStars) {
@@ -734,12 +908,16 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showInnerStars = false,
   showNebulae = true,
   showEdges = true,
+  showCelestialObjects = true,
+  showClusterGalaxies = true,
+  clusterSeparation = 0.3,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
   const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
   const containerRef = useRef<HTMLDivElement>(null)
-  const coreGeoRef = useRef(new SphereGeometry(1, 24, 24))
+  const coreGeoRef = useRef(new SphereGeometry(1, 10, 10))
+  const hitGeoRef = useRef(new SphereGeometry(1, 4, 4))
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
   const initializedRef = useRef(false)
@@ -757,6 +935,12 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showInnerStarsRef.current = showInnerStars
   const showNebulaeRef = useRef(showNebulae)
   showNebulaeRef.current = showNebulae
+  const showCelestialRef = useRef(showCelestialObjects)
+  showCelestialRef.current = showCelestialObjects
+  const showClusterGalaxiesRef = useRef(showClusterGalaxies)
+  showClusterGalaxiesRef.current = showClusterGalaxies
+  const clusterSeparationRef = useRef(clusterSeparation)
+  clusterSeparationRef.current = clusterSeparation
   const showEdgesRef = useRef(showEdges)
   useEffect(() => { showEdgesRef.current = showEdges }, [showEdges])
   // Instanced star rendering — single draw call for all nodes
@@ -764,6 +948,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const nodeIndexMapRef = useRef<Map<string, number>>(new Map())
   // Skip per-frame position sync once the force simulation has cooled down
   const simulationStableRef = useRef(false)
+  // Hide links during simulation warmup — they're invisible during fast movement anyway
+  const linksVisibleRef = useRef(false)
   // Activity visualization refs (imperative handle)
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
 
@@ -833,7 +1019,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     if (graphRef.current && initializedRef.current) {
       const graph = graphRef.current
       simulationStableRef.current = false
-      updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current)
+      updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current, { showGalaxies: showClusterGalaxiesRef.current })
 
       // Dispose old instanced mesh and rebuild with new nodes
       if (instancedMeshRef.current) {
@@ -890,7 +1076,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         // Invisible hit sphere for click/hover detection —
         // visual rendering is handled by the single InstancedMesh
         const hitMat = new MeshBasicMaterial({ visible: false })
-        const hitMesh = new Mesh(coreGeoRef.current.clone(), hitMat)
+        const hitMesh = new Mesh(hitGeoRef.current, hitMat)
         hitMesh.scale.setScalar(radius * 1.5) // slightly larger for comfortable clicking
 
         // Show topic labels: one per cluster, on the most important node in that cluster.
@@ -919,8 +1105,24 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       })
       .nodeThreeObjectExtend(false)
 
+      // ── Position sync — merge hit mesh + InstancedMesh updates into one pass ──
+      .nodePositionUpdate((obj: any, coords: any, node: any) => {
+        obj.position.set(coords.x, coords.y || 0, coords.z || 0)
+        if (!simulationStableRef.current && instancedMeshRef.current) {
+          const idx = nodeIndexMapRef.current.get(node.id)
+          if (idx !== undefined) {
+            _syncDummy.position.set(coords.x, coords.y || 0, coords.z || 0)
+            _syncDummy.scale.setScalar(2 + (node.importance ?? 0) * 6)
+            _syncDummy.updateMatrix()
+            instancedMeshRef.current.setMatrixAt(idx, _syncDummy.matrix)
+            instancedMeshRef.current.instanceMatrix.needsUpdate = true
+          }
+        }
+        return true // tell library we handled it
+      })
+
       // ── Link appearance ──────────────────────────────────────────────
-      .linkVisibility(() => showEdgesRef.current)
+      .linkVisibility(() => linksVisibleRef.current && showEdgesRef.current)
       .linkColor((link: any) => {
         const sourceNode = typeof link.source === 'object' ? link.source : null
         if (!sourceNode) return '#60a5fa'
@@ -1001,15 +1203,19 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       }
     } catch { /* force config may fail silently */ }
 
-    // ── Topic clustering force ─────────────────────────────────────────
-    // Nudge nodes toward their topic cluster centroid each tick.
-    // This creates visible spatial groupings by topic while still
-    // letting the force simulation handle fine positioning.
+    // ── Topic clustering force with configurable separation ──────────────
+    // Nudge nodes toward their topic cluster target. The target blends
+    // between the emergent centroid (organic) and a Fibonacci sphere home
+    // position (structured), controlled by clusterSeparation (0-1).
     graph.onEngineTick(() => {
       const data = graph.graphData()
       if (!data?.nodes?.length) return
 
-      // Compute centroid per cluster (skip uncategorized — let those float freely)
+      const sep = clusterSeparationRef.current
+      const homeWeight = sep * 0.6
+      const strength = 0.003 + sep * 0.005
+
+      // Compute centroid per cluster (skip uncategorized)
       const centroids = new Map<number, { x: number; y: number; z: number; count: number }>()
       for (const node of data.nodes) {
         if (node.x == null || node.cluster_id == null) continue
@@ -1019,26 +1225,46 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         centroids.set(node.cluster_id, c)
       }
 
-      // Apply clustering force only to nodes in real topics.
-      // Gentle pull (0.003) keeps nodes near their topic neighborhood
-      // without collapsing them into a single point. The stronger charge
-      // repulsion (-80) pushes nodes apart within the cluster.
-      const strength = 0.003
+      // Assign Fibonacci homes for clusters we haven't seen yet
+      const totalClusters = centroids.size
+      let idx = 0
+      for (const cid of centroids.keys()) {
+        const key = String(cid)
+        if (!clusterHomePositions.has(key)) {
+          clusterHomePositions.set(key, fibonacciSphere(idx, totalClusters, 150))
+        }
+        idx++
+      }
+
       for (const node of data.nodes) {
         if (node.x == null || node.cluster_id == null) continue
         if (node.cluster_label === 'Uncategorized') continue
         const c = centroids.get(node.cluster_id)
         if (!c || c.count < 2) continue
-        const cx = c.x / c.count, cy = c.y / c.count, cz = c.z / c.count
-        // Only pull if node is far from centroid — don't compress nodes already nearby
-        const dx = cx - node.x, dy = cy - node.y, dz = cz - node.z
+
+        const centX = c.x / c.count, centY = c.y / c.count, centZ = c.z / c.count
+        const home = clusterHomePositions.get(String(node.cluster_id))
+
+        // Blend centroid with Fibonacci home based on separation
+        let tx = centX, ty = centY, tz = centZ
+        if (home && homeWeight > 0) {
+          tx = centX * (1 - homeWeight) + home.x * homeWeight
+          ty = centY * (1 - homeWeight) + home.y * homeWeight
+          tz = centZ * (1 - homeWeight) + home.z * homeWeight
+        }
+
+        const dx = tx - node.x, dy = ty - node.y, dz = tz - node.z
         const dist = Math.sqrt(dx * dx + dy * dy + dz * dz)
-        if (dist < 15) continue  // already close enough, let charge handle spacing
+        if (dist < 15) continue
         node.vx = (node.vx ?? 0) + dx * strength
         node.vy = (node.vy ?? 0) + dy * strength
         node.vz = (node.vz ?? 0) + dz * strength
       }
     })
+
+    // Disable pointer interaction during warmup — raycasting all scene objects
+    // every 50ms is wasted work while the graph is still moving
+    graph.enablePointerInteraction(false)
 
     // ── Simulation stabilization — stop syncing positions once layout cools ──
     graph.onEngineStop(() => {
@@ -1048,6 +1274,9 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         const data = graph.graphData()
         syncInstancePositions(instancedMeshRef.current, data.nodes, nodeIndexMapRef.current)
       }
+      // Re-enable interaction and links now that the graph is stable
+      graph.enablePointerInteraction(true)
+      linksVisibleRef.current = true
     })
 
     // ── Bloom post-processing ──────────────────────────────────────────
@@ -1056,7 +1285,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         ? (neuralModeRef.current.bloomStrength ?? 1.5)
         : 1.0
       const bloomPass = new UnrealBloomPass(
-        new Vector2(width, height),
+        new Vector2(Math.floor(width / 2), Math.floor(height / 2)),
         bloomStrength,   // strength
         0.6,   // radius — wider halo for star glow
         0.15,  // threshold — catch dimmer star cores
@@ -1079,16 +1308,17 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       sharedUniforms.uTime.value = Date.now() * 0.001
       tickCount++
 
-      // Sync instanced star positions from force-graph layout.
-      // Skip once the simulation has stabilized — positions don't change until new data arrives.
-      if (instancedMeshRef.current && nodeIndexMapRef.current.size > 0 && !simulationStableRef.current) {
-        const data = graph.graphData()
-        syncInstancePositions(instancedMeshRef.current, data.nodes, nodeIndexMapRef.current)
-      }
-
       // Slow auto-rotate
       if (spinningRef.current) {
         try { graph.scene().rotation.y += 0.001 } catch { /* ok */ }
+      }
+
+      // Parallax — shift background opposite to camera for depth
+      if (starfieldRef.current) {
+        try {
+          const cam = graph.camera().position
+          starfieldRef.current.position.set(-cam.x * 0.02, -cam.y * 0.02, -cam.z * 0.02)
+        } catch { /* ok during init */ }
       }
 
       // Progressive label visibility — throttle to every 5th frame
@@ -1160,13 +1390,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     // Attach starfield if galaxy mode at init
     if (bgColorRef.current === 'galaxy') {
-      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current })
+      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current, celestialObjects: showCelestialRef.current })
       graph.scene().add(sf)
       starfieldRef.current = sf
     }
 
     // Load initial data
-    updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current)
+    updateGraphData(graph, nodes, edges, useClusterColors, layoutRef.current, { showGalaxies: showClusterGalaxiesRef.current })
 
     // Build instanced star rendering after data is loaded
     const graphData = graph.graphData()
@@ -1232,7 +1462,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     if (bgColor === 'galaxy') {
       graph.backgroundColor('#000000')
-      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae })
+      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae, celestialObjects: showCelestialObjects })
       scene.add(sf)
       starfieldRef.current = sf
     } else {
@@ -1366,9 +1596,9 @@ function makeDomainLabel(text: string, count: number, color: string): Sprite {
 }
 
 // Track cluster visuals so we can remove them on update
-const clusterVisuals: (Sprite | Mesh)[] = []
+const clusterVisuals: (Sprite | Mesh | Points)[] = []
 
-function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], useClusterMode: boolean, config?: LayoutConfig) {
+function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], useClusterMode: boolean, config?: LayoutConfig, galaxyOptions?: { showGalaxies: boolean }) {
   const cfg = config ?? LAYOUT_PRESETS[DEFAULT_LAYOUT]
   const graphNodes = nodes.map(n => ({ ...n })) as any[]
   const nodeIds = new Set(nodes.map(n => n.id))
@@ -1436,6 +1666,58 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
         label.position.set(cx, cy - haloRadius - 5, cz)
         scene.add(label)
         clusterVisuals.push(label)
+
+        // Galaxy visuals — halo glow and dust particles per cluster
+        if (galaxyOptions?.showGalaxies && clusterId >= 0 && group[0]?.cluster_label !== 'Uncategorized') {
+          const clusterCount = byCluster.size
+          const haloOpacity = clusterCount > 20
+            ? 0.06 / Math.sqrt(clusterCount / 10)
+            : 0.06
+
+          const tmpC = new Color(color)
+          const cr = Math.floor(tmpC.r * 255), cg = Math.floor(tmpC.g * 255), cb = Math.floor(tmpC.b * 255)
+          const haloTex = makeClusterHaloTexture(cr, cg, cb)
+          const haloMat = new SpriteMaterial({
+            map: haloTex, transparent: true, opacity: haloOpacity,
+            blending: AdditiveBlending, depthWrite: false,
+          })
+          const haloSprite = new Sprite(haloMat)
+          haloSprite.position.set(cx, cy, cz)
+          const haloScale = haloRadius * 3
+          haloSprite.scale.set(haloScale, haloScale, 1)
+          scene.add(haloSprite)
+          clusterVisuals.push(haloSprite)
+
+          // Dust particles — small colored Points cloud around cluster
+          const dustCount = Math.min(50, Math.max(20, group.length))
+          const dustPos = new Float32Array(dustCount * 3)
+          const dustCol = new Float32Array(dustCount * 3)
+          const dustRadius = haloRadius * 1.5
+          for (let d = 0; d < dustCount; d++) {
+            const seed = clusterId * 100 + d
+            const pr1 = Math.sin(seed * 127.1 + 311.7) * 0.5 + 0.5
+            const pr2 = Math.sin(seed * 269.5 + 183.3) * 0.5 + 0.5
+            const pr3 = Math.sin(seed * 419.2 + 371.9) * 0.5 + 0.5
+            const dr = dustRadius * pr1
+            const dTheta = pr2 * Math.PI * 2
+            const dPhi = Math.acos(2 * pr3 - 1)
+            dustPos[d * 3]     = cx + dr * Math.sin(dPhi) * Math.cos(dTheta)
+            dustPos[d * 3 + 1] = cy + dr * Math.sin(dPhi) * Math.sin(dTheta)
+            dustPos[d * 3 + 2] = cz + dr * Math.cos(dPhi)
+            dustCol[d * 3]     = tmpC.r
+            dustCol[d * 3 + 1] = tmpC.g
+            dustCol[d * 3 + 2] = tmpC.b
+          }
+          const dustGeo = new BufferGeometry()
+          dustGeo.setAttribute('position', new Float32BufferAttribute(dustPos, 3))
+          dustGeo.setAttribute('color', new Float32BufferAttribute(dustCol, 3))
+          const dust = new Points(dustGeo, new PointsMaterial({
+            size: 0.5, vertexColors: true, transparent: true, opacity: 0.4,
+            sizeAttenuation: true, depthWrite: false,
+          }))
+          scene.add(dust)
+          clusterVisuals.push(dust)
+        }
       }
     } else {
       // ── Type mode: group by engram type (original behavior) ──

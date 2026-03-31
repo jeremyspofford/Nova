@@ -141,6 +141,9 @@ export default function Brain() {
   const [showInnerStars, setShowInnerStars] = useLocalStorage('brain.showInnerStars', false)
   const [showNebulae, setShowNebulae] = useLocalStorage('brain.showNebulae', true)
   const [showEdges, setShowEdges] = useLocalStorage('brain.showEdges', true)
+  const [showCelestialObjects, setShowCelestialObjects] = useLocalStorage('brain.showCelestialObjects', true)
+  const [showClusterGalaxies, setShowClusterGalaxies] = useLocalStorage('brain.showClusterGalaxies', true)
+  const [clusterSeparation, setClusterSeparation] = useLocalStorage('brain.clusterSeparation', 0.3)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
@@ -385,6 +388,9 @@ export default function Brain() {
         showInnerStars={perf.showInnerStars}
         showNebulae={showNebulae}
         showEdges={perf.showEdges}
+        showCelestialObjects={showCelestialObjects}
+        showClusterGalaxies={showClusterGalaxies}
+        clusterSeparation={clusterSeparation}
         className="w-full h-full"
       />
 
@@ -683,6 +689,8 @@ export default function Brain() {
                 { label: 'Stars', value: showBgStars, set: setShowBgStars },
                 { label: 'Inner Stars', value: showInnerStars, set: setShowInnerStars },
                 { label: 'Clouds', value: showNebulae, set: setShowNebulae },
+                { label: 'Celestial Objects', value: showCelestialObjects, set: setShowCelestialObjects },
+                { label: 'Galaxy Halos', value: showClusterGalaxies, set: setShowClusterGalaxies },
               ].map(({ label, value, set }) => (
                 <button
                   key={label}
@@ -696,6 +704,23 @@ export default function Brain() {
                   {label}
                 </button>
               ))}
+            </div>
+
+            {/* Cluster separation */}
+            <div className="space-y-1.5">
+              <div className="text-[10px] text-stone-600">Cluster Separation</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={clusterSeparation}
+                  onChange={(e) => setClusterSeparation(parseFloat(e.target.value))}
+                  className="flex-1 h-1 accent-teal-500 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-webkit-slider-thumb]:appearance-none"
+                />
+                <span className="text-[10px] text-stone-500 w-6 text-right">{clusterSeparation.toFixed(2)}</span>
+              </div>
             </div>
           </div>
         </div>
