@@ -113,8 +113,10 @@ class BaseAgent:
         tier: str | None = None,
         task_type: str | None = None,
     ) -> None:
+        from datetime import date
         self.model          = model
-        self.system_prompt  = system_prompt or self.DEFAULT_SYSTEM
+        base_prompt         = system_prompt or self.DEFAULT_SYSTEM
+        self.system_prompt  = f"Current date: {date.today().isoformat()}\n\n{base_prompt}"
         self.allowed_tools  = allowed_tools  # None = all tools; [] = no tools
         self.temperature    = temperature
         self.max_tokens     = max_tokens

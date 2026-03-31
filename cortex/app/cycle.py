@@ -376,7 +376,9 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
             "If the goal has a description, you should be able to plan work."
         )
 
+    from datetime import date
     prompt = f"""You are Nova's autonomous brain (Cortex). You are deciding what to do this cycle.
+Current date: {date.today().isoformat()}
 
 Winning drive: {drive.name} (urgency {drive.urgency}, score {state.winner.score:.2f})
 Drive says: {drive.description}

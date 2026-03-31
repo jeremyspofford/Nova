@@ -781,8 +781,10 @@ async def _build_nova_context(
             f"the capability is disabled in Settings and suggest they re-enable it."
         )
 
+    from datetime import date
     platform_block = (
         f"## Platform Context\n"
+        f"- Current date:  {date.today().isoformat()}\n"
         f"- Your model:    {model}\n"
         f"- Your agent ID: {agent_id}\n"
         f"- Session ID:    {session_id}\n"
