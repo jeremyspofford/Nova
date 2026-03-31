@@ -324,13 +324,21 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     # Warning check — non-blocking, prepended to result
     warned, warning_msg = _is_command_warned(command)
 
+    # Set HOME correctly per tier
+    if tier == SandboxTier.root:
+        shell_home = f"{HOST_ROOT_PREFIX}{settings.home_root}"
+    elif tier == SandboxTier.home:
+        shell_home = settings.home_root
+    else:
+        shell_home = str(cwd)
+
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "HOME": str(cwd), "TERM": "dumb"},
+            env={**os.environ, "HOME": shell_home, "TERM": "dumb"},
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -389,8 +397,8 @@ def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
         if fragment in cmd_lower:
             return True, reason
 
-    # Additional blocks for workspace and nova tiers
-    if tier in (SandboxTier.workspace, SandboxTier.nova):
+    # Additional blocks for workspace and home tiers
+    if tier in (SandboxTier.workspace, SandboxTier.home):
         _TIER_BLOCKS: list[tuple[str, str]] = [
             ("chmod -r /",      "recursive permission change on root"),
             ("chown -r /",      "recursive ownership change on root"),
