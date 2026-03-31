@@ -716,6 +716,41 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 goal_id, outcome.task_id,
             )
 
+        # Record iteration history for goal timeline
+        try:
+            attempt = await conn.fetchval(
+                "SELECT COALESCE(MAX(attempt), 0) + 1 FROM goal_iterations WHERE goal_id = $1::uuid",
+                goal_id,
+            )
+            # Get plan text from current_plan
+            plan_data = row["current_plan"] or {}
+            plan_text = plan_data.get("plan", "") if isinstance(plan_data, dict) else ""
+
+            # Detect plan adjustment (previous attempt failed, plan changed)
+            adjustment = None
+            if isinstance(plan_data, dict) and plan_data.get("last_task_status") == "failed":
+                prev_error = plan_data.get("last_task_error", "")
+                if prev_error:
+                    adjustment = f"Re-planned after failure: {prev_error[:200]}"
+
+            headline = (outcome.output or "")[:200].split("\n")[0] if outcome.output else outcome.status
+            files = plan_data.get("files_changed", []) if isinstance(plan_data, dict) else []
+
+            await conn.execute("""
+                INSERT INTO goal_iterations
+                    (goal_id, attempt, cycle_number, plan_text, task_id, task_status,
+                     task_summary, cost_usd, files_touched, plan_adjustment)
+                VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
+            """,
+                goal_id, attempt, cycle, plan_text,
+                outcome.task_id if outcome.task_id != "unknown" else None,
+                outcome.status, headline,
+                outcome.total_cost_usd,
+                json.dumps(files), adjustment,
+            )
+        except Exception as e:
+            log.debug("Failed to record goal iteration: %s", e)
+
         # ── Check if goal has reached its limits ──
         await _check_goal_limits(conn, goal_id, row)
 
