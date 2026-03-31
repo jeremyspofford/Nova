@@ -45,9 +45,12 @@ class Settings(BaseSettings):
     # Phase 3: Code & Terminal Tools
     workspace_root: str = "/workspace"
     shell_timeout_seconds: int = 30
-    # Sandbox tier: workspace | nova | host | isolated (Phase 3b)
+    # Sandbox tier: workspace | home | root | isolated
     shell_sandbox: str = "workspace"
     nova_root: str = "/nova"
+    # HOME on the host — set via HOST_HOME env in docker-compose.yml.
+    # Default "/root" is the container's root home; only correct if HOST_HOME is set.
+    home_root: str = Field(default="/root", validation_alias=AliasChoices("HOST_HOME", "home_root"))
 
     # Phase 4: Task Queue + Failure Recovery
     # Running tasks write a heartbeat every N seconds
