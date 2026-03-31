@@ -128,12 +128,18 @@ async def _get_sandbox_tier() -> SandboxTier:
             row = await conn.fetchrow(
                 "SELECT value #>> '{}' AS val FROM platform_config WHERE key = 'shell.sandbox'"
             )
-        if row and row["val"] in SandboxTier.__members__:
-            return SandboxTier(row["val"])
+        if row:
+            try:
+                return SandboxTier(row["val"])
+            except ValueError:
+                pass
     except Exception:
         pass
     from app.config import settings as _s
-    return SandboxTier(_s.shell_sandbox) if _s.shell_sandbox in SandboxTier.__members__ else SandboxTier.workspace
+    try:
+        return SandboxTier(_s.shell_sandbox)
+    except ValueError:
+        return SandboxTier.workspace
 
 
 # ── Agent lifecycle ───────────────────────────────────────────────────────────

@@ -52,6 +52,7 @@ async def get_disabled_tool_groups() -> set[str]:
 
 async def resolve_effective_tools(
     allowed_tools: list[str] | None = None,
+    sandbox_tier: "SandboxTier | None" = None,
 ) -> tuple[list[ToolDefinition], set[str]]:
     """Centralized permission resolution — single entry point for all callers.
 
@@ -60,12 +61,25 @@ async def resolve_effective_tools(
 
     Layers:
       1. Global permissions (disabled_groups from platform_config)
-      2. Pod allowlist (optional — filters within permitted tools)
+      2. Tier-aware descriptions (swap code/git tool descriptions for home/root)
+      3. Pod allowlist (optional — filters within permitted tools)
     """
     from app.tools import get_permitted_tools
+    from app.tools.sandbox import SandboxTier, get_sandbox
 
     disabled = await get_disabled_tool_groups()
     tools = get_permitted_tools(disabled)
+
+    # Resolve tier: explicit param > contextvar > default (workspace)
+    tier = sandbox_tier or get_sandbox()
+
+    # Swap in tier-aware descriptions for Code and Git tools
+    if tier not in (SandboxTier.workspace, SandboxTier.isolated):
+        from app.tools.code_tools import get_code_tools
+        from app.tools.git_tools import get_git_tools
+        tier_tools = get_code_tools(tier) + get_git_tools(tier)
+        tier_by_name = {t.name: t for t in tier_tools}
+        tools = [tier_by_name.get(t.name, t) for t in tools]
 
     if allowed_tools is not None:
         allowed_set = set(allowed_tools)

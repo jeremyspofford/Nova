@@ -754,27 +754,26 @@ async def _run_agent(
     session_id = await _create_session(task_id, agent, resolved_model=model)
     await _set_task_status(task_id, f"{agent.role}_running", current_stage=agent.role)
 
-    # Set sandbox tier from pod config for this agent execution.
-    # NOTE(2026-03-26): The Dashboard Settings page writes to platform_config.shell.sandbox
-    # but the pipeline was only reading pod.sandbox — so changing the sandbox tier in
-    # Settings had no effect on pipeline tasks. This fallback bridges the gap: when the
-    # pod uses the default "workspace" tier, we check the global platform_config setting.
-    # TODO: Other Claude sessions may also be addressing this disconnect (e.g. adding
-    # per-pod sandbox controls to the Dashboard). Re-check whether this fallback is still
-    # needed once those changes land, or if it should become the canonical read path.
-    if pod.sandbox in SandboxTier.__members__ and pod.sandbox != "workspace":
-        tier = SandboxTier(pod.sandbox)
+    # Set sandbox tier — try pod config first, fall back to global platform_config
+    tier = SandboxTier.workspace
+    if pod.sandbox and pod.sandbox != "workspace":
+        try:
+            tier = SandboxTier(pod.sandbox)
+        except ValueError:
+            pass  # Unknown tier value — use default
     else:
         # Pod has default tier — check if the global platform config overrides it
-        tier = SandboxTier.workspace
         try:
             pool = get_pool()
             async with pool.acquire() as conn:
                 row = await conn.fetchrow(
                     "SELECT value #>> '{}' AS val FROM platform_config WHERE key = 'shell.sandbox'"
                 )
-            if row and row["val"] in SandboxTier.__members__:
-                tier = SandboxTier(row["val"])
+            if row:
+                try:
+                    tier = SandboxTier(row["val"])
+                except ValueError:
+                    pass
         except Exception:
             pass  # DB unavailable — safe default
     sandbox_token = set_sandbox(tier)
