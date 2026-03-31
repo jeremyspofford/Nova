@@ -964,7 +964,7 @@ export function Goals() {
         <>
           {/* Suggested: pending intel recommendations */}
           <p className="text-caption text-content-tertiary -mb-2">
-            Recommendations from intelligence feeds that Nova thinks could become goals. Approve to create a goal, defer to review later.
+            Recommendations from intelligence feeds that Nova thinks could become goals. Approve to create a goal, defer to review later, or decline to dismiss permanently.
           </p>
           {recsLoading ? (
             <div className="space-y-3">

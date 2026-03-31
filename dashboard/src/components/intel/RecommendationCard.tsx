@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { Check, Clock, FileText, Brain, MessageSquare } from 'lucide-react'
+import { Check, Clock, X, FileText, Brain, MessageSquare } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import type { IntelRecommendation } from '../../api'
 import { Button } from '../ui/Button'
@@ -116,6 +116,14 @@ export function RecommendationCard({ rec, expanded, onToggle, onStatusChange }: 
                 onClick={() => onStatusChange('deferred')}
               >
                 Defer
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<X size={14} />}
+                onClick={() => onStatusChange('dismissed')}
+              >
+                Decline
               </Button>
             </div>
           )}
