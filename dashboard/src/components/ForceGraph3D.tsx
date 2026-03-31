@@ -888,7 +888,7 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     deepGeo.setAttribute('position', new Float32BufferAttribute(deepPos, 3))
     deepGeo.setAttribute('color', new Float32BufferAttribute(deepCol, 3))
     const deepStars = new Points(deepGeo, new PointsMaterial({
-      size: 1.5, vertexColors: true, transparent: true, opacity: 0.5,
+      size: 2.0, vertexColors: true, transparent: true, opacity: 0.7,
       sizeAttenuation: false, depthTest: false, depthWrite: false,
     }))
     deepStars.renderOrder = -1
@@ -908,7 +908,7 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     const farGeo = new BufferGeometry()
     farGeo.setAttribute('position', new Float32BufferAttribute(farPos, 3))
     const farStars = new Points(farGeo, new PointsMaterial({
-      size: 1.0, color: 0x8888bb, transparent: true, opacity: 0.3,
+      size: 1.5, color: 0x9999cc, transparent: true, opacity: 0.45,
       sizeAttenuation: false, depthTest: false, depthWrite: false,
     }))
     farStars.renderOrder = -2
@@ -1704,6 +1704,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       return 0
     })
   }, [showEdges])
+
+  // Live-update galaxy halos visibility
+  useEffect(() => {
+    for (const visual of clusterVisuals) {
+      visual.visible = showClusterGalaxies
+    }
+  }, [showClusterGalaxies])
 
   // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 
