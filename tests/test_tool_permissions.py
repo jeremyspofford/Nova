@@ -153,3 +153,46 @@ class TestToolPermissionsAPI:
             assert "enabled" in g
             assert "is_mcp" in g
             assert g["tool_count"] == len(g["tools"])
+
+
+class TestSandboxTierRename:
+    """Verify sandbox tier rename and backward compat."""
+
+    async def test_sandbox_setting_uses_new_names(
+        self, orchestrator: httpx.AsyncClient, admin_headers: dict
+    ):
+        """Platform config should accept new tier names."""
+        # Set to 'home' (new name)
+        resp = await orchestrator.patch(
+            "/api/v1/config",
+            json={"key": "shell.sandbox", "value": "home"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+
+        # Read it back
+        resp = await orchestrator.get("/api/v1/config", headers=admin_headers)
+        entries = {e["key"]: e for e in resp.json()}
+        assert entries["shell.sandbox"]["value"] == "home"
+
+    async def test_sandbox_setting_backward_compat(
+        self, orchestrator: httpx.AsyncClient, admin_headers: dict
+    ):
+        """Old tier names ('nova', 'host') should still be accepted."""
+        resp = await orchestrator.patch(
+            "/api/v1/config",
+            json={"key": "shell.sandbox", "value": "nova"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+
+    async def test_sandbox_setting_reset_to_workspace(
+        self, orchestrator: httpx.AsyncClient, admin_headers: dict
+    ):
+        """Clean up: reset sandbox to workspace."""
+        resp = await orchestrator.patch(
+            "/api/v1/config",
+            json={"key": "shell.sandbox", "value": "workspace"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200

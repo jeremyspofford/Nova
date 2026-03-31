@@ -526,15 +526,15 @@ function AgentModelPicker({
 
 const SANDBOX_TIERS = [
   { value: 'workspace', label: 'workspace' },
-  { value: 'nova', label: 'nova' },
-  { value: 'host', label: 'host' },
+  { value: 'home', label: 'home' },
+  { value: 'root', label: 'root' },
   { value: 'isolated', label: 'isolated' },
 ]
 
 const SANDBOX_DESCRIPTIONS: Record<string, string> = {
-  workspace: 'Paths scoped to /workspace',
-  nova:      'Paths scoped to /nova (full repo)',
-  host:      'No path restriction (hard blocks only)',
+  workspace: 'Paths scoped to workspace directory',
+  home:      'Paths scoped to home directory',
+  root:      'Full host filesystem access',
   isolated:  'No filesystem or shell access',
 }
 
@@ -801,7 +801,7 @@ function CreatePodModal({ open, onClose }: { open: boolean; onClose: () => void 
 const HELP_ENTRIES = [
   { term: 'Pod', definition: 'An isolated pipeline configuration — each pod defines which AI models and settings are used for each stage of task execution.' },
   { term: 'Agent Role', definition: 'Each pod has 5 agents: Context (gathers info), Task (does the work), Guardrail (safety check), Code Review (quality check), Decision (pass/fail).' },
-  { term: 'Sandbox Tier', definition: "How isolated the agent's execution environment is — from 'isolated' (most restricted) to 'host' (full system access)." },
+  { term: 'Sandbox Tier', definition: "How isolated the agent's execution environment is — from 'isolated' (most restricted) to 'root' (full system access)." },
   { term: 'Routing Keywords', definition: "Terms that trigger this pod — when a task matches these keywords, it's routed to this pod's pipeline." },
   { term: 'Fallback Models', definition: 'Secondary AI models used if the primary model is unavailable or rate-limited.' },
   { term: 'On Failure', definition: 'What happens when an agent fails — abort (stop), skip (continue), or escalate (flag for human review).' },

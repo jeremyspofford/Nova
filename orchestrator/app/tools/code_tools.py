@@ -1,16 +1,18 @@
 """
 Code & Terminal Tools — filesystem and shell access for Nova agents.
 
-Agents can read/write files and run shell commands, all scoped to the
-configured workspace_root directory. Path traversal attempts (../) are
-rejected before any I/O occurs.
+Access scope is controlled by the sandbox tier:
+  workspace — paths scoped to /workspace (default)
+  home      — paths scoped to user's home directory
+  root      — full host filesystem via /host-root mount
+  isolated  — no filesystem or shell access
 
 Tools provided:
-  list_dir          — directory listing (relative to workspace_root)
+  list_dir          — directory listing
   read_file         — read a file's contents
   write_file        — create or overwrite a file
   run_shell         — execute a shell command with timeout
-  search_codebase   — ripgrep search across the workspace
+  search_codebase   — ripgrep search
 """
 from __future__ import annotations
 
@@ -22,6 +24,20 @@ from pathlib import Path
 from nova_contracts import ToolDefinition
 
 log = logging.getLogger(__name__)
+
+HOST_ROOT_PREFIX = "/host-root"
+
+
+def display_path(path: Path | str) -> str:
+    """Convert internal container path to user-facing path.
+
+    Root tier paths are prefixed with /host-root inside the container.
+    Strip this prefix so agents and users see real host paths.
+    """
+    s = str(path)
+    if s.startswith(HOST_ROOT_PREFIX):
+        return s[len(HOST_ROOT_PREFIX):] or "/"
+    return s
 
 # ─── Tool definitions (what the LLM sees) ────────────────────────────────────
 
@@ -144,24 +160,154 @@ CODE_TOOLS: list[ToolDefinition] = [
     ),
 ]
 
+# Name-based lookup for stable parameter reuse across tiers
+_CODE_PARAMS = {t.name: t.parameters for t in CODE_TOOLS}
+
+
+def get_code_tools(tier: "SandboxTier") -> list[ToolDefinition]:
+    """Generate tool definitions with tier-appropriate descriptions."""
+    from app.tools.sandbox import SandboxTier
+
+    if tier == SandboxTier.home:
+        return [
+            ToolDefinition(
+                name="list_dir",
+                description=(
+                    "List files and directories at a path in your home directory. "
+                    "Use absolute paths (e.g., '/home/user/project/src') or relative paths from home."
+                ),
+                parameters=_CODE_PARAMS["list_dir"],
+            ),
+            ToolDefinition(
+                name="read_file",
+                description=(
+                    "Read the contents of a file in your home directory. "
+                    "Use absolute paths (e.g., '/home/user/project/main.py') or relative. "
+                    "Large files are truncated at 8000 characters."
+                ),
+                parameters=_CODE_PARAMS["read_file"],
+            ),
+            ToolDefinition(
+                name="write_file",
+                description=(
+                    "Write or overwrite a file in your home directory. "
+                    "Use absolute paths or relative. Creates parent directories automatically."
+                ),
+                parameters=_CODE_PARAMS["write_file"],
+            ),
+            ToolDefinition(
+                name="run_shell",
+                description=(
+                    "Run a shell command with cwd in your home directory. "
+                    "Commands run in a subprocess with a hard timeout. "
+                    "Blocks sudo, curl|sh, and privilege escalation."
+                ),
+                parameters=_CODE_PARAMS["run_shell"],
+            ),
+            ToolDefinition(
+                name="search_codebase",
+                description=(
+                    "Search for a pattern across files in your home directory using ripgrep. "
+                    "Returns matching lines with file paths and line numbers."
+                ),
+                parameters=_CODE_PARAMS["search_codebase"],
+            ),
+        ]
+
+    if tier == SandboxTier.root:
+        return [
+            ToolDefinition(
+                name="list_dir",
+                description=(
+                    "List files and directories at any path on the host filesystem. "
+                    "Use absolute paths (e.g., '/etc/nginx', '/var/log')."
+                ),
+                parameters=_CODE_PARAMS["list_dir"],
+            ),
+            ToolDefinition(
+                name="read_file",
+                description=(
+                    "Read the contents of any file on the host filesystem. "
+                    "Use absolute paths (e.g., '/etc/nginx/nginx.conf'). "
+                    "Large files are truncated at 8000 characters."
+                ),
+                parameters=_CODE_PARAMS["read_file"],
+            ),
+            ToolDefinition(
+                name="write_file",
+                description=(
+                    "Write or overwrite any file on the host filesystem. "
+                    "Use absolute paths. Creates parent directories automatically."
+                ),
+                parameters=_CODE_PARAMS["write_file"],
+            ),
+            ToolDefinition(
+                name="run_shell",
+                description=(
+                    "Run a shell command on the host. "
+                    "Working directory defaults to home. "
+                    "Use file tools (read_file, write_file) for accessing arbitrary host paths."
+                ),
+                parameters=_CODE_PARAMS["run_shell"],
+            ),
+            ToolDefinition(
+                name="search_codebase",
+                description=(
+                    "Search for a pattern across files on the host filesystem using ripgrep. "
+                    "Use absolute paths to scope the search (e.g., '/etc', '/home/user/project')."
+                ),
+                parameters=_CODE_PARAMS["search_codebase"],
+            ),
+        ]
+
+    # workspace / isolated — return defaults
+    return list(CODE_TOOLS)
+
 
 # ─── Path helpers ─────────────────────────────────────────────────────────────
 
 def _resolve_path(relative: str) -> Path:
-    """Resolve a relative path to an absolute path within the current sandbox root.
+    """Resolve a path within the current sandbox tier's root.
 
-    Raises ValueError if the resolved path escapes the sandbox root.
-    Raises PermissionError if the sandbox tier is 'isolated'.
+    - workspace: relative paths only, scoped to /workspace
+    - home: absolute or relative, scoped to $HOME
+    - root: absolute or relative, transparently mapped to /host-root
+    - isolated: raises PermissionError
     """
     from app.tools.sandbox import get_root, get_sandbox, SandboxTier
 
-    root = get_root()  # raises PermissionError for isolated tier
+    tier = get_sandbox()
 
-    # In host mode, allow absolute paths and skip containment check
-    if get_sandbox() == SandboxTier.host:
-        candidate = Path(relative).resolve() if relative.startswith("/") else (root / relative).resolve()
+    if tier == SandboxTier.isolated:
+        get_root()  # raises PermissionError
+
+    root = get_root()
+
+    if tier == SandboxTier.root:
+        if relative.startswith("/"):
+            candidate = (Path(HOST_ROOT_PREFIX) / relative.lstrip("/")).resolve()
+        else:
+            candidate = (Path(HOST_ROOT_PREFIX) / relative).resolve()
+        if not str(candidate).startswith(HOST_ROOT_PREFIX):
+            raise ValueError(
+                f"Path '{relative}' resolves outside host filesystem mount. "
+                "Directory traversal is not permitted."
+            )
         return candidate
 
+    if tier == SandboxTier.home:
+        if relative.startswith("/"):
+            candidate = Path(relative).resolve()
+        else:
+            candidate = (root / relative).resolve()
+        if not str(candidate).startswith(str(root)):
+            raise ValueError(
+                f"Path '{relative}' resolves outside home directory '{root}'. "
+                "Access denied in home sandbox tier."
+            )
+        return candidate
+
+    # Workspace tier (default)
     candidate = (root / relative).resolve()
     if not str(candidate).startswith(str(root)):
         raise ValueError(
@@ -209,7 +355,7 @@ async def execute_tool(name: str, arguments: dict) -> str:
 def _execute_list_dir(path: str, recursive: bool) -> str:
     target = _resolve_path(path)
     if not target.exists():
-        return f"Path '{path}' does not exist in workspace."
+        return f"Path '{path}' does not exist."
     if not target.is_dir():
         return f"'{path}' is a file, not a directory."
 
@@ -222,9 +368,11 @@ def _execute_list_dir(path: str, recursive: bool) -> str:
         return f"Directory '{path}' is empty."
 
     lines = [f"Contents of {path}:"]
-    root = _resolve_path(".")
     for e in entries:
-        rel = e.relative_to(root)
+        try:
+            rel = e.relative_to(target)
+        except ValueError:
+            rel = display_path(e)
         kind = "/" if e.is_dir() else ""
         lines.append(f"  {rel}{kind}")
     return "\n".join(lines)
@@ -233,7 +381,7 @@ def _execute_list_dir(path: str, recursive: bool) -> str:
 def _execute_read_file(path: str) -> str:
     target = _resolve_path(path)
     if not target.exists():
-        return f"File '{path}' does not exist in workspace."
+        return f"File '{path}' does not exist."
     if not target.is_file():
         return f"'{path}' is a directory, not a file."
 
@@ -242,7 +390,7 @@ def _execute_read_file(path: str) -> str:
     if len(text) > MAX_CHARS:
         truncated = len(text) - MAX_CHARS
         text = text[:MAX_CHARS] + f"\n\n[... {truncated} characters truncated ...]"
-    return f"File: {path}\n```\n{text}\n```"
+    return f"File: {display_path(target)}\n```\n{text}\n```"
 
 
 def _execute_write_file(path: str, content: str) -> str:
@@ -252,7 +400,7 @@ def _execute_write_file(path: str, content: str) -> str:
     target.write_text(content, encoding="utf-8")
     action = "Updated" if existed else "Created"
     byte_count = len(content.encode())
-    return f"{action} '{path}' ({byte_count} bytes, {content.count(chr(10)) + 1} lines)."
+    return f"{action} '{display_path(target)}' ({byte_count} bytes, {content.count(chr(10)) + 1} lines)."
 
 
 async def _execute_run_shell(command: str, working_dir: str | None) -> str:
@@ -281,13 +429,21 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     # Warning check — non-blocking, prepended to result
     warned, warning_msg = _is_command_warned(command)
 
+    # Set HOME correctly per tier
+    if tier == SandboxTier.root:
+        shell_home = f"{HOST_ROOT_PREFIX}{settings.home_root}"
+    elif tier == SandboxTier.home:
+        shell_home = settings.home_root
+    else:
+        shell_home = str(cwd)
+
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             cwd=str(cwd),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={**os.environ, "HOME": str(cwd), "TERM": "dumb"},
+            env={**os.environ, "HOME": shell_home, "TERM": "dumb"},
         )
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(),
@@ -322,7 +478,7 @@ def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
     most obviously destructive commands while keeping the tool useful for
     real development work (running tests, builds, linters, etc.).
 
-    In host tier, only the most dangerous hard blocks are enforced.
+    In root tier, only the most dangerous hard blocks are enforced.
     In workspace/nova tiers, all hard blocks apply.
     """
     from app.tools.sandbox import SandboxTier
@@ -346,8 +502,8 @@ def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
         if fragment in cmd_lower:
             return True, reason
 
-    # Additional blocks for workspace and nova tiers
-    if tier in (SandboxTier.workspace, SandboxTier.nova):
+    # Additional blocks for workspace and home tiers
+    if tier in (SandboxTier.workspace, SandboxTier.home):
         _TIER_BLOCKS: list[tuple[str, str]] = [
             ("chmod -r /",      "recursive permission change on root"),
             ("chown -r /",      "recursive ownership change on root"),
@@ -429,6 +585,10 @@ async def _execute_search_codebase(
 
     out = stdout.decode(errors="replace").strip()
     err = stderr.decode(errors="replace").strip()
+
+    # Strip /host-root prefix from ripgrep output paths
+    if HOST_ROOT_PREFIX + "/" in (out or ""):
+        out = out.replace(HOST_ROOT_PREFIX + "/", "/")
 
     if proc.returncode == 1 and not out:
         return f"No matches found for '{pattern}' in '{path}'."

@@ -21,11 +21,11 @@ def test_default_tier_is_workspace():
 
 
 def test_set_and_reset_contextvar():
-    token = set_sandbox(SandboxTier.nova)
-    assert get_sandbox() == SandboxTier.nova
+    token = set_sandbox(SandboxTier.home)
+    assert get_sandbox() == SandboxTier.home
     reset_sandbox(token)
     # After reset, should be back to previous value
-    assert get_sandbox() != SandboxTier.nova or get_sandbox() == SandboxTier.workspace
+    assert get_sandbox() != SandboxTier.home or get_sandbox() == SandboxTier.workspace
 
 
 # ─── get_root ─────────────────────────────────────────────────────────────────
@@ -40,22 +40,22 @@ def test_get_root_workspace(tmp_path: Path):
             reset_sandbox(token)
 
 
-def test_get_root_nova(tmp_path: Path):
-    nova_dir = tmp_path / "nova_root"
-    nova_dir.mkdir()
+def test_get_root_home(tmp_path: Path):
+    home_dir = tmp_path / "home_root"
+    home_dir.mkdir()
     with patch("app.config.settings") as s:
-        s.nova_root = str(nova_dir)
-        token = set_sandbox(SandboxTier.nova)
+        s.home_root = str(home_dir)
+        token = set_sandbox(SandboxTier.home)
         try:
-            assert get_root() == nova_dir.resolve()
+            assert get_root() == home_dir.resolve()
         finally:
             reset_sandbox(token)
 
 
-def test_get_root_host():
-    token = set_sandbox(SandboxTier.host)
+def test_get_root_root():
+    token = set_sandbox(SandboxTier.root)
     try:
-        assert get_root() == Path("/")
+        assert get_root() == Path("/host-root")
     finally:
         reset_sandbox(token)
 
@@ -84,13 +84,13 @@ def test_resolve_path_in_workspace(tmp_path: Path):
             reset_sandbox(token)
 
 
-def test_resolve_path_host_allows_absolute(tmp_path: Path):
+def test_resolve_path_root_allows_absolute(tmp_path: Path):
     from app.tools.code_tools import _resolve_path
 
-    token = set_sandbox(SandboxTier.host)
+    token = set_sandbox(SandboxTier.root)
     try:
         resolved = _resolve_path("/tmp")
-        assert resolved == Path("/tmp").resolve()
+        assert resolved == Path("/host-root/tmp")
     finally:
         reset_sandbox(token)
 
@@ -120,8 +120,8 @@ def test_sudo_blocked_in_workspace():
     assert "privilege" in reason.lower()
 
 
-def test_sudo_allowed_in_host():
+def test_sudo_allowed_in_root():
     from app.tools.code_tools import _is_command_blocked
 
-    blocked, _ = _is_command_blocked("sudo apt install vim", SandboxTier.host)
+    blocked, _ = _is_command_blocked("sudo apt install vim", SandboxTier.root)
     assert not blocked
