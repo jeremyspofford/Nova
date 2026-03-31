@@ -180,6 +180,46 @@ export const getTaskFindings = (task_id: string) =>
 export const getTaskReviews = (task_id: string) =>
   apiFetch<CodeReviewVerdict[]>(`/api/v1/pipeline/tasks/${task_id}/reviews`)
 
+export interface Artifact {
+  id: string
+  task_id: string
+  agent_session_id: string | null
+  artifact_type: string
+  name: string
+  content: string
+  content_hash: string
+  file_path: string | null
+  metadata: Record<string, unknown> | null
+  created_at: string
+  attempt?: number
+}
+
+export interface WorkspaceFile {
+  path: string
+  content: string | null
+  size_bytes: number
+  modified_at: string
+  truncated?: boolean
+  error?: string
+}
+
+export interface TaskSummary {
+  headline: string
+  files_created: string[]
+  files_modified: string[]
+  commands_run: string[]
+  findings_count: number
+  review_verdict: string | null
+  cost_usd: number
+  duration_s: number | null
+}
+
+export const getTaskArtifacts = (task_id: string) =>
+  apiFetch<Artifact[]>(`/api/v1/pipeline/tasks/${task_id}/artifacts`)
+
+export const getWorkspaceFile = (path: string) =>
+  apiFetch<WorkspaceFile>(`/api/v1/workspace/files?path=${encodeURIComponent(path)}`)
+
 export const deletePipelineTask = (task_id: string) =>
   apiFetch<void>(`/api/v1/pipeline/tasks/${task_id}`, { method: 'DELETE' })
 
@@ -454,6 +494,27 @@ export interface Goal {
   scope_analysis?: unknown | null
   spec?: string | null
 }
+
+export interface GoalIteration {
+  id: string
+  goal_id: string
+  attempt: number
+  cycle_number: number
+  plan_text: string | null
+  task_id: string | null
+  task_status: string | null
+  task_summary: string | null
+  cost_usd: number
+  files_touched: string[]
+  plan_adjustment: string | null
+  created_at: string
+}
+
+export const getGoalIterations = (goal_id: string) =>
+  apiFetch<GoalIteration[]>(`/api/v1/goals/${goal_id}/iterations`)
+
+export const getGoalArtifacts = (goal_id: string) =>
+  apiFetch<Artifact[]>(`/api/v1/goals/${goal_id}/artifacts`)
 
 export const getGoals = (status?: string) => {
   const qs = status ? `?status=${status}` : ''
