@@ -131,6 +131,68 @@ PLATFORM_TOOLS: list[ToolDefinition] = [
             "required": ["description"],
         },
     ),
+    ToolDefinition(
+        name="create_goal",
+        description=(
+            "Create a strategic goal for Cortex to pursue autonomously over time. Goals are "
+            "ongoing objectives that Cortex re-evaluates and acts on repeatedly — use create_task "
+            "for one-shot work instead. "
+            "If the platform's autonomy level requires confirmation, the first call without "
+            "confirmed=true returns a DRAFT for the user to review. Only set confirmed=true after "
+            "the user explicitly approves the draft."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Short name for the goal",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "What Cortex should accomplish and why",
+                },
+                "success_criteria": {
+                    "type": "string",
+                    "description": "How to determine the goal has been achieved",
+                },
+                "priority": {
+                    "type": "integer",
+                    "enum": [1, 2, 3, 4],
+                    "description": "Priority level: 1=critical, 2=high, 3=normal, 4=low",
+                },
+                "max_cost_usd": {
+                    "type": "number",
+                    "description": "Maximum spend in USD before Cortex pauses the goal",
+                },
+                "max_iterations": {
+                    "type": "integer",
+                    "description": "Maximum number of Cortex think-cycles for this goal",
+                },
+                "check_interval_seconds": {
+                    "type": "integer",
+                    "description": "How often (in seconds) Cortex should revisit this goal",
+                },
+                "schedule_cron": {
+                    "type": "string",
+                    "description": "Cron expression for scheduled re-evaluation (e.g. '0 9 * * 1' for Monday 9am)",
+                },
+                "parent_goal_id": {
+                    "type": "string",
+                    "description": "UUID of a parent goal to nest this under",
+                },
+                "max_completions": {
+                    "type": "integer",
+                    "description": "Stop after completing this many times (useful with schedule_cron)",
+                },
+                "confirmed": {
+                    "type": "boolean",
+                    "description": "Set to true only after the user has reviewed and approved the draft",
+                },
+            },
+            "required": ["title", "description"],
+        },
+    ),
 ]
 
 
@@ -167,6 +229,8 @@ async def execute_tool(name: str, arguments: dict) -> str:
                 pod_name=arguments.get("pod_name"),
                 context=arguments.get("context"),
             )
+        elif name == "create_goal":
+            return await _execute_create_goal(arguments)
         else:
             return f"Unknown tool '{name}'. Available: {[t.name for t in PLATFORM_TOOLS]}"
     except Exception as e:
@@ -278,6 +342,22 @@ async def _execute_send_message_to_agent(agent_id: str, message: str) -> str:
         return f"Failed to reach agent {agent_id}: {e}"
 
 
+async def _get_creation_autonomy() -> str:
+    """Read nova:config:creation.autonomy from Redis (db1). Default: auto_tasks."""
+    from app.redis_client import get_redis
+    try:
+        redis = await get_redis()
+        value = await redis.get("nova:config:creation.autonomy")
+        return value.decode() if isinstance(value, bytes) else (value or "auto_tasks")
+    except Exception:
+        return "auto_tasks"
+
+
+# Module-level rate-limit counter: tracks goal creations per session/run
+_goal_creation_count: dict[str, int] = {}
+_GOAL_RATE_LIMIT = 3
+
+
 async def _execute_create_task(
     description: str,
     pod_name: str | None = None,
@@ -340,4 +420,135 @@ async def _execute_create_task(
     return (
         f"Task submitted to pod '{pod_name}' (ID: {task_id}). "
         f"The pipeline will execute this autonomously — you'll be notified when it completes."
+    )
+
+
+async def _execute_create_goal(args: dict) -> str:
+    """Create a strategic goal for Cortex with autonomy check and rate limiting."""
+    import uuid as _uuid
+    from datetime import datetime, timezone
+    from app.db import get_pool
+    from app.stimulus import emit_stimulus
+
+    title = (args.get("title") or "").strip()
+    description = (args.get("description") or "").strip()
+
+    if not title:
+        return "Error: 'title' is required and must not be empty."
+    if not description:
+        return "Error: 'description' is required and must not be empty."
+
+    # Rate limit: max 3 goal creations per process lifetime
+    _goal_creation_count.setdefault("total", 0)
+    if _goal_creation_count["total"] >= _GOAL_RATE_LIMIT:
+        return (
+            f"Rate limit reached: at most {_GOAL_RATE_LIMIT} goals may be created per session. "
+            "Ask the user to create additional goals from the dashboard."
+        )
+
+    confirmed = bool(args.get("confirmed", False))
+    autonomy = await _get_creation_autonomy()
+
+    # Confirmation gate: require explicit approval unless autonomy is full_auto
+    if not confirmed and autonomy in ("auto_tasks", "confirm_all"):
+        success_criteria = args.get("success_criteria", "(none)")
+        priority = args.get("priority", 3)
+        max_cost_usd = args.get("max_cost_usd")
+        max_iterations = args.get("max_iterations")
+        check_interval_seconds = args.get("check_interval_seconds")
+        schedule_cron = args.get("schedule_cron")
+        parent_goal_id = args.get("parent_goal_id")
+        max_completions = args.get("max_completions")
+
+        lines = [
+            "CONFIRMATION REQUIRED — Goal draft:",
+            f"  Title:             {title}",
+            f"  Description:       {description}",
+            f"  Success criteria:  {success_criteria}",
+            f"  Priority:          {priority}",
+        ]
+        if max_cost_usd is not None:
+            lines.append(f"  Max cost (USD):    {max_cost_usd}")
+        if max_iterations is not None:
+            lines.append(f"  Max iterations:    {max_iterations}")
+        if check_interval_seconds is not None:
+            lines.append(f"  Check interval:    {check_interval_seconds}s")
+        if schedule_cron:
+            lines.append(f"  Schedule (cron):   {schedule_cron}")
+        if parent_goal_id:
+            lines.append(f"  Parent goal ID:    {parent_goal_id}")
+        if max_completions is not None:
+            lines.append(f"  Max completions:   {max_completions}")
+        lines.append("")
+        lines.append("Please confirm with the user before calling create_goal again with confirmed=true.")
+        return "\n".join(lines)
+
+    # Resolve optional fields
+    success_criteria = args.get("success_criteria")
+    priority = int(args.get("priority") or 3)
+    max_cost_usd = args.get("max_cost_usd")
+    max_iterations = args.get("max_iterations")
+    check_interval_seconds = args.get("check_interval_seconds")
+    schedule_cron = args.get("schedule_cron")
+    parent_goal_id = args.get("parent_goal_id")
+    max_completions = args.get("max_completions")
+
+    # Compute schedule_next_at from cron expression if provided
+    schedule_next_at = None
+    if schedule_cron:
+        try:
+            from croniter import croniter
+            if not croniter.is_valid(schedule_cron):
+                return f"Error: invalid cron expression '{schedule_cron}'."
+            schedule_next_at = croniter(schedule_cron, datetime.now(timezone.utc)).get_next(datetime)
+        except Exception as exc:
+            return f"Error parsing cron expression '{schedule_cron}': {exc}"
+
+    # Parse parent_goal_id to UUID if provided
+    parent_uuid = None
+    if parent_goal_id:
+        try:
+            parent_uuid = _uuid.UUID(str(parent_goal_id))
+        except ValueError:
+            return f"Error: parent_goal_id '{parent_goal_id}' is not a valid UUID."
+
+    goal_id = str(_uuid.uuid4())
+    pool = get_pool()
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO goals (
+                id, title, description, success_criteria, priority,
+                max_cost_usd, max_iterations, check_interval_seconds,
+                schedule_cron, schedule_next_at, parent_goal_id,
+                max_completions, created_via, created_by
+            )
+            VALUES (
+                $1::uuid, $2, $3, $4, $5,
+                $6, $7, $8,
+                $9, $10, $11,
+                $12, $13, $14
+            )
+            """,
+            goal_id, title, description, success_criteria, priority,
+            max_cost_usd, max_iterations, check_interval_seconds,
+            schedule_cron, schedule_next_at, parent_uuid,
+            max_completions, "chat_tool", "nova",
+        )
+
+    _goal_creation_count["total"] += 1
+
+    await emit_stimulus("goal.created", {
+        "goal_id": goal_id,
+        "title": title,
+        "schedule_cron": schedule_cron,
+    })
+
+    log.info("Goal created via chat tool: %s — %s", goal_id, title)
+    return (
+        f"Goal created successfully.\n"
+        f"  ID:    {goal_id}\n"
+        f"  Title: {title}\n"
+        "Cortex will begin pursuing this goal on its next think cycle."
     )
