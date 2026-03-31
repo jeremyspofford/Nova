@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, RefreshCw, ChevronDown, ChevronRight, Trash2, Lock, ShieldAlert } from 'lucide-react'
 import clsx from 'clsx'
 import { getRules, createRule, updateRule, deleteRule, apiFetch } from '../api'
-import { PageHeader } from '../components/layout/PageHeader'
 import {
   Card, Badge, Toggle, Metric, Button, Input, Textarea, Modal, ConfirmDialog, EmptyState, Skeleton,
 } from '../components/ui'
@@ -454,17 +453,3 @@ export function RulesContent() {
   )
 }
 
-// ── Main page ────────────────────────────────────────────────────────────────
-
-export function Rules() {
-  return (
-    <div className="space-y-6 px-4 py-6 sm:px-6">
-      <PageHeader
-        title="Rules"
-        description="Constraints on agent behavior. Rules check tool calls before execution."
-        helpEntries={HELP_ENTRIES}
-      />
-      <RulesContent />
-    </div>
-  )
-}

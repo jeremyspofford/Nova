@@ -5,7 +5,6 @@ import {
 } from 'lucide-react'
 import clsx from 'clsx'
 import { getSkills, createSkill, updateSkill, deleteSkill } from '../api'
-import { PageHeader } from '../components/layout/PageHeader'
 import {
   Card, Badge, Toggle, Metric, Button, Input, Textarea, Select, Modal, ConfirmDialog,
   EmptyState, Skeleton,
@@ -440,17 +439,3 @@ export function SkillsContent() {
   )
 }
 
-// ── Main page ───────────────────────────────────────────────────────────────
-
-export function Skills() {
-  return (
-    <div className="space-y-6 px-4 py-6 sm:px-6">
-      <PageHeader
-        title="Skills"
-        description="Reusable prompt templates injected into agent conversations."
-        helpEntries={HELP_ENTRIES}
-      />
-      <SkillsContent />
-    </div>
-  )
-}

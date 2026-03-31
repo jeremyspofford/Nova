@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import { Plus, Key, Trash2 } from 'lucide-react'
 import { getKeys, createKey, revokeKey } from '../api'
-import { PageHeader } from '../components/layout/PageHeader'
 import {
   Button, Input, Label, Badge, CopyableId, Card,
   Modal, Table, ConfirmDialog, EmptyState,
@@ -210,16 +209,3 @@ export function KeysContent() {
   )
 }
 
-// ── Main page ───────────────────────────────────────────────────────────────
-
-export function Keys() {
-  return (
-    <div className="space-y-6">
-      <PageHeader
-        title="API Keys"
-        description="Keys let external clients call Nova's OpenAI-compatible API. Each key has its own rate limit and usage tracking."
-      />
-      <KeysContent />
-    </div>
-  )
-}

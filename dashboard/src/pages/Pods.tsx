@@ -3,12 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronDown, ChevronRight, RefreshCw, Layers,
   Loader2, Thermometer, Hash, Clock, RotateCw, FileText, Cpu, Settings2, Shield, Wrench,
-  Plus, Trash2,
+  Plus, Trash2, ArrowUp, ArrowDown, X,
 } from 'lucide-react'
 import clsx from 'clsx'
-import { getPods, getPod, updatePod, updatePodAgent, createPod, deletePod } from '../api'
+import { getPods, getPod, updatePod, updatePodAgent, createPod, deletePod, discoverModels } from '../api'
 import type { Pod, PodAgent } from '../types'
-import { ModelPicker } from '../components/ModelPicker'
 import { ToolPicker } from '../components/ToolPicker'
 import { PageHeader } from '../components/layout/PageHeader'
 import {
@@ -423,6 +422,135 @@ function AgentToolSettings({ agent, podId }: { agent: PodAgent; podId: string })
   )
 }
 
+// ── Pod model picker (primary + fallbacks) ──────────────────────────────────
+
+function PodModelPicker({
+  primaryModel, fallbackModels, onChange, podDefaultModel,
+}: {
+  primaryModel: string | null
+  fallbackModels: string[]
+  onChange: (primary: string | null, fallbacks: string[]) => void
+  podDefaultModel?: string | null
+}) {
+  const [addingFallback, setAddingFallback] = useState(false)
+
+  const { data: providers } = useQuery({
+    queryKey: ['model-catalog'],
+    queryFn: () => discoverModels(),
+    staleTime: 60_000,
+  })
+  const allModelIds = (providers ?? [])
+    .filter(p => p.available)
+    .flatMap(p => p.models.filter(m => m.registered).map(m => m.id))
+
+  const available = allModelIds.filter(
+    id => id !== primaryModel && !fallbackModels.includes(id),
+  )
+
+  const removeFallback = (idx: number) =>
+    onChange(primaryModel, fallbackModels.filter((_, i) => i !== idx))
+
+  const moveUp = (idx: number) => {
+    if (idx === 0) return
+    const next = [...fallbackModels]
+    ;[next[idx - 1], next[idx]] = [next[idx], next[idx - 1]]
+    onChange(primaryModel, next)
+  }
+
+  const moveDown = (idx: number) => {
+    if (idx === fallbackModels.length - 1) return
+    const next = [...fallbackModels]
+    ;[next[idx], next[idx + 1]] = [next[idx + 1], next[idx]]
+    onChange(primaryModel, next)
+  }
+
+  const inheritLabel = podDefaultModel
+    ? `Inherit from pod (${podDefaultModel.split('/').pop()})`
+    : 'Inherit from pod / service default'
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-content-tertiary">
+          Primary model
+        </label>
+        <select
+          value={primaryModel ?? ''}
+          onChange={e => onChange(e.target.value || null, fallbackModels)}
+          className="w-full rounded-md border border-border-subtle bg-surface-input px-3 py-1.5 text-xs text-content-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent-500/40"
+        >
+          <option value="">{inheritLabel}</option>
+          {allModelIds.map(id => (
+            <option key={id} value={id}>{id}</option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="mb-1.5 block text-[10px] font-medium uppercase tracking-wide text-content-tertiary">
+          Fallback models{' '}
+          <span className="normal-case text-content-quaternary">(tried in order on failure)</span>
+        </label>
+
+        {fallbackModels.length === 0 && !addingFallback && (
+          <p className="mb-1.5 text-[11px] italic text-content-tertiary">
+            No fallbacks — task will fail if primary model is unavailable
+          </p>
+        )}
+
+        <div className="space-y-1">
+          {fallbackModels.map((fb, i) => (
+            <div
+              key={fb}
+              className="flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface-card px-2 py-1"
+            >
+              <span className="w-4 shrink-0 text-center text-[10px] font-semibold text-content-tertiary">
+                {i + 1}
+              </span>
+              <span className="flex-1 truncate font-mono text-xs text-content-primary">{fb}</span>
+              <button onClick={() => moveUp(i)} disabled={i === 0} title="Move up"
+                className="rounded p-0.5 text-content-tertiary hover:text-content-primary disabled:opacity-20">
+                <ArrowUp size={11} />
+              </button>
+              <button onClick={() => moveDown(i)} disabled={i === fallbackModels.length - 1} title="Move down"
+                className="rounded p-0.5 text-content-tertiary hover:text-content-primary disabled:opacity-20">
+                <ArrowDown size={11} />
+              </button>
+              <button onClick={() => removeFallback(i)} title="Remove"
+                className="rounded p-0.5 text-content-tertiary hover:text-danger">
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {addingFallback ? (
+          <select
+            className="mt-1.5 w-full rounded-md border border-accent bg-surface-card px-3 py-1.5 text-xs text-content-primary outline-none ring-2 ring-accent-500/40"
+            defaultValue=""
+            autoFocus
+            onBlur={() => setAddingFallback(false)}
+            onChange={e => {
+              if (e.target.value) onChange(primaryModel, [...fallbackModels, e.target.value])
+              setAddingFallback(false)
+            }}
+          >
+            <option value="">Select a fallback model...</option>
+            {available.map(id => (
+              <option key={id} value={id}>{id}</option>
+            ))}
+          </select>
+        ) : available.length > 0 ? (
+          <button onClick={() => setAddingFallback(true)}
+            className="mt-1.5 flex items-center gap-1 text-[11px] text-accent hover:text-accent-600">
+            <Plus size={11} /> Add fallback
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
 // ── Agent model picker ───────────────────────────────────────────────────────
 
 function AgentModelPicker({
@@ -482,7 +610,7 @@ function AgentModelPicker({
 
       {editing ? (
         <div className="space-y-3">
-          <ModelPicker
+          <PodModelPicker
             primaryModel={primary}
             fallbackModels={fallbacks}
             onChange={(p, f) => { setPrimary(p); setFallbacks(f) }}
