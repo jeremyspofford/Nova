@@ -23,6 +23,20 @@ from nova_contracts import ToolDefinition
 
 log = logging.getLogger(__name__)
 
+HOST_ROOT_PREFIX = "/host-root"
+
+
+def display_path(path: Path | str) -> str:
+    """Convert internal container path to user-facing path.
+
+    Root tier paths are prefixed with /host-root inside the container.
+    Strip this prefix so agents and users see real host paths.
+    """
+    s = str(path)
+    if s.startswith(HOST_ROOT_PREFIX):
+        return s[len(HOST_ROOT_PREFIX):] or "/"
+    return s
+
 # ─── Tool definitions (what the LLM sees) ────────────────────────────────────
 
 CODE_TOOLS: list[ToolDefinition] = [
@@ -148,20 +162,47 @@ CODE_TOOLS: list[ToolDefinition] = [
 # ─── Path helpers ─────────────────────────────────────────────────────────────
 
 def _resolve_path(relative: str) -> Path:
-    """Resolve a relative path to an absolute path within the current sandbox root.
+    """Resolve a path within the current sandbox tier's root.
 
-    Raises ValueError if the resolved path escapes the sandbox root.
-    Raises PermissionError if the sandbox tier is 'isolated'.
+    - workspace: relative paths only, scoped to /workspace
+    - home: absolute or relative, scoped to $HOME
+    - root: absolute or relative, transparently mapped to /host-root
+    - isolated: raises PermissionError
     """
     from app.tools.sandbox import get_root, get_sandbox, SandboxTier
 
-    root = get_root()  # raises PermissionError for isolated tier
+    tier = get_sandbox()
 
-    # In host mode, allow absolute paths and skip containment check
-    if get_sandbox() == SandboxTier.host:
-        candidate = Path(relative).resolve() if relative.startswith("/") else (root / relative).resolve()
+    if tier == SandboxTier.isolated:
+        get_root()  # raises PermissionError
+
+    root = get_root()
+
+    if tier == SandboxTier.root:
+        if relative.startswith("/"):
+            candidate = (Path(HOST_ROOT_PREFIX) / relative.lstrip("/")).resolve()
+        else:
+            candidate = (Path(HOST_ROOT_PREFIX) / relative).resolve()
+        if not str(candidate).startswith(HOST_ROOT_PREFIX):
+            raise ValueError(
+                f"Path '{relative}' resolves outside host filesystem mount. "
+                "Directory traversal is not permitted."
+            )
         return candidate
 
+    if tier == SandboxTier.home:
+        if relative.startswith("/"):
+            candidate = Path(relative).resolve()
+        else:
+            candidate = (root / relative).resolve()
+        if not str(candidate).startswith(str(root)):
+            raise ValueError(
+                f"Path '{relative}' resolves outside home directory '{root}'. "
+                "Access denied in home sandbox tier."
+            )
+        return candidate
+
+    # Workspace tier (default)
     candidate = (root / relative).resolve()
     if not str(candidate).startswith(str(root)):
         raise ValueError(
