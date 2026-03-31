@@ -37,7 +37,23 @@ log = logging.getLogger(__name__)
 _consecutive_skips: dict[str, int] = {}
 MAX_CONSECUTIVE_SKIPS = 3
 
+# Round-robin counter for multi-goal rotation
+_goal_round_robin: int = 0
+
 ALL_DRIVES = [serve, maintain, improve, learn, reflect]
+
+
+def _select_goal(stale_goals: list[dict], scheduled_goal_ids: list[str]) -> dict:
+    """Pick the next goal to work on. Scheduled goals always win; otherwise round-robin."""
+    global _goal_round_robin
+    # Scheduled goals take priority (they have deadlines)
+    for g in stale_goals:
+        if str(g["id"]) in scheduled_goal_ids:
+            return g
+    # Round-robin through the priority-sorted list
+    idx = _goal_round_robin % len(stale_goals)
+    _goal_round_robin += 1
+    return stale_goals[idx]
 
 
 @dataclass
@@ -58,6 +74,7 @@ class CycleState:
     error: str | None = None
     resolved_model: str | None = None
     goal_id: str | None = None
+    selected_goal: dict | None = None  # Set by _plan_action for _execute_serve
     dispatched_task_id: str | None = None
     task_outcome: TaskOutcome | None = None
     plan_text: str | None = None
@@ -293,7 +310,9 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
     if drive.name == "serve":
         stale_goals = drive.context.get("stale_goals", [])
         if stale_goals:
-            goal = stale_goals[0]
+            scheduled_ids = drive.context.get("scheduled_goal_ids", [])
+            goal = _select_goal(stale_goals, scheduled_ids)
+            state.selected_goal = goal
             goal_id = goal.get("id", "")
             plan_data = goal.get("current_plan") or {}
             db_skip_count = plan_data.get("consecutive_skips", 0) if isinstance(plan_data, dict) else 0
@@ -392,42 +411,38 @@ async def _execute_action(drive: DriveResult, plan: str, state: CycleState) -> s
     """Execute the planned action. Returns outcome description."""
     if "skip" in plan.lower()[:20]:
         # Track consecutive skips per goal
-        if drive.name == "serve":
-            stale_goals = drive.context.get("stale_goals", [])
-            if stale_goals:
-                goal_id = stale_goals[0]["id"]
-                _consecutive_skips[goal_id] = _consecutive_skips.get(goal_id, 0) + 1
-                log.info(
-                    "Goal %s skipped (%d consecutive)",
-                    goal_id, _consecutive_skips[goal_id],
-                )
-                # Update last_checked_at and persist skip count so it survives restarts
-                try:
-                    pool = get_pool()
-                    async with pool.acquire() as conn:
-                        await conn.execute(
-                            """UPDATE goals SET
-                                 last_checked_at = NOW(),
-                                 current_plan = jsonb_set(COALESCE(current_plan, '{}'::jsonb), '{consecutive_skips}', $1::text::jsonb),
-                                 updated_at = NOW()
-                               WHERE id = $2::uuid""",
-                            str(_consecutive_skips[goal_id]),
-                            goal_id,
-                        )
-                except Exception as e:
-                    log.warning("Failed to update last_checked_at on skip: %s", e)
+        if drive.name == "serve" and state.selected_goal:
+            goal_id = state.selected_goal["id"]
+            _consecutive_skips[goal_id] = _consecutive_skips.get(goal_id, 0) + 1
+            log.info(
+                "Goal %s skipped (%d consecutive)",
+                goal_id, _consecutive_skips[goal_id],
+            )
+            # Update last_checked_at and persist skip count so it survives restarts
+            try:
+                pool = get_pool()
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """UPDATE goals SET
+                             last_checked_at = NOW(),
+                             current_plan = jsonb_set(COALESCE(current_plan, '{}'::jsonb), '{consecutive_skips}', $1::text::jsonb),
+                             updated_at = NOW()
+                           WHERE id = $2::uuid""",
+                        str(_consecutive_skips[goal_id]),
+                        goal_id,
+                    )
+            except Exception as e:
+                log.warning("Failed to update last_checked_at on skip: %s", e)
 
         # Mark as idle so adaptive timeout stays long (not 30s)
         state.action_taken = "idle"
         return "Skipped — no meaningful action to take"
 
     # Reset skip counter on successful action
-    if drive.name == "serve":
-        stale_goals = drive.context.get("stale_goals", [])
-        if stale_goals:
-            goal_id = stale_goals[0]["id"]
-            if goal_id in _consecutive_skips:
-                del _consecutive_skips[goal_id]
+    if drive.name == "serve" and state.selected_goal:
+        goal_id = state.selected_goal["id"]
+        if goal_id in _consecutive_skips:
+            del _consecutive_skips[goal_id]
 
     if drive.name == "serve":
         return await _execute_serve(drive, plan, state)
@@ -444,12 +459,12 @@ async def _execute_action(drive: DriveResult, plan: str, state: CycleState) -> s
 
 
 async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> str:
-    """Execute a serve action — work on the highest-priority stale goal."""
+    """Execute a serve action — work on the selected goal (set by _plan_action)."""
     stale_goals = drive.context.get("stale_goals", [])
     if not stale_goals:
         return "No stale goals to work on"
 
-    goal = stale_goals[0]
+    goal = state.selected_goal or stale_goals[0]
     goal_id = goal["id"]
     state.goal_id = goal_id
 
