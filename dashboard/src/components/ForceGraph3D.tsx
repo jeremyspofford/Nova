@@ -4,6 +4,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   SphereGeometry,
+  BoxGeometry,
   ShaderMaterial,
   Sprite,
   SpriteMaterial,
@@ -917,7 +918,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
   const containerRef = useRef<HTMLDivElement>(null)
   const coreGeoRef = useRef(new SphereGeometry(1, 10, 10))
-  const hitGeoRef = useRef(new SphereGeometry(1, 4, 4))
+  const hitGeoRef = useRef(new BoxGeometry(1, 1, 1))
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
   const initializedRef = useRef(false)
@@ -1515,6 +1516,22 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       { x: pos.x, y: pos.y, z: pos.z },
       1000,
     )
+
+    // Cluster focus animation — boost focused halo, dim others
+    const halos = clusterVisuals.filter(
+      (s): s is Sprite => s.userData?.type === 'clusterHalo'
+    )
+    for (const h of halos) {
+      const mat = h.material as SpriteMaterial
+      mat.opacity = h.userData.clusterId === focusClusterId ? 0.15 : 0.02
+    }
+    const restoreTimer = setTimeout(() => {
+      for (const h of halos) {
+        const mat = h.material as SpriteMaterial
+        mat.opacity = h.userData.baseOpacity
+      }
+    }, 2000)
+    return () => clearTimeout(restoreTimer)
   }, [focusClusterId, focusClusterTs])
 
   // Navigate camera to a specific node
@@ -1685,6 +1702,7 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
           haloSprite.position.set(cx, cy, cz)
           const haloScale = haloRadius * 3
           haloSprite.scale.set(haloScale, haloScale, 1)
+          haloSprite.userData = { type: 'clusterHalo', clusterId, baseOpacity: haloOpacity }
           scene.add(haloSprite)
           clusterVisuals.push(haloSprite)
 
