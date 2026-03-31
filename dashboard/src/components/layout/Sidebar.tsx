@@ -1,4 +1,5 @@
 import { useLocation, NavLink, useNavigate } from 'react-router-dom'
+import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import {
   MessageSquare,
   ListTodo,
@@ -89,6 +90,7 @@ export function Sidebar({
   const navigate = useNavigate()
   const { user, authConfig } = useAuth()
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
+  const { avatarUrl } = useNovaIdentity()
   const { data: attentionCount = 0 } = useAttentionCount()
   const { isDebug } = useDebug()
   const [brainEnabled] = useLocalStorage('brain.enabled', true)
@@ -100,15 +102,13 @@ export function Sidebar({
   return (
     <aside
       className={clsx(
-        'hidden md:flex flex-col h-full bg-surface border-r border-border-subtle transition-[width] duration-200 ease-in-out shrink-0 dark:bg-surface-root/80 dark:backdrop-blur-xl dark:border-white/[0.04]',
+        'hidden md:flex flex-col h-full bg-surface border-r border-border-subtle transition-[width] duration-200 ease-in-out shrink-0 glass-nav dark:border-white/[0.06]',
         collapsed ? 'w-[60px]' : 'w-[240px]',
       )}
     >
       {/* Logo */}
       <div className={clsx('flex items-center gap-2.5 px-3 h-14 shrink-0 cursor-pointer', collapsed && 'justify-center')} onClick={() => navigate('/')} title="Go to Brain">
-        <div className="h-7 w-7 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shrink-0 dark:shadow-[0_0_16px_rgb(var(--accent-500)/0.3)]">
-          <span className="text-white text-compact font-bold leading-none">N</span>
-        </div>
+        <img src={avatarUrl} alt="Nova" className="h-7 w-7 rounded-lg object-cover shrink-0 dark:shadow-[0_0_16px_rgb(var(--accent-500)/0.3)]" />
         {!collapsed && (
           <span className="text-h3 text-content-primary tracking-tight">Nova</span>
         )}

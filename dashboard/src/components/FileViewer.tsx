@@ -67,7 +67,7 @@ export default function FileViewer({ path, onClose }: FileViewerProps) {
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
 
       {/* Panel */}
-      <div className="relative w-full max-w-4xl max-h-[85vh] flex flex-col bg-surface-card rounded-xl border border-border-subtle shadow-lg dark:bg-[rgb(18_18_24/0.95)] dark:backdrop-blur-xl dark:border-white/[0.08]">
+      <div className="relative w-full max-w-4xl max-h-[85vh] flex flex-col bg-surface-card rounded-xl border border-border-subtle shadow-lg glass-overlay dark:border-white/[0.12]">
         {/* Header */}
         <div className="flex items-center gap-3 px-5 py-3 border-b border-border-subtle shrink-0">
           <FileText className="w-4 h-4 text-content-tertiary shrink-0" />

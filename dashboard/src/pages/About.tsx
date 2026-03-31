@@ -32,7 +32,7 @@ function statusLabel(status: 'success' | 'warning' | 'danger' | 'neutral'): stri
 }
 
 export function About() {
-  const { name } = useNovaIdentity()
+  const { name, avatarUrl } = useNovaIdentity()
   const { data: services, isLoading } = useQuery({
     queryKey: ['about-service-health'],
     queryFn: getServiceStatus,
@@ -47,9 +47,7 @@ export function About() {
       <Card className="w-full max-w-lg p-6 space-y-6">
         {/* Header */}
         <div className="text-center">
-          <div className="mx-auto w-14 h-14 rounded-xl bg-accent/10 flex items-center justify-center mb-4">
-            <span className="text-2xl font-bold text-accent">N</span>
-          </div>
+          <img src={avatarUrl} alt="Nova" className="mx-auto w-14 h-14 rounded-xl object-cover mb-4" />
           <h1 className="text-h1 text-content-primary">{name}</h1>
           <p className="mt-1 text-compact text-content-secondary">
             Version {VERSION}

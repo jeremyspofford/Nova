@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Search, X, ChevronRight, Network, Settings } from 'lucide-react'
 import { apiFetch } from '../api'
 import { useLocalStorage } from '../hooks/useLocalStorage'
+import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
@@ -116,6 +117,7 @@ function ScoreBar({ value, label, color }: { value: number; label: string; color
 
 export default function Brain() {
   const graphRef = useRef<ForceGraph3DHandle>(null)
+  const { avatarUrl } = useNovaIdentity()
   const [sidebarCollapsed] = useLocalStorage('nova-sidebar-collapsed', false)
 
   // Graph data
@@ -387,9 +389,9 @@ export default function Brain() {
       />
 
       {/* ── HUD: Glass top bar ──────────────────────────────────────── */}
-      <div className="fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 bg-[rgba(8,45,42,0.30)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)] border-b border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)] shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]">
+      <div className="fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 glass-overlay border-b border-white/[0.12] border-t-white/[0.20]">
         {/* Logo mark */}
-        <div className="w-7 h-7 rounded-full bg-teal-500 flex items-center justify-center text-white text-sm font-bold mr-2 shrink-0">N</div>
+        <img src={avatarUrl} alt="Nova" className="w-7 h-7 rounded-full object-cover mr-2 shrink-0" />
         <span className="text-base font-semibold text-stone-200 shrink-0">Brain</span>
 
         {/* Center stats */}
@@ -446,11 +448,9 @@ export default function Brain() {
 
       {/* ── Overlay: Topics & Search ───────────────────────────────── */}
       {topicsOpen && (
-          <div className="fixed top-[72px] w-[320px] max-h-[calc(100vh-92px)]
-                          z-20 rounded-2xl
-                          bg-[rgba(8,45,42,0.30)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)]
-                          border border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)]
-                          shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]
+          <div className="fixed top-[72px] w-[440px] max-h-[calc(100vh-92px)]
+                          z-20 rounded-2xl glass-overlay
+                          border border-white/[0.12] border-t-white/[0.20]
                           p-5 overflow-y-auto scrollbar-thin
                           animate-[scaleIn_150ms_ease-out]"
                style={{ left: sidebarCollapsed ? 76 : 256 }}>
@@ -628,9 +628,7 @@ export default function Brain() {
           onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false) }}
         >
           <div className="absolute top-[60px] right-3 w-[240px]
-                          bg-[rgba(8,45,42,0.30)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)]
-                          border border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)] rounded-2xl
-                          shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]
+                          glass-overlay border border-white/[0.12] border-t-white/[0.20] rounded-2xl
                           p-5 space-y-4">
             <button
               onClick={() => setSettingsOpen(false)}
@@ -709,9 +707,9 @@ export default function Brain() {
           className="absolute inset-0 z-20 flex items-center justify-center"
           onClick={(e) => { if (e.target === e.currentTarget) setSelectedNode(null) }}
         >
-          <div className="w-[480px] max-h-[70vh] overflow-y-auto bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded-xl shadow-2xl scrollbar-thin">
+          <div className="w-[480px] max-h-[70vh] overflow-y-auto glass-overlay border border-white/[0.12] border-t-white/[0.20] rounded-xl scrollbar-thin">
             {/* Header */}
-            <div className="sticky top-0 bg-zinc-900/95 backdrop-blur-md border-b border-white/5 px-5 py-3.5 flex items-center justify-between">
+            <div className="sticky top-0 bg-stone-950/95 border-b border-white/[0.08] px-5 py-3.5 flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
                 <span
                   className="text-[11px] px-1.5 py-0.5 rounded font-medium shrink-0"

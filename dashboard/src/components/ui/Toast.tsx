@@ -30,7 +30,7 @@ export function Toast({ variant, message, action, onDismiss }: ToastProps) {
   return (
     <div
       className={clsx(
-        'flex items-center gap-3 bg-surface-card border border-border rounded-lg shadow-md px-4 py-3',
+        'flex items-center gap-3 bg-surface-card border border-border rounded-lg shadow-md px-4 py-3 glass-overlay dark:border-white/[0.10]',
         'animate-fade-in',
       )}
     >

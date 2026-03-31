@@ -722,6 +722,30 @@ services:
           "import urllib.request; urllib.request.urlopen('http://localhost:8130/health/live', timeout=3)",
         ]
 
+  # ── Vaultwarden (optional secrets manager) ──────────────────────────────────
+  vaultwarden:
+    image: vaultwarden/server:latest
+    container_name: nova-vaultwarden
+    profiles: ["secrets"]
+    restart: unless-stopped
+    environment:
+      - DOMAIN=http://localhost:8222
+      - SIGNUPS_ALLOWED=true
+      - ADMIN_TOKEN=${VAULTWARDEN_ADMIN_TOKEN:-}
+      - LOG_LEVEL=warn
+    volumes:
+      - vaultwarden-data:/data
+    ports:
+      - "127.0.0.1:8222:80"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:80/alive"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - nova-internal
+
   dashboard:
     <<: *nova-common
     build:
@@ -801,3 +825,4 @@ volumes:
   nova-vllm-cache:
   nova-sglang-cache:
   tailscale-state:
+  vaultwarden-data:

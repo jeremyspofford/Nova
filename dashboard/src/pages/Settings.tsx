@@ -33,11 +33,13 @@ import { UsersSection } from './settings/UsersSection'
 import { SkillsSection } from './settings/SkillsSection'
 import { RulesSection } from './settings/RulesSection'
 import { KeysSection } from './settings/KeysSection'
+import { VaultwardenSection } from './settings/VaultwardenSection'
 import { SelfModelSection } from './settings/SelfModelSection'
 import { ConsolidationSection } from './settings/ConsolidationSection'
 import { MaintenanceSection } from './settings/MaintenanceSection'
 import { EngramSourcesSection } from './settings/EngramSourcesSection'
 import { RouterStatusSection } from './settings/RouterStatusSection'
+import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
 
@@ -77,6 +79,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'guest-access', label: 'Guest Access', icon: Shield },
       { id: 'sandbox', label: 'Agent Sandbox', icon: Shield },
       { id: 'keys', label: 'API Keys', icon: Key },
+      { id: 'vault', label: 'Secrets Manager', icon: Shield },
     ],
   },
   {
@@ -359,6 +362,7 @@ export function Settings() {
   const voiceTtsVoice = useConfigValue(entries, 'voice.tts_voice', 'nova')
   const voiceTtsModel = useConfigValue(entries, 'voice.tts_model', 'tts-1')
 
+  const { avatarUrl, isDefaultAvatar, setAvatar } = useNovaIdentity()
   const [brainEnabled, setBrainEnabled] = useLocalStorage('brain.enabled', true)
 
   // Legacy deep-link: scroll to a specific section within the active tab.
@@ -448,6 +452,40 @@ export function Settings() {
         {show('identity') && (
           <div id="identity">
             <Section icon={Bot} title="Nova Identity" description="How Nova presents itself. Changes appear in the next Chat session.">
+              {/* Avatar */}
+              <div className="flex flex-col gap-1 mb-2">
+                <label className="text-compact font-medium text-content-primary">Avatar</label>
+                <div className="flex items-center gap-4">
+                  <img src={avatarUrl} alt="Nova avatar" className="w-12 h-12 rounded-lg object-cover border border-border-subtle" />
+                  <div className="flex items-center gap-2">
+                    <label className="cursor-pointer inline-flex items-center gap-1.5 px-3 py-1.5 text-compact font-medium rounded-md border border-border-subtle bg-surface-card hover:bg-surface-card-hover text-content-primary transition-colors">
+                      Upload
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          const reader = new FileReader()
+                          reader.onload = () => setAvatar(reader.result as string)
+                          reader.readAsDataURL(file)
+                          e.target.value = ''
+                        }}
+                      />
+                    </label>
+                    {!isDefaultAvatar && (
+                      <button
+                        onClick={() => setAvatar(null)}
+                        className="px-3 py-1.5 text-compact font-medium rounded-md border border-border-subtle bg-surface-card hover:bg-surface-card-hover text-content-tertiary transition-colors"
+                      >
+                        Reset
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <p className="text-micro text-content-tertiary">Custom image for Nova across the dashboard. Resets to default star icon.</p>
+              </div>
               <ConfigField label="Name" configKey="nova.name" value={novaName} placeholder="Nova" description="Shown in the dashboard header and chat UI." onSave={handleSave} saving={saveMutation.isPending} />
               <ConfigField label="Greeting message" configKey="nova.greeting" value={novaGreeting} multiline rows={3} placeholder="Hello! I'm Nova..." description="The first message shown in the Chat page before the user types anything." onSave={handleSave} saving={saveMutation.isPending} />
               <ConfigField
@@ -530,6 +568,12 @@ export function Settings() {
         {show('keys') && (
           <div id="keys">
             <KeysSection />
+          </div>
+        )}
+
+        {show('vault') && (
+          <div id="vault">
+            <VaultwardenSection />
           </div>
         )}
 

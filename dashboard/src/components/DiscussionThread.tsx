@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Send, Trash2 } from 'lucide-react'
 import { getComments, addComment, deleteComment, type Comment } from '../api'
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export function DiscussionThread({ entityType, entityId }: Props) {
+  const { avatarUrl } = useNovaIdentity()
   const { user } = useAuth()
   const qc = useQueryClient()
   const [body, setBody] = useState('')
@@ -66,13 +68,13 @@ export function DiscussionThread({ entityType, entityId }: Props) {
         {comments.map((c: Comment) => (
           <div key={c.id}>
             <div className="flex items-center gap-1.5 mb-1">
-              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold ${
-                c.author_type === 'nova'
-                  ? 'bg-gradient-to-br from-teal-400 to-sky-500 text-black'
-                  : 'bg-blue-500 text-white'
-              }`}>
-                {c.author_type === 'nova' ? 'N' : c.author_name.charAt(0).toUpperCase()}
-              </div>
+              {c.author_type === 'nova' ? (
+                <img src={avatarUrl} alt="Nova" className="w-5 h-5 rounded-full object-cover" />
+              ) : (
+                <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold bg-blue-500 text-white">
+                  {c.author_name.charAt(0).toUpperCase()}
+                </div>
+              )}
               <span className={`text-caption font-semibold ${
                 c.author_type === 'nova' ? 'text-teal-400' : 'text-blue-400'
               }`}>

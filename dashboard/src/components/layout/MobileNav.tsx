@@ -84,7 +84,7 @@ export function MobileNav() {
   return (
     <>
       {/* Bottom tab bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface border-t border-border-subtle pb-[env(safe-area-inset-bottom)]">
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface border-t border-border-subtle pb-[env(safe-area-inset-bottom)] glass-nav dark:border-white/[0.06]">
         <div className="flex items-center justify-around h-14">
           {visibleTabs.map(tab => {
             const Icon = tab.icon
@@ -118,7 +118,7 @@ export function MobileNav() {
 
       {/* Full-screen drawer */}
       {drawerOpen && (
-        <div className="md:hidden fixed inset-0 z-50 bg-surface-root animate-fade-in">
+        <div className="md:hidden fixed inset-0 z-50 bg-surface-root dark:bg-transparent glass-overlay animate-fade-in">
           <div className="flex items-center justify-between px-4 h-14 border-b border-border-subtle">
             <span className="text-h3 text-content-primary">Menu</span>
             <button

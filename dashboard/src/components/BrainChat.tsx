@@ -280,7 +280,7 @@ export function BrainChat({ onClose, onActivityStep, onStreamComplete }: BrainCh
   const silencePct = silenceCountdown > 0 ? (silenceCountdown / silenceTimeoutMs) * 100 : 0
 
   return (
-    <div className="fixed bottom-5 right-5 z-20 w-[420px] lg:w-[420px] md:w-[360px] h-[calc(100vh-80px)] flex flex-col overflow-hidden rounded-2xl bg-[rgba(8,45,42,0.35)] [backdrop-filter:blur(60px)_saturate(1.8)] [-webkit-backdrop-filter:blur(60px)_saturate(1.8)] border border-[rgba(255,255,255,0.12)] border-t-[rgba(255,255,255,0.20)] shadow-[0_8px_40px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.12),inset_0_-1px_0_rgba(0,0,0,0.15)]">
+    <div className="fixed bottom-5 right-5 z-20 w-[440px] lg:w-[440px] md:w-[380px] h-[calc(100vh-80px)] flex flex-col overflow-hidden rounded-2xl glass-overlay border border-white/[0.12] border-t-white/[0.20]">
       {/* Header */}
       <div className="shrink-0 min-h-[48px] flex items-center px-4 border-b border-[rgba(68,64,60,0.55)]">
         <span className="text-sm font-semibold text-stone-200">Chat with Nova</span>

@@ -12,10 +12,10 @@ type CardProps = {
 } & Omit<React.HTMLAttributes<HTMLDivElement>, 'className'>
 
 const VARIANTS: Record<CardVariant, string> = {
-  default: 'bg-surface-card border border-border-subtle rounded-lg dark:bg-surface-card/80 dark:backdrop-blur-md dark:border-white/[0.06]',
+  default: 'bg-surface-card border border-border-subtle rounded-lg glass-card dark:border-white/[0.08]',
   hoverable:
-    'bg-surface-card border border-border-subtle rounded-lg hover:border-border hover:bg-surface-card-hover transition-colors cursor-pointer dark:bg-surface-card/80 dark:backdrop-blur-md dark:border-white/[0.06] dark:hover:border-white/[0.1] dark:hover:shadow-glow',
-  outlined: 'bg-surface-card border border-border rounded-lg dark:bg-surface-card/80 dark:backdrop-blur-md dark:border-white/[0.08]',
+    'bg-surface-card border border-border-subtle rounded-lg glass-card dark:border-white/[0.08] hover:border-border hover:bg-surface-card-hover transition-colors cursor-pointer dark:hover:border-white/[0.12] dark:hover:shadow-glow',
+  outlined: 'bg-surface-card border border-border rounded-lg glass-card dark:border-white/[0.10]',
 }
 
 export function Card({

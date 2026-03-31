@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
 import { LogIn, UserPlus, Eye, EyeOff, ChevronDown, ChevronUp, User } from 'lucide-react'
 import { Button, Input } from '../components/ui'
 
 export function Login() {
+  const { avatarUrl } = useNovaIdentity()
   const { login, register, loginWithGoogle, authConfig } = useAuth()
   const searchParams = new URLSearchParams(window.location.search)
   const urlInviteCode = searchParams.get('invite')
@@ -74,14 +76,12 @@ export function Login() {
     : 'Create a new account'
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-surface-root px-4">
+    <div className="min-h-screen flex items-center justify-center bg-surface-root dark:bg-transparent px-4">
       <div className="w-full max-w-sm">
 
         {/* Logo mark + wordmark */}
         <div className="flex flex-col items-center mb-8 gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-teal-400 to-teal-600 flex items-center justify-center shadow-md">
-            <span className="text-white font-bold text-lg font-sans leading-none">N</span>
-          </div>
+          <img src={avatarUrl} alt="Nova" className="w-10 h-10 rounded-lg object-cover shadow-md" />
           <div className="text-center">
             <h1 className="text-xl font-semibold text-content-primary font-sans">Nova</h1>
             <p className="mt-1 text-caption text-content-tertiary font-sans">{subtitle}</p>
@@ -89,7 +89,7 @@ export function Login() {
         </div>
 
         {/* Form card */}
-        <div className="bg-surface-card border border-border rounded-lg p-6 shadow-sm space-y-4">
+        <div className="bg-surface-card border border-border rounded-lg p-6 shadow-sm space-y-4 glass-card dark:border-white/[0.08]">
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email */}
             <Input
@@ -218,7 +218,7 @@ export function Login() {
               {showInviteField ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             </button>
             {showInviteField && (
-              <div className="mt-3 bg-surface-card border border-border rounded-lg p-4 space-y-3 shadow-sm">
+              <div className="mt-3 bg-surface-card border border-border rounded-lg p-4 space-y-3 shadow-sm glass-card dark:border-white/[0.08]">
                 <Input
                   label="Invite code"
                   type="text"

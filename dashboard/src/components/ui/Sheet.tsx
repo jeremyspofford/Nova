@@ -49,7 +49,7 @@ export function Sheet({ open, onClose, width = 'default', title, children }: She
       <div
         className={clsx(
           'fixed right-0 top-0 bottom-0 flex flex-col',
-          'bg-surface-card border-l border-border-subtle shadow-lg dark:bg-[rgb(18_18_24/0.95)] dark:backdrop-blur-xl dark:border-white/[0.06]',
+          'bg-surface-card border-l border-border-subtle shadow-lg glass-overlay dark:border-white/[0.10]',
           'animate-slide-in-right',
           WIDTHS[width],
         )}

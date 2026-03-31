@@ -25,6 +25,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from nova_contracts import ChatMessageType
 
 from app.config import settings
+from app.queue import enqueue_message
 from app.session import get_or_create_session
 
 log = logging.getLogger(__name__)
@@ -239,6 +240,19 @@ async def _stream_response(
 
     except httpx.HTTPStatusError as e:
         await _send_error(websocket, f"Orchestrator error: {e.response.status_code}", session_id)
+    except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+        # Orchestrator unreachable — queue the message for later
+        log.warning("Orchestrator unreachable, queuing message for session %s: %s", session_id, e)
+        position = await enqueue_message(session_id, agent_id, conversation_history)
+        try:
+            await websocket.send_json({
+                "type": "queued",
+                "position": position,
+                "session_id": session_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
+            pass
     except Exception as e:
         await _send_error(websocket, f"Stream error: {e}", session_id)
 

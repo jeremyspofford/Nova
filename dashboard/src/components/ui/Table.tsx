@@ -39,7 +39,7 @@ export function Table<T extends Record<string, unknown>>({
   )
 
   return (
-    <div className={clsx('overflow-x-auto rounded-lg border border-border', className)}>
+    <div className={clsx('overflow-x-auto rounded-lg border border-border glass-card dark:border-white/[0.08]', className)}>
       <table className="w-full text-compact">
         <thead>
           <tr className="bg-surface-elevated">

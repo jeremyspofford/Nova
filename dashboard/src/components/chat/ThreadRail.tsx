@@ -35,7 +35,7 @@ export function ThreadRail() {
 
       {/* Expanded panel */}
       <div className="absolute inset-y-0 left-0 w-0 group-hover:w-[260px] overflow-hidden
-                      bg-stone-800 border-r border-stone-700
+                      bg-stone-800 border-r border-stone-700 glass-nav dark:border-white/[0.06]
                       transition-[width] duration-200 ease-[cubic-bezier(0.4,0,0.2,1)]">
         <div className="w-[260px] h-full flex flex-col p-3 gap-2
                         opacity-0 group-hover:opacity-100 transition-opacity duration-150 delay-50">

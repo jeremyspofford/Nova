@@ -69,7 +69,7 @@ export function OnboardingWizard() {
   const currentIdx = stepOrder.indexOf(step)
 
   return (
-    <div className="min-h-screen bg-surface-root flex flex-col items-center justify-center">
+    <div className="min-h-screen bg-surface-root dark:bg-transparent flex flex-col items-center justify-center">
       <div className="w-full max-w-xl mx-auto px-4">
         {/* Step progress indicator */}
         <div className="flex items-center justify-center gap-1 mb-8">
@@ -115,7 +115,7 @@ export function OnboardingWizard() {
         </div>
 
         {/* Step content card */}
-        <div className="bg-surface-card rounded-lg border border-border-subtle shadow-sm">
+        <div className="bg-surface-card rounded-lg border border-border-subtle shadow-sm glass-card dark:border-white/[0.08]">
           {step === 'welcome' && (
             <Welcome onNext={() => setStep('hardware')} onSkip={handleSkip} />
           )}

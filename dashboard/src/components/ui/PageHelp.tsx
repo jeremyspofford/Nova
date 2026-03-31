@@ -48,7 +48,7 @@ export function PageHelp({ entries }: PageHelpProps) {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 z-50 w-[28rem] max-w-[calc(100vw-2rem)] bg-surface-card border border-border-subtle rounded-md p-4 shadow-lg animate-fade-in">
+        <div className="absolute right-0 top-full mt-2 z-50 w-[28rem] max-w-[calc(100vw-2rem)] bg-surface-card border border-border-subtle rounded-md p-4 shadow-lg animate-fade-in glass-overlay dark:border-white/[0.10]">
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-compact font-semibold text-content-primary flex items-center gap-1.5">
               <HelpCircle size={14} className="text-accent" />

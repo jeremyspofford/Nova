@@ -1,6 +1,7 @@
 """Nova Chat API — main entrypoint."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from fastapi.responses import HTMLResponse
 from nova_contracts.logging import configure_logging
 
 from app.config import settings
+from app.drain import drain_loop
 from app.session import close_redis
 from app.websocket import handle_websocket
 
@@ -20,8 +22,14 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Chat API starting on ws://0.0.0.0:%d/ws/chat", settings.service_port)
+    drain_task = asyncio.create_task(drain_loop(), name="queue-drain")
     yield
     log.info("Chat API shutting down")
+    drain_task.cancel()
+    try:
+        await drain_task
+    except asyncio.CancelledError:
+        pass
     await close_redis()
 
 
@@ -54,6 +62,7 @@ async def liveness():
 @app.get("/health/ready")
 async def readiness():
     import httpx
+    from app.queue import queue_length
     checks = {}
     try:
         async with httpx.AsyncClient(base_url=settings.orchestrator_url, timeout=3.0) as c:
@@ -61,8 +70,12 @@ async def readiness():
             checks["orchestrator"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
     except Exception as e:
         checks["orchestrator"] = f"error: {e}"
+    try:
+        depth = await queue_length()
+    except Exception:
+        depth = -1
     all_ok = all(v == "ok" for v in checks.values())
-    return {"status": "ready" if all_ok else "degraded", "checks": checks}
+    return {"status": "ready" if all_ok else "degraded", "checks": checks, "queue_depth": depth}
 
 
 # Quick test UI — open http://localhost:8080 in a browser to chat

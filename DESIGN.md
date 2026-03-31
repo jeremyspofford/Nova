@@ -146,9 +146,45 @@ Dark-first design. CSS class-based (`html.dark`). Semantic surface tokens (`--su
   - `shimmer` — 1.5s skeleton loading sweep
 
 ## Decoration
-- **Glass morphism:** `blur(16px) saturate(1.2)` + subtle white border. For modals, command palette, floating overlays.
-- **Accent glow:** Teal glow on hover for cards (gradient border mask + translateY(-1px)). Amber glow for cognitive states.
-- **Scrollbars:** Thin (6px), auto-hiding, stone-colored. Appear on hover.
+
+### Liquid Glass System (Dark Mode)
+
+A tiered glass-morphism system with escalating blur, saturation, and teal tinting. Higher tiers feel more "floating" and demand more visual attention. All tiers are dark-mode only (`html.dark` scoped) and defined in `index.css`.
+
+**Design principle:** Teal-tinted glass (`rgba(8,45,42,...)`) on navigation and overlays creates a cohesive warmth that ties interactive surfaces to the Nova teal accent. Neutral glass (`rgba(12,10,9,...)`) on cards and surfaces stays recessive so content dominates.
+
+| Tier | CSS Class | Blur | Saturate | Background | Border | Shadow | Use |
+|------|-----------|------|----------|------------|--------|--------|-----|
+| Surface | `.glass-surface` | 20px | 1.2 | `rgba(12,10,9,0.50)` | — | — | Background panels, ambient containers |
+| Card | `.glass-card` | 40px | 1.4 | `rgba(12,10,9,0.70)` | `white/[0.08]` | `0 4px 24px black/25, inset 0 1px 0 white/5` | Cards, tables, message bubbles, form containers |
+| Nav | `.glass-nav` | 40px | 1.6 | `rgba(8,45,42,0.30)` | `white/[0.06]` | `inset 0 1px 0 white/6` | Sidebar, thread rail, context panel, mobile tab bar |
+| Overlay | `.glass-overlay` | 60px | 1.8 | `rgba(8,45,42,0.30)` | `white/[0.12]` | `0 8px 40px black/50, inset 0 1px 0 white/12, inset 0 -1px 0 black/15` | Modals, sheets, popovers, toasts, dropdowns, full-screen drawers |
+
+**Light mode fallback:** `.glass` (blur 16px, sat 1.2, white/3%) and `.glass-strong` (blur 24px, sat 1.3, white/6%) provide subtle depth on light backgrounds.
+
+**Border convention:** All glass elements in dark mode add a `dark:border-white/[N]` utility to Tailwind, where N matches the tier:
+- Card/Surface: `dark:border-white/[0.08]`
+- Nav: `dark:border-white/[0.06]`
+- Overlay: `dark:border-white/[0.10]` to `dark:border-white/[0.12]`
+- Top edge highlight: overlays use `border-t-[rgba(255,255,255,0.20)]` for a subtle light-from-above effect
+
+**Brain page — HUD ambient tier:** The Brain's HUD widgets (SystemStatus, ActiveTopics) use a denser, darker glass (`rgba(12,10,9,0.88)`, blur 20px) to stay readable over the bright 3D graph without competing with it. This is defined as a local `glassPanel` constant in `HudWidgets.tsx`, not a global CSS class. All other Brain overlays (HUD bar, Topics panel, Settings panel, BrainChat, Memory Detail Modal) use the standard `.glass-overlay` class.
+
+**Usage rules:**
+- Overlays (modals, sheets, popovers, toasts) always use `.glass-overlay`
+- Persistent navigation always uses `.glass-nav`
+- Content containers (cards, tables) always use `.glass-card`
+- When glass sits over a 3D scene or video, increase background opacity for readability
+- Always include `-webkit-backdrop-filter` alongside `backdrop-filter` for Safari
+
+### Accent Glow
+- Teal glow on hover for cards (gradient border mask + translateY(-1px)). Amber glow for cognitive states.
+- `.glow-accent`: subtle teal ring + spread at rest
+- `.glow-accent-hover:hover`: intensified teal glow on interaction
+- `.card-glow`: gradient border mask that responds to cursor position
+
+### Scrollbars
+- Thin (6px), auto-hiding, stone-colored. Appear on hover. `.custom-scrollbar` and `.scrollbar-thin` classes.
 
 ## Decisions Log
 | Date | Decision | Rationale |
@@ -158,3 +194,4 @@ Dark-first design. CSS class-based (`html.dark`). Semantic surface tokens (`--su
 | 2026-03-30 | Amber secondary for cognitive states | Teal = operational state, amber = active reasoning. Maps directly to Cortex thinking loop. W&B validated amber-on-dark in this space. |
 | 2026-03-30 | Keep Plus Jakarta Sans + Geist Mono | Already better than 90% of the space. Humanist warmth differentiates from Inter/Geist monoculture. |
 | 2026-03-30 | Keep stone neutrals | Warm enough for long sessions, neutral enough for data density. No change needed. |
+| 2026-03-31 | Document liquid glass tier system | 5-tier glass system (surface/card/nav/overlay + HUD ambient) evolved organically. Teal-tinted glass on nav/overlay creates warmth; neutral glass on cards stays recessive. Brain HUD uses a custom denser tier for readability over 3D. |

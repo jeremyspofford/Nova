@@ -45,7 +45,7 @@ export function Popover({ trigger, children, align = 'start', className }: Popov
         <div
           className={clsx(
             'absolute top-full mt-1 z-40',
-            'bg-surface-card border border-border rounded-lg shadow-lg p-2',
+            'bg-surface-card border border-border rounded-lg shadow-lg p-2 glass-overlay dark:border-white/[0.10]',
             'animate-fade-in',
             ALIGN[align],
           )}

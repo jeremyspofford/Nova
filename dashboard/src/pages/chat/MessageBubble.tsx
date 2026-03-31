@@ -1,5 +1,6 @@
 import { memo, useMemo } from 'react'
-import { Bot, User, FileText } from 'lucide-react'
+import { useNovaIdentity } from '../../hooks/useNovaIdentity'
+import { User, FileText } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -9,6 +10,7 @@ import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import type { Message } from '../../stores/chat-store'
 
 export const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
+  const { avatarUrl } = useNovaIdentity()
   const isUser = message.role === 'user'
   const cleanedContent = useMemo(
     () => !isUser && message.content ? cleanToolArtifacts(message.content) : message.content,
@@ -18,16 +20,13 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
   return (
     <div className={clsx('flex gap-3', isUser && 'flex-row-reverse')}>
       {/* Avatar */}
-      <div
-        className={clsx(
-          'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
-          isUser
-            ? 'bg-surface-elevated text-content-secondary'
-            : 'bg-accent text-neutral-950',
-        )}
-      >
-        {isUser ? <User size={13} /> : <Bot size={13} />}
-      </div>
+      {isUser ? (
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-elevated text-content-secondary">
+          <User size={13} />
+        </div>
+      ) : (
+        <img src={avatarUrl} alt="Nova" className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover" />
+      )}
 
       {/* Bubble */}
       <div className={isUser ? 'ml-auto max-w-[85%]' : 'flex-1 min-w-0 max-w-[85%]'}>
@@ -35,8 +34,8 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
           className={clsx(
             'text-compact leading-relaxed',
             isUser
-              ? 'bg-stone-800 text-content-primary whitespace-pre-wrap rounded-xl px-4 py-3'
-              : 'bg-stone-800/60 border-l-2 border-teal-800 text-content-primary markdown-body overflow-x-auto rounded-r-xl px-5 py-[18px]',
+              ? 'glass-card text-content-primary whitespace-pre-wrap rounded-xl px-4 py-3'
+              : 'glass-card border-l-2 border-teal-800 text-content-primary markdown-body overflow-x-auto rounded-r-xl px-5 py-[18px]',
           )}
         >
           {!isUser && message.activitySteps && message.activitySteps.length > 0 && (

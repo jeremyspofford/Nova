@@ -34,7 +34,7 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
   return (
     <aside
       className="w-[340px] shrink-0 h-full flex
-                 bg-surface-card/85 backdrop-blur-xl border-l border-border-subtle"
+                 bg-surface-card/85 backdrop-blur-xl border-l border-border-subtle glass-nav dark:border-white/[0.06]"
       aria-label="Context panel"
     >
       {/* Collapse strip */}

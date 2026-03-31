@@ -452,7 +452,7 @@ export function Chat() {
       </div>
 
       {/* Chat Area */}
-      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root">
+      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent">
         {messages.length === 0 ? (
           /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
           <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">

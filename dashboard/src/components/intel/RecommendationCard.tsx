@@ -26,7 +26,7 @@ export function RecommendationCard({ rec, expanded, onToggle, onStatusChange }: 
     <div
       className={clsx(
         'border-l-4 rounded-lg bg-surface-card border border-border-subtle',
-        'dark:bg-surface-card/80 dark:backdrop-blur-md dark:border-white/[0.06]',
+        'glass-card dark:border-white/[0.08]',
         grade.border,
       )}
     >
