@@ -650,14 +650,14 @@ function makeBlackHoleTexture(): CanvasTexture {
   ctx.beginPath(); ctx.arc(0, 0, size * 0.42, 0, Math.PI * 2); ctx.fill()
   ctx.restore()
 
-  // Event horizon
-  const dark = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.15)
+  // Event horizon — solid black core, nothing escapes
+  const dark = ctx.createRadialGradient(cx, cy, 0, cx, cy, size * 0.18)
   dark.addColorStop(0, 'rgba(0,0,0,1)')
-  dark.addColorStop(0.4, 'rgba(0,0,0,1)')
-  dark.addColorStop(0.7, 'rgba(0,0,0,0.6)')
-  dark.addColorStop(1, 'rgba(0,0,0,0)')
+  dark.addColorStop(0.6, 'rgba(0,0,0,1)')
+  dark.addColorStop(0.85, 'rgba(0,0,0,0.9)')
+  dark.addColorStop(1, 'rgba(0,0,0,0.3)')
   ctx.fillStyle = dark
-  ctx.beginPath(); ctx.arc(cx, cy, size * 0.15, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.18, 0, Math.PI * 2); ctx.fill()
   return new CanvasTexture(canvas)
 }
 
@@ -734,8 +734,8 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       // Suns (additive blending — glow through bloom)
       { tex: makeSunTexture(255, 230, 150), x: 2200,  y: 800,   z: 1500, s: 120, op: 0.35, additive: true }, // yellow-white
       { tex: makeSunTexture(220, 80, 40),   x: -1800, y: -1200, z: 600,  s: 40,  op: 0.3,  additive: true }, // red dwarf
-      // Black hole (additive for accretion disk glow)
-      { tex: makeBlackHoleTexture(), x: -800, y: 400, z: -2500, s: 140, op: 0.4, additive: true },
+      // Black hole — opaque core with additive accretion glow rendered separately
+      { tex: makeBlackHoleTexture(), x: -800, y: 400, z: -2500, s: 140, op: 0.85, additive: false },
     ]
 
     for (const c of celestials) {
@@ -753,14 +753,13 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
 
   // ── Deep-field stars — static backdrop ──
   if (options.bgStars) {
-    // Uses depthTest:false + renderOrder:-1 to render behind everything regardless
-    // of camera distance, and sizeAttenuation:false for constant pixel size.
-    const deepCount = 3000
+    // Layer 1: primary deep stars — constant pixel size, always visible
+    const deepCount = 5000
     const deepPos = new Float32Array(deepCount * 3)
     const deepCol = new Float32Array(deepCount * 3)
 
     for (let i = 0; i < deepCount; i++) {
-      const r = 4000 + Math.random() * 4000
+      const r = 3500 + Math.random() * 5500
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(2 * Math.random() - 1)
       deepPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
@@ -792,6 +791,74 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     }))
     deepStars.renderOrder = -1
     group.add(deepStars)
+
+    // Layer 2: ultra-distant faint stars — fills the void when zoomed out
+    const farCount = 4000
+    const farPos = new Float32Array(farCount * 3)
+    for (let i = 0; i < farCount; i++) {
+      const r = 8000 + Math.random() * 6000
+      const theta = Math.random() * Math.PI * 2
+      const phi = Math.acos(2 * Math.random() - 1)
+      farPos[i * 3]     = r * Math.sin(phi) * Math.cos(theta)
+      farPos[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta)
+      farPos[i * 3 + 2] = r * Math.cos(phi)
+    }
+    const farGeo = new BufferGeometry()
+    farGeo.setAttribute('position', new Float32BufferAttribute(farPos, 3))
+    const farStars = new Points(farGeo, new PointsMaterial({
+      size: 1.0, color: 0x8888bb, transparent: true, opacity: 0.3,
+      sizeAttenuation: false, depthTest: false, depthWrite: false,
+    }))
+    farStars.renderOrder = -2
+    group.add(farStars)
+
+    // Milky Way band — flattened disc of faint stars creating a galactic plane
+    const milkyCount = 3000
+    const milkyPos = new Float32Array(milkyCount * 3)
+    const milkyCol = new Float32Array(milkyCount * 3)
+    for (let i = 0; i < milkyCount; i++) {
+      const r = 2000 + Math.random() * 7000
+      const theta = Math.random() * Math.PI * 2
+      // Flatten to a disc — concentrated near y=0 with gaussian-ish falloff
+      const ySpread = (Math.random() + Math.random() + Math.random() - 1.5) * 600
+      milkyPos[i * 3]     = r * Math.cos(theta)
+      milkyPos[i * 3 + 1] = ySpread
+      milkyPos[i * 3 + 2] = r * Math.sin(theta)
+      // Warm white to pale blue
+      const warmth = Math.random()
+      milkyCol[i * 3]     = 0.7 + warmth * 0.3
+      milkyCol[i * 3 + 1] = 0.7 + warmth * 0.2
+      milkyCol[i * 3 + 2] = 0.8 + Math.random() * 0.2
+    }
+    const milkyGeo = new BufferGeometry()
+    milkyGeo.setAttribute('position', new Float32BufferAttribute(milkyPos, 3))
+    milkyGeo.setAttribute('color', new Float32BufferAttribute(milkyCol, 3))
+    const milkyWay = new Points(milkyGeo, new PointsMaterial({
+      size: 1.2, vertexColors: true, transparent: true, opacity: 0.18,
+      sizeAttenuation: false, depthTest: false, depthWrite: false,
+    }))
+    milkyWay.renderOrder = -1
+    group.add(milkyWay)
+
+    // Asteroid field — small rocky particles scattered in the mid-field
+    const asteroidCount = 200
+    const asteroidPos = new Float32Array(asteroidCount * 3)
+    for (let i = 0; i < asteroidCount; i++) {
+      const r = 1200 + Math.random() * 2500
+      const theta = Math.random() * Math.PI * 2
+      // Slightly flattened — asteroids tend to orbit in a plane
+      const ySpread = (Math.random() - 0.5) * 800
+      asteroidPos[i * 3]     = r * Math.cos(theta) + (Math.random() - 0.5) * 200
+      asteroidPos[i * 3 + 1] = ySpread
+      asteroidPos[i * 3 + 2] = r * Math.sin(theta) + (Math.random() - 0.5) * 200
+    }
+    const asteroidGeo = new BufferGeometry()
+    asteroidGeo.setAttribute('position', new Float32BufferAttribute(asteroidPos, 3))
+    const asteroids = new Points(asteroidGeo, new PointsMaterial({
+      size: 2.5, color: 0x665544, transparent: true, opacity: 0.35,
+      sizeAttenuation: true, depthWrite: false,
+    }))
+    group.add(asteroids)
   }
 
   // ── Inner stars — mid-field particles surrounding the graph ──
@@ -1576,42 +1643,6 @@ const TYPE_LABELS: Record<string, string> = {
   goal: 'GOALS',
 }
 
-function makeDomainLabel(text: string, count: number, color: string): Sprite {
-  const canvas = document.createElement('canvas')
-  const w = 512
-  const h = 128
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, w, h)
-
-  // Domain label
-  const label = text.length > 30 ? text.slice(0, 28) + '...' : text
-  ctx.font = '600 32px system-ui'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = color
-  ctx.globalAlpha = 0.9
-  ctx.fillText(label, w / 2, h / 2 - 12)
-
-  // Count badge
-  ctx.font = '400 22px system-ui'
-  ctx.globalAlpha = 0.55
-  ctx.fillText(`${count} memories`, w / 2, h / 2 + 18)
-
-  const tex = new CanvasTexture(canvas)
-  const mat = new SpriteMaterial({
-    map: tex,
-    transparent: true,
-    depthWrite: false,
-    depthTest: false,
-  })
-  const sprite = new Sprite(mat)
-  sprite.scale.set(70, 18, 1)
-  sprite.renderOrder = 2
-  return sprite
-}
-
 // Track cluster visuals so we can remove them on update
 const clusterVisuals: (Sprite | Mesh | Points)[] = []
 
@@ -1675,14 +1706,6 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
         const color = clusterId >= 0
           ? CLUSTER_COLORS[clusterId % CLUSTER_COLORS.length]
           : DEFAULT_COLOR
-
-        // Use the cluster_label from the first node in this group
-        const domainLabel = group[0]?.cluster_label ?? `Cluster ${clusterId}`
-
-        const label = makeDomainLabel(domainLabel, group.length, color)
-        label.position.set(cx, cy - haloRadius - 5, cz)
-        scene.add(label)
-        clusterVisuals.push(label)
 
         // Galaxy visuals — halo glow and dust particles per cluster
         if (galaxyOptions?.showGalaxies && clusterId >= 0 && group[0]?.cluster_label !== 'Uncategorized') {
@@ -1763,14 +1786,6 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
 
         const color = TYPE_COLORS[type] ?? DEFAULT_COLOR
 
-        const label = makeDomainLabel(
-          TYPE_LABELS[type] ?? type.toUpperCase(),
-          group.length,
-          color,
-        )
-        label.position.set(cx, cy - haloRadius - 5, cz)
-        scene.add(label)
-        clusterVisuals.push(label)
       }
     }
   }, settleMs)
