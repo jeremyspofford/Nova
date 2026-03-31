@@ -1,16 +1,18 @@
 """
 Code & Terminal Tools — filesystem and shell access for Nova agents.
 
-Agents can read/write files and run shell commands, all scoped to the
-configured workspace_root directory. Path traversal attempts (../) are
-rejected before any I/O occurs.
+Access scope is controlled by the sandbox tier:
+  workspace — paths scoped to /workspace (default)
+  home      — paths scoped to user's home directory
+  root      — full host filesystem via /host-root mount
+  isolated  — no filesystem or shell access
 
 Tools provided:
-  list_dir          — directory listing (relative to workspace_root)
+  list_dir          — directory listing
   read_file         — read a file's contents
   write_file        — create or overwrite a file
   run_shell         — execute a shell command with timeout
-  search_codebase   — ripgrep search across the workspace
+  search_codebase   — ripgrep search
 """
 from __future__ import annotations
 
@@ -157,6 +159,109 @@ CODE_TOOLS: list[ToolDefinition] = [
         },
     ),
 ]
+
+# Name-based lookup for stable parameter reuse across tiers
+_CODE_PARAMS = {t.name: t.parameters for t in CODE_TOOLS}
+
+
+def get_code_tools(tier: "SandboxTier") -> list[ToolDefinition]:
+    """Generate tool definitions with tier-appropriate descriptions."""
+    from app.tools.sandbox import SandboxTier
+
+    if tier == SandboxTier.home:
+        return [
+            ToolDefinition(
+                name="list_dir",
+                description=(
+                    "List files and directories at a path in your home directory. "
+                    "Use absolute paths (e.g., '/home/user/project/src') or relative paths from home."
+                ),
+                parameters=_CODE_PARAMS["list_dir"],
+            ),
+            ToolDefinition(
+                name="read_file",
+                description=(
+                    "Read the contents of a file in your home directory. "
+                    "Use absolute paths (e.g., '/home/user/project/main.py') or relative. "
+                    "Large files are truncated at 8000 characters."
+                ),
+                parameters=_CODE_PARAMS["read_file"],
+            ),
+            ToolDefinition(
+                name="write_file",
+                description=(
+                    "Write or overwrite a file in your home directory. "
+                    "Use absolute paths or relative. Creates parent directories automatically."
+                ),
+                parameters=_CODE_PARAMS["write_file"],
+            ),
+            ToolDefinition(
+                name="run_shell",
+                description=(
+                    "Run a shell command with cwd in your home directory. "
+                    "Commands run in a subprocess with a hard timeout. "
+                    "Blocks sudo, curl|sh, and privilege escalation."
+                ),
+                parameters=_CODE_PARAMS["run_shell"],
+            ),
+            ToolDefinition(
+                name="search_codebase",
+                description=(
+                    "Search for a pattern across files in your home directory using ripgrep. "
+                    "Returns matching lines with file paths and line numbers."
+                ),
+                parameters=_CODE_PARAMS["search_codebase"],
+            ),
+        ]
+
+    if tier == SandboxTier.root:
+        return [
+            ToolDefinition(
+                name="list_dir",
+                description=(
+                    "List files and directories at any path on the host filesystem. "
+                    "Use absolute paths (e.g., '/etc/nginx', '/var/log')."
+                ),
+                parameters=_CODE_PARAMS["list_dir"],
+            ),
+            ToolDefinition(
+                name="read_file",
+                description=(
+                    "Read the contents of any file on the host filesystem. "
+                    "Use absolute paths (e.g., '/etc/nginx/nginx.conf'). "
+                    "Large files are truncated at 8000 characters."
+                ),
+                parameters=_CODE_PARAMS["read_file"],
+            ),
+            ToolDefinition(
+                name="write_file",
+                description=(
+                    "Write or overwrite any file on the host filesystem. "
+                    "Use absolute paths. Creates parent directories automatically."
+                ),
+                parameters=_CODE_PARAMS["write_file"],
+            ),
+            ToolDefinition(
+                name="run_shell",
+                description=(
+                    "Run a shell command on the host. "
+                    "Working directory defaults to home. "
+                    "Use file tools (read_file, write_file) for accessing arbitrary host paths."
+                ),
+                parameters=_CODE_PARAMS["run_shell"],
+            ),
+            ToolDefinition(
+                name="search_codebase",
+                description=(
+                    "Search for a pattern across files on the host filesystem using ripgrep. "
+                    "Use absolute paths to scope the search (e.g., '/etc', '/home/user/project')."
+                ),
+                parameters=_CODE_PARAMS["search_codebase"],
+            ),
+        ]
+
+    # workspace / isolated — return defaults
+    return list(CODE_TOOLS)
 
 
 # ─── Path helpers ─────────────────────────────────────────────────────────────

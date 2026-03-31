@@ -113,6 +113,48 @@ GIT_TOOLS: list[ToolDefinition] = [
     ),
 ]
 
+# Name-based lookup for stable parameter reuse across tiers
+_GIT_PARAMS = {t.name: t.parameters for t in GIT_TOOLS}
+
+
+def get_git_tools(tier: "SandboxTier") -> list[ToolDefinition]:
+    """Generate git tool definitions with tier-appropriate descriptions."""
+    from app.tools.sandbox import SandboxTier
+
+    if tier in (SandboxTier.home, SandboxTier.root):
+        scope = "home directory" if tier == SandboxTier.home else "host filesystem"
+        return [
+            ToolDefinition(
+                name="git_status",
+                description=(
+                    f"Show the working tree status of any git repository on the {scope}. "
+                    "Returns staged, unstaged, and untracked file lists."
+                ),
+                parameters=_GIT_PARAMS["git_status"],
+            ),
+            ToolDefinition(
+                name="git_diff",
+                description=(
+                    f"Show unstaged or staged changes in any git repository on the {scope}."
+                ),
+                parameters=_GIT_PARAMS["git_diff"],
+            ),
+            ToolDefinition(
+                name="git_log",
+                description=f"Show recent git commit history for any repo on the {scope}.",
+                parameters=_GIT_PARAMS["git_log"],
+            ),
+            ToolDefinition(
+                name="git_commit",
+                description=(
+                    f"Stage files and commit in any git repository on the {scope}."
+                ),
+                parameters=_GIT_PARAMS["git_commit"],
+            ),
+        ]
+
+    return list(GIT_TOOLS)
+
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
