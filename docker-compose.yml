@@ -346,6 +346,7 @@ services:
       SHELL_TIMEOUT_SECONDS: ${SHELL_TIMEOUT_SECONDS:-30}
       CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-}
       BRIDGE_SERVICE_SECRET: ${BRIDGE_SERVICE_SECRET:-}
+      HOST_HOME: ${HOME}
     # Mount the host workspace at /workspace so agents can read/write files.
     # Set NOVA_WORKSPACE in .env to point at any directory.
     # Default: ~/.nova/workspace (created by setup.sh)
@@ -353,6 +354,8 @@ services:
     volumes:
       - ${NOVA_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
       - .:/nova:rw
+      - ${HOME}:${HOME}:rw
+      - /:/host-root:rw
     ports:
       - "8000:8000"
     depends_on:
