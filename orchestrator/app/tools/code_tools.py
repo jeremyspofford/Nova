@@ -478,7 +478,7 @@ def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
     most obviously destructive commands while keeping the tool useful for
     real development work (running tests, builds, linters, etc.).
 
-    In host tier, only the most dangerous hard blocks are enforced.
+    In root tier, only the most dangerous hard blocks are enforced.
     In workspace/nova tiers, all hard blocks apply.
     """
     from app.tools.sandbox import SandboxTier

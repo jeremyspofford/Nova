@@ -24,3 +24,7 @@ WHERE config->>'sandbox' = 'nova';
 UPDATE pods
 SET config = jsonb_set(config, '{sandbox}', '"root"')
 WHERE config->>'sandbox' = 'host';
+
+-- Direct sandbox column on pods table (used by pipeline executor)
+UPDATE pods SET sandbox = 'home' WHERE sandbox = 'nova';
+UPDATE pods SET sandbox = 'root' WHERE sandbox = 'host';

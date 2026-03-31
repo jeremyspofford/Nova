@@ -610,17 +610,17 @@ def _sandbox_context() -> str:
             f"You have access to the user's workspace directory. "
             f"You cannot access files outside this directory."
         ),
-        SandboxTier.nova: (
-            f"Sandbox tier: nova (self-modification)\n"
+        SandboxTier.home: (
+            f"Sandbox tier: home (home directory access)\n"
             f"Filesystem root: {root}  (all file/shell paths are relative to this)\n"
-            f"You have access to Nova's own source code. You can read and modify the codebase "
-            f"that runs you — Dockerfiles, Python services, the dashboard, configuration, etc. "
-            f"Be careful with changes that could break running services."
+            f"You have access to the user's home directory on the host. "
+            f"You can read and modify personal files, dotfiles, and local projects. "
+            f"Be careful with changes that could affect the user's environment."
         ),
-        SandboxTier.host: (
-            f"Sandbox tier: host (full system access)\n"
+        SandboxTier.root: (
+            f"Sandbox tier: root (full host filesystem access)\n"
             f"Filesystem root: /\n"
-            f"You have unrestricted filesystem access. Exercise extreme caution — "
+            f"You have full host filesystem access via /host-root. Exercise extreme caution — "
             f"you can read and write any file on the system."
         ),
         SandboxTier.isolated: (
