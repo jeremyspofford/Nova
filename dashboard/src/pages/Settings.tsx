@@ -5,7 +5,7 @@ import {
   Bot, Wrench, Palette, Users, Bug, Database, Lock,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
   FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell, Mic,
-  Brain, GitMerge, Wand2, ShieldAlert, Key,
+  Brain, GitMerge, Wand2, ShieldAlert, Key, Target,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -34,6 +34,7 @@ import { SkillsSection } from './settings/SkillsSection'
 import { RulesSection } from './settings/RulesSection'
 import { KeysSection } from './settings/KeysSection'
 import { VaultwardenSection } from './settings/VaultwardenSection'
+import { GoalCreationSection } from './settings/GoalCreationSection'
 import { SelfModelSection } from './settings/SelfModelSection'
 import { ConsolidationSection } from './settings/ConsolidationSection'
 import { MaintenanceSection } from './settings/MaintenanceSection'
@@ -89,6 +90,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'skills', label: 'Skills', icon: Wand2 },
       { id: 'rules', label: 'Rules', icon: ShieldAlert },
+      { id: 'goal-creation', label: 'Goal & Task Creation', icon: Target },
     ],
   },
   {
@@ -588,6 +590,12 @@ export function Settings() {
         {show('rules') && (
           <div id="rules">
             <RulesSection />
+          </div>
+        )}
+
+        {show('goal-creation') && (
+          <div id="goal-creation">
+            <GoalCreationSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
           </div>
         )}
 
