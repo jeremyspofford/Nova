@@ -998,6 +998,12 @@ async def _persist_stage_records(
 
             # ── Artifacts ─────────────────────────────────────────────
             if agent.artifact_type:
+                # Dedup: remove previous task_summary so retries don't stack duplicates
+                if agent.role == "documentation":
+                    await conn.execute(
+                        "DELETE FROM artifacts WHERE task_id = $1::uuid AND artifact_type = 'task_summary'",
+                        task_id,
+                    )
                 content = result.get("output") or result.get("adr") or result.get("content", "")
                 if content:
                     content_str = content if isinstance(content, str) else str(content)

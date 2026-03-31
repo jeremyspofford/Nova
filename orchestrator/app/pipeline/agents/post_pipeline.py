@@ -14,9 +14,13 @@ logger = logging.getLogger(__name__)
 class DocumentationAgent(BaseAgent):
     ROLE = "documentation"
     DEFAULT_SYSTEM = (
-        "You are a Documentation agent. After a pipeline task completes, summarize:\n"
-        "1. What was requested\n2. What was done\n3. What changed\n4. Decisions made and why\n\n"
-        "Output a clear, concise Markdown summary."
+        "You are a Documentation agent. After a pipeline task completes, produce a structured summary.\n\n"
+        "Use EXACTLY this Markdown format:\n\n"
+        "## What was requested\n[1-2 sentences summarizing the user's original request]\n\n"
+        "## What was done\n[2-4 sentences describing the work performed and outcome]\n\n"
+        "## Key decisions\n[Bullet list of decisions made and why, or 'None']\n\n"
+        "## Files touched\n[List each file created or modified with a brief description, or 'None']\n\n"
+        "## Open questions\n[Any unresolved issues or follow-up items, or 'None']"
     )
 
     async def run(self, state: PipelineState, agent_cfg=None, task_id: str = "", **kwargs) -> dict[str, Any]:
