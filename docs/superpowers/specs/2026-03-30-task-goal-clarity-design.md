@@ -21,10 +21,10 @@ Four components, ordered by dependency:
 
 **What:** When a task completes, the pipeline executor builds a `summary` JSONB from data already available — no LLM call.
 
-**Schema change:** New migration adding `summary` JSONB column to `tasks` table.
+**Schema change:** Migration `051_task_summary.sql`:
 
 ```sql
-ALTER TABLE tasks ADD COLUMN summary JSONB;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS summary JSONB;
 ```
 
 **Summary shape:**
@@ -42,7 +42,15 @@ ALTER TABLE tasks ADD COLUMN summary JSONB;
 }
 ```
 
-**Populated by:** `orchestrator/app/pipeline/executor.py` — in the task completion path, after `output` is composed (lines ~513-528). The `files_changed` list is already extracted from the agent result dict. `headline` is derived by splitting `output` on sentence boundaries and taking the first 200 characters. `findings_count` and `review_verdict` are already available from the pipeline state.
+**Populated by:** `orchestrator/app/pipeline/executor.py` — inside `_complete_task()` (line ~1129), where `completed_at` is being set. This is the only location where all required data is available:
+
+- `headline`: first 200 chars of `output`, split on sentence boundaries
+- `files_created` / `files_modified`: from task agent result dict `files_changed` (already extracted during pipeline)
+- `commands_run`: from task agent result dict `commands_run`
+- `findings_count`: query `SELECT COUNT(*) FROM guardrail_findings WHERE task_id = $1` (not available on PipelineState — must be queried)
+- `review_verdict`: `state.completed.get("code_review", {}).get("verdict")` — nullable when code review was skipped (run_condition not met)
+- `cost_usd`: `total_cost_usd` already computed by `_complete_task`
+- `duration_s`: `(now - started_at).total_seconds()` — both values available inside `_complete_task`
 
 **API change:** `GET /api/v1/pipeline/tasks/{task_id}` already returns all task columns — `summary` will appear automatically.
 
@@ -78,7 +86,21 @@ ALTER TABLE tasks ADD COLUMN summary JSONB;
 [Any unresolved issues or follow-up items, or "None"]
 ```
 
-**Artifact storage:** Artifact `artifact_type` = `task_summary`. One per task. If a `task_summary` artifact already exists for the task (retry), overwrite by content_hash dedup.
+**Artifact type change:** Migration to update the DocumentationAgent pod_agents config:
+
+```sql
+UPDATE pod_agents SET artifact_type = 'task_summary' WHERE role = 'documentation';
+```
+
+This distinguishes new structured summaries from old-format documentation artifacts.
+
+**Artifact dedup:** Before inserting, delete any existing `task_summary` artifact for the task:
+
+```sql
+DELETE FROM artifacts WHERE task_id = $1 AND artifact_type = 'task_summary';
+```
+
+This handles retries cleanly without needing a UNIQUE constraint change.
 
 **Dashboard change:** The "Details" tab in task detail (replacing the current "Output" tab as default) renders the `task_summary` artifact as styled sections. If no `task_summary` artifact exists yet (post-pipeline still running or pre-change task), falls back to rendering `tasks.output` as plain text.
 
@@ -96,13 +118,13 @@ ALTER TABLE tasks ADD COLUMN summary JSONB;
 
 ### Schema
 
-New migration:
+Migration `052_goal_iterations.sql`:
 
 ```sql
-CREATE TABLE goal_iterations (
+CREATE TABLE IF NOT EXISTS goal_iterations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     goal_id         UUID NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
-    iteration       INTEGER NOT NULL,
+    attempt         INTEGER NOT NULL,
     cycle_number    INTEGER NOT NULL,
     plan_text       TEXT,
     task_id         UUID REFERENCES tasks(id) ON DELETE SET NULL,
@@ -112,32 +134,35 @@ CREATE TABLE goal_iterations (
     files_touched   JSONB DEFAULT '[]',
     plan_adjustment TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(goal_id, iteration)
+    UNIQUE(goal_id, attempt)
 );
 
-CREATE INDEX idx_goal_iterations_goal ON goal_iterations(goal_id);
+CREATE INDEX IF NOT EXISTS idx_goal_iterations_goal ON goal_iterations(goal_id);
 ```
+
+**Key design decision — `attempt` vs `iteration`:** The column is named `attempt` (not `iteration`) and uses its own monotonically-increasing counter, separate from `goals.iteration` which only increments on success. Every task dispatch (success or failure) gets a new `attempt` number. This avoids the UNIQUE constraint violation that would occur with consecutive failures at the same `goals.iteration` value.
+
+**Note:** Cortex connects to the same Postgres instance as orchestrator. This is the existing pattern — cortex already writes directly to `goals`, `cortex_state`, and other orchestrator-owned tables.
 
 ### Population
 
 **Where:** `cortex/app/cycle.py` — `_update_goal_progress()`, after the branch logic and before `_check_goal_limits()`.
 
 ```python
-# Record iteration history
+# Record iteration history — attempt always increments (unlike goals.iteration which only increments on success)
+attempt = await conn.fetchval(
+    "SELECT COALESCE(MAX(attempt), 0) + 1 FROM goal_iterations WHERE goal_id = $1::uuid",
+    goal_id,
+)
 await conn.execute("""
-    INSERT INTO goal_iterations (goal_id, iteration, cycle_number, plan_text,
+    INSERT INTO goal_iterations (goal_id, attempt, cycle_number, plan_text,
         task_id, task_status, task_summary, cost_usd, files_touched, plan_adjustment)
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-    ON CONFLICT (goal_id, iteration) DO UPDATE SET
-        task_status = EXCLUDED.task_status,
-        task_summary = EXCLUDED.task_summary,
-        cost_usd = EXCLUDED.cost_usd,
-        files_touched = EXCLUDED.files_touched
-""", goal_id, new_iteration, cycle, plan_text, task_id, outcome.status,
+""", goal_id, attempt, cycle, plan_text, task_id, outcome.status,
      headline, outcome.total_cost_usd, files_json, adjustment_note)
 ```
 
-**Plan adjustment detection:** When the previous iteration failed and cortex re-planned, the `plan_adjustment` field captures the delta. Populated by comparing `current_plan.plan` (previous) with the new plan text. If they differ and the previous task failed, the adjustment is: "Re-planned after failure: {previous_error}. New approach: {new_plan_snippet}".
+**Plan adjustment detection:** When the previous attempt failed and cortex re-planned, the `plan_adjustment` field captures the delta. Populated by comparing `current_plan.plan` (previous) with the new plan text. If they differ and the previous task failed, the adjustment is: "Re-planned after failure: {previous_error}. New approach: {new_plan_snippet}".
 
 ### API
 
@@ -147,7 +172,7 @@ Returns:
 ```json
 [
   {
-    "iteration": 2,
+    "attempt": 3,
     "cycle_number": 849,
     "plan_text": "Fix boolean type handling in validate_type()",
     "task_id": "a3f2...c91e",
@@ -159,15 +184,15 @@ Returns:
     "created_at": "2026-03-30T14:22:00Z"
   },
   {
-    "iteration": 1,
-    "cycle_number": 847,
+    "attempt": 2,
+    "cycle_number": 848,
     "plan_text": "Review platform capabilities and identify gaps",
     "task_id": "7b1e...03af",
     "task_status": "failed",
     "task_summary": "Failed: missing test fixtures",
     "cost_usd": 0.04,
     "files_touched": [],
-    "plan_adjustment": null,
+    "plan_adjustment": "Re-planned after failure: test_fixtures directory not found. New approach: fix boolean type handling directly.",
     "created_at": "2026-03-30T14:15:00Z"
   }
 ]
@@ -177,10 +202,10 @@ Returns:
 
 **GoalTimeline component** in `dashboard/src/pages/Goals.tsx`:
 
-1. **Progress narrative** — top card with teal accent. Text generated client-side from iteration history: takes the last 3-5 iterations and composes "Completed X. Y failed (reason). Retried with Z. Next: W." Simple template logic, no LLM call.
+1. **Progress narrative** — top card with teal accent. Text generated client-side from iteration history: takes the last 3-5 attempts and composes "Completed X. Y failed (reason). Retried with Z. Next: W." Simple template logic, no LLM call.
 
 2. **Timeline view** — vertical timeline, newest first. Each node shows:
-   - Iteration number and timestamp
+   - Attempt number and timestamp
    - Plan text (what cortex intended)
    - Task outcome (status badge, headline)
    - Files touched (clickable, opens File Viewer)
@@ -201,10 +226,12 @@ Returns:
 
 | Type | Rendering |
 |------|-----------|
-| `documentation`, `task_summary`, `decision_record`, `api_contract` | Markdown → HTML (use existing `react-markdown` or add it) |
-| `code`, `test`, `config`, `schema` | Syntax-highlighted code block (detect language from `name` or `file_path` extension) |
-| `diagram` | Mermaid diagram rendering |
+| `documentation`, `task_summary`, `decision_record`, `api_contract` | Markdown via `react-markdown` + `remark-gfm` (already in project) |
+| `code`, `test`, `config`, `schema` | Syntax-highlighted via `rehype-highlight` (new dep, pairs with existing react-markdown) |
+| `diagram` | Mermaid rendering via `mermaid` library (new dep) |
 | `context_package` | Collapsible JSON tree viewer |
+
+**New npm dependencies:** `rehype-highlight`, `mermaid` (or `react-mermaid2`).
 
 Each artifact card shows: name, type badge, created_at, file_path (if set, clickable). "Copy content" button.
 
@@ -221,44 +248,67 @@ Opens as a modal when any file path is clicked anywhere in the dashboard (task s
 @router.get("/api/v1/workspace/files")
 async def read_workspace_file(path: str):
     """Read a file from the Nova workspace. Read-only, path-traversal safe."""
-    workspace = settings.nova_workspace
-    resolved = (Path(workspace) / path).resolve()
-    if not str(resolved).startswith(str(Path(workspace).resolve())):
+    workspace = Path(settings.workspace_root)
+    resolved = (workspace / path).resolve()
+    if not str(resolved).startswith(str(workspace.resolve())):
         raise HTTPException(403, "Path traversal blocked")
     if not resolved.is_file():
         raise HTTPException(404, "File not found")
+    size = resolved.stat().st_size
+    if size > 1_000_000:  # 1MB limit for text viewer
+        return {
+            "path": path,
+            "content": None,
+            "size_bytes": size,
+            "modified_at": datetime.fromtimestamp(resolved.stat().st_mtime).isoformat(),
+            "truncated": True,
+            "error": "File too large to display (>1MB)",
+        }
     content = resolved.read_text(errors="replace")
     return {
         "path": path,
         "content": content,
-        "size_bytes": resolved.stat().st_size,
+        "size_bytes": size,
         "modified_at": datetime.fromtimestamp(resolved.stat().st_mtime).isoformat(),
     }
 ```
 
 **Rendering:** Same logic as artifact types — detect by extension, render markdown or syntax-highlight code.
 
-**Security:** Path traversal prevention via `resolve()` + prefix check. Read-only. No directory listing. Scoped to `NOVA_WORKSPACE`.
+**Security:** Path traversal prevention via `resolve()` + prefix check. Read-only. No directory listing. Scoped to `NOVA_WORKSPACE` / `workspace_root`. The TOCTOU race between `is_file()` and `read_text()` is accepted risk given the single-user containerized deployment model.
 
 ### Goal-Level Artifact Rollup
 
-Goal detail page gets an "Artifacts" expandable section below the timeline. Fetches artifacts for all tasks associated with the goal (via `goal_id` on tasks table). Grouped by iteration number.
+New endpoint: `GET /api/v1/goals/{goal_id}/artifacts`
+
+Single query joining `tasks` and `artifacts` on `goal_id`:
+
+```sql
+SELECT a.*, t.goal_id,
+       (SELECT gi.attempt FROM goal_iterations gi WHERE gi.task_id = a.task_id LIMIT 1) as attempt
+FROM artifacts a
+JOIN tasks t ON a.task_id = t.id
+WHERE t.goal_id = $1
+ORDER BY a.created_at DESC
+```
+
+Goal detail page gets an "Artifacts" expandable section below the timeline, showing all artifacts grouped by attempt number.
 
 ---
 
 ## Migration Summary
 
-1. `ALTER TABLE tasks ADD COLUMN summary JSONB` — task executive summary
-2. `CREATE TABLE goal_iterations (...)` — iteration history for timeline
+1. `051_task_summary.sql` — `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS summary JSONB`
+2. `052_goal_iterations.sql` — `CREATE TABLE goal_iterations`, update DocumentationAgent artifact_type
 
 ## Files Modified
 
 ### Backend (orchestrator)
-- `orchestrator/app/migrations/0XX_task_summary.sql` — summary column
-- `orchestrator/app/migrations/0XX_goal_iterations.sql` — iterations table
-- `orchestrator/app/pipeline/executor.py` — build summary JSONB at task completion
+- `orchestrator/app/migrations/051_task_summary.sql` — summary column
+- `orchestrator/app/migrations/052_goal_iterations.sql` — iterations table + pod_agents update
+- `orchestrator/app/pipeline/executor.py` — build summary JSONB in `_complete_task()`
 - `orchestrator/app/pipeline/agents/post_pipeline.py` — improved DocumentationAgent prompt
-- `orchestrator/app/goals_router.py` — new GET `/goals/{goal_id}/iterations` endpoint
+- `orchestrator/app/goals_router.py` — new `GET /goals/{goal_id}/iterations`, `GET /goals/{goal_id}/artifacts`
 - `orchestrator/app/workspace_router.py` (new) — file read endpoint
 - `orchestrator/app/router.py` — mount workspace_router
 
@@ -270,14 +320,17 @@ Goal detail page gets an "Artifacts" expandable section below the timeline. Fetc
 - `dashboard/src/pages/Goals.tsx` — GoalTimeline component replacing raw JSON
 - `dashboard/src/components/FileViewer.tsx` (new) — modal file viewer
 - `dashboard/src/components/ArtifactRenderer.tsx` (new) — renders artifacts by type
-- `dashboard/src/api.ts` — new API functions: `getGoalIterations`, `getWorkspaceFile`
+- `dashboard/src/api.ts` — new API functions: `getGoalIterations`, `getGoalArtifacts`, `getWorkspaceFile`
+- `package.json` — add `rehype-highlight`, `mermaid` (or `react-mermaid2`)
 
 ## Verification
 
 1. Complete a pipeline task → verify summary card appears with correct headline, files, cost
 2. Wait for post-pipeline → verify Details tab shows structured breakdown
-3. Create a goal, let cortex run 2+ iterations → verify timeline shows iteration history with plan evolution
+3. Create a goal, let cortex run 2+ attempts → verify timeline shows attempt history with plan evolution
 4. Fail a task deliberately → verify timeline shows failure and plan adjustment on retry
 5. Click a file path in any summary → verify File Viewer opens with rendered content
 6. Check Artifacts tab → verify all artifact types render correctly
 7. Existing tasks (pre-migration) → verify fallback to raw output display works
+8. Large file (>1MB) → verify File Viewer shows truncation message
+9. Path traversal attempt → verify 403 response
