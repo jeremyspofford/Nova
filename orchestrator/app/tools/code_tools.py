@@ -250,7 +250,7 @@ async def execute_tool(name: str, arguments: dict) -> str:
 def _execute_list_dir(path: str, recursive: bool) -> str:
     target = _resolve_path(path)
     if not target.exists():
-        return f"Path '{path}' does not exist in workspace."
+        return f"Path '{path}' does not exist."
     if not target.is_dir():
         return f"'{path}' is a file, not a directory."
 
@@ -263,9 +263,11 @@ def _execute_list_dir(path: str, recursive: bool) -> str:
         return f"Directory '{path}' is empty."
 
     lines = [f"Contents of {path}:"]
-    root = _resolve_path(".")
     for e in entries:
-        rel = e.relative_to(root)
+        try:
+            rel = e.relative_to(target)
+        except ValueError:
+            rel = display_path(e)
         kind = "/" if e.is_dir() else ""
         lines.append(f"  {rel}{kind}")
     return "\n".join(lines)
@@ -274,7 +276,7 @@ def _execute_list_dir(path: str, recursive: bool) -> str:
 def _execute_read_file(path: str) -> str:
     target = _resolve_path(path)
     if not target.exists():
-        return f"File '{path}' does not exist in workspace."
+        return f"File '{path}' does not exist."
     if not target.is_file():
         return f"'{path}' is a directory, not a file."
 
@@ -283,7 +285,7 @@ def _execute_read_file(path: str) -> str:
     if len(text) > MAX_CHARS:
         truncated = len(text) - MAX_CHARS
         text = text[:MAX_CHARS] + f"\n\n[... {truncated} characters truncated ...]"
-    return f"File: {path}\n```\n{text}\n```"
+    return f"File: {display_path(target)}\n```\n{text}\n```"
 
 
 def _execute_write_file(path: str, content: str) -> str:
@@ -293,7 +295,7 @@ def _execute_write_file(path: str, content: str) -> str:
     target.write_text(content, encoding="utf-8")
     action = "Updated" if existed else "Created"
     byte_count = len(content.encode())
-    return f"{action} '{path}' ({byte_count} bytes, {content.count(chr(10)) + 1} lines)."
+    return f"{action} '{display_path(target)}' ({byte_count} bytes, {content.count(chr(10)) + 1} lines)."
 
 
 async def _execute_run_shell(command: str, working_dir: str | None) -> str:
@@ -470,6 +472,10 @@ async def _execute_search_codebase(
 
     out = stdout.decode(errors="replace").strip()
     err = stderr.decode(errors="replace").strip()
+
+    # Strip /host-root prefix from ripgrep output paths
+    if HOST_ROOT_PREFIX + "/" in (out or ""):
+        out = out.replace(HOST_ROOT_PREFIX + "/", "/")
 
     if proc.returncode == 1 and not out:
         return f"No matches found for '{pattern}' in '{path}'."
