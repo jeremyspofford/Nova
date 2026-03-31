@@ -145,6 +145,7 @@ export default function Brain() {
   const [showClusterGalaxies, setShowClusterGalaxies] = useLocalStorage('brain.showClusterGalaxies', true)
   const [showMilkyWay, setShowMilkyWay] = useLocalStorage('brain.showMilkyWay', true)
   const [showAsteroids, setShowAsteroids] = useLocalStorage('brain.showAsteroids', true)
+  const [showSolarSystems, setShowSolarSystems] = useLocalStorage('brain.showSolarSystems', true)
   const [clusterSeparation, setClusterSeparation] = useLocalStorage('brain.clusterSeparation', 0.3)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -394,6 +395,7 @@ export default function Brain() {
         showClusterGalaxies={showClusterGalaxies}
         showMilkyWay={showMilkyWay}
         showAsteroids={showAsteroids}
+        showSolarSystems={showSolarSystems}
         clusterSeparation={clusterSeparation}
         className="w-full h-full"
       />
@@ -696,6 +698,7 @@ export default function Brain() {
                 { label: 'Clouds', value: showNebulae, set: setShowNebulae },
                 { label: 'Celestial Objects', value: showCelestialObjects, set: setShowCelestialObjects },
                 { label: 'Asteroids', value: showAsteroids, set: setShowAsteroids },
+                { label: 'Solar Systems', value: showSolarSystems, set: setShowSolarSystems },
                 { label: 'Galaxy Halos', value: showClusterGalaxies, set: setShowClusterGalaxies },
               ].map(({ label, value, set }) => (
                 <button

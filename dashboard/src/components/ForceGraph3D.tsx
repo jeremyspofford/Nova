@@ -113,6 +113,7 @@ interface ForceGraph3DProps {
   showClusterGalaxies?: boolean
   showMilkyWay?: boolean
   showAsteroids?: boolean
+  showSolarSystems?: boolean
   clusterSeparation?: number
 }
 
@@ -677,7 +678,11 @@ function makeClusterHaloTexture(r: number, g: number, b: number): CanvasTexture 
   return new CanvasTexture(canvas)
 }
 
-function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean; celestialObjects: boolean; milkyWay: boolean; asteroids: boolean }): Group {
+// Store orbiting planet sprites so the tick loop can animate them
+const orbitingPlanets: { sprite: Sprite; cx: number; cy: number; cz: number; radius: number; speed: number; phase: number; tilt: number }[] = []
+
+function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebulae: boolean; celestialObjects: boolean; milkyWay: boolean; asteroids: boolean; solarSystems: boolean }): Group {
+  orbitingPlanets.length = 0
   const group = new Group()
   group.name = 'starfield'
 
@@ -782,6 +787,51 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     bhDisk.scale.set(160, 160, 1)
     bhDisk.renderOrder = 2
     group.add(bhDisk)
+  }
+
+  // ── Solar systems — planets orbiting around suns ──
+  if (options.solarSystems && options.celestialObjects) {
+    const solarSystems = [
+      { // Yellow-white sun system
+        cx: 2200, cy: 800, cz: 1500,
+        planets: [
+          { r: 8, g: 150, b: 180, size: 8, orbit: 180, speed: 0.15, tilt: 0.2 },
+          { r: 180, g: 140, b: 80, size: 12, orbit: 280, speed: 0.08, tilt: -0.1, ring: true },
+          { r: 100, g: 160, b: 200, size: 6, orbit: 380, speed: 0.05, tilt: 0.3 },
+          { r: 160, g: 100, b: 60, size: 5, orbit: 140, speed: 0.25, tilt: -0.15 },
+        ],
+      },
+      { // Red dwarf system — fewer, closer planets
+        cx: -1800, cy: -1200, cz: 600,
+        planets: [
+          { r: 140, g: 80, b: 60, size: 5, orbit: 60, speed: 0.3, tilt: 0.1 },
+          { r: 80, g: 120, b: 140, size: 7, orbit: 100, speed: 0.18, tilt: -0.2 },
+        ],
+      },
+    ]
+
+    for (const sys of solarSystems) {
+      for (const p of sys.planets) {
+        const tex = p.ring
+          ? makeRingedPlanetTexture(p.r, p.g, p.b)
+          : makePlanetTexture(p.r, p.g, p.b)
+        const mat = new SpriteMaterial({
+          map: tex, transparent: true, opacity: 0.6,
+          depthWrite: false,
+        })
+        const sprite = new Sprite(mat)
+        sprite.scale.set(p.size, p.size, 1)
+        // Initial position — will be animated in tick loop
+        sprite.position.set(sys.cx + p.orbit, sys.cy, sys.cz)
+        group.add(sprite)
+        orbitingPlanets.push({
+          sprite, cx: sys.cx, cy: sys.cy, cz: sys.cz,
+          radius: p.orbit, speed: p.speed,
+          phase: Math.random() * Math.PI * 2,
+          tilt: p.tilt,
+        })
+      }
+    }
   }
 
   // ── Deep-field stars — static backdrop ──
@@ -1037,6 +1087,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showClusterGalaxies = true,
   showMilkyWay = true,
   showAsteroids = true,
+  showSolarSystems = true,
   clusterSeparation = 0.3,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
@@ -1070,6 +1121,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showMilkyWayRef.current = showMilkyWay
   const showAsteroidsRef = useRef(showAsteroids)
   showAsteroidsRef.current = showAsteroids
+  const showSolarSystemsRef = useRef(showSolarSystems)
+  showSolarSystemsRef.current = showSolarSystems
   const clusterSeparationRef = useRef(clusterSeparation)
   clusterSeparationRef.current = clusterSeparation
   const showEdgesRef = useRef(showEdges)
@@ -1452,6 +1505,19 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         } catch { /* ok during init */ }
       }
 
+      // Animate orbiting planets in solar systems
+      if (orbitingPlanets.length > 0) {
+        const t = Date.now() * 0.001
+        for (const p of orbitingPlanets) {
+          const angle = p.phase + t * p.speed
+          p.sprite.position.set(
+            p.cx + Math.cos(angle) * p.radius,
+            p.cy + Math.sin(angle) * p.radius * Math.sin(p.tilt),
+            p.cz + Math.sin(angle) * p.radius * Math.cos(p.tilt),
+          )
+        }
+      }
+
       // Progressive label visibility — throttle to every 5th frame
       if (tickCount % 5 === 0) {
         try {
@@ -1525,7 +1591,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     // Attach starfield if galaxy mode at init
     if (bgColorRef.current === 'galaxy') {
-      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current, celestialObjects: showCelestialRef.current, milkyWay: showMilkyWayRef.current, asteroids: showAsteroidsRef.current })
+      const sf = createStarfield({ bgStars: showBgStarsRef.current, innerStars: showInnerStarsRef.current, nebulae: showNebulaeRef.current, celestialObjects: showCelestialRef.current, milkyWay: showMilkyWayRef.current, asteroids: showAsteroidsRef.current, solarSystems: showSolarSystemsRef.current })
       graph.scene().add(sf)
       starfieldRef.current = sf
     }
@@ -1597,13 +1663,28 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     if (bgColor === 'galaxy') {
       graph.backgroundColor('#000000')
-      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae, celestialObjects: showCelestialObjects, milkyWay: showMilkyWay, asteroids: showAsteroids })
+      const sf = createStarfield({ bgStars: showBackgroundStars, innerStars: showInnerStars, nebulae: showNebulae, celestialObjects: showCelestialObjects, milkyWay: showMilkyWay, asteroids: showAsteroids, solarSystems: showSolarSystems })
       scene.add(sf)
       starfieldRef.current = sf
     } else {
       graph.backgroundColor(bgColor)
     }
-  }, [bgColor, showBackgroundStars, showInnerStars, showNebulae, showMilkyWay, showAsteroids])
+  }, [bgColor, showBackgroundStars, showInnerStars, showNebulae, showCelestialObjects, showMilkyWay, showAsteroids, showSolarSystems])
+
+  // Live-update edge visibility when toggled
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph) return
+    showEdgesRef.current = showEdges
+    graph.linkVisibility(() => linksVisibleRef.current && showEdgesRef.current)
+    graph.linkDirectionalParticles((link: any) => {
+      if (!showEdgesRef.current) return 0
+      if (neuralModeRef.current?.particlesAlways) {
+        return Math.max(1, Math.ceil((link.weight ?? 0.5) * 2))
+      }
+      return 0
+    })
+  }, [showEdges])
 
   // Layout preset is now fixed (single "clustered" layout) — no dynamic switching needed
 
