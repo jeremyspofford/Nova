@@ -198,7 +198,7 @@ type SourceFilter = 'mine' | 'cortex' | 'all'
 const SOURCE_FILTERS = [
   { value: 'mine', label: 'My Tasks' },
   { value: 'cortex', label: 'Cortex' },
-  { value: 'all', label: 'All Sources' },
+  { value: 'all', label: 'All Origins' },
 ]
 
 function matchesSourceFilter(task: PipelineTask, filter: SourceFilter): boolean {
@@ -841,6 +841,8 @@ function TaskRow({
         'hover:bg-surface-card-hover',
         selected && 'bg-accent/10',
         (needsReview || needsClarification) && !selected && 'bg-info-dim/30',
+        isActive && !needsReview && !needsClarification && 'border-l-2 border-l-accent bg-accent-dim/30',
+        isTerminal && !selected && 'opacity-75',
       )}
     >
       {/* Selection checkbox */}
@@ -958,11 +960,11 @@ function StatsRow() {
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <Card className="p-4">
+      <Card className={clsx('p-4', (stats?.active_count ?? 0) > 0 && 'border-accent/30 dark:border-accent/20 glow-accent')}>
         <Metric
           label="Active Tasks"
           value={stats?.active_count ?? 0}
-          icon={<Zap size={12} />}
+          icon={<Zap size={12} className={(stats?.active_count ?? 0) > 0 ? 'text-accent' : ''} />}
           tooltip="Tasks currently running in the pipeline."
         />
       </Card>
@@ -1126,9 +1128,6 @@ export function Tasks() {
       <p className="text-caption text-content-tertiary -mb-4">Each task flows through 5 pipeline stages before producing a final result or escalating for review.</p>
       <StatsRow />
 
-      {/* Submit form */}
-      <SubmitForm />
-
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3">
         {/* Status pills */}
@@ -1246,7 +1245,7 @@ export function Tasks() {
           title={statusFilter === 'all' && sourceFilter === 'all' && !search ? 'No tasks yet' : 'No matching tasks'}
           description={
             statusFilter === 'all' && sourceFilter === 'all' && !search
-              ? 'Submit your first pipeline task above to get started.'
+              ? 'Nova creates tasks automatically when working toward your goals. You can also submit tasks manually below.'
               : 'Try adjusting your filters or search query.'
           }
         />
@@ -1263,6 +1262,9 @@ export function Tasks() {
           ))}
         </Card>
       )}
+
+      {/* Submit form — below task list, power-user action */}
+      <SubmitForm />
 
       {/* Task detail sheet */}
       <TaskDetailSheet

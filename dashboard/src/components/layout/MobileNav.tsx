@@ -39,7 +39,7 @@ const moreItems: { label?: string; items: NavItem[] }[] = [
   {
     label: 'Knowledge',
     items: [
-      { to: '/sources', label: 'Sources', icon: Globe, minRole: 'member' },
+      { to: '/sources', label: 'Knowledge', icon: Globe, minRole: 'member' },
     ],
   },
   {
