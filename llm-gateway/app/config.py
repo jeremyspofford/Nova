@@ -150,6 +150,8 @@ class Settings(BaseSettings):
     service_host: str = "0.0.0.0"
     service_port: int = 8001
     log_level: str = "INFO"
+    gateway_public_url: str = "http://localhost:8001/v1"
+    require_auth: bool = False
 
 
 settings = Settings()

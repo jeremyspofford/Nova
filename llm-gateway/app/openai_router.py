@@ -42,6 +42,8 @@ from app.openai_compat import (
     nova_response_to_oai,
     oai_request_to_nova,
 )
+from app.config import settings
+from app.editor_tracker import detect_editor_slug, record_connection, get_connections
 from app.rate_limiter import check_rate_limit
 from app.registry import MODEL_REGISTRY, DEFAULT_MODEL_KEY, get_provider
 from app.tier_resolver import resolve_model, BudgetExhaustedError
@@ -97,6 +99,8 @@ async def chat_completions(req: OAIChatCompletionRequest, raw_request: Request):
                     )
                     yield f"data: {oai_chunk.model_dump_json()}\n\n".encode()
 
+                # Track editor connection after successful stream (non-blocking)
+                _track_editor(raw_request)
                 yield b"data: [DONE]\n\n"
 
             except Exception as e:
@@ -118,6 +122,8 @@ async def chat_completions(req: OAIChatCompletionRequest, raw_request: Request):
             response.output_tokens,
             response.cost_usd or 0,
         )
+        # Track editor connection (non-critical, best-effort)
+        _track_editor(raw_request)
         return nova_response_to_oai(response, request_model=req.model)
 
 
@@ -132,4 +138,36 @@ async def list_models_oai():
             for model_id in MODEL_REGISTRY
             if model_id != DEFAULT_MODEL_KEY
         ],
+    }
+
+
+def _track_editor(request: Request) -> None:
+    """Fire-and-forget editor tracking. Runs in background to not slow responses."""
+    import asyncio
+    asyncio.create_task(_record_editor(request))
+
+
+async def _record_editor(request: Request) -> None:
+    """Detect and record editor connection from request headers."""
+    try:
+        user_agent = request.headers.get("user-agent")
+        # Check for editor hint header (set by dashboard test connection)
+        editor_hint = request.headers.get("x-nova-editor")
+        slug = detect_editor_slug(editor_hint, user_agent)
+        if slug:
+            await record_connection(slug, user_agent)
+    except Exception:
+        pass  # Non-critical
+
+
+@openai_router.get("/editor-connections")
+async def editor_connections():
+    """Return connection state for all known editors."""
+    connections = await get_connections()
+    endpoint = settings.gateway_public_url
+    auth_required = settings.require_auth
+    return {
+        "connections": connections,
+        "endpoint": endpoint,
+        "auth_required": auth_required,
     }
