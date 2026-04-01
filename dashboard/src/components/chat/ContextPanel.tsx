@@ -1,6 +1,7 @@
-import { ChevronRight, Activity, Brain, Terminal, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { ChevronRight, ChevronDown, Activity, Brain, Terminal, Loader2 } from 'lucide-react'
 import clsx from 'clsx'
-import type { ActivityStep, Message } from '../../stores/chat-store'
+import type { ActivityStep, Message, EngramSummary } from '../../stores/chat-store'
 
 interface Props {
   messages: Message[]
@@ -9,13 +10,72 @@ interface Props {
   onToggle: () => void
 }
 
+const TYPE_LABELS: Record<string, string> = {
+  fact: 'Fact',
+  episode: 'Episode',
+  concept: 'Concept',
+  procedure: 'Procedure',
+  preference: 'Preference',
+  topic: 'Topic',
+}
+
+function EngramRow({ engram }: { engram: EngramSummary }) {
+  const [expanded, setExpanded] = useState(false)
+  const typeLabel = TYPE_LABELS[engram.type] ?? engram.type
+
+  return (
+    <div className="border-t border-border-subtle/20 first:border-0">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="flex items-start gap-1.5 py-1.5 w-full text-left hover:bg-surface-card-hover/50
+                   rounded-xs transition-colors duration-fast"
+      >
+        {expanded
+          ? <ChevronDown size={12} className="text-content-tertiary mt-0.5 shrink-0" />
+          : <ChevronRight size={12} className="text-content-tertiary mt-0.5 shrink-0" />
+        }
+        <span className="text-compact text-content-primary leading-snug flex-1 min-w-0 line-clamp-2">
+          {engram.preview || 'Untitled engram'}
+        </span>
+      </button>
+      {expanded && (
+        <div className="pl-5 pb-1.5 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-micro font-semibold uppercase text-content-tertiary">Type</span>
+            <span className="text-micro text-content-secondary">{typeLabel}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-micro font-semibold uppercase text-content-tertiary">ID</span>
+            <span className="text-mono-sm font-mono text-content-tertiary select-all">
+              {engram.id.slice(0, 12)}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Props) {
   // Extract live state from the most recent assistant message
   const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
   const steps = lastAssistant?.activitySteps ?? []
+
+  // Prefer summaries (with preview text) over bare IDs
+  const engramSummaries: EngramSummary[] = steps
+    .filter(s => s.step === 'memory')
+    .flatMap(s => s.engram_summaries ?? [])
+  // Fallback: wrap bare IDs if no summaries available
   const engramIds = steps
     .filter(s => s.step === 'memory' && s.engram_ids?.length)
     .flatMap(s => s.engram_ids ?? [])
+  const memoryItems: EngramSummary[] = engramSummaries.length > 0
+    ? engramSummaries
+    : engramIds.map(id => ({ id, type: 'unknown', preview: id.slice(0, 12) + '\u2026' }))
+
+  // Tool call steps — anything that isn't a built-in pipeline step
+  const builtinSteps = new Set(['classifying', 'memory', 'model', 'generating'])
+  const toolSteps = steps.filter(s => !builtinSteps.has(s.step))
 
   if (collapsed) {
     return (
@@ -99,30 +159,27 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
         </ContextSection>
 
         {/* Memory Hits */}
-        {engramIds.length > 0 && (
-          <ContextSection icon={Brain} title="MEMORY HITS" count={engramIds.length}>
-            {engramIds.slice(0, 6).map((id) => (
-              <div
-                key={id}
-                className="flex items-center gap-2 py-1 border-t border-border-subtle/20 first:border-0"
-              >
-                <span className="text-compact text-content-primary truncate flex-1">
-                  {id.slice(0, 12)}...
-                </span>
-              </div>
+        {memoryItems.length > 0 && (
+          <ContextSection icon={Brain} title="MEMORY HITS" count={memoryItems.length}>
+            {memoryItems.slice(0, 8).map((engram) => (
+              <EngramRow key={engram.id} engram={engram} />
             ))}
+            {memoryItems.length > 8 && (
+              <div className="text-micro text-content-tertiary pt-1">
+                +{memoryItems.length - 8} more
+              </div>
+            )}
           </ContextSection>
         )}
 
         {/* Tool Calls */}
-        <ContextSection
-          icon={Terminal}
-          title="TOOL CALLS"
-          count={steps.filter(s => s.step !== 'classifying' && s.step !== 'generating').length}
-        >
-          {steps
-            .filter(s => s.detail && s.step !== 'classifying' && s.step !== 'generating')
-            .map((step, i) => (
+        {toolSteps.length > 0 && (
+          <ContextSection
+            icon={Terminal}
+            title="TOOL CALLS"
+            count={toolSteps.length}
+          >
+            {toolSteps.map((step, i) => (
               <div key={i} className="flex items-center gap-2 py-1.5">
                 {step.state === 'done' ? (
                   <span className="text-success text-compact">&#10003;</span>
@@ -130,9 +187,11 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
                   <Loader2 className="w-3.5 h-3.5 text-warning animate-spin" />
                 )}
                 <span className="text-caption font-mono text-content-secondary">{step.step}</span>
-                <span className="text-caption font-mono text-content-tertiary truncate flex-1">
-                  {step.detail}
-                </span>
+                {step.detail && (
+                  <span className="text-caption font-mono text-content-tertiary truncate flex-1">
+                    {step.detail}
+                  </span>
+                )}
                 {step.elapsed_ms != null && (
                   <span className="text-mono-sm font-mono text-content-tertiary shrink-0">
                     {(step.elapsed_ms / 1000).toFixed(1)}s
@@ -140,7 +199,8 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
                 )}
               </div>
             ))}
-        </ContextSection>
+          </ContextSection>
+        )}
       </div>
     </aside>
   )

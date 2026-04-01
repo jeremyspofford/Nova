@@ -1031,16 +1031,25 @@ async def _run_tool_loop(
         ))
 
         for tc in tool_calls:
+            # Summarize arguments for the "running" status
+            args_summary = ""
+            args = tc.get("arguments", {})
+            if isinstance(args, dict):
+                # Pick the most informative argument value as a brief summary
+                for key in ("query", "topic", "name", "goal", "text", "url", "id"):
+                    if key in args:
+                        val = str(args[key])[:60]
+                        args_summary = val
+                        break
             if on_tool_status:
-                await on_tool_status({"step": tc["name"], "state": "running", "detail": tc["name"]})
+                await on_tool_status({"step": tc["name"], "state": "running", "detail": args_summary or tc["name"]})
 
             t0 = time.perf_counter()
             result = await execute_tool(tc["name"], tc.get("arguments", {}))
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
             if on_tool_status:
-                detail = result[:120] + "..." if len(result) > 120 else result
-                await on_tool_status({"step": tc["name"], "state": "done", "detail": detail, "elapsed_ms": elapsed_ms})
+                await on_tool_status({"step": tc["name"], "state": "done", "detail": args_summary or tc["name"], "elapsed_ms": elapsed_ms})
 
             current.append(Message(
                 role="tool",
