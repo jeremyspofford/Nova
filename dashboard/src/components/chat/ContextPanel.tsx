@@ -168,12 +168,15 @@ function ContextSection({ icon: Icon, title, count, children }: {
   )
 }
 
+const KNOWN_STEPS: Record<string, string> = {
+  classifying: 'Classifying request',
+  memory: 'Searching memory',
+  model: 'Selecting model',
+  generating: 'Generating response',
+}
+
 function stepLabel(step: ActivityStep): string {
-  switch (step.step) {
-    case 'classifying': return 'Classifying request'
-    case 'memory': return 'Searching memory'
-    case 'model': return 'Selecting model'
-    case 'generating': return 'Generating response'
-    default: return step.step
-  }
+  if (KNOWN_STEPS[step.step]) return KNOWN_STEPS[step.step]
+  // Tool calls: convert snake_case to title case (e.g. "create_goal" → "Create Goal")
+  return step.step.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }

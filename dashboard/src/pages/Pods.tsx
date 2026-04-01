@@ -677,19 +677,20 @@ function PodSandbox({ pod }: { pod: Pod }) {
   })
 
   return (
-    <div className="flex items-center gap-3 rounded-sm border border-border-subtle bg-surface-elevated px-4 py-3">
-      <Shield size={14} className="shrink-0 text-content-tertiary" />
+    <div className="flex items-center gap-2.5 rounded-sm border border-border-subtle bg-surface-elevated px-3 py-2">
+      <Shield size={13} className="shrink-0 text-content-tertiary" />
       <div className="min-w-0 flex-1">
-        <p className="text-micro font-medium uppercase tracking-wider text-content-tertiary mb-0.5">Sandbox Tier</p>
-        <p className="text-caption text-content-tertiary">{SANDBOX_DESCRIPTIONS[pod.sandbox] ?? ''}</p>
+        <p className="text-micro font-medium uppercase tracking-wider text-content-tertiary">Sandbox</p>
+        <p className="text-micro text-content-tertiary truncate">{SANDBOX_DESCRIPTIONS[pod.sandbox] ?? ''}</p>
       </div>
-      <Select
-        value={pod.sandbox ?? 'workspace'}
-        onChange={e => save.mutate(e.target.value)}
-        disabled={save.isPending}
-        items={SANDBOX_TIERS}
-        className="w-32"
-      />
+      <div className="w-36 shrink-0">
+        <Select
+          value={pod.sandbox ?? 'workspace'}
+          onChange={e => save.mutate(e.target.value)}
+          disabled={save.isPending}
+          items={SANDBOX_TIERS}
+        />
+      </div>
       {save.isPending && <Loader2 size={12} className="animate-spin text-content-tertiary" />}
     </div>
   )
@@ -771,7 +772,7 @@ function PodCard({ pod, onDelete }: { pod: Pod; onDelete: (pod: Pod) => void }) 
   const pipelineStatuses = agentPipelineStatuses(agents)
 
   return (
-    <Card variant="default" className={clsx(!pod.enabled && 'opacity-60')}>
+    <Card variant="default" className={clsx(!pod.enabled && 'opacity-60', pod.enabled && 'border-l-2 border-l-accent')}>
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-4">
         <button

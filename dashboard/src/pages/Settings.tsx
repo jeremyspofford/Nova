@@ -434,7 +434,7 @@ export function Settings() {
           onChange={setSearch}
           placeholder="Search settings..."
           debounceMs={150}
-          className="max-w-sm"
+          className="max-w-md"
         />
         {!searchLower && (
           <Tabs tabs={TABS} activeTab={activeTab} onChange={setActiveTab} />

@@ -461,11 +461,12 @@ async def list_task_sessions(task_id: str, _key: ApiKeyDep) -> list[dict]:
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT id, task_id, role, status, output, error, traceback,
+            SELECT DISTINCT ON (role)
+                   id, task_id, role, status, error, traceback,
                    duration_ms, model_used, cost_usd, started_at
             FROM agent_sessions
             WHERE task_id = $1::uuid
-            ORDER BY started_at
+            ORDER BY role, started_at DESC
             """,
             task_id,
         )

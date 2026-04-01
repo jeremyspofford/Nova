@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -85,10 +86,10 @@ async def run_agent_turn(
         if settings.memory_retrieval_mode == "tools":
             # Lightweight priming — agent uses memory tools for depth
             memory_ctx = await _get_domain_priming(session_id)
-            _mem_count, _engram_ids, _retrieval_log_id = 0, [], None
+            _mem_count, _engram_ids, _engram_summaries, _retrieval_log_id = 0, [], [], None
         else:
             # Legacy: full 40% context injection
-            memory_ctx, _mem_count, _engram_ids, _retrieval_log_id = await _get_memory_context(
+            memory_ctx, _mem_count, _engram_ids, _engram_summaries, _retrieval_log_id = await _get_memory_context(
                 agent_id, query, session_id
             )
 
@@ -245,10 +246,10 @@ async def run_agent_turn_streaming(
             _mem_t = time.monotonic()
             memory_ctx = await _get_domain_priming(session_id)
             mem_ms = int((time.monotonic() - _mem_t) * 1000)
-            memory_count, _engram_ids, _retrieval_log_id = 0, [], None
+            memory_count, _engram_ids, _engram_summaries, _retrieval_log_id = 0, [], [], None
         else:
             _mem_t = time.monotonic()
-            memory_ctx, memory_count, _engram_ids, _retrieval_log_id = await _get_memory_context(
+            memory_ctx, memory_count, _engram_ids, _engram_summaries, _retrieval_log_id = await _get_memory_context(
                 agent_id, query, session_id
             )
             mem_ms = int((time.monotonic() - _mem_t) * 1000)
@@ -260,6 +261,8 @@ async def run_agent_turn_streaming(
         mem_status: dict = {"step": "memory", "state": "done", "detail": mem_detail, "elapsed_ms": mem_ms}
         if _engram_ids:
             mem_status["engram_ids"] = _engram_ids
+        if _engram_summaries:
+            mem_status["engram_summaries"] = _engram_summaries
         yield json.dumps({"status": mem_status})
 
         if classified_model:
@@ -278,12 +281,35 @@ async def run_agent_turn_streaming(
         # Resolve tool calls before streaming the final response.
         # The tool loop calls the LLM, executes any tool calls, feeds results
         # back, and repeats up to 5 rounds. The final text is then streamed.
-        streaming_messages, used_tools = await _resolve_tool_rounds(
+        # Tool status events are yielded in real-time via an asyncio.Queue so
+        # the dashboard sidebar shows each tool call as it happens.
+        tool_queue: asyncio.Queue[str] = asyncio.Queue()
+
+        async def _push_tool_status(status: dict) -> None:
+            await tool_queue.put(json.dumps({"status": status}))
+
+        resolve_task = asyncio.create_task(_resolve_tool_rounds(
             messages=prompt_messages,
             model=model,
             metadata={"agent_id": agent_id, "session_id": session_id},
             tools=effective_tools,
-        )
+            on_tool_status=_push_tool_status,
+        ))
+
+        # Drain tool status events while the tool loop runs concurrently
+        while not resolve_task.done():
+            try:
+                event = await asyncio.wait_for(tool_queue.get(), timeout=0.05)
+                yield event
+            except asyncio.TimeoutError:
+                continue
+
+        # Propagate any exception from the tool loop
+        streaming_messages, used_tools = resolve_task.result()
+
+        # Drain any remaining queued events
+        while not tool_queue.empty():
+            yield tool_queue.get_nowait()
 
     # Pass tools when history contains tool interactions — Anthropic requires
     # tools= to be present whenever any message references tool_use content.
@@ -397,15 +423,15 @@ async def _get_domain_priming(session_id: str) -> str:
         return ""
 
 
-async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str], str | None]:
+async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str], list[dict], str | None]:
     """Fetch engram-powered memory context for prompt assembly.
 
     Calls the engram /context endpoint which returns a formatted prompt string
     with sections (self-model, active goal, reconstructed memories, key decisions,
-    open threads). Returns (context_string, section_count, engram_ids, retrieval_log_id).
+    open threads). Returns (context_string, section_count, engram_ids, engram_summaries, retrieval_log_id).
     """
     if not query:
-        return "", 0, [], None
+        return "", 0, [], [], None
 
     # Check pre-warmed cache first (Phase 4b optimization)
     if settings.memory_prewarm_enabled and session_id:
@@ -421,9 +447,10 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
                     sections = data.get("sections", {})
                     section_count = sum(1 for v in sections.values() if v)
                     engram_ids = data.get("engram_ids", [])
+                    engram_summaries = data.get("engram_summaries", [])
                     retrieval_log_id = data.get("retrieval_log_id")
                     log.debug("Memory cache hit for session %s", session_id)
-                    return context, section_count, engram_ids, retrieval_log_id
+                    return context, section_count, engram_ids, engram_summaries, retrieval_log_id
         except Exception as e:
             log.debug("Memory cache lookup failed (falling through): %s", e)
 
@@ -434,19 +461,20 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
             json={"query": query, "session_id": session_id},
         )
         if resp.status_code != 200:
-            return "", 0, [], None
+            return "", 0, [], [], None
         data = resp.json()
         context = data.get("context", "")
         if not context:
-            return "", 0, [], None
+            return "", 0, [], [], None
         sections = data.get("sections", {})
         section_count = sum(1 for v in sections.values() if v)
         engram_ids = data.get("engram_ids", [])
+        engram_summaries = data.get("engram_summaries", [])
         retrieval_log_id = data.get("retrieval_log_id")
-        return context, section_count, engram_ids, retrieval_log_id
+        return context, section_count, engram_ids, engram_summaries, retrieval_log_id
     except Exception as e:
         log.warning("Engram memory retrieval failed: %s", e)
-        return "", 0, [], None
+        return "", 0, [], [], None
 
 
 async def _prewarm_memory(session_id: str, query: str) -> None:
@@ -871,6 +899,7 @@ async def _resolve_tool_rounds(
     metadata: dict,
     max_rounds: int = 5,
     tools: list | None = None,
+    on_tool_status: Callable | None = None,
 ) -> tuple[list[Message], bool]:
     """
     Execute any tool-call rounds the LLM requests, returning the enriched
@@ -886,6 +915,7 @@ async def _resolve_tool_rounds(
         tools=tools,
         max_rounds=max_rounds,
         return_messages=True,
+        on_tool_status=on_tool_status,
     )
     return current, used_tools
 
@@ -950,6 +980,7 @@ async def _run_tool_loop(
     max_tokens: int | None = None,
     max_rounds: int = 5,
     return_messages: bool = False,
+    on_tool_status: Callable | None = None,
 ) -> tuple[str, int, int, float | None] | tuple[str, int, int, float | None, list[Message], bool]:
     """
     Non-streaming tool loop — used by run_agent_turn, run_agent_turn_raw, and _resolve_tool_rounds.
@@ -960,6 +991,8 @@ async def _run_tool_loop(
         tools:  Callers must pass explicit tool list (from resolve_effective_tools).
                 None → all tools (fallback for callers that don't manage permissions).
                 [] → no tools.
+        on_tool_status:  Optional async callback for emitting tool execution status
+                         events to the SSE stream.
     """
     effective_tools = get_all_tools() if tools is None else tools
     llm_client = get_llm_client()
@@ -998,7 +1031,17 @@ async def _run_tool_loop(
         ))
 
         for tc in tool_calls:
+            if on_tool_status:
+                await on_tool_status({"step": tc["name"], "state": "running", "detail": tc["name"]})
+
+            t0 = time.perf_counter()
             result = await execute_tool(tc["name"], tc.get("arguments", {}))
+            elapsed_ms = int((time.perf_counter() - t0) * 1000)
+
+            if on_tool_status:
+                detail = result[:120] + "..." if len(result) > 120 else result
+                await on_tool_status({"step": tc["name"], "state": "done", "detail": detail, "elapsed_ms": elapsed_ms})
+
             current.append(Message(
                 role="tool",
                 name=tc["name"],

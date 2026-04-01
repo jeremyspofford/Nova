@@ -4,6 +4,7 @@ type TabItem = {
   id: string
   label: string
   icon?: React.ElementType
+  badge?: number
 }
 
 type TabsProps = {
@@ -40,6 +41,11 @@ export function Tabs({ tabs, activeTab, onChange, className }: TabsProps) {
             <span className="inline-flex items-center gap-1.5">
               {Icon && <Icon className="w-3.5 h-3.5" />}
               {tab.label}
+              {tab.badge != null && tab.badge > 0 && (
+                <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-micro font-semibold bg-accent-500/20 text-accent-400">
+                  {tab.badge}
+                </span>
+              )}
             </span>
           </button>
         )

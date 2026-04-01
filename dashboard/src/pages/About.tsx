@@ -49,7 +49,7 @@ export function About() {
         <div className="text-center">
           <img src={avatarUrl} alt="Nova" className="mx-auto w-14 h-14 rounded-xl object-cover mb-4" />
           <h1 className="text-h1 text-content-primary">{name}</h1>
-          <p className="mt-1 text-compact text-content-secondary">
+          <p className="mt-1 text-mono text-content-secondary">
             Version {VERSION}
           </p>
           <p className="mt-3 text-compact text-content-secondary max-w-sm mx-auto">

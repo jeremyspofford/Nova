@@ -87,40 +87,35 @@ Checkpoint keys are stage roles. Sessions have a `role` field. Match by role to 
 
 ### Storing partial work context
 
-In `_update_goal_progress`, the **failed** branch enriches `current_plan` with three new fields derived from `outcome.checkpoint`:
+In `_update_goal_progress`, the **failed** branch enriches `current_plan` with fields derived from `outcome.checkpoint`:
 
 | Field | Source | Purpose |
 |-------|--------|---------|
 | `last_completed_stages` | List of keys from checkpoint dict | Which stages succeeded |
-| `last_stage_output` | Checkpoint `"task"` output, truncated to 1000 chars | The actual work product |
-| `failed_at_stage` | Session with `status='failed'`, fallback to task `current_stage` | Where it broke |
+| `prior_checkpoint` | Full checkpoint dict | All completed stage outputs for re-planning |
+| `failed_at_stage` | First stage in pipeline order not in checkpoint keys, fallback to `current_stage` | Where it broke |
 
 These fields only exist in `current_plan` when the prior task failed with partial work. Complete tasks and tasks that failed before any stage completed don't set them.
 
 ### Smart re-dispatch
 
-When the planner builds the next iteration's task input and `current_plan` contains prior work fields, a **prior work context block** is appended to the goal context assembly in `_plan_action` (the `serve` drive path, lines ~336-353 in `cycle.py` — the planner uses a user message, not a system prompt):
+When the planner builds the next iteration's task input and `current_plan` contains prior work fields, a **prior work context block** is appended to the goal context assembly in `_plan_action` (the `serve` drive path in `cycle.py` — the planner uses a user message, not a system prompt):
 
 ```
-## Prior Attempt Context
-The previous attempt completed these stages: context, task
-It failed at: guardrail (error: <truncated error>)
-
-The Task agent produced:
-<last_stage_output>
-
-Use this as a starting point. Do not redo work that already succeeded.
-If the failure was in validation (guardrail, code_review), the work product
-may be fine — focus on addressing the specific failure reason.
+Completed stages before failure: context, task
+Failed at stage: guardrail
+Prior work from completed stages (use as starting point, do not redo):
+  [context]: <stage output, 500 chars max>
+  [task]: <stage output, 500 chars max>
 ```
+
+Each completed stage's output is included with a per-stage cap of 500 chars. This gives the planner structured context from ALL completed stages, not just the task stage. With 7 stages max, worst case is ~3500 chars.
+
+Legacy fallback: if `prior_checkpoint` is absent but `last_stage_output` exists (from plans stored before this revision), the old single-output format is used.
 
 This injection is conditional — only when prior work fields exist. ~20 lines in the dispatch prompt builder.
 
 The planner then generates task input that references the prior output. The pipeline runs its full stage sequence, but the Context and Task agents execute faster because the input already contains the answer. No pipeline modifications, no checkpoint copying between tasks, no "start at stage X" mode.
-
-### Context size guardrail
-
-`last_stage_output` is capped at 1000 chars. This prevents token budget blowout while preserving enough context for the planner to reason about what was accomplished. If the full output is needed, the planner can reference the task ID — the data is in the DB.
 
 ## What This Does NOT Include
 
@@ -144,3 +139,13 @@ The planner then generates task input that references the prior output. The pipe
 - `cortex/app/task_tracker.py` — Add `checkpoint` field to `TaskOutcome`, read in `_score_task()`
 - `cortex/app/cycle.py` — Enrich failed branch of `_update_goal_progress` with partial work fields
 - `cortex/app/cycle.py` — Inject prior work context block in dispatch prompt builder
+
+## Eng Review Decisions (2026-03-31)
+
+1. **Sessions dedup:** Endpoint uses `DISTINCT ON (role) ORDER BY started_at DESC` — one session per stage, latest wins
+2. **Stage constants:** Keep existing 5-stage `STAGES` for progress bar; new `PIPELINE_STAGES` (7 stages) scoped to `FailedTaskStagesView` only
+3. **Tests:** 5 API schema tests (always run) + 2 cortex integration tests (opt-in, LLM-dependent) in `tests/test_crash_recovery.py`
+4. **Full checkpoint:** `prior_checkpoint` stores the entire checkpoint dict, not a truncated snippet. Per-stage cap of 500 chars on injection.
+5. **Failed stage detection:** Inferred from checkpoint gaps (first stage in pipeline order not in checkpoint keys), not `current_stage`
+6. **Sessions payload:** `output` column excluded from sessions endpoint (dashboard uses checkpoint data instead)
+7. **TODO update:** "Learning from Failures" effort reduced from 1 week to 3 days (checkpoint data now provides failed task context)

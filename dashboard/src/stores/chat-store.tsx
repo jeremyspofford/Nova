@@ -1,6 +1,12 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from 'react'
 import { apiFetch } from '../api'
 
+export interface EngramSummary {
+  id: string
+  type: string
+  preview: string
+}
+
 export interface ActivityStep {
   step: string
   state: 'running' | 'done'
@@ -10,6 +16,7 @@ export interface ActivityStep {
   category?: string | null
   startedAt?: number  // Date.now(), set client-side for live timer
   engram_ids?: string[]  // IDs of engrams retrieved during memory step
+  engram_summaries?: EngramSummary[]  // Brief info about retrieved engrams
 }
 
 export interface AttachedFile {

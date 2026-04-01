@@ -347,12 +347,17 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
                         failed_stage = plan_data.get("failed_at_stage", "unknown")
                         parts.append(f"Completed stages before failure: {', '.join(completed_stages)}")
                         parts.append(f"Failed at stage: {failed_stage}")
-                        stage_output = plan_data.get("last_stage_output")
-                        if stage_output:
-                            parts.append(
-                                "Prior work output (use as starting point, do not redo):\n"
-                                f"{stage_output[:500]}"
-                            )
+                        prior_cp = plan_data.get("prior_checkpoint")
+                        if prior_cp and isinstance(prior_cp, dict):
+                            parts.append("Prior work from completed stages (use as starting point, do not redo):")
+                            for role, stage_out in prior_cp.items():
+                                if isinstance(stage_out, dict):
+                                    content = stage_out.get("content") or stage_out.get("output") or str(stage_out)
+                                else:
+                                    content = str(stage_out)
+                                parts.append(f"  [{role}]: {content[:500]}")
+                        elif plan_data.get("last_stage_output"):
+                            parts.append(f"Prior work output: {plan_data['last_stage_output'][:500]}")
                 elif plan_data.get("last_task_output"):
                     parts.append(f"Last result: {plan_data['last_task_output'][:200]}")
                 if plan_data.get("plan"):
@@ -674,13 +679,19 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             # Enrich with partial work from checkpoint
             if outcome.checkpoint and isinstance(outcome.checkpoint, dict):
                 plan_update["last_completed_stages"] = list(outcome.checkpoint.keys())
-                # The "task" stage output is the actual work product
-                task_output = outcome.checkpoint.get("task", {})
-                if isinstance(task_output, dict):
-                    content = task_output.get("content") or task_output.get("output") or str(task_output)
-                    plan_update["last_stage_output"] = content[:1000]
-                # Identify failing stage from current_stage (carried via TaskOutcome)
-                plan_update["failed_at_stage"] = outcome.current_stage or "unknown"
+                plan_update["prior_checkpoint"] = outcome.checkpoint
+                # Infer failed stage: first stage in pipeline order not in checkpoint
+                _stage_order = [
+                    "context", "task", "critique_direction", "guardrail",
+                    "code_review", "critique_acceptance", "decision",
+                ]
+                completed = set(outcome.checkpoint.keys())
+                failed = next((s for s in _stage_order if s not in completed), None)
+                plan_update["failed_at_stage"] = (
+                    failed
+                    or (outcome.current_stage or "").removesuffix("_running")
+                    or "unknown"
+                )
             await conn.execute(
                 """UPDATE goals
                    SET current_plan = $1::jsonb,

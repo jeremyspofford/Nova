@@ -305,13 +305,20 @@ export interface StreamMeta {
 }
 
 /** Activity step emitted during processing (before content deltas). */
+export interface EngramSummary {
+  id: string
+  type: string
+  preview: string
+}
+
 export interface ActivityStep {
-  step: string       // "classifying" | "memory" | "model" | "generating"
+  step: string       // "classifying" | "memory" | "model" | "generating" | tool names
   state: 'running' | 'done'
   detail?: string
   elapsed_ms?: number
   model?: string
   category?: string | null
+  engram_summaries?: EngramSummary[]
 }
 
 export type StreamEvent = string | { meta: StreamMeta } | { status: ActivityStep }

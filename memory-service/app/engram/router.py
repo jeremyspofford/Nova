@@ -210,6 +210,7 @@ async def get_engram_context(
             "open_threads": bool(ctx.open_threads),
         },
         "engram_ids": ctx.engram_ids,
+        "engram_summaries": ctx.engram_summaries,
         "retrieval_log_id": ctx.retrieval_log_id,
     }
 

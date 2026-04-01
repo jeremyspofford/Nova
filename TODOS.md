@@ -17,7 +17,8 @@ These are the gaps preventing Nova from being truly self-directed. Ordered by im
 **What:** Read prior reflections back before planning new cycles.
 **Why:** Cortex writes reflections to engrams after each cycle but never queries them. It repeats the same mistakes because it has no memory of what went wrong before.
 **How:** In the PLAN phase, query engrams for recent reflections/failures related to the current goal. Include them in the LLM planning prompt.
-**Effort:** 1 week
+**Note:** Crash recovery context (2026-03-31) now provides full checkpoint data for failed tasks — the planner sees all completed stage outputs and where it failed. Remaining scope: query engram reflections for broader failure patterns across goals.
+**Effort:** 3 days (reduced from 1 week)
 **Added:** 2026-03-27
 
 ### Maturation Pipeline Executor

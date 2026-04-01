@@ -62,6 +62,7 @@ class WorkingMemoryContext:
     open_threads: str = ""
     total_tokens: int = 0
     engram_ids: list[str] = field(default_factory=list)
+    engram_summaries: list[dict] = field(default_factory=list)
     retrieval_log_id: str | None = None
 
 
@@ -216,6 +217,10 @@ async def assemble_context(
     # 4. Reconstruct memories from activated engrams
     if activated:
         ctx.engram_ids = [str(e.id) for e in activated]
+        ctx.engram_summaries = [
+            {"id": str(e.id), "type": e.type, "preview": e.content[:80].strip()}
+            for e in activated
+        ]
         memory_text = await reconstruct(
             session, activated,
             context=query,

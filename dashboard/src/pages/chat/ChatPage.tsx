@@ -337,24 +337,28 @@ export function Chat() {
         accumulated += event
         feedTextRef.current(event as string)
       }
-      // Stream complete — show the full response at once
+      // Stream complete — show the full response and mark all steps done
       needsInstantScroll.current = true
       setMessages(prev =>
-        prev.map(m =>
-          m.id === assistantMsgId
-            ? { ...m, content: cleanToolArtifacts(accumulated), isStreaming: false }
-            : m
-        )
+        prev.map(m => {
+          if (m.id !== assistantMsgId) return m
+          const steps = m.activitySteps?.map(s =>
+            s.state === 'running' ? { ...s, state: 'done' as const } : s
+          )
+          return { ...m, content: cleanToolArtifacts(accumulated), isStreaming: false, activitySteps: steps }
+        })
       )
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setError(msg)
       setMessages(prev =>
-        prev.map(m =>
-          m.id === assistantMsgId
-            ? { ...m, content: `Error: ${msg}`, isStreaming: false }
-            : m
-        )
+        prev.map(m => {
+          if (m.id !== assistantMsgId) return m
+          const steps = m.activitySteps?.map(s =>
+            s.state === 'running' ? { ...s, state: 'done' as const } : s
+          )
+          return { ...m, content: `Error: ${msg}`, isStreaming: false, activitySteps: steps }
+        })
       )
     } finally {
       flushBufferRef.current()
