@@ -341,6 +341,18 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
             if plan_data and isinstance(plan_data, dict):
                 if plan_data.get("last_task_status") == "failed":
                     parts.append(f"Last attempt FAILED: {plan_data.get('last_task_error', 'unknown')[:200]}")
+                    # Inject prior work context if partial stages completed
+                    completed_stages = plan_data.get("last_completed_stages")
+                    if completed_stages:
+                        failed_stage = plan_data.get("failed_at_stage", "unknown")
+                        parts.append(f"Completed stages before failure: {', '.join(completed_stages)}")
+                        parts.append(f"Failed at stage: {failed_stage}")
+                        stage_output = plan_data.get("last_stage_output")
+                        if stage_output:
+                            parts.append(
+                                "Prior work output (use as starting point, do not redo):\n"
+                                f"{stage_output[:500]}"
+                            )
                 elif plan_data.get("last_task_output"):
                     parts.append(f"Last result: {plan_data['last_task_output'][:200]}")
                 if plan_data.get("plan"):
