@@ -13,6 +13,7 @@ import {
   Monitor,
   Plug,
   BarChart3,
+  FlaskConical,
   Settings,
   HeartPulse,
   Users,
@@ -33,7 +34,7 @@ const primaryTabs: NavItem[] = [
   { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
   { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
   { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
-  { to: '/', label: 'Brain', icon: Brain, minRole: 'guest' },
+  { to: '/brain', label: 'Brain', icon: Brain, minRole: 'guest' },
 ]
 
 const moreItems: { label?: string; items: NavItem[] }[] = [
@@ -56,6 +57,7 @@ const moreItems: { label?: string; items: NavItem[] }[] = [
     label: 'System',
     items: [
       { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
+      { to: '/benchmarks', label: 'Benchmarks', icon: FlaskConical, minRole: 'admin' },
       { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
       { to: '/recovery', label: 'Recovery', icon: HeartPulse, minRole: 'admin' },
@@ -80,7 +82,7 @@ export function MobileNav() {
   )
 
   const visibleTabs = primaryTabs.filter(tab =>
-    hasMinRole(userRole, tab.minRole) && (tab.to !== '/' || brainEnabled)
+    hasMinRole(userRole, tab.minRole) && (tab.to !== '/brain' || brainEnabled)
   )
 
   return (
