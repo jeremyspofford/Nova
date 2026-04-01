@@ -41,8 +41,9 @@ function EngramRow({ engram, onViewDetail }: { engram: EngramSummary; onViewDeta
         <span
           role="button"
           tabIndex={0}
+          aria-label="View engram details"
           onClick={(e) => { e.stopPropagation(); onViewDetail(engram.id) }}
-          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onViewDetail(engram.id) } }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onViewDetail(engram.id) } }}
           className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded-xs
                      hover:bg-surface-elevated transition-opacity duration-fast text-content-tertiary hover:text-content-secondary"
           title="View details"
@@ -69,6 +70,8 @@ function EngramRow({ engram, onViewDetail }: { engram: EngramSummary; onViewDeta
 }
 
 export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Props) {
+  const [selectedEngramId, setSelectedEngramId] = useState<string | null>(null)
+
   // Extract live state from the most recent assistant message
   const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
   const steps = lastAssistant?.activitySteps ?? []
@@ -84,8 +87,6 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
   const memoryItems: EngramSummary[] = engramSummaries.length > 0
     ? engramSummaries
     : engramIds.map(id => ({ id, type: 'unknown', preview: id.slice(0, 12) + '\u2026' }))
-
-  const [selectedEngramId, setSelectedEngramId] = useState<string | null>(null)
 
   // Tool call steps — anything that isn't a built-in pipeline step
   const builtinSteps = new Set(['classifying', 'memory', 'model', 'generating'])
