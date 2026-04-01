@@ -248,16 +248,25 @@ async def close():
         _redis = None
 
 
-def detect_editor_slug(api_key_name: str | None, user_agent: str | None) -> str | None:
-    """Identify the editor from API key name or User-Agent.
+def detect_editor_slug(editor_hint: str | None, user_agent: str | None) -> str | None:
+    """Identify the editor from an explicit hint header or User-Agent.
+
+    Detection methods (in priority order):
+    1. X-Nova-Editor header — set by the dashboard's test connection button
+    2. User-Agent sniffing — works for Continue, Cline, Aider, and some others
 
     Returns an editor slug or None if unrecognized.
     """
-    # Primary: named API key (editor-continue, editor-cline, etc.)
-    if api_key_name and api_key_name.startswith("editor-"):
-        slug = api_key_name.removeprefix("editor-")
-        if slug in KNOWN_EDITORS:
-            return slug
+    # Primary: explicit editor hint (from dashboard test or custom header)
+    if editor_hint:
+        hint_lower = editor_hint.lower().strip()
+        if hint_lower in KNOWN_EDITORS:
+            return hint_lower
+        # Also accept "editor-continue" format
+        if hint_lower.startswith("editor-"):
+            slug = hint_lower.removeprefix("editor-")
+            if slug in KNOWN_EDITORS:
+                return slug
 
     # Fallback: User-Agent sniffing
     if user_agent:
@@ -339,8 +348,9 @@ async def get_connections() -> dict:
 
 In `llm-gateway/app/openai_router.py`, add the tracking call after successful completions and the new endpoint.
 
-Add import at top of file (after existing imports):
+Add imports at top of file (after existing imports):
 ```python
+from app.config import settings
 from app.editor_tracker import detect_editor_slug, record_connection, get_connections
 ```
 
@@ -362,10 +372,10 @@ Replace the non-streaming branch with tracking:
         return nova_response_to_oai(response, request_model=req.model)
 ```
 
-For streaming, add tracking call inside `generate()` just before `yield b"data: [DONE]\n\n"` (the success path at line 100, not the error path):
+For streaming, add tracking call inside `generate()` just before `yield b"data: [DONE]\n\n"` (the success path at line 100, not the error path). Use fire-and-forget to avoid blocking the final SSE chunk:
 ```python
-                # Track editor connection after successful stream
-                await _record_editor(raw_request)
+                # Track editor connection after successful stream (non-blocking)
+                _track_editor(raw_request)
                 yield b"data: [DONE]\n\n"
 ```
 
@@ -381,9 +391,10 @@ def _track_editor(request: Request) -> None:
 async def _record_editor(request: Request) -> None:
     """Detect and record editor connection from request headers."""
     try:
-        api_key_name = request.headers.get("x-api-key-name")
         user_agent = request.headers.get("user-agent")
-        slug = detect_editor_slug(api_key_name, user_agent)
+        # Check for editor hint header (set by dashboard test connection)
+        editor_hint = request.headers.get("x-nova-editor")
+        slug = detect_editor_slug(editor_hint, user_agent)
         if slug:
             await record_connection(slug, user_agent)
     except Exception:
@@ -394,8 +405,8 @@ async def _record_editor(request: Request) -> None:
 async def editor_connections():
     """Return connection state for all known editors."""
     connections = await get_connections()
-    endpoint = getattr(settings, 'gateway_public_url', None) or "http://localhost:8001/v1"
-    auth_required = getattr(settings, 'require_auth', False)
+    endpoint = settings.gateway_public_url
+    auth_required = settings.require_auth
     return {
         "connections": connections,
         "endpoint": endpoint,
@@ -442,7 +453,7 @@ This is the main page with all three zones: connection monitor, editor tabs, and
 
 ```tsx
 // dashboard/src/pages/Editors.tsx
-import { useState, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { Code, Copy, Check, RefreshCw, Zap, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
@@ -568,9 +579,11 @@ function ConfigPanel({
   const models = modelsData?.data ?? []
 
   // Set default model on load
-  if (models.length > 0 && !selectedModel) {
-    setSelectedModel(models[0].id)
-  }
+  useEffect(() => {
+    if (models.length > 0 && !selectedModel) {
+      setSelectedModel(models[0].id)
+    }
+  }, [models, selectedModel])
 
   // Fetch/create editor API key
   const { data: keys, refetch: refetchKeys } = useQuery({
@@ -585,7 +598,7 @@ function ConfigPanel({
 
   // Determine the API key value to show in config
   const apiKeyDisplay = authRequired
-    ? (editorKey ?? existingKey?.prefix ?? 'sk-nova-...')
+    ? (editorKey ?? existingKey?.key_prefix ?? 'sk-nova-...')
     : 'unused'
 
   // Create key for this editor
@@ -616,9 +629,13 @@ function ConfigPanel({
   })
 
   // Auto-create key on tab visit (if auth required, admin, and no key exists)
-  if (authRequired && isAdmin && !existingKey && !editorKey && !createEditorKey.isPending) {
-    createEditorKey.mutate()
-  }
+  const [keyCreationAttempted, setKeyCreationAttempted] = useState(false)
+  useEffect(() => {
+    if (authRequired && isAdmin && !existingKey && !editorKey && !keyCreationAttempted) {
+      setKeyCreationAttempted(true)
+      createEditorKey.mutate()
+    }
+  }, [authRequired, isAdmin, existingKey, editorKey, keyCreationAttempted])
 
   const config = generateConfig(slug, endpoint, selectedModel || 'your-model-id', apiKeyDisplay)
   const instructions = getPasteInstructions(slug)
@@ -633,7 +650,10 @@ function ConfigPanel({
     setTestStatus('testing')
     setTestError('')
     try {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-Nova-Editor': slug, // Tells the gateway which editor this is
+      }
       if (authRequired && apiKeyDisplay !== 'sk-nova-...') {
         headers['Authorization'] = `Bearer ${apiKeyDisplay}`
       }
@@ -1032,11 +1052,14 @@ Run:
 ```bash
 cd llm-gateway && python -c "
 from app.editor_tracker import detect_editor_slug
-assert detect_editor_slug('editor-continue', None) == 'continue'
+# Explicit editor hint (from X-Nova-Editor header)
+assert detect_editor_slug('continue', None) == 'continue'
 assert detect_editor_slug('editor-cline', None) == 'cline'
+# User-Agent fallback
 assert detect_editor_slug(None, 'Mozilla/5.0 Continue/1.0') == 'continue'
 assert detect_editor_slug(None, 'some-unknown-agent') is None
-assert detect_editor_slug('my-regular-key', None) is None
+# No detection at all
+assert detect_editor_slug(None, None) is None
 print('All detection tests passed')
 "
 ```
