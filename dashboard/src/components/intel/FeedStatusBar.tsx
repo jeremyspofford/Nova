@@ -30,14 +30,18 @@ function formatRelative(iso: string): string {
   return `${diffDays}d ago`
 }
 
-function feedStatus(feed: IntelFeed): 'ok' | 'error' | 'pending' {
+function feedStatus(feed: IntelFeed): 'ok' | 'stale' | 'error' | 'pending' {
   if (!feed.last_checked_at) return 'pending'
   if (feed.error_count > 0) return 'error'
+  // Flag feeds that haven't been checked in over 24 hours as stale
+  const ageMs = Date.now() - new Date(feed.last_checked_at).getTime()
+  if (ageMs > 24 * 60 * 60 * 1000) return 'stale'
   return 'ok'
 }
 
-function StatusIcon({ status }: { status: 'ok' | 'error' | 'pending' }) {
+function StatusIcon({ status }: { status: 'ok' | 'stale' | 'error' | 'pending' }) {
   if (status === 'ok') return <CheckCircle2 size={12} className="text-success flex-shrink-0" />
+  if (status === 'stale') return <AlertCircle size={12} className="text-warning flex-shrink-0" />
   if (status === 'error') return <AlertCircle size={12} className="text-danger flex-shrink-0" />
   return <Clock size={12} className="text-content-tertiary flex-shrink-0" />
 }
@@ -71,6 +75,7 @@ export function FeedStatusBar({ onManageFeeds }: Props) {
 
   const enabledFeeds = feeds.filter((f: IntelFeed) => f.enabled)
   const okCount = enabledFeeds.filter((f: IntelFeed) => feedStatus(f) === 'ok').length
+  const staleCount = enabledFeeds.filter((f: IntelFeed) => feedStatus(f) === 'stale').length
   const errCount = enabledFeeds.filter((f: IntelFeed) => feedStatus(f) === 'error').length
   const pendingCount = enabledFeeds.filter((f: IntelFeed) => feedStatus(f) === 'pending').length
 
@@ -93,6 +98,11 @@ export function FeedStatusBar({ onManageFeeds }: Props) {
             {okCount > 0 && (
               <span className="flex items-center gap-1">
                 <CheckCircle2 size={10} className="text-success" /> {okCount} ok
+              </span>
+            )}
+            {staleCount > 0 && (
+              <span className="flex items-center gap-1">
+                <AlertCircle size={10} className="text-warning" /> {staleCount} stale
               </span>
             )}
             {errCount > 0 && (
@@ -130,7 +140,7 @@ export function FeedStatusBar({ onManageFeeds }: Props) {
                 >
                   <StatusIcon status={st} />
                   <span className={`text-caption truncate flex-1 ${
-                    st === 'error' ? 'text-danger' : 'text-content-secondary'
+                    st === 'error' ? 'text-danger' : st === 'stale' ? 'text-warning' : 'text-content-secondary'
                   }`}>
                     {feed.name}
                   </span>
