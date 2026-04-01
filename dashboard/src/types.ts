@@ -84,6 +84,7 @@ export interface PipelineTask {
   completed_at: string | null
   metadata: Record<string, unknown>
   summary: Record<string, unknown> | null
+  checkpoint: Record<string, Record<string, unknown>> | null
 }
 
 export interface GuardrailFinding {
@@ -105,6 +106,20 @@ export interface CodeReviewVerdict {
   issues: { severity: string; description: string; file?: string; line?: string }[]
   summary: string
   created_at: string
+}
+
+export interface AgentSession {
+  id: string
+  task_id: string
+  role: string
+  status: 'running' | 'complete' | 'failed' | 'skipped'
+  output: Record<string, unknown> | null
+  error: string | null
+  traceback: string | null
+  duration_ms: number | null
+  model_used: string | null
+  cost_usd: number
+  started_at: string | null
 }
 
 export interface PodAgent {

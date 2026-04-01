@@ -341,6 +341,18 @@ async def _plan_action(drive: DriveResult, state: CycleState) -> str:
             if plan_data and isinstance(plan_data, dict):
                 if plan_data.get("last_task_status") == "failed":
                     parts.append(f"Last attempt FAILED: {plan_data.get('last_task_error', 'unknown')[:200]}")
+                    # Inject prior work context if partial stages completed
+                    completed_stages = plan_data.get("last_completed_stages")
+                    if completed_stages:
+                        failed_stage = plan_data.get("failed_at_stage", "unknown")
+                        parts.append(f"Completed stages before failure: {', '.join(completed_stages)}")
+                        parts.append(f"Failed at stage: {failed_stage}")
+                        stage_output = plan_data.get("last_stage_output")
+                        if stage_output:
+                            parts.append(
+                                "Prior work output (use as starting point, do not redo):\n"
+                                f"{stage_output[:500]}"
+                            )
                 elif plan_data.get("last_task_output"):
                     parts.append(f"Last result: {plan_data['last_task_output'][:200]}")
                 if plan_data.get("plan"):
@@ -651,7 +663,7 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             )
 
         elif outcome.status == "failed":
-            # Failed task — store error context for next cycle's planning, don't advance iteration
+            # Failed task — store error context + partial work for re-planning
             plan_update = {
                 **current_plan,
                 "last_task_id": outcome.task_id,
@@ -659,6 +671,16 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 "last_task_error": (outcome.error or "unknown")[:500],
                 "cycle": cycle,
             }
+            # Enrich with partial work from checkpoint
+            if outcome.checkpoint and isinstance(outcome.checkpoint, dict):
+                plan_update["last_completed_stages"] = list(outcome.checkpoint.keys())
+                # The "task" stage output is the actual work product
+                task_output = outcome.checkpoint.get("task", {})
+                if isinstance(task_output, dict):
+                    content = task_output.get("content") or task_output.get("output") or str(task_output)
+                    plan_update["last_stage_output"] = content[:1000]
+                # Identify failing stage from current_stage (carried via TaskOutcome)
+                plan_update["failed_at_stage"] = outcome.current_stage or "unknown"
             await conn.execute(
                 """UPDATE goals
                    SET current_plan = $1::jsonb,
@@ -670,8 +692,11 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 new_cost,
             )
             log.info(
-                "Goal %s: task %s failed — error stored for re-planning",
+                "Goal %s: task %s failed at %s — partial work stored for re-planning "
+                "(stages: %s)",
                 goal_id, outcome.task_id,
+                plan_update.get("failed_at_stage", "unknown"),
+                plan_update.get("last_completed_stages", []),
             )
 
         elif outcome.status == "cancelled":

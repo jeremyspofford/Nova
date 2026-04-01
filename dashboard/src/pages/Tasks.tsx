@@ -17,14 +17,14 @@ import {
   getPipelineTasks, submitPipelineTask, cancelPipelineTask,
   reviewPipelineTask, getQueueStats, getPods, discoverModels,
   deletePipelineTask, bulkDeletePipelineTasks, bulkDeletePipelineTasksByIds,
-  getTaskFindings, getTaskReviews, getTaskArtifacts,
+  getTaskFindings, getTaskReviews, getTaskSessions, getTaskArtifacts,
   getPipelineStats, getPipelineLatency,
   clarifyPipelineTask,
 } from '../api'
 import type { TaskSummary, Artifact } from '../api'
 import ArtifactCard, { MermaidDiagram } from '../components/ArtifactRenderer'
 import FileViewer from '../components/FileViewer'
-import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict } from '../types'
+import type { PipelineTask, TaskStatus, GuardrailFinding, CodeReviewVerdict, AgentSession } from '../types'
 import { ACTIVE_TASK_STATUSES, TASK_STATUS_CONFIG } from '../constants'
 import { useChatStore } from '../stores/chat-store'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -53,6 +53,17 @@ const HELP_ENTRIES = [
   { term: 'Escalation', definition: 'When a task is flagged for human review instead of being automatically resolved.' },
   { term: 'Finding', definition: 'A specific concern raised by the guardrail agent — e.g. a security risk or policy violation.' },
   { term: 'Verdict', definition: "The code review agent's assessment — approved, rejected, or needs-fix." },
+]
+
+/** Full 7-stage pipeline order (from checkpoint.py PIPELINE_STAGE_ORDER). */
+const PIPELINE_STAGES = [
+  { role: 'context', label: 'Context' },
+  { role: 'task', label: 'Task' },
+  { role: 'critique_direction', label: 'Critique' },
+  { role: 'guardrail', label: 'Guardrail' },
+  { role: 'code_review', label: 'Code Review' },
+  { role: 'critique_acceptance', label: 'Acceptance' },
+  { role: 'decision', label: 'Decision' },
 ]
 
 // ── Task context builder for chat ─────────────────────────────────────────────
@@ -480,10 +491,152 @@ function TaskArtifactsTab({ taskId, onFileClick }: { taskId: string; onFileClick
   )
 }
 
+// ── Stage card (collapsible card for a single pipeline stage) ────────────────
+
+function StageCard({ stage, session, checkpoint, isFailed }: {
+  stage: { role: string; label: string }
+  session?: AgentSession
+  checkpoint: Record<string, unknown> | null
+  isFailed: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  const duration = session?.duration_ms
+    ? `${(session.duration_ms / 1000).toFixed(1)}s`
+    : null
+  const model = session?.model_used?.split('/').pop() ?? null
+  const cost = session?.cost_usd ? `$${session.cost_usd.toFixed(3)}` : null
+
+  return (
+    <div className={clsx(
+      'rounded-md border p-2.5',
+      isFailed ? 'border-danger/30 bg-danger-dim/10' : 'border-border bg-surface-elevated',
+    )}>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-content-tertiary hover:text-content-primary text-xs"
+        >
+          {expanded ? '\u25BE' : '\u25B8'}
+        </button>
+        <span className={clsx(
+          'text-compact font-medium',
+          isFailed ? 'text-danger' : 'text-content-primary',
+        )}>
+          {stage.label}
+        </span>
+        <span className="flex-1" />
+        {duration && <span className="text-caption text-content-tertiary">{duration}</span>}
+        {model && <span className="text-caption text-content-tertiary">{model}</span>}
+        {cost && <span className="text-caption text-content-tertiary">{cost}</span>}
+      </div>
+
+      {isFailed && session?.error && (
+        <div className="mt-2">
+          <pre className="whitespace-pre-wrap break-words rounded-sm bg-danger-dim p-2 text-mono-sm text-danger">
+            {session.error}
+          </pre>
+          {session.traceback && (
+            <details className="mt-1">
+              <summary className="text-caption text-content-tertiary cursor-pointer hover:text-content-secondary">
+                Traceback
+              </summary>
+              <pre className="mt-1 whitespace-pre-wrap break-words text-mono-sm text-content-tertiary max-h-48 overflow-y-auto">
+                {session.traceback}
+              </pre>
+            </details>
+          )}
+        </div>
+      )}
+
+      {expanded && checkpoint && (
+        <div className="mt-2 rounded-sm bg-surface-card p-2 markdown-body text-compact text-content-secondary">
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {typeof checkpoint.content === 'string'
+              ? checkpoint.content
+              : JSON.stringify(checkpoint, null, 2)}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Failed task stages view (stage-by-stage timeline) ────────────────────────
+
+function FailedTaskStagesView({ taskId, checkpoint, error: taskError }: {
+  taskId: string
+  checkpoint: Record<string, Record<string, unknown>> | null
+  error: string | null
+}) {
+  const { data: sessions = [], isLoading } = useQuery({
+    queryKey: ['task-sessions', taskId],
+    queryFn: () => getTaskSessions(taskId),
+    staleTime: Infinity,
+  })
+
+  if (isLoading) return <Skeleton lines={5} />
+
+  const sessionByRole = new Map(sessions.map(s => [s.role, s]))
+  const completedRoles = new Set(checkpoint ? Object.keys(checkpoint) : [])
+  const failedSession = sessions.find(s => s.status === 'failed')
+
+  return (
+    <div className="space-y-0">
+      {PIPELINE_STAGES.map((stage, i) => {
+        const session = sessionByRole.get(stage.role)
+        const isCompleted = completedRoles.has(stage.role)
+        const isFailed = session?.status === 'failed' || (failedSession?.role === stage.role)
+        const isNotReached = !isCompleted && !isFailed && !session
+
+        const dotColor = isCompleted ? 'bg-success'
+          : isFailed ? 'bg-danger'
+          : 'bg-content-tertiary'
+
+        return (
+          <div key={stage.role} className="relative pb-3 pl-6">
+            {i < PIPELINE_STAGES.length - 1 && (
+              <div className="absolute left-[9px] top-5 h-full w-0.5 bg-border" />
+            )}
+            <div className={`absolute left-1 top-1.5 h-3 w-3 rounded-full border-2 border-surface ${dotColor}`} />
+
+            {isNotReached ? (
+              <div className="py-1 text-caption text-content-tertiary">
+                {stage.label} — <span className="italic">not reached</span>
+              </div>
+            ) : (
+              <StageCard
+                stage={stage}
+                session={session}
+                checkpoint={isCompleted ? checkpoint![stage.role] : null}
+                isFailed={isFailed}
+              />
+            )}
+          </div>
+        )
+      })}
+
+      {taskError && !failedSession && (
+        <div className="mt-3 rounded-sm bg-danger-dim p-3">
+          <p className="text-caption font-medium text-danger mb-1">Pipeline Error</p>
+          <pre className="whitespace-pre-wrap break-words text-mono-sm text-danger">
+            {taskError}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Task details tab ─────────────────────────────────────────────────────────
 
-function TaskDetailsTab({ taskId, fallbackOutput, fallbackError }: {
-  taskId: string; fallbackOutput: string | null; fallbackError: string | null
+function TaskDetailsTab({ taskId, taskStatus, checkpoint, fallbackOutput, fallbackError }: {
+  taskId: string
+  taskStatus: string
+  checkpoint: Record<string, Record<string, unknown>> | null
+  fallbackOutput: string | null
+  fallbackError: string | null
 }) {
   const { data: artifacts = [] } = useQuery({
     queryKey: ['task-artifacts', taskId],
@@ -498,6 +651,11 @@ function TaskDetailsTab({ taskId, fallbackOutput, fallbackError }: {
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{summary.content}</ReactMarkdown>
       </div>
     )
+  }
+
+  // Failed task with no summary — show stage-by-stage recovery view
+  if (taskStatus === 'failed' && !fallbackOutput) {
+    return <FailedTaskStagesView taskId={taskId} checkpoint={checkpoint} error={fallbackError} />
   }
 
   return (
@@ -652,7 +810,13 @@ export function TaskDetailSheet({
         {/* Tab content */}
         <div className="min-h-[120px]">
           {detailTab === 'details' && (
-            <TaskDetailsTab taskId={task.id} fallbackOutput={task.output} fallbackError={task.error} />
+            <TaskDetailsTab
+              taskId={task.id}
+              taskStatus={task.status}
+              checkpoint={task.checkpoint}
+              fallbackOutput={task.output}
+              fallbackError={task.error}
+            />
           )}
           {detailTab === 'artifacts' && (
             <TaskArtifactsTab taskId={task.id} onFileClick={setViewingFile} />
