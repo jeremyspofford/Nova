@@ -344,9 +344,9 @@ async def _execute_send_message_to_agent(agent_id: str, message: str) -> str:
 
 async def _get_creation_autonomy() -> str:
     """Read nova:config:creation.autonomy from Redis (db1). Default: auto_tasks."""
-    from app.redis_client import get_redis
+    from app.store import get_redis
     try:
-        redis = await get_redis()
+        redis = get_redis()
         value = await redis.get("nova:config:creation.autonomy")
         return value.decode() if isinstance(value, bytes) else (value or "auto_tasks")
     except Exception:
