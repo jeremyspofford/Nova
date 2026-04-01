@@ -24,8 +24,8 @@ Two touchpoints:
 ### Navigation
 
 - New top-level nav item "Editors" in the Infrastructure section (between Models and Integrations)
-- Lucide icon: `Plug` or `Monitor`
-- Minimum role: `member`
+- Lucide icon: `Code` (both `Plug` and `Monitor` are already used by Integrations and Models respectively)
+- Minimum role: `member` — page renders for all members, but auto-key-creation requires admin. Non-admin users see the config with a placeholder key and a note: "Ask an admin to create an API key for you, or create one from Settings > Keys."
 
 ### Layout
 
@@ -67,7 +67,7 @@ Single page with three zones:
 **Zone 2 — Editor tabs:**
 - Tabs: Continue.dev, Cline, Cursor, Aider, Windsurf, Other/Generic
 - Each tab contains editor-specific config generation and paste instructions
-- Active tab persisted in URL hash (`#editor=continue`)
+- Active tab persisted in URL hash via the existing `useTabHash` hook (`#tab=continue`)
 
 **Zone 3 — Config content (per editor tab):**
 - Model selector dropdown (populated from `GET /v1/models`)
@@ -98,17 +98,23 @@ On tab selection, the page:
 6. Config updates live when user changes the model dropdown
 
 **API key lifecycle:**
-- Auto-created with name `editor-{slug}` on first tab visit (if auth enabled)
-- Reused if an `editor-{slug}` key already exists (checked via `GET /api/v1/keys`)
-- "Regenerate Key" button available for rotation
+- Auto-created with name `editor-{slug}` on first tab visit (if auth enabled, and user has admin role)
+- To check for existing keys: fetch `GET /api/v1/keys`, filter client-side by name prefix `editor-`. There is no server-side filter endpoint.
+- Guard against duplicate creation: check for existing key before creating. If a race creates a duplicate, it's harmless (two keys for the same editor both work).
+- "Regenerate Key" = revoke the old key via `DELETE /api/v1/keys/{id}` + create a new one with the same name. After regeneration, the user must re-copy the config since the key value changed. The UI should show a warning: "Your editor will disconnect until you update the config."
 - Revoking via Settings > Keys shows the editor as disconnected on this page
+- Rate limit of 120 rpm (vs default 60) because editors make rapid sequential requests during autocomplete and inline suggestions
 
 ### Test Connection
 
-- Fires `POST /v1/chat/completions` through the dashboard's existing proxy using the editor's API key and selected model, with a trivial prompt (e.g., `"ping"`, `max_tokens: 1`)
+The test proves the gateway endpoint is reachable and the selected model responds — the same path an external editor would take.
+
+- Fires `POST /v1/chat/completions` through the dashboard's `/v1` proxy using the selected model with a trivial prompt (`"ping"`, `max_tokens: 1`)
+- If auth is enabled, includes the editor's API key in the `Authorization: Bearer` header so the gateway's auth middleware validates it end-to-end
+- If auth is disabled, sends without a key (same as the editor would)
 - Success: green checkmark + "Connected! Nova received the request using {model}."
 - Failure: red X + specific error message with hint:
-  - Key invalid → "API key was revoked. Click Regenerate Key."
+  - 401/403 → "API key is invalid or revoked. Click Regenerate Key."
   - Gateway down → "LLM Gateway is not responding. Check service status."
   - Model not found → "Model {id} is not available. Try a different model."
 
@@ -118,12 +124,12 @@ On tab selection, the page:
 
 ### Request Tracking in LLM Gateway
 
-The gateway's `/v1/chat/completions` handler adds lightweight tracking after each request:
+The gateway's `/v1/chat/completions` handler adds lightweight tracking **after a successful response** (not on request receipt — failed requests shouldn't count as "connected"):
 
-- Write to Redis hash `nova:editor:connections` (in gateway's db1)
-- Key: API key name (e.g., `editor-continue`) or detected User-Agent slug
+- Write to separate Redis keys per editor: `nova:editor:connection:{slug}` (in gateway's db1)
 - Value: JSON `{ "last_seen": <unix_ts>, "user_agent": "<raw>", "request_count": <int> }`
-- Each entry has a 5-minute TTL (auto-cleanup of stale connections)
+- Each key gets `EXPIRE 300` (5 minutes) — Redis per-field TTL doesn't exist on hashes, so separate keys are used instead
+- The gateway's lifespan shutdown must include `close_redis()` for the connection tracking Redis client (per project convention: every `get_redis()` needs a corresponding `close_redis()`)
 
 ### User-Agent Fallback Detection
 
@@ -161,11 +167,13 @@ Only used as a fallback — key-based detection is primary and more reliable.
     }
   },
   "endpoint": "http://localhost:8001/v1",
-  "auth_required": true
+  "auth_required": false
 }
 ```
 
 Status values: `"connected"` (< 60s), `"idle"` (< 5m), `"disconnected"` (> 5m), `"never"` (no record).
+
+The `endpoint` URL is read from `GATEWAY_PUBLIC_URL` env var (default: `http://localhost:8001/v1`). For remote access setups (Tailscale, Cloudflare tunnel), users should set this to their external URL. The `auth_required` field is read from the gateway's own `REQUIRE_AUTH` env var.
 
 Dashboard polls this endpoint every 5 seconds via TanStack Query.
 
@@ -190,8 +198,8 @@ The onboarding wizard's final "Ready" step (step 6) gains a second card alongsid
 ```
 
 - Not a new wizard step — zero friction added to the existing 6-step flow
-- "Set Up" navigates to `/editors`
-- Card uses Lucide `Plug` icon
+- "Set Up" navigates via `window.location.href = '/editors'` (full page navigation, consistent with the existing "Go to Chat" button which uses `window.location.href = '/chat'`)
+- Card uses Lucide `Code` icon (matching the sidebar nav item)
 - Styled consistently with the existing Ready screen
 
 ---
@@ -211,12 +219,14 @@ The onboarding wizard's final "Ready" step (step 6) gains a second card alongsid
 |---|---|
 | `dashboard/src/App.tsx` | Add `/editors` route |
 | `dashboard/src/components/layout/Sidebar.tsx` | Add "Editors" nav item in Infrastructure section |
+| `dashboard/src/components/layout/MobileNav.tsx` | Add "Editors" nav item (mirrors sidebar) |
 | `dashboard/src/pages/onboarding/Ready.tsx` | Add "Connect Your Editor" card |
-| `llm-gateway/app/openai_router.py` | Add request tracking + `GET /v1/editor-connections` endpoint |
+| `llm-gateway/app/openai_router.py` | Add request tracking (post-response) + `GET /v1/editor-connections` endpoint |
+| `llm-gateway/app/main.py` | Add `close_redis()` for connection tracking Redis in lifespan shutdown |
 
 ### No New Database Tables
 
-Connection state is ephemeral — Redis hash with TTL. API keys use the existing `api_keys` table.
+Connection state is ephemeral — separate Redis keys per editor with 5-minute TTL. API keys use the existing `api_keys` table.
 
 ---
 
