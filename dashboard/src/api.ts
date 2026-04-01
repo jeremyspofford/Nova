@@ -1103,7 +1103,7 @@ export const getDomainSummary = () =>
   apiFetch<DomainSummary>('/mem/api/v1/engrams/sources/domain-summary')
 
 export const getEngramDetail = (engramId: string) =>
-  apiFetch<EngramDetail>(`/mem/api/v1/engrams/${engramId}`)
+  apiFetch<EngramDetail>(`/mem/api/v1/engrams/engrams/${engramId}`)
 
 // ── Engram Reindex ──────────────────────────────────────────────────────────
 
