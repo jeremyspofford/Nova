@@ -31,6 +31,8 @@ class TaskOutcome:
     findings_count: int = 0
     timed_out: bool = False
     total_cost_usd: float = 0.0
+    checkpoint: dict | None = None
+    current_stage: str | None = None
 
 
 def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
@@ -41,12 +43,15 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
     error = task.get("error")
     findings_count = task.get("findings_count", 0)
     total_cost_usd = float(task.get("total_cost_usd") or 0)
+    checkpoint = task.get("checkpoint")
+    current_stage = task.get("current_stage")
 
     if timed_out:
         return TaskOutcome(
             task_id=task_id, status="running", score=0.5, confidence=0.3,
             output=output, error=error, findings_count=findings_count,
             timed_out=True, total_cost_usd=total_cost_usd,
+            checkpoint=checkpoint, current_stage=current_stage,
         )
 
     if status == "complete":
@@ -56,11 +61,13 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
                 task_id=task_id, status=status, score=0.6, confidence=0.8,
                 output=output, error=error, findings_count=findings_count,
                 total_cost_usd=total_cost_usd,
+                checkpoint=checkpoint, current_stage=current_stage,
             )
         return TaskOutcome(
             task_id=task_id, status=status, score=0.8, confidence=0.9,
             output=output, error=error, findings_count=findings_count,
             total_cost_usd=total_cost_usd,
+            checkpoint=checkpoint, current_stage=current_stage,
         )
 
     if status == "failed":
@@ -68,6 +75,7 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
             task_id=task_id, status=status, score=0.2, confidence=0.9,
             output=output, error=error, findings_count=findings_count,
             total_cost_usd=total_cost_usd,
+            checkpoint=checkpoint, current_stage=current_stage,
         )
 
     if status == "cancelled":
@@ -75,6 +83,7 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
             task_id=task_id, status=status, score=0.1, confidence=0.9,
             output=output, error=error, findings_count=findings_count,
             total_cost_usd=total_cost_usd,
+            checkpoint=checkpoint, current_stage=current_stage,
         )
 
     # Unexpected status — treat as unknown
@@ -82,6 +91,7 @@ def _score_task(task: dict, timed_out: bool) -> TaskOutcome:
         task_id=task_id, status=status, score=0.5, confidence=0.3,
         output=output, error=error, findings_count=findings_count,
         total_cost_usd=total_cost_usd,
+        checkpoint=checkpoint, current_stage=current_stage,
     )
 
 
