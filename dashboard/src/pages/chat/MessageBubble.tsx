@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import { User, FileText } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { format } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import clsx from 'clsx'
@@ -10,32 +10,48 @@ import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import type { Message } from '../../stores/chat-store'
 
 export const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
-  const { avatarUrl } = useNovaIdentity()
+  const { avatarUrl, isDefaultAvatar } = useNovaIdentity()
   const isUser = message.role === 'user'
+  const isThinking = !isUser && message.isStreaming && !message.content
   const cleanedContent = useMemo(
     () => !isUser && message.content ? cleanToolArtifacts(message.content) : message.content,
     [isUser, message.content],
   )
 
   return (
-    <div className={clsx('flex gap-3', isUser && 'flex-row-reverse')}>
-      {/* Avatar */}
-      {isUser ? (
-        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-elevated text-content-secondary">
-          <User size={13} />
-        </div>
-      ) : (
-        <img src={avatarUrl} alt="Nova" className="mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover" />
+    <div className={clsx('flex gap-2', isUser ? 'justify-end' : 'items-start')}>
+      {/* Assistant avatar */}
+      {!isUser && (
+        isDefaultAvatar ? (
+          <div className={clsx(
+            'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+            isThinking
+              ? 'bg-amber-500/20 text-amber-400'
+              : 'bg-teal-500/20 text-teal-400',
+          )}>
+            N
+          </div>
+        ) : (
+          <img src={avatarUrl} alt="Nova" className={clsx(
+            'mt-0.5 h-7 w-7 shrink-0 rounded-full object-cover',
+            isThinking && 'ring-2 ring-amber-500/40',
+          )} />
+        )
       )}
 
-      {/* Bubble */}
-      <div className={isUser ? 'ml-auto max-w-[85%]' : 'flex-1 min-w-0 max-w-[85%]'}>
+      {/* Bubble column */}
+      <div className={clsx(
+        isUser ? 'max-w-[80%] md:max-w-prose' : 'flex-1 min-w-0 max-w-prose',
+      )}>
         <div
           className={clsx(
             'text-compact leading-relaxed',
             isUser
-              ? 'glass-card text-content-primary whitespace-pre-wrap rounded-xl px-4 py-3'
-              : 'glass-card border-l-2 border-teal-800 text-content-primary markdown-body overflow-x-auto rounded-r-xl px-5 py-[18px]',
+              ? 'glass-card text-content-primary whitespace-pre-wrap rounded-tl-xl rounded-tr-sm rounded-br-xl rounded-bl-xl px-4 py-3'
+              : clsx(
+                  'glass-card text-content-primary markdown-body overflow-x-auto rounded-tl-sm rounded-tr-xl rounded-br-xl rounded-bl-xl px-5 py-[18px]',
+                  isThinking && 'border-amber-500/15',
+                ),
           )}
         >
           {!isUser && message.activitySteps && message.activitySteps.length > 0 && (
@@ -78,9 +94,18 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
             )
           ) : message.isStreaming ? (
             <span className="inline-flex items-center gap-1 py-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.3s] dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]" />
-              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce [animation-delay:-0.15s] dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]" />
-              <span className="h-1.5 w-1.5 rounded-full bg-accent animate-bounce dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]" />
+              <span className={clsx(
+                'h-1.5 w-1.5 rounded-full animate-bounce [animation-delay:-0.3s]',
+                isThinking ? 'bg-amber-400 dark:shadow-[0_0_6px_rgb(251_191_36/0.5)]' : 'bg-accent dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]',
+              )} />
+              <span className={clsx(
+                'h-1.5 w-1.5 rounded-full animate-bounce [animation-delay:-0.15s]',
+                isThinking ? 'bg-amber-400 dark:shadow-[0_0_6px_rgb(251_191_36/0.5)]' : 'bg-accent dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]',
+              )} />
+              <span className={clsx(
+                'h-1.5 w-1.5 rounded-full animate-bounce',
+                isThinking ? 'bg-amber-400 dark:shadow-[0_0_6px_rgb(251_191_36/0.5)]' : 'bg-accent dark:shadow-[0_0_6px_rgb(var(--accent-500)/0.5)]',
+              )} />
             </span>
           ) : '\u2014'}
         </div>
@@ -92,7 +117,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
             isUser && 'text-right',
           )}
         >
-          {formatDistanceToNow(message.timestamp, { addSuffix: true })}
+          {format(message.timestamp, 'h:mm a')}
           {message.metadata?.channel === 'telegram' && (
             <span className="ml-1.5 text-content-tertiary/50">via Telegram</span>
           )}
@@ -106,6 +131,13 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
           )}
         </p>
       </div>
+
+      {/* User avatar */}
+      {isUser && (
+        <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-surface-elevated text-content-secondary">
+          <User size={13} />
+        </div>
+      )}
     </div>
   )
 })
