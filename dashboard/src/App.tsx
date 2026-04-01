@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { getAuthHeaders } from './api'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
@@ -30,6 +30,8 @@ import Friction from './pages/Friction'
 import Brain from './pages/Brain'
 import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
 import ComponentGallery from './pages/dev/ComponentGallery'
+
+const Editors = lazy(() => import('./pages/Editors'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -173,6 +175,7 @@ function AppShell() {
         <Route path="/sources" element={<AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout>} />
         <Route path="/integrations" element={<AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout>} />
         <Route path="/models" element={<AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout>} />
+        <Route path="/editors" element={<AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout>} />
         <Route path="/users" element={<AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout>} />
         <Route path="/settings" element={<AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout>} />
         <Route path="/recovery" element={<AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout>} />
