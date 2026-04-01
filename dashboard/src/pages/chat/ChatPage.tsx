@@ -487,7 +487,7 @@ export function Chat() {
           /* Empty state: greeting at top, input pinned to bottom */
           <>
             <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-[780px] mx-auto px-4 md:px-8 py-6">
+              <div className="mx-auto px-3 md:px-8 py-6 max-w-none md:max-w-3xl xl:max-w-4xl">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -499,7 +499,7 @@ export function Chat() {
               </div>
             </div>
             <div className="shrink-0 w-full px-4 md:px-8 pb-16 md:pb-4">
-              <div className="max-w-[780px] mx-auto">
+              <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>
@@ -508,7 +508,7 @@ export function Chat() {
           /* Active chat: scrollable messages + bottom-pinned input */
           <>
             <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-[780px] mx-auto px-4 md:px-8 py-6 space-y-6">
+              <div className="mx-auto px-3 md:px-8 py-6 space-y-4 max-w-none md:max-w-3xl xl:max-w-4xl">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -550,7 +550,7 @@ export function Chat() {
             )}
 
             <div className="shrink-0 w-full px-4 md:px-8 pb-16 md:pb-4">
-              <div className="max-w-[780px] mx-auto">
+              <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>
