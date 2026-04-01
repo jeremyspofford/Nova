@@ -651,7 +651,7 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
             )
 
         elif outcome.status == "failed":
-            # Failed task — store error context for next cycle's planning, don't advance iteration
+            # Failed task — store error context + partial work for re-planning
             plan_update = {
                 **current_plan,
                 "last_task_id": outcome.task_id,
@@ -659,6 +659,16 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 "last_task_error": (outcome.error or "unknown")[:500],
                 "cycle": cycle,
             }
+            # Enrich with partial work from checkpoint
+            if outcome.checkpoint and isinstance(outcome.checkpoint, dict):
+                plan_update["last_completed_stages"] = list(outcome.checkpoint.keys())
+                # The "task" stage output is the actual work product
+                task_output = outcome.checkpoint.get("task", {})
+                if isinstance(task_output, dict):
+                    content = task_output.get("content") or task_output.get("output") or str(task_output)
+                    plan_update["last_stage_output"] = content[:1000]
+                # Identify failing stage from current_stage (carried via TaskOutcome)
+                plan_update["failed_at_stage"] = outcome.current_stage or "unknown"
             await conn.execute(
                 """UPDATE goals
                    SET current_plan = $1::jsonb,
@@ -670,8 +680,11 @@ async def _update_goal_progress(goal_id: str, outcome: TaskOutcome, cycle: int) 
                 new_cost,
             )
             log.info(
-                "Goal %s: task %s failed — error stored for re-planning",
+                "Goal %s: task %s failed at %s — partial work stored for re-planning "
+                "(stages: %s)",
                 goal_id, outcome.task_id,
+                plan_update.get("failed_at_stage", "unknown"),
+                plan_update.get("last_completed_stages", []),
             )
 
         elif outcome.status == "cancelled":
