@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ChevronRight, ChevronDown, Activity, Brain, Terminal, Loader2 } from 'lucide-react'
+import { ChevronRight, ChevronDown, Activity, Brain, Terminal, Loader2, Eye } from 'lucide-react'
 import clsx from 'clsx'
 import type { ActivityStep, Message, EngramSummary } from '../../stores/chat-store'
+import { EngramDetailModal } from './EngramDetailModal'
 
 interface Props {
   messages: Message[]
@@ -19,7 +20,7 @@ const TYPE_LABELS: Record<string, string> = {
   topic: 'Topic',
 }
 
-function EngramRow({ engram }: { engram: EngramSummary }) {
+function EngramRow({ engram, onViewDetail }: { engram: EngramSummary; onViewDetail: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const typeLabel = TYPE_LABELS[engram.type] ?? engram.type
 
@@ -28,7 +29,7 @@ function EngramRow({ engram }: { engram: EngramSummary }) {
       <button
         onClick={() => setExpanded(e => !e)}
         className="flex items-start gap-1.5 py-1.5 w-full text-left hover:bg-surface-card-hover/50
-                   rounded-xs transition-colors duration-fast"
+                   rounded-xs transition-colors duration-fast group"
       >
         {expanded
           ? <ChevronDown size={12} className="text-content-tertiary mt-0.5 shrink-0" />
@@ -36,6 +37,17 @@ function EngramRow({ engram }: { engram: EngramSummary }) {
         }
         <span className="text-compact text-content-primary leading-snug flex-1 min-w-0 line-clamp-2">
           {engram.preview || 'Untitled engram'}
+        </span>
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => { e.stopPropagation(); onViewDetail(engram.id) }}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); onViewDetail(engram.id) } }}
+          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 rounded-xs
+                     hover:bg-surface-elevated transition-opacity duration-fast text-content-tertiary hover:text-content-secondary"
+          title="View details"
+        >
+          <Eye size={12} />
         </span>
       </button>
       {expanded && (
@@ -72,6 +84,8 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
   const memoryItems: EngramSummary[] = engramSummaries.length > 0
     ? engramSummaries
     : engramIds.map(id => ({ id, type: 'unknown', preview: id.slice(0, 12) + '\u2026' }))
+
+  const [selectedEngramId, setSelectedEngramId] = useState<string | null>(null)
 
   // Tool call steps — anything that isn't a built-in pipeline step
   const builtinSteps = new Set(['classifying', 'memory', 'model', 'generating'])
@@ -162,7 +176,7 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
         {memoryItems.length > 0 && (
           <ContextSection icon={Brain} title="MEMORY HITS" count={memoryItems.length}>
             {memoryItems.slice(0, 8).map((engram) => (
-              <EngramRow key={engram.id} engram={engram} />
+              <EngramRow key={engram.id} engram={engram} onViewDetail={setSelectedEngramId} />
             ))}
             {memoryItems.length > 8 && (
               <div className="text-micro text-content-tertiary pt-1">
@@ -202,6 +216,10 @@ export function ContextPanel({ messages, isStreaming, collapsed, onToggle }: Pro
           </ContextSection>
         )}
       </div>
+      <EngramDetailModal
+        engramId={selectedEngramId}
+        onClose={() => setSelectedEngramId(null)}
+      />
     </aside>
   )
 }
