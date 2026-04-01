@@ -145,6 +145,8 @@ async def assemble_context(
                 "embedding": None,  # Not stored on ActivatedEngram
                 "final_score": e.final_score,
                 "source_type": e.source_type,
+                "confidence": getattr(e, "confidence", 0.5),
+                "access_count": getattr(e, "access_count", 0),
             })
 
         reranked_dicts = neural_rerank(
@@ -171,6 +173,8 @@ async def assemble_context(
                 "embedding": None,
                 "final_score": e.final_score,
                 "source_type": e.source_type,
+                "confidence": getattr(e, "confidence", 0.5),
+                "access_count": getattr(e, "access_count", 0),
             }
             for e in topic_engrams
         ]
@@ -184,8 +188,10 @@ async def assemble_context(
                 content=d["content"],
                 activation=d["activation"],
                 importance=d["importance"],
+                confidence=d.get("confidence", 0.5),
                 final_score=d["final_score"],
                 convergence_paths=d.get("convergence_paths", 0),
+                access_count=d.get("access_count", 0),
                 source_type=d.get("source_type", "chat"),
             )
             for d in reranked_dicts
