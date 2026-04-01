@@ -39,13 +39,44 @@ const STATUS_COLOR: Record<string, SemanticColor> = {
   cancelled: 'neutral',
 }
 
-const MATURATION_COLORS: Record<string, string> = {
-  triaging: 'bg-stone-700/40 text-stone-300',
-  scoping: 'bg-blue-900/30 text-blue-400',
-  speccing: 'bg-purple-900/30 text-purple-400',
-  review: 'bg-amber-900/30 text-amber-400',
-  building: 'bg-teal-900/30 text-teal-400',
-  verifying: 'bg-emerald-900/30 text-emerald-400',
+const MATURATION_STAGES = ['triaging', 'scoping', 'speccing', 'review', 'building', 'verifying'] as const
+const MATURATION_LABELS: Record<string, string> = {
+  triaging: 'Triage',
+  scoping: 'Scope',
+  speccing: 'Spec',
+  review: 'Review',
+  building: 'Build',
+  verifying: 'Verify',
+}
+
+function MaturationStages({ current, compact }: { current: string; compact?: boolean }) {
+  const idx = MATURATION_STAGES.indexOf(current as typeof MATURATION_STAGES[number])
+  return (
+    <div className="inline-flex items-start gap-0.5">
+      {MATURATION_STAGES.map((stage, i) => {
+        const status = i < idx ? 'done' : i === idx ? 'active' : 'pending'
+        return (
+          <div key={stage} className={clsx('flex flex-col items-center', !compact && 'gap-0.5')}>
+            <div className={clsx(
+              'rounded-xs',
+              compact ? 'w-4 h-1' : 'w-7 h-1.5',
+              status === 'done' && 'bg-accent',
+              status === 'active' && 'bg-accent animate-pulse-slow',
+              status === 'pending' && 'bg-border-subtle',
+            )} />
+            {!compact && (
+              <span className={clsx(
+                'text-[9px] leading-tight',
+                status === 'active' ? 'text-accent font-medium' : 'text-content-tertiary',
+              )}>
+                {MATURATION_LABELS[stage]}
+              </span>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'failed'
@@ -70,7 +101,7 @@ function GoalStatsRow() {
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i} className="p-4">
             <Skeleton lines={2} />
@@ -80,23 +111,57 @@ function GoalStatsRow() {
     )
   }
 
+  const activeCount = stats?.active ?? 0
+  const successPct = stats ? Math.round(stats.success_rate * 100) : null
+  const successColor = successPct == null ? 'text-content-primary'
+    : successPct >= 70 ? 'text-success'
+    : successPct >= 40 ? 'text-warning'
+    : 'text-danger'
+
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <Card className="p-4">
-        <Metric
-          label="Active Goals"
-          value={stats?.active ?? 0}
-          icon={<Target size={12} />}
-          tooltip="Goals currently being pursued by the Cortex autonomous brain."
-        />
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Hero metric — active goals */}
+      <Card className={clsx(
+        'col-span-2 sm:col-span-1 p-5 relative overflow-hidden',
+        activeCount > 0 && 'border-accent/30 shadow-[0_0_20px_rgba(25,168,158,0.15)]',
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={clsx(
+            'flex items-center justify-center w-10 h-10 rounded-lg',
+            activeCount > 0
+              ? 'bg-accent/15 text-accent'
+              : 'bg-surface-elevated text-content-tertiary',
+          )}>
+            <Target size={20} />
+          </div>
+          <div>
+            <p className="text-caption text-content-tertiary">Active Goals</p>
+            <p className={clsx(
+              'text-2xl font-bold tracking-tight font-mono',
+              activeCount > 0 ? 'text-accent' : 'text-content-primary',
+            )}>
+              {activeCount}
+            </p>
+          </div>
+        </div>
+        {activeCount > 0 && (
+          <div className="absolute inset-0 rounded-[inherit] animate-[glow-pulse_3s_ease-in-out_infinite] pointer-events-none border border-accent/20" />
+        )}
       </Card>
+
+      {/* Success rate — color-coded by performance */}
       <Card className="p-4">
-        <Metric
-          label="Success Rate"
-          value={stats ? `${Math.round(stats.success_rate * 100)}%` : '--'}
-          icon={<TrendingUp size={12} />}
-          tooltip="Percentage of goal iterations that produced useful progress."
-        />
+        <div className="flex flex-col gap-1">
+          <Tooltip content="Percentage of goal iterations that produced useful progress." side="bottom">
+            <span className="text-caption font-medium text-content-tertiary uppercase tracking-wider inline-flex items-center gap-1.5">
+              <TrendingUp size={12} />
+              Success Rate
+            </span>
+          </Tooltip>
+          <span className={clsx('text-display font-mono', successColor)}>
+            {successPct != null ? `${successPct}%` : '--'}
+          </span>
+        </div>
       </Card>
       <Card className="p-4">
         <Metric
@@ -573,7 +638,12 @@ function GoalCard({ goal }: { goal: Goal }) {
     <>
       <Card
         variant="hoverable"
-        className="p-4"
+        className={clsx(
+          'p-4',
+          goal.status === 'active' && 'border-l-2 border-l-accent shadow-[inset_4px_0_8px_-4px_rgba(25,168,158,0.25)]',
+          goal.status === 'paused' && 'opacity-70 hover:opacity-85',
+          (goal.status === 'completed' || goal.status === 'failed' || goal.status === 'cancelled') && 'opacity-55 hover:opacity-75',
+        )}
         onClick={() => setExpanded(v => !v)}
       >
         {/* Header row */}
@@ -585,12 +655,7 @@ function GoalCard({ goal }: { goal: Goal }) {
               </span>
               <Badge color={color} size="sm">{goal.status}</Badge>
               {goal.maturation_status && (
-                <span className={clsx(
-                  'inline-flex px-1.5 py-0.5 rounded text-micro font-medium',
-                  MATURATION_COLORS[goal.maturation_status] ?? 'bg-neutral-700 text-neutral-300',
-                )}>
-                  {goal.maturation_status}
-                </span>
+                <MaturationStages current={goal.maturation_status} compact />
               )}
               {goal.priority <= 2 && (
                 <Badge color={goal.priority <= 1 ? 'danger' : 'warning'} size="sm">
@@ -733,12 +798,7 @@ function GoalCard({ goal }: { goal: Goal }) {
                 {maturationOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                 Maturation & Discussion
                 {goal.maturation_status && (
-                  <span className={clsx(
-                    'ml-1.5 inline-flex px-1.5 py-0.5 rounded text-micro font-medium',
-                    MATURATION_COLORS[goal.maturation_status] ?? 'bg-neutral-700 text-neutral-300',
-                  )}>
-                    {goal.maturation_status}
-                  </span>
+                  <MaturationStages current={goal.maturation_status} />
                 )}
               </button>
 
@@ -964,8 +1024,21 @@ export function Goals() {
       />
 
       {/* Stats row */}
-      <p className="text-caption text-content-tertiary -mb-4">Active goals, iteration throughput, and cumulative LLM spend across all autonomous objectives.</p>
       <GoalStatsRow />
+
+      {/* Pending recommendations banner */}
+      {pendingCount > 0 && pageView === 'goals' && (
+        <button
+          onClick={() => setPageView('suggested')}
+          className="flex items-center gap-2 w-full rounded-md border border-accent/20 bg-accent/5 px-4 py-2.5 text-left transition-colors hover:bg-accent/10"
+        >
+          <Lightbulb size={16} className="text-accent shrink-0" />
+          <span className="text-compact text-content-secondary">
+            <strong className="text-accent">{pendingCount}</strong> new recommendation{pendingCount !== 1 ? 's' : ''} waiting for review
+          </span>
+          <ChevronRight size={14} className="ml-auto text-content-tertiary" />
+        </button>
+      )}
 
       {/* Page view tabs: Goals | Suggested */}
       <div className="flex items-center gap-1 border-b border-border-subtle">
@@ -1032,13 +1105,8 @@ export function Goals() {
               title={statusFilter === 'all' ? 'No goals yet' : `No ${statusFilter} goals`}
               description={
                 statusFilter === 'all'
-                  ? 'Create a goal to start autonomous operation.'
+                  ? 'Tell Nova what you want to accomplish. It will plan, execute, and iterate autonomously.'
                   : 'Try selecting a different filter.'
-              }
-              action={
-                statusFilter === 'all'
-                  ? { label: 'Create Goal', onClick: () => setShowCreate(true) }
-                  : undefined
               }
             />
           ) : (
