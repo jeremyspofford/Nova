@@ -9,7 +9,6 @@ import { useVoiceChat } from '../../hooks/useVoiceChat'
 import { ModelManagerModal, getHiddenModels } from '../../components/ModelManagerModal'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
-import { ThreadRail } from '../../components/chat/ThreadRail'
 import { ContextPanel } from '../../components/chat/ContextPanel'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
 
@@ -146,25 +145,26 @@ export function Chat() {
   // Auto-load the active conversation on mount for authenticated users.
   // If a conversationId is already known, load messages for it.
   // Otherwise fetch/create the most recent conversation and load that.
+  // Never call resetConversation on failure — just leave the user in a
+  // working state so they can keep chatting even if the API is down.
   useEffect(() => {
     if (!isAuthenticated) return
 
     if (conversationId) {
       if (messages.length === 0 && !isStreaming) {
         loadConversation(conversationId).catch(() => {
-          // Conversation no longer exists — get or create a new one
+          // Conversation no longer exists — try to get/create one silently
           getOrCreateActiveConversation().then(id => {
-            loadConversation(id).catch(() => resetConversation())
-          }).catch(() => resetConversation())
+            loadConversation(id).catch(() => {})
+          }).catch(() => {})
         })
       }
     } else {
       // No stored conversation — fetch or create the active one
       getOrCreateActiveConversation().then(id => {
-        loadConversation(id).catch(() => resetConversation())
+        loadConversation(id).catch(() => {})
       }).catch(() => {
-        // API unavailable (e.g. REQUIRE_AUTH=false with no conversations endpoint)
-        // — do nothing, user can still chat without persistence
+        // API unavailable — do nothing, user can still chat without persistence
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -446,30 +446,29 @@ export function Chat() {
 
   return (
     <div className="flex h-full w-full overflow-hidden">
-      {/* Thread Rail - collapsible conversation list (hidden below md) */}
-      <div className="hidden md:block h-full">
-        <ThreadRail />
-      </div>
-
       {/* Chat Area */}
       <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent">
         {messages.length === 0 ? (
-          /* Empty state: vertically centered greeting + input (Claude Desktop feel) */
-          <div className="flex-1 flex flex-col items-center justify-center px-4 pb-[20vh]">
-            {greeting && (
-              <div className="max-w-[780px] w-full mb-8 mx-auto">
-                <MessageBubble message={{
-                  id: 'greeting',
-                  role: 'assistant',
-                  content: greeting,
-                  timestamp: new Date(),
-                }} />
+          /* Empty state: greeting at top, input pinned to bottom */
+          <>
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <div className="max-w-[780px] mx-auto px-4 md:px-8 py-6">
+                {greeting && (
+                  <MessageBubble message={{
+                    id: 'greeting',
+                    role: 'assistant',
+                    content: greeting,
+                    timestamp: new Date(),
+                  }} />
+                )}
               </div>
-            )}
-            <div className="w-full max-w-[780px] mx-auto">
-              <ChatInput {...chatInputProps} />
             </div>
-          </div>
+            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
+              <div className="max-w-[780px] mx-auto">
+                <ChatInput {...chatInputProps} />
+              </div>
+            </div>
+          </>
         ) : (
           /* Active chat: scrollable messages + bottom-pinned input */
           <>

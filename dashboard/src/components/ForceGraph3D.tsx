@@ -670,9 +670,9 @@ function makeClusterHaloTexture(r: number, g: number, b: number): CanvasTexture 
   canvas.width = canvas.height = size
   const ctx = canvas.getContext('2d')!
   const grad = ctx.createRadialGradient(size * 0.45, size * 0.48, 0, size / 2, size / 2, size / 2)
-  grad.addColorStop(0, `rgba(${r},${g},${b},0.2)`)
-  grad.addColorStop(0.3, `rgba(${r},${g},${b},0.08)`)
-  grad.addColorStop(0.6, `rgba(${r},${g},${b},0.03)`)
+  grad.addColorStop(0, `rgba(${r},${g},${b},0.45)`)
+  grad.addColorStop(0.3, `rgba(${r},${g},${b},0.18)`)
+  grad.addColorStop(0.6, `rgba(${r},${g},${b},0.06)`)
   grad.addColorStop(1, 'rgba(0,0,0,0)')
   ctx.fillStyle = grad; ctx.fillRect(0, 0, size, size)
   return new CanvasTexture(canvas)
@@ -805,26 +805,26 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
       { // Yellow-white sun system
         cx: 4500, cy: 1800, cz: 3200,
         planets: [
-          { r: 160, g: 100, b: 60,  size: 8,  orbit: 220, speed: 0.25, tilt: -0.15 },
-          { r: 8,   g: 150, b: 180, size: 10, orbit: 320, speed: 0.15, tilt: 0.2 },
-          { r: 180, g: 140, b: 80,  size: 16, orbit: 450, speed: 0.08, tilt: -0.1, ring: true },
-          { r: 100, g: 160, b: 200, size: 9,  orbit: 600, speed: 0.04, tilt: 0.3 },
+          { r: 160, g: 100, b: 60,  size: 25, orbit: 220, speed: 0.25, tilt: -0.15 },
+          { r: 8,   g: 150, b: 180, size: 30, orbit: 320, speed: 0.15, tilt: 0.2 },
+          { r: 180, g: 140, b: 80,  size: 45, orbit: 450, speed: 0.08, tilt: -0.1, ring: true },
+          { r: 100, g: 160, b: 200, size: 28, orbit: 600, speed: 0.04, tilt: 0.3 },
         ],
       },
       { // Red dwarf system — fewer, closer planets
         cx: -4000, cy: -2800, cz: 1500,
         planets: [
-          { r: 140, g: 80,  b: 60,  size: 7, orbit: 80,  speed: 0.35, tilt: 0.1 },
-          { r: 80,  g: 120, b: 140, size: 9, orbit: 140, speed: 0.2,  tilt: -0.2 },
-          { r: 200, g: 160, b: 100, size: 6, orbit: 200, speed: 0.12, tilt: 0.15 },
+          { r: 140, g: 80,  b: 60,  size: 22, orbit: 80,  speed: 0.35, tilt: 0.1 },
+          { r: 80,  g: 120, b: 140, size: 28, orbit: 140, speed: 0.2,  tilt: -0.2 },
+          { r: 200, g: 160, b: 100, size: 20, orbit: 200, speed: 0.12, tilt: 0.15 },
         ],
       },
       { // Blue giant system — large orbits, big planets
         cx: -2000, cy: 4200, cz: -2500,
         planets: [
-          { r: 60,  g: 100, b: 180, size: 12, orbit: 300, speed: 0.1,  tilt: 0.25 },
-          { r: 140, g: 180, b: 200, size: 18, orbit: 500, speed: 0.06, tilt: -0.15, ring: true },
-          { r: 180, g: 120, b: 80,  size: 8,  orbit: 180, speed: 0.2,  tilt: 0.1 },
+          { r: 60,  g: 100, b: 180, size: 35, orbit: 300, speed: 0.1,  tilt: 0.25 },
+          { r: 140, g: 180, b: 200, size: 50, orbit: 500, speed: 0.06, tilt: -0.15, ring: true },
+          { r: 180, g: 120, b: 80,  size: 25, orbit: 180, speed: 0.2,  tilt: 0.1 },
         ],
       },
     ]
@@ -835,8 +835,8 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
           ? makeRingedPlanetTexture(p.r, p.g, p.b)
           : makePlanetTexture(p.r, p.g, p.b)
         const mat = new SpriteMaterial({
-          map: tex, transparent: true, opacity: 0.6,
-          depthWrite: false,
+          map: tex, transparent: true, opacity: 0.8,
+          blending: AdditiveBlending, depthWrite: false,
         })
         const sprite = new Sprite(mat)
         sprite.scale.set(p.size, p.size, 1)
@@ -1079,6 +1079,41 @@ function disposeStarfield(group: Group) {
 // Mimics Obsidian's "zoom in to read" behavior.
 const LABEL_SHOW_DISTANCE = 500  // Topic labels visible from farther away
 const LABEL_MIN_IMPORTANCE = 0.3 // (no longer used — cluster rep logic in Brain.tsx)
+
+// ── Layout cache — survives unmount, enables instant re-mount ────────────────
+// When the simulation settles, we snapshot every node's (x,y,z) into this
+// module-level Map. On re-mount with the same nodes, we inject these as
+// starting positions and skip the warmup entirely.
+// Camera state is saved on unmount so zoom/pan is preserved too.
+const _positionCache = new Map<string, { x: number; y: number; z: number }>()
+let _cameraCache: {
+  position: { x: number; y: number; z: number }
+  target: { x: number; y: number; z: number }
+  sceneRotY: number
+} | null = null
+
+function savePositionCache(graphData: { nodes: any[] }) {
+  _positionCache.clear()
+  for (const n of graphData.nodes) {
+    if (n.id && n.x != null) {
+      _positionCache.set(n.id, { x: n.x, y: n.y ?? 0, z: n.z ?? 0 })
+    }
+  }
+}
+
+function applyPositionCache(graphNodes: any[]): boolean {
+  if (_positionCache.size === 0) return false
+  let hits = 0
+  for (const n of graphNodes) {
+    const cached = _positionCache.get(n.id)
+    if (cached) {
+      n.x = cached.x; n.y = cached.y; n.z = cached.z
+      hits++
+    }
+  }
+  // Only use cache if most nodes have cached positions
+  return hits > graphNodes.length * 0.8
+}
 
 // ── Component ────────────────────────────────────────────────────────────────
 
@@ -1477,6 +1512,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         const data = graph.graphData()
         syncInstancePositions(instancedMeshRef.current, data.nodes, nodeIndexMapRef.current)
       }
+      // Cache settled positions for instant re-mount
+      savePositionCache(graph.graphData())
       // Re-enable interaction and links now that the graph is stable
       graph.enablePointerInteraction(true)
       linksVisibleRef.current = true
@@ -1640,6 +1677,17 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     ro.observe(el)
 
     return () => {
+      // Save camera state for re-mount
+      try {
+        const cam = graph.camera()
+        const ctrl = graph.controls()
+        _cameraCache = {
+          position: { x: cam.position.x, y: cam.position.y, z: cam.position.z },
+          target: ctrl.target ? { x: ctrl.target.x, y: ctrl.target.y, z: ctrl.target.z } : { x: 0, y: 0, z: 0 },
+          sceneRotY: graph.scene().rotation.y,
+        }
+      } catch { /* ok */ }
+
       cancelAnimationFrame(rotationFrame)
       el.removeEventListener('pointerdown', stopSpin)
       ro.disconnect()
@@ -1833,17 +1881,33 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
       weight: e.weight,
     }))
 
-  // Let d3-force handle layout organically — no forced positioning.
-  // The topology (edges) naturally creates clusters, charge pushes
-  // unconnected nodes apart, and domain coloring makes groups visible.
+  // Inject cached positions for instant layout (skips simulation)
+  const hasCachedLayout = applyPositionCache(graphNodes)
+  if (hasCachedLayout) {
+    graph.warmupTicks(0).cooldownTicks(0)
+  }
+
   graph.graphData({ nodes: graphNodes, links: graphLinks })
 
-  // Longer settle time for large graphs
-  const settleMs = nodes.length > 500 ? 3000 : 1200
+  // Cached layout: zoom immediately. Fresh layout: wait for simulation to settle.
+  const settleMs = hasCachedLayout ? 100 : (nodes.length > 500 ? 3000 : 1200)
 
   // Add cluster/domain labels after simulation settles
   setTimeout(() => {
-    try { graph.zoomToFit(600, 60) } catch { /* ok */ }
+    // Restore saved camera or zoom-to-fit for fresh layout
+    if (hasCachedLayout && _cameraCache) {
+      try {
+        const cam = graph.camera()
+        const ctrl = graph.controls()
+        const { position: p, target: t, sceneRotY } = _cameraCache
+        cam.position.set(p.x, p.y, p.z)
+        if (ctrl.target) ctrl.target.set(t.x, t.y, t.z)
+        ctrl.update?.()
+        graph.scene().rotation.y = sceneRotY
+      } catch { /* ok */ }
+    } else {
+      try { graph.zoomToFit(600, 60) } catch { /* ok */ }
+    }
 
     // Remove old cluster visuals
     const scene = graph.scene()
@@ -1885,8 +1949,8 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
         if (galaxyOptions?.showGalaxies && clusterId >= 0 && group[0]?.cluster_label !== 'Uncategorized') {
           const clusterCount = byCluster.size
           const haloOpacity = clusterCount > 20
-            ? 0.06 / Math.sqrt(clusterCount / 10)
-            : 0.06
+            ? 0.18 / Math.sqrt(clusterCount / 10)
+            : 0.18
 
           const tmpC = new Color(color)
           const cr = Math.floor(tmpC.r * 255), cg = Math.floor(tmpC.g * 255), cb = Math.floor(tmpC.b * 255)
@@ -1927,7 +1991,7 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
           dustGeo.setAttribute('position', new Float32BufferAttribute(dustPos, 3))
           dustGeo.setAttribute('color', new Float32BufferAttribute(dustCol, 3))
           const dust = new Points(dustGeo, new PointsMaterial({
-            size: 0.5, vertexColors: true, transparent: true, opacity: 0.4,
+            size: 1.5, vertexColors: true, transparent: true, opacity: 0.5,
             sizeAttenuation: true, depthWrite: false,
           }))
           scene.add(dust)

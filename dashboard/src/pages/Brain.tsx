@@ -1,13 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, X, ChevronRight, Network, Settings, Orbit, GitFork } from 'lucide-react'
+import { Search, X, ChevronRight, Network, Settings } from 'lucide-react'
 import { apiFetch } from '../api'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
-import { ForceGraph2D } from '../components/ForceGraph2D'
 import type { ActivityStep } from '../stores/chat-store'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -121,26 +120,6 @@ export default function Brain() {
   const { avatarUrl } = useNovaIdentity()
   const [sidebarCollapsed] = useLocalStorage('nova-sidebar-collapsed', false)
 
-  // View mode
-  const [viewMode, setViewMode] = useLocalStorage<'galaxy' | 'graph'>('brain.viewMode', 'galaxy')
-
-  // Graph data — 3D Galaxy uses capped lightweight endpoint, 2D Graph fetches everything
-  const { data: graph } = useQuery<GraphData>({
-    queryKey: ['brain-graph'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph/lightweight?max_nodes=2000'),
-    staleTime: 30_000,
-    retry: 1,
-    enabled: viewMode === 'galaxy',
-  })
-
-  const { data: graphFull } = useQuery<GraphData>({
-    queryKey: ['brain-graph-full'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/graph/lightweight?max_nodes=5000'),
-    staleTime: 30_000,
-    retry: 1,
-    enabled: viewMode === 'graph',
-  })
-
   // UI state
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
@@ -151,19 +130,24 @@ export default function Brain() {
   const [expandedClusterId, setExpandedClusterId] = useState<number | null>(null)
   const [focusNode, setFocusNode] = useState<{ id: string; ts: number } | null>(null)
   const [showBgStars, setShowBgStars] = useLocalStorage('brain.showBgStars', true)
-  const [showInnerStars, setShowInnerStars] = useLocalStorage('brain.showInnerStars', false)
   const [showNebulae, setShowNebulae] = useLocalStorage('brain.showNebulae', true)
   const [showEdges, setShowEdges] = useLocalStorage('brain.showEdges', true)
   const [showCelestialObjects, setShowCelestialObjects] = useLocalStorage('brain.showCelestialObjects', true)
   const [showClusterGalaxies, setShowClusterGalaxies] = useLocalStorage('brain.showClusterGalaxies', true)
   const [showMilkyWay, setShowMilkyWay] = useLocalStorage('brain.showMilkyWay', true)
-  const [showAsteroids, setShowAsteroids] = useLocalStorage('brain.showAsteroids', true)
-  const [showSolarSystems, setShowSolarSystems] = useLocalStorage('brain.showSolarSystems', true)
-  const [clusterSeparation, setClusterSeparation] = useLocalStorage('brain.clusterSeparation', 0.3)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
   const [bloomStrength, setBloomStrength] = useLocalStorage('brain.bloomStrength', 1.5)
+  const [nodeLimit, setNodeLimit] = useLocalStorage('brain.nodeLimit', 2000)
+
+  // Graph data
+  const { data: graph } = useQuery<GraphData>({
+    queryKey: ['brain-graph', nodeLimit],
+    queryFn: () => apiFetch(`/mem/api/v1/engrams/graph/lightweight?max_nodes=${nodeLimit}`),
+    staleTime: 30_000,
+    retry: 1,
+  })
 
   // Search-filtered graph
   const { data: searchGraph } = useQuery<GraphData>({
@@ -173,32 +157,27 @@ export default function Brain() {
     staleTime: 10_000,
   })
 
-  const baseGraph = viewMode === 'graph' ? graphFull : graph
-  const activeGraph = searchActive && searchGraph ? searchGraph : baseGraph
+  const activeGraph = searchActive && searchGraph ? searchGraph : graph
 
   // Progressive enhancement — cap expensive effects at high node counts
-  // User toggles (showEdges, showInnerStars) always pass through; perf only limits bloom/particles
   const nodeCount = activeGraph?.nodes.length ?? 0
   const perf = useMemo(() => {
     if (nodeCount > 1000) return {
       showEdges,
-      showInnerStars,
       bloomStrength: Math.min(bloomStrength, 1.0),
       particlesAlways: false,
     }
     if (nodeCount > 500) return {
       showEdges,
-      showInnerStars,
       bloomStrength: Math.min(bloomStrength, 1.2),
       particlesAlways: false,
     }
     return {
       showEdges,
-      showInnerStars,
       bloomStrength,
       particlesAlways: true,
     }
-  }, [nodeCount, showEdges, showInnerStars, bloomStrength])
+  }, [nodeCount, showEdges, bloomStrength])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -377,92 +356,47 @@ export default function Brain() {
     : '#71717a'
 
   return (
-    <div
-      className="relative w-full h-full overflow-hidden pt-[52px]"
-      style={{ background: viewMode === 'galaxy' ? '#000000' : '#0c0a09' }}
-    >
+    <div className="relative w-full h-screen overflow-hidden bg-black pt-[52px]">
       {/* Full-viewport graph */}
-      {viewMode === 'galaxy' ? (
-        <ForceGraph3D
-          ref={graphRef}
-          nodes={filteredGraphData?.nodes ?? []}
-          edges={filteredGraphData?.edges ?? []}
-          clusters={filteredGraphData?.clusters}
-          selectedId={selectedNode}
-          onSelectNode={setSelectedNode}
-          onBackgroundClick={() => setSelectedNode(null)}
-          focusClusterId={focusCluster?.id ?? null}
-          focusClusterTs={focusCluster?.ts}
-          focusNodeId={focusNode?.id ?? null}
-          focusNodeTs={focusNode?.ts}
-          autoSpin={false}
-          bgColor="galaxy"
-          layoutPreset={layout}
-          neuralMode={{
-            enabled: true,
-            breathingRate: 0.02,
-            breathingAmplitude: 0.05,
-            bloomStrength: perf.bloomStrength,
-            particlesAlways: perf.particlesAlways,
-          }}
-          showBackgroundStars={showBgStars}
-          showInnerStars={perf.showInnerStars}
-          showNebulae={showNebulae}
-          showEdges={perf.showEdges}
-          showCelestialObjects={showCelestialObjects}
-          showClusterGalaxies={showClusterGalaxies}
-          showMilkyWay={showMilkyWay}
-          showAsteroids={showAsteroids}
-          showSolarSystems={showSolarSystems}
-          clusterSeparation={clusterSeparation}
-          className="w-full h-full"
-        />
-      ) : (
-        <ForceGraph2D
-          nodes={filteredGraphData?.nodes ?? []}
-          edges={filteredGraphData?.edges ?? []}
-          selectedId={selectedNode}
-          onSelectNode={setSelectedNode}
-          onBackgroundClick={() => setSelectedNode(null)}
-          className="w-full h-full"
-        />
-      )}
+      <ForceGraph3D
+        ref={graphRef}
+        nodes={filteredGraphData?.nodes ?? []}
+        edges={filteredGraphData?.edges ?? []}
+        clusters={filteredGraphData?.clusters}
+        selectedId={selectedNode}
+        onSelectNode={setSelectedNode}
+        onBackgroundClick={() => setSelectedNode(null)}
+        focusClusterId={focusCluster?.id ?? null}
+        focusClusterTs={focusCluster?.ts}
+        focusNodeId={focusNode?.id ?? null}
+        focusNodeTs={focusNode?.ts}
+        autoSpin={false}
+        bgColor="galaxy"
+        layoutPreset={layout}
+        neuralMode={{
+          enabled: true,
+          breathingRate: 0.02,
+          breathingAmplitude: 0.05,
+          bloomStrength: perf.bloomStrength,
+          particlesAlways: perf.particlesAlways,
+        }}
+        showBackgroundStars={showBgStars}
+        showInnerStars={false}
+        showNebulae={showNebulae}
+        showEdges={perf.showEdges}
+        showCelestialObjects={showCelestialObjects}
+        showClusterGalaxies={showClusterGalaxies}
+        showMilkyWay={showMilkyWay}
+        showAsteroids={false}
+        showSolarSystems={false}
+        className="w-full h-full"
+      />
 
       {/* ── HUD: Glass top bar ──────────────────────────────────────── */}
-      <div className={`fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 border-b ${
-        viewMode === 'galaxy'
-          ? 'glass-overlay border-white/[0.12] border-t-white/[0.20]'
-          : 'bg-[#0c0a09]/95 backdrop-blur-sm border-stone-800/60'
-      }`}>
+      <div className="fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 glass-overlay border-b border-white/[0.12] border-t-white/[0.20]">
         {/* Logo mark */}
         <img src={avatarUrl} alt="Nova" className="w-7 h-7 rounded-full object-cover mr-2 shrink-0" />
-        <span className="text-base font-semibold text-stone-200 shrink-0 mr-3">Brain</span>
-
-        {/* View toggle */}
-        <div className="flex items-center bg-stone-800/60 rounded-lg p-0.5 shrink-0">
-          <button
-            onClick={() => setViewMode('galaxy')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors duration-150 ${
-              viewMode === 'galaxy'
-                ? 'bg-stone-700 text-stone-200'
-                : 'text-stone-500 hover:text-stone-300'
-            }`}
-          >
-            <Orbit size={12} />
-            Galaxy
-          </button>
-          <button
-            onClick={() => setViewMode('graph')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors duration-150 ${
-              viewMode === 'graph'
-                ? 'bg-stone-700 text-stone-200'
-                : 'text-stone-500 hover:text-stone-300'
-            }`}
-          >
-            <GitFork size={12} />
-            Graph
-          </button>
-        </div>
+        <span className="text-base font-semibold text-stone-200 shrink-0">Brain</span>
 
         {/* Center stats */}
         <div className="flex-1 text-center text-xs font-mono text-stone-400 truncate px-4">
@@ -696,11 +630,7 @@ export default function Brain() {
 
       {/* ── Overlay: Display Settings ──────────────────────────────── */}
       {settingsOpen && (
-        <div
-          className="absolute inset-0 z-20"
-          onClick={(e) => { if (e.target === e.currentTarget) setSettingsOpen(false) }}
-        >
-          <div className="absolute top-[60px] right-3 w-[240px]
+          <div className="absolute top-[60px] right-3 w-[240px] z-20
                           glass-overlay border border-white/[0.12] border-t-white/[0.20] rounded-2xl
                           p-5 space-y-4">
             <button
@@ -719,24 +649,51 @@ export default function Brain() {
               )}
             </div>
 
-            {/* Bloom strength — Galaxy only */}
-            {viewMode === 'galaxy' && (
-              <div className="space-y-1.5">
-                <div className="text-[10px] text-stone-600">Bloom</div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="3"
-                    step="0.1"
-                    value={bloomStrength}
-                    onChange={(e) => setBloomStrength(parseFloat(e.target.value))}
-                    className="flex-1 h-1 accent-teal-500 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-webkit-slider-thumb]:appearance-none"
-                  />
-                  <span className="text-[10px] text-stone-500 w-6 text-right">{bloomStrength.toFixed(1)}</span>
-                </div>
+            {/* Node limit */}
+            <div className="space-y-2">
+              <div className="text-[10px] text-stone-600">Memories shown</div>
+              <div className="flex flex-wrap gap-1">
+                {[
+                  { label: '1', value: 1 },
+                  { label: '200', value: 200 },
+                  { label: '2k', value: 2000 },
+                  { label: '5k', value: 5000 },
+                  { label: 'All', value: engramStats?.total_engrams ?? 99999 },
+                ].map(({ label, value }) => (
+                  <button
+                    key={label}
+                    onClick={() => setNodeLimit(value)}
+                    className={`relative text-[10px] font-medium px-2 py-1 rounded transition-colors ${
+                      nodeLimit === value
+                        ? 'text-teal-400 bg-teal-500/15 border border-teal-500/30'
+                        : 'text-stone-500 hover:text-stone-300 border border-transparent hover:border-white/10'
+                    }`}
+                  >
+                    {label}
+                    {value === 2000 && (
+                      <span className="absolute -top-1 -right-1 w-1.5 h-1.5 rounded-full bg-teal-400" title="Recommended" />
+                    )}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
+
+            {/* Bloom strength */}
+            <div className="space-y-1.5">
+              <div className="text-[10px] text-stone-600">Bloom</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="3"
+                  step="0.1"
+                  value={bloomStrength}
+                  onChange={(e) => setBloomStrength(parseFloat(e.target.value))}
+                  className="flex-1 h-1 accent-teal-500 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-webkit-slider-thumb]:appearance-none"
+                />
+                <span className="text-[10px] text-stone-500 w-6 text-right">{bloomStrength.toFixed(1)}</span>
+              </div>
+            </div>
 
             <div className="space-y-2">
               <div className="text-[10px] text-stone-600 mb-1">Graph</div>
@@ -752,55 +709,29 @@ export default function Brain() {
               </button>
             </div>
 
-            {/* Galaxy-only settings */}
-            {viewMode === 'galaxy' && (
-              <>
-                <div className="space-y-2">
-                  <div className="text-[10px] text-stone-600 mb-1">Background</div>
-                  {[
-                    { label: 'Stars', value: showBgStars, set: setShowBgStars },
-                    { label: 'Inner Stars', value: showInnerStars, set: setShowInnerStars },
-                    { label: 'Milky Way', value: showMilkyWay, set: setShowMilkyWay },
-                    { label: 'Clouds', value: showNebulae, set: setShowNebulae },
-                    { label: 'Celestial Objects', value: showCelestialObjects, set: setShowCelestialObjects },
-                    { label: 'Asteroids', value: showAsteroids, set: setShowAsteroids },
-                    { label: 'Solar Systems', value: showSolarSystems, set: setShowSolarSystems },
-                    { label: 'Galaxy Halos', value: showClusterGalaxies, set: setShowClusterGalaxies },
-                  ].map(({ label, value, set }) => (
-                    <button
-                      key={label}
-                      onClick={() => set((v: boolean) => !v)}
-                      className={`block w-full text-left text-[11px] px-2 py-1 rounded transition-colors ${
-                        value
-                          ? 'text-teal-400 bg-teal-500/10'
-                          : 'text-stone-600 hover:text-stone-400'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Cluster separation */}
-                <div className="space-y-1.5">
-                  <div className="text-[10px] text-stone-600">Cluster Separation</div>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={clusterSeparation}
-                      onChange={(e) => setClusterSeparation(parseFloat(e.target.value))}
-                      className="flex-1 h-1 accent-teal-500 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-webkit-slider-thumb]:appearance-none"
-                    />
-                    <span className="text-[10px] text-stone-500 w-6 text-right">{clusterSeparation.toFixed(2)}</span>
-                  </div>
-                </div>
-              </>
-            )}
+            <div className="space-y-2">
+              <div className="text-[10px] text-stone-600 mb-1">Background</div>
+              {[
+                { label: 'Stars', value: showBgStars, set: setShowBgStars },
+                { label: 'Milky Way', value: showMilkyWay, set: setShowMilkyWay },
+                { label: 'Clouds', value: showNebulae, set: setShowNebulae },
+                { label: 'Celestial Objects', value: showCelestialObjects, set: setShowCelestialObjects },
+                { label: 'Galaxy Halos', value: showClusterGalaxies, set: setShowClusterGalaxies },
+              ].map(({ label, value, set }) => (
+                <button
+                  key={label}
+                  onClick={() => set((v: boolean) => !v)}
+                  className={`block w-full text-left text-[11px] px-2 py-1 rounded transition-colors ${
+                    value
+                      ? 'text-teal-400 bg-teal-500/10'
+                      : 'text-stone-600 hover:text-stone-400'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
       )}
 
       {/* ── Memory Detail Modal ─────────────────────────────────────────── */}

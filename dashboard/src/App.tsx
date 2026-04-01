@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { getAuthHeaders } from './api'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useLocalStorage } from './hooks/useLocalStorage'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
 import { CommandPalette } from './components/CommandPalette'
@@ -122,9 +121,7 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
 }
 
 function HomeRoute() {
-  const [brainEnabled] = useLocalStorage('brain.enabled', true)
-  if (!brainEnabled) return <Navigate to="/chat" replace />
-  return <AppLayout fullWidth><ErrorBoundary><Brain /></ErrorBoundary></AppLayout>
+  return <Navigate to="/chat" replace />
 }
 
 function AppShell() {
@@ -166,7 +163,7 @@ function AppShell() {
 
         {/* Routes WITH sidebar */}
         <Route path="/" element={<HomeRoute />} />
-        <Route path="/brain" element={<Navigate to="/" replace />} />
+        <Route path="/brain" element={<AppLayout fullWidth><ErrorBoundary><Brain /></ErrorBoundary></AppLayout>} />
         <Route path="/chat" element={<AppLayout fullWidth><ErrorBoundary><Chat /></ErrorBoundary></AppLayout>} />
         <Route path="/tasks" element={<AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout>} />
         <Route path="/friction" element={<AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout>} />

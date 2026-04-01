@@ -781,6 +781,7 @@ Comprehensive 5-discipline review (architecture, backend, frontend, security, te
 | **Post-pipeline agents** | Documentation, Diagramming, Security Review, Memory Extraction agents designed in Quartet spec but not built |
 | **Default pods** | Quick Reply, Research, Code Generation, Analysis designed but only Quartet shipped |
 | **ClaudeCode provider** | Spawn `claude -p` subprocess for zero API cost via Claude Max subscription. Designed, not implemented. |
+| **Brain 2D Graph View** | Obsidian-style 2D Canvas graph view for Brain page — simple dots/lines, no WebGL, can render all nodes without the 2K cap. Toggle between Galaxy (3D) and Graph (2D) views. |
 | **Web Push notifications** | Task completion push via PWA service worker |
 | **Key-level model restrictions** | `sk-nova-*` keys scoped to specific providers |
 | **Multi-model A/B testing** | Run two models on same subtask, Evaluation Agent picks better output |
