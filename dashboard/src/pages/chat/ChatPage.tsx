@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { streamChat, discoverModels, resolveModel, apiFetch, getOrCreateActiveConversation, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
-import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import { useVoiceChat } from '../../hooks/useVoiceChat'
@@ -37,7 +36,6 @@ export function Chat() {
     webSearchEnabled,
     deepResearchEnabled,
   } = useChatStore()
-  const { isAuthenticated } = useAuth()
   const queryClient = useQueryClient()
 
   const { name: aiName, greeting } = useNovaIdentity()
@@ -152,8 +150,6 @@ export function Chat() {
   // Never call resetConversation on failure — just leave the user in a
   // working state so they can keep chatting even if the API is down.
   useEffect(() => {
-    if (!isAuthenticated) return
-
     if (conversationId) {
       if (messages.length === 0 && !isStreaming) {
         loadConversation(conversationId).catch(() => {
@@ -267,9 +263,9 @@ export function Chat() {
     }
     setIsStreaming(true)
 
-    // Auto-create conversation for authenticated users without one
+    // Auto-create conversation without one
     let activeConversationId = conversationId
-    if (isAuthenticated && !activeConversationId) {
+    if (!activeConversationId) {
       try {
         const conv = await apiFetch<{ id: string }>('/api/v1/conversations', {
           method: 'POST',

@@ -112,36 +112,12 @@ export function clearLegacyChat() {
 
 const ChatContext = createContext<ChatStore | null>(null)
 
-/** Restore messages from localStorage (unauthenticated persistence). */
-function restoreLocalMessages(): { messages: Message[]; sessionId: string | undefined } {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return { messages: [], sessionId: undefined }
-    const data = JSON.parse(raw)
-    if (!Array.isArray(data?.messages)) return { messages: [], sessionId: undefined }
-    return {
-      messages: data.messages.map((m: { id?: string; role: string; content: string; timestamp: string; modelUsed?: string }) => ({
-        id: m.id ?? crypto.randomUUID(),
-        role: m.role as 'user' | 'assistant',
-        content: m.content,
-        timestamp: new Date(m.timestamp),
-        modelUsed: m.modelUsed,
-      })),
-      sessionId: data.sessionId,
-    }
-  } catch {
-    return { messages: [], sessionId: undefined }
-  }
-}
-
 export function ChatProvider({ children }: { children: ReactNode }) {
-  // Initialize from localStorage for unauthenticated, or conversation ID for authenticated
-  const stored = restoreLocalMessages()
   const activeConvId = localStorage.getItem('nova_active_conversation')
 
-  const [messages, setMessages] = useState<Message[]>(activeConvId ? [] : stored.messages)
+  const [messages, setMessages] = useState<Message[]>([])
   const [sessionId, setSessionId] = useState<string | undefined>(
-    activeConvId ?? stored.sessionId ?? undefined
+    activeConvId ?? undefined
   )
   const [conversationId, setConversationId] = useState<string | null>(activeConvId)
   const [modelId, _setModelId] = useState(
@@ -186,18 +162,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('nova_active_conversation')
     }
   }, [conversationId])
-
-  // Persist messages to localStorage for unauthenticated users
-  useEffect(() => {
-    if (conversationId) return  // Authenticated: Postgres handles persistence
-    if (messages.length === 0 && !sessionIdRef.current) return  // Nothing to persist
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      sessionId: sessionIdRef.current,
-      messages: messages
-        .filter(m => !m.isStreaming)
-        .map(m => ({ id: m.id, role: m.role, content: m.content, timestamp: m.timestamp.toISOString(), modelUsed: m.modelUsed })),
-    }))
-  }, [messages, conversationId])
 
   // Persist sidebar state
   useEffect(() => {
@@ -254,7 +218,6 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     setError(null)
     setPendingFiles([])
     setDraftInput('')
-    localStorage.removeItem(STORAGE_KEY)
   }, [])
 
   return (
