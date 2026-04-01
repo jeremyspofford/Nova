@@ -1,4 +1,4 @@
-import type { AgentInfo, ApiKey, CodeReviewVerdict, GuardrailFinding, OAIModel, PipelineTask, Pod, PodAgent, UsageEvent } from './types'
+import type { AgentInfo, AgentSession, ApiKey, CodeReviewVerdict, GuardrailFinding, OAIModel, PipelineTask, Pod, PodAgent, UsageEvent } from './types'
 
 // Admin secret is stored in localStorage so you can change it without
 // rebuilding the dashboard. Default matches the dev .env value.
@@ -179,6 +179,9 @@ export const getTaskFindings = (task_id: string) =>
 
 export const getTaskReviews = (task_id: string) =>
   apiFetch<CodeReviewVerdict[]>(`/api/v1/pipeline/tasks/${task_id}/reviews`)
+
+export const getTaskSessions = (task_id: string) =>
+  apiFetch<AgentSession[]>(`/api/v1/pipeline/tasks/${task_id}/sessions`)
 
 export interface Artifact {
   id: string
