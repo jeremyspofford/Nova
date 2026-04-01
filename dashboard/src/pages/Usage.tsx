@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
-import { BarChart3 } from 'lucide-react'
+import { BarChart3, DollarSign, TrendingUp, TrendingDown } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
@@ -72,7 +72,7 @@ export function Usage() {
   const { activePreset, mode } = useTheme()
 
   const chartColors = useMemo(() => ({
-    bar:      cssVar('--accent-700') || '#0f766e',
+    bar:      cssVar('--accent-500') || '#19A89E',
     grid:     cssVar('--neutral-200') || '#e7e5e0',
     tick:     cssVar('--neutral-400') || '#a8a29e',
     tooltipBg: cssVar('--card') || '#ffffff',
@@ -96,6 +96,21 @@ export function Usage() {
   const costInPeriod = (since: Date) =>
     events.filter(e => new Date(e.created_at) >= since).reduce((s, e) => s + (e.cost_usd ?? 0), 0)
 
+  // Compare period cost vs previous period for trend arrows
+  const costInRange = (from: Date, to: Date) =>
+    events.filter(e => { const d = new Date(e.created_at); return d >= from && d < to }).reduce((s, e) => s + (e.cost_usd ?? 0), 0)
+
+  const twoDaysAgo  = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000)
+  const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+  const twoMonthsAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000)
+
+  const todayCost = costInPeriod(dayAgo)
+  const yesterdayCost = costInRange(twoDaysAgo, dayAgo)
+  const weekCost = costInPeriod(weekAgo)
+  const lastWeekCost = costInRange(twoWeeksAgo, weekAgo)
+  const monthCost = costInPeriod(monthAgo)
+  const lastMonthCost = costInRange(twoMonthsAgo, monthAgo)
+
   const totalCost   = events.reduce((s, e) => s + (e.cost_usd ?? 0), 0)
   const totalTokens = events.reduce((s, e) => s + e.input_tokens + e.output_tokens, 0)
   const totalCalls  = events.length
@@ -104,36 +119,89 @@ export function Usage() {
   const chartData   = getChartData(view, events, sortBy)
   const isHorizontal = HORIZONTAL_VIEWS.includes(view)
 
+  const trendDelta = (current: number, previous: number) => {
+    if (previous === 0) return null
+    const diff = current - previous
+    return { diff, direction: diff >= 0 ? 'up' as const : 'down' as const }
+  }
+
+  const todayTrend = trendDelta(todayCost, yesterdayCost)
+  const weekTrend = trendDelta(weekCost, lastWeekCost)
+  const monthTrend = trendDelta(monthCost, lastMonthCost)
+
   return (
     <div className="space-y-6">
       <PageHeader title="Usage" description="Track LLM costs and usage across all providers and models." helpEntries={HELP_ENTRIES} />
 
-      {/* Period cost cards */}
-      <p className="text-caption text-content-tertiary -mt-3">Estimated spend per time window — based on per-token pricing from each provider.</p>
+      {/* Period cost cards with trend indicators */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Today',      value: `$${costInPeriod(dayAgo).toFixed(4)}`   },
-          { label: 'This Week',  value: `$${costInPeriod(weekAgo).toFixed(4)}`  },
-          { label: 'This Month', value: `$${costInPeriod(monthAgo).toFixed(4)}` },
-          { label: 'This Year',  value: `$${costInPeriod(yearAgo).toFixed(4)}`  },
-        ].map(({ label, value }) => (
-          <Card key={label} className="p-4">
-            <Metric label={label} value={value} />
-          </Card>
-        ))}
-      </div>
+        {/* Hero: Today's spend */}
+        <Card className={clsx(
+          'col-span-2 sm:col-span-1 p-5 relative overflow-hidden',
+          todayCost > 0 && 'border-accent/30 shadow-[0_0_20px_rgba(25,168,158,0.15)]',
+        )}>
+          <div className="flex items-center gap-3">
+            <div className={clsx(
+              'flex items-center justify-center w-10 h-10 rounded-lg',
+              todayCost > 0 ? 'bg-accent/15 text-accent' : 'bg-surface-elevated text-content-tertiary',
+            )}>
+              <DollarSign size={20} />
+            </div>
+            <div>
+              <p className="text-caption text-content-tertiary">Today</p>
+              <p className={clsx(
+                'text-2xl font-bold tracking-tight font-mono',
+                todayCost > 0 ? 'text-accent' : 'text-content-primary',
+              )}>
+                ${todayCost.toFixed(2)}
+              </p>
+            </div>
+          </div>
+          {todayTrend && (
+            <div className={clsx(
+              'mt-2 flex items-center gap-1 text-caption',
+              todayTrend.direction === 'up' ? 'text-warning' : 'text-success',
+            )}>
+              {todayTrend.direction === 'up'
+                ? <TrendingUp size={12} />
+                : <TrendingDown size={12} />}
+              <span>${Math.abs(todayTrend.diff).toFixed(2)} vs yesterday</span>
+            </div>
+          )}
+        </Card>
 
-      {/* All-time summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {[
-          { label: 'Total Cost',   value: `$${totalCost.toFixed(4)}`   },
-          { label: 'Total Tokens', value: totalTokens.toLocaleString() },
-          { label: 'Total Calls',  value: totalCalls.toLocaleString()  },
-        ].map(({ label, value }) => (
-          <Card key={label} className="p-4">
-            <Metric label={label} value={value} />
-          </Card>
-        ))}
+        {/* Secondary period cards with deltas */}
+        <Card className="p-4">
+          <Metric label="This Week" value={`$${weekCost.toFixed(2)}`} />
+          {weekTrend && (
+            <div className={clsx(
+              'mt-1 flex items-center gap-1 text-caption',
+              weekTrend.direction === 'up' ? 'text-warning' : 'text-success',
+            )}>
+              {weekTrend.direction === 'up' ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+              <span>${Math.abs(weekTrend.diff).toFixed(2)}</span>
+            </div>
+          )}
+        </Card>
+        <Card className="p-4">
+          <Metric label="This Month" value={`$${monthCost.toFixed(2)}`} />
+          {monthTrend && (
+            <div className={clsx(
+              'mt-1 flex items-center gap-1 text-caption',
+              monthTrend.direction === 'up' ? 'text-warning' : 'text-success',
+            )}>
+              {monthTrend.direction === 'up' ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+              <span>${Math.abs(monthTrend.diff).toFixed(2)}</span>
+            </div>
+          )}
+        </Card>
+        <Card className="p-4">
+          <Metric label="All Time" value={`$${totalCost.toFixed(2)}`} />
+          <div className="mt-1 flex items-center gap-3 text-caption text-content-tertiary">
+            <span>{totalTokens.toLocaleString()} tokens</span>
+            <span>{totalCalls.toLocaleString()} calls</span>
+          </div>
+        </Card>
       </div>
 
       {/* Chart section */}

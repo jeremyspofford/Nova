@@ -867,6 +867,7 @@ function TaskReviewsTab({ taskId }: { taskId: string }) {
 // ── Submit form ────────────────────────────────────────────────────────────────
 
 function SubmitForm() {
+  const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [podName, setPodName] = useState('')
   const [modelId, setModelId] = useState('')
@@ -884,6 +885,7 @@ function SubmitForm() {
     ),
     onSuccess: () => {
       setInput('')
+      setOpen(false)
       qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
       qc.invalidateQueries({ queryKey: ['pipeline-stats'] })
     },
@@ -900,47 +902,58 @@ function SubmitForm() {
   ]
 
   return (
-    <Card className="p-4">
-      <h2 className="mb-3 text-compact font-semibold text-content-primary">Submit Task</h2>
-      <div className="space-y-2">
-        <Textarea
-          rows={3}
-          placeholder="Describe what you want the agent pipeline to do..."
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && input.trim()) submit.mutate()
-          }}
-        />
-        <div className="flex flex-wrap gap-2">
-          <div className="w-40">
-            <Select
-              value={podName}
-              onChange={e => setPodName(e.target.value)}
-              items={podItems}
-            />
+    <Card className="overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-surface-card-hover transition-colors"
+      >
+        <span className="flex items-center gap-2 text-compact font-medium text-content-secondary">
+          <Send size={14} className="text-content-tertiary" />
+          Submit a manual task
+        </span>
+        {open ? <ChevronUp size={14} className="text-content-tertiary" /> : <ChevronDown size={14} className="text-content-tertiary" />}
+      </button>
+      {open && (
+        <div className="px-4 pb-4 space-y-2 border-t border-border-subtle pt-3">
+          <Textarea
+            rows={3}
+            placeholder="Describe what you want the agent pipeline to do..."
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && input.trim()) submit.mutate()
+            }}
+          />
+          <div className="flex flex-wrap gap-2">
+            <div className="w-40">
+              <Select
+                value={podName}
+                onChange={e => setPodName(e.target.value)}
+                items={podItems}
+              />
+            </div>
+            <div className="w-40">
+              <Select
+                value={modelId}
+                onChange={e => setModelId(e.target.value)}
+                items={modelItems}
+              />
+            </div>
+            <Button
+              className="ml-auto"
+              icon={<Send size={14} />}
+              onClick={() => submit.mutate()}
+              disabled={!input.trim()}
+              loading={submit.isPending}
+            >
+              Submit<span className="hidden sm:inline"> (Cmd+Enter)</span>
+            </Button>
           </div>
-          <div className="w-40">
-            <Select
-              value={modelId}
-              onChange={e => setModelId(e.target.value)}
-              items={modelItems}
-            />
-          </div>
-          <Button
-            className="ml-auto"
-            icon={<Send size={14} />}
-            onClick={() => submit.mutate()}
-            disabled={!input.trim()}
-            loading={submit.isPending}
-          >
-            Submit<span className="hidden sm:inline"> (Cmd+Enter)</span>
-          </Button>
+          {submit.isError && (
+            <p className="text-caption text-danger">Failed to submit: {String(submit.error)}</p>
+          )}
         </div>
-        {submit.isError && (
-          <p className="text-caption text-danger">Failed to submit: {String(submit.error)}</p>
-        )}
-      </div>
+      )}
     </Card>
   )
 }
@@ -1005,8 +1018,10 @@ function TaskRow({
         'hover:bg-surface-card-hover',
         selected && 'bg-accent/10',
         (needsReview || needsClarification) && !selected && 'bg-info-dim/30',
-        isActive && !needsReview && !needsClarification && 'border-l-2 border-l-accent bg-accent-dim/30',
-        isTerminal && !selected && 'opacity-75',
+        // Running tasks: teal left accent + subtle glow
+        isActive && !needsReview && !needsClarification && !selected && 'border-l-2 border-l-accent shadow-[inset_4px_0_8px_-4px_rgba(25,168,158,0.25)]',
+        // Terminal tasks visually recede
+        isTerminal && !selected && 'opacity-60 hover:opacity-80',
       )}
     >
       {/* Selection checkbox */}
@@ -1109,12 +1124,13 @@ function StatsRow() {
   })
 
   const isLoading = statsLoading || latencyLoading
+  const activeCount = stats?.active_count ?? 0
 
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_1fr] gap-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i} className="p-4">
+          <Card key={i} className={clsx('p-4', i === 0 && 'sm:row-span-1')}>
             <Skeleton lines={2} />
           </Card>
         ))}
@@ -1123,15 +1139,37 @@ function StatsRow() {
   }
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <Card className={clsx('p-4', (stats?.active_count ?? 0) > 0 && 'border-accent/30 dark:border-accent/20 glow-accent')}>
-        <Metric
-          label="Active Tasks"
-          value={stats?.active_count ?? 0}
-          icon={<Zap size={12} className={(stats?.active_count ?? 0) > 0 ? 'text-accent' : ''} />}
-          tooltip="Tasks currently running in the pipeline."
-        />
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {/* Hero metric — active tasks */}
+      <Card className={clsx(
+        'col-span-2 sm:col-span-1 p-5 relative overflow-hidden',
+        activeCount > 0 && 'border-accent/30 shadow-[0_0_20px_rgba(25,168,158,0.15)]',
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={clsx(
+            'flex items-center justify-center w-10 h-10 rounded-lg',
+            activeCount > 0
+              ? 'bg-accent/15 text-accent'
+              : 'bg-surface-elevated text-content-tertiary',
+          )}>
+            <Zap size={20} />
+          </div>
+          <div>
+            <p className="text-caption text-content-tertiary">Active Now</p>
+            <p className={clsx(
+              'text-2xl font-bold tracking-tight font-mono',
+              activeCount > 0 ? 'text-accent' : 'text-content-primary',
+            )}>
+              {activeCount}
+            </p>
+          </div>
+        </div>
+        {activeCount > 0 && (
+          <div className="absolute inset-0 rounded-[inherit] animate-[glow-pulse_3s_ease-in-out_infinite] pointer-events-none border border-accent/20" />
+        )}
       </Card>
+
+      {/* Secondary metrics */}
       <Card className="p-4">
         <Metric
           label="Completed Today"
@@ -1173,6 +1211,7 @@ export function Tasks() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const lastClickedRef = useRef<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const qc = useQueryClient()
 
   const { data: tasks = [], isFetching } = useQuery({
@@ -1289,7 +1328,6 @@ export function Tasks() {
       />
 
       {/* Stats row */}
-      <p className="text-caption text-content-tertiary -mb-4">Each task flows through 5 pipeline stages before producing a final result or escalating for review.</p>
       <StatsRow />
 
       {/* Filter bar */}
@@ -1409,9 +1447,13 @@ export function Tasks() {
           title={statusFilter === 'all' && sourceFilter === 'all' && !search ? 'No tasks yet' : 'No matching tasks'}
           description={
             statusFilter === 'all' && sourceFilter === 'all' && !search
-              ? 'Nova creates tasks automatically when working toward your goals. You can also submit tasks manually below.'
+              ? "Nova hasn't started any tasks yet. Create a goal and Nova will break it down into tasks automatically."
               : 'Try adjusting your filters or search query.'
           }
+          action={statusFilter === 'all' && sourceFilter === 'all' && !search ? {
+            label: 'Go to Goals',
+            onClick: () => navigate('/goals'),
+          } : undefined}
         />
       ) : (
         <Card className="overflow-hidden">
@@ -1427,8 +1469,9 @@ export function Tasks() {
         </Card>
       )}
 
-      {/* Submit form — below task list, power-user action */}
+      {/* Submit form — demoted below task list */}
       <SubmitForm />
+
 
       {/* Task detail sheet */}
       <TaskDetailSheet

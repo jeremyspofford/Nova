@@ -1082,6 +1082,19 @@ export const deleteKnowledgeCredential = (id: string) =>
 export const getKnowledgeStats = () =>
   apiFetch<KnowledgeStats>('/api/v1/knowledge/stats')
 
+export interface DomainSummary {
+  source_count: number
+  engram_count: number
+  by_kind: Record<string, { count: number; stale_count: number }>
+  domains: string[]
+  recent_sources: { title: string; kind: string }[]
+  gaps: { title: string; kind: string; coverage: string | null }[]
+  stale_sources: { title: string; kind: string }[]
+}
+
+export const getDomainSummary = () =>
+  apiFetch<DomainSummary>('/mem/api/v1/engrams/sources/domain-summary')
+
 // ── Engram Reindex ──────────────────────────────────────────────────────────
 
 export interface ReindexResponse {

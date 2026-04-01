@@ -16,8 +16,9 @@ import { RECOMMENDED_OLLAMA_MODELS, CLOUD_PROVIDER_ORDER } from '../constants'
 import {
   RefreshCw, Trash2, Download, Check, HardDrive, Cloud, Loader2,
   AlertTriangle, ExternalLink, Server, X, Info, Play, Cpu, Thermometer,
-  Activity, Layers, Zap,
+  Activity, Layers, Zap, ChevronDown, ChevronRight,
 } from 'lucide-react'
+import clsx from 'clsx'
 import { formatBytes } from '../lib/format'
 import { recoveryFetch } from '../api-recovery'
 import {
@@ -165,7 +166,9 @@ function ProviderCard({ provider }: { provider: ProviderModelList }) {
 
   return (
     <Card
-      className={configured ? 'border-accent-dim' : ''}
+      className={clsx(
+        configured ? 'border-accent-dim' : 'opacity-55 hover:opacity-75 transition-opacity',
+      )}
     >
       <div className="p-4">
         <div className="flex items-center justify-between mb-3">
@@ -254,6 +257,7 @@ function isRequiredModel(name: string): boolean {
 // ── Routing Stats section ─────────────────────────────────────────────────────
 
 function RoutingStatsSection() {
+  const [open, setOpen] = useState(false)
   const { data: stats, isLoading } = useQuery({
     queryKey: ['routing-stats'],
     queryFn: () => getRoutingStats(),
@@ -264,40 +268,48 @@ function RoutingStatsSection() {
   if (!stats || stats.by_model.length === 0) return null
 
   return (
-    <Card className="p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <Zap size={16} className="text-accent" />
-        <span className="text-compact font-semibold text-content-primary">Routing Stats (7d)</span>
-        <Tooltip content="Percentage of requests where the primary model failed and a fallback was used.">
-          <Badge color={stats.fallback_rate_pct > 20 ? 'warning' : 'success'} size="sm">
-            {stats.fallback_rate_pct.toFixed(1)}% fallback
-          </Badge>
-        </Tooltip>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-caption">
-          <thead>
-            <tr className="text-content-tertiary">
-              <th className="text-left py-1.5 pr-3 font-medium">Model</th>
-              <th className="text-right py-1.5 px-3 font-medium">Requests</th>
-              <th className="text-right py-1.5 px-3 font-medium">Avg Tokens</th>
-              <th className="text-right py-1.5 px-3 font-medium">Avg Latency</th>
-              <th className="text-right py-1.5 pl-3 font-medium">Cost</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border-subtle">
-            {stats.by_model.map(m => (
-              <tr key={m.model}>
-                <td className="py-1.5 pr-3 font-mono text-content-primary">{m.model}</td>
-                <td className="py-1.5 px-3 text-right text-content-secondary">{m.requests.toLocaleString()}</td>
-                <td className="py-1.5 px-3 text-right text-content-secondary">{m.avg_tokens.toLocaleString()}</td>
-                <td className="py-1.5 px-3 text-right text-content-secondary">{(m.avg_latency_ms / 1000).toFixed(1)}s</td>
-                <td className="py-1.5 pl-3 text-right font-mono text-content-secondary">${m.cost_usd.toFixed(4)}</td>
+    <Card className="overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center justify-between w-full px-4 py-3 text-left hover:bg-surface-card-hover transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <Zap size={16} className="text-accent" />
+          <span className="text-compact font-semibold text-content-primary">Routing Stats (7d)</span>
+          <Tooltip content="Percentage of requests where the primary model failed and a fallback was used.">
+            <Badge color={stats.fallback_rate_pct > 20 ? 'warning' : 'success'} size="sm">
+              {stats.fallback_rate_pct.toFixed(1)}% fallback
+            </Badge>
+          </Tooltip>
+        </div>
+        {open ? <ChevronDown size={14} className="text-content-tertiary" /> : <ChevronRight size={14} className="text-content-tertiary" />}
+      </button>
+      {open && (
+        <div className="px-4 pb-4 overflow-x-auto border-t border-border-subtle pt-3">
+          <table className="w-full text-caption">
+            <thead>
+              <tr className="text-content-tertiary">
+                <th className="text-left py-1.5 pr-3 font-medium">Model</th>
+                <th className="text-right py-1.5 px-3 font-medium">Requests</th>
+                <th className="text-right py-1.5 px-3 font-medium">Avg Tokens</th>
+                <th className="text-right py-1.5 px-3 font-medium">Avg Latency</th>
+                <th className="text-right py-1.5 pl-3 font-medium">Cost</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-border-subtle">
+              {stats.by_model.map(m => (
+                <tr key={m.model}>
+                  <td className="py-1.5 pr-3 font-mono text-content-primary">{m.model}</td>
+                  <td className="py-1.5 px-3 text-right text-content-secondary">{m.requests.toLocaleString()}</td>
+                  <td className="py-1.5 px-3 text-right text-content-secondary">{m.avg_tokens.toLocaleString()}</td>
+                  <td className="py-1.5 px-3 text-right text-content-secondary">{(m.avg_latency_ms / 1000).toFixed(1)}s</td>
+                  <td className="py-1.5 pl-3 text-right font-mono text-content-secondary">${m.cost_usd.toFixed(4)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </Card>
   )
 }
@@ -512,8 +524,65 @@ export function Models() {
         }
       />
 
-      {/* Onboarding Banner */}
+      {/* Onboarding Banner — amber-dim for CPU-only warning */}
       {showOnboarding && <OnboardingBanner onDismiss={dismissOnboarding} />}
+
+      {/* Active model hero — the one-second answer */}
+      {activeBackend !== 'none' && (
+        <Card className={clsx(
+          'p-5 relative overflow-hidden',
+          (backendState === 'ready' || backendState === 'running') && 'border-accent/30 shadow-[0_0_20px_rgba(25,168,158,0.15)]',
+        )}>
+          <div className="flex items-center gap-4">
+            <div className={clsx(
+              'flex items-center justify-center w-10 h-10 rounded-lg',
+              (backendState === 'ready' || backendState === 'running')
+                ? 'bg-accent/15 text-accent'
+                : backendState === 'switching' || backendState === 'starting'
+                  ? 'bg-warning-dim text-warning'
+                  : 'bg-surface-elevated text-content-tertiary',
+            )}>
+              {activeBackend === 'ollama' ? <HardDrive size={20} /> : <Server size={20} />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-caption text-content-tertiary">Active Backend</p>
+                <Badge
+                  color={backendState === 'ready' || backendState === 'running' ? 'success' : backendState === 'switching' || backendState === 'starting' ? 'warning' : 'danger'}
+                  dot size="sm"
+                >
+                  {backendState}
+                </Badge>
+              </div>
+              <p className="text-xl font-bold tracking-tight text-content-primary">
+                {activeBackend === 'ollama' ? 'Ollama' : activeBackend.toUpperCase()}
+                {backendStatus.data?.active_model && (
+                  <span className="ml-2 text-base font-mono font-normal text-content-secondary">
+                    {backendStatus.data.active_model}
+                  </span>
+                )}
+              </p>
+              <div className="flex items-center gap-3 mt-1 text-caption text-content-tertiary">
+                {gpuStats.data && (
+                  <span className="flex items-center gap-1">
+                    <Cpu size={10} className="text-accent" />
+                    GPU {gpuStats.data.gpu_utilization_pct}%
+                    <span className="text-content-tertiary">|</span>
+                    VRAM {gpuStats.data.vram_used_gb}/{gpuStats.data.vram_total_gb} GB
+                  </span>
+                )}
+                {ollamaStatus.data && activeBackend === 'ollama' && (
+                  <span>{ollamaStatus.data.gpu_available ? 'GPU accelerated' : 'CPU only'}</span>
+                )}
+                {hasCloudProvider && <span>Cloud fallback available</span>}
+              </div>
+            </div>
+          </div>
+          {(backendState === 'ready' || backendState === 'running') && (
+            <div className="absolute inset-0 rounded-[inherit] animate-[glow-pulse_3s_ease-in-out_infinite] pointer-events-none border border-accent/20" />
+          )}
+        </Card>
+      )}
 
       {/* Section A: Local Models (Ollama) */}
       {activeBackend === 'ollama' && (

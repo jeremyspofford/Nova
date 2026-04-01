@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Globe, Lightbulb, Plus, Rss, Users } from 'lucide-react'
-import { getKnowledgeSources, getKnowledgeStats, getIntelStats, getIntelRecommendations, updateRecommendation, type KnowledgeSource, type IntelRecommendation } from '../api'
+import { Brain, ChevronRight, Globe, Lightbulb, Plus, Rss, Users } from 'lucide-react'
+import clsx from 'clsx'
+import { getKnowledgeSources, getKnowledgeStats, getIntelStats, getIntelRecommendations, updateRecommendation, getDomainSummary, type KnowledgeSource, type IntelRecommendation } from '../api'
 import { useTabHash } from '../hooks/useTabHash'
 import { PageHeader } from '../components/layout/PageHeader'
-import { Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
+import { Badge, Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
 import { SourceCard } from '../components/sources/SourceCard'
 import { AddSourceModal } from '../components/sources/AddSourceModal'
 import { CredentialManager } from '../components/sources/CredentialManager'
@@ -51,6 +52,19 @@ export function Sources() {
     staleTime: 30_000,
   })
 
+  const { data: domainSummary } = useQuery({
+    queryKey: ['domain-summary'],
+    queryFn: getDomainSummary,
+    staleTime: 60_000,
+  })
+
+  const { data: pendingRecs = [] } = useQuery({
+    queryKey: ['intel-recs', 'pending'],
+    queryFn: () => getIntelRecommendations({ status: 'pending' }),
+    staleTime: 10_000,
+  })
+
+  const pendingRecCount = pendingRecs.length
   const statsLoading = knowledgeStatsLoading || intelStatsLoading
 
   const totalSources = (knowledgeStats?.total_sources ?? 0) + (intelStats?.active_feeds ?? 0)
@@ -84,40 +98,82 @@ export function Sources() {
         }
       />
 
-      {/* Stats row */}
-      {statsLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Card key={i} className="p-4">
-              <Skeleton lines={2} />
-            </Card>
-          ))}
-        </div>
+      {/* Domain summary hero */}
+      {domainSummary && domainSummary.domains.length > 0 ? (
+        <Card className={clsx(
+          'p-5 relative overflow-hidden',
+          'border-accent/20 shadow-[0_0_20px_rgba(25,168,158,0.08)]',
+        )}>
+          <div className="flex items-start gap-3 mb-3">
+            <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent/15 text-accent shrink-0">
+              <Brain size={20} />
+            </div>
+            <div>
+              <p className="text-compact font-semibold text-content-primary">
+                Nova knows about
+              </p>
+              <p className="text-caption text-content-tertiary">
+                <span className="font-mono text-content-secondary">{domainSummary.engram_count.toLocaleString()}</span> memories from{' '}
+                <span className="font-mono text-content-secondary">{domainSummary.source_count}</span> sources
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {domainSummary.domains.map(domain => (
+              <Badge key={domain} color="accent" size="sm">{domain}</Badge>
+            ))}
+          </div>
+        </Card>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-          <Card className="p-4">
-            <Metric
-              label="Total Sources"
-              value={totalSources}
-              icon={<Globe size={12} />}
-              tooltip="Knowledge sources plus active intel feeds."
-            />
-          </Card>
-          <Card className="p-4">
-            <Metric
-              label="Active"
-              value={activeSources}
-              tooltip="Sources and feeds currently being monitored."
-            />
-          </Card>
-          <Card className="p-4">
-            <Metric
-              label="Credentials"
-              value={totalCredentials}
-              tooltip="Stored authentication tokens for private sources."
-            />
-          </Card>
-        </div>
+        /* Stats row fallback when no domain data */
+        statsLoading ? (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Card key={i} className="p-4">
+                <Skeleton lines={2} />
+              </Card>
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card className="p-4">
+              <Metric
+                label="Total Sources"
+                value={totalSources}
+                icon={<Globe size={12} />}
+                tooltip="Knowledge sources plus active intel feeds."
+              />
+            </Card>
+            <Card className="p-4">
+              <Metric
+                label="Active"
+                value={activeSources}
+                tooltip="Sources and feeds currently being monitored."
+              />
+            </Card>
+            <Card className="p-4">
+              <Metric
+                label="Credentials"
+                value={totalCredentials}
+                tooltip="Stored authentication tokens for private sources."
+              />
+            </Card>
+          </div>
+        )
+      )}
+
+      {/* Pending recommendations banner */}
+      {pendingRecCount > 0 && activeTab !== 'recommendations' && (
+        <button
+          onClick={() => setActiveTab('recommendations')}
+          className="flex items-center gap-2 w-full rounded-md border border-accent/20 bg-accent/5 px-4 py-2.5 text-left transition-colors hover:bg-accent/10"
+        >
+          <Lightbulb size={16} className="text-accent shrink-0" />
+          <span className="text-compact text-content-secondary">
+            <strong className="text-accent">{pendingRecCount}</strong> new recommendation{pendingRecCount !== 1 ? 's' : ''} waiting for review
+          </span>
+          <ChevronRight size={14} className="ml-auto text-content-tertiary" />
+        </button>
       )}
 
       {/* Tabs */}
