@@ -8,6 +8,7 @@ Endpoints:
   POST   /api/v1/pipeline/tasks/{task_id}/cancel Cancel a queued/pending task
   GET    /api/v1/pipeline/tasks/{task_id}/findings  Guardrail findings for a task
   GET    /api/v1/pipeline/tasks/{task_id}/reviews   Code review verdicts for a task
+  GET    /api/v1/pipeline/tasks/{task_id}/sessions  Agent sessions for a task
   GET    /api/v1/pipeline/tasks/{task_id}/artifacts Artifacts produced by a task
 
   GET    /api/v1/pods                            List all pods
@@ -449,6 +450,28 @@ async def list_task_reviews(task_id: str, _key: ApiKeyDep) -> list[dict]:
     return [
         _row_to_dict(r, uuid_fields=("id", "task_id", "agent_session_id"),
                      dt_fields=("created_at",))
+        for r in rows
+    ]
+
+
+@router.get("/api/v1/pipeline/tasks/{task_id}/sessions")
+async def list_task_sessions(task_id: str, _key: ApiKeyDep) -> list[dict]:
+    """List agent sessions for a pipeline task, ordered by execution sequence."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, task_id, role, status, output, error, traceback,
+                   duration_ms, model_used, cost_usd, started_at
+            FROM agent_sessions
+            WHERE task_id = $1::uuid
+            ORDER BY started_at
+            """,
+            task_id,
+        )
+    return [
+        _row_to_dict(r, uuid_fields=("id", "task_id"),
+                     dt_fields=("started_at",))
         for r in rows
     ]
 
