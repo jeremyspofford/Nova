@@ -218,6 +218,7 @@ async def get_pipeline_task(task_id: str, _key: ApiKeyDep) -> dict:
                    t.retry_count, t.max_retries,
                    t.queued_at, t.started_at, t.completed_at, t.metadata,
                    t.total_cost_usd,
+                   t.checkpoint,
                    (SELECT COUNT(*) FROM guardrail_findings gf WHERE gf.task_id = t.id) AS findings_count,
                    (SELECT COUNT(*) FROM code_reviews cr WHERE cr.task_id = t.id) AS reviews_count,
                    (SELECT COUNT(*) FROM artifacts a WHERE a.task_id = t.id) AS artifacts_count
