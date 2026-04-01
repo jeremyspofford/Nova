@@ -82,19 +82,26 @@ function GoalStatsRow() {
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <Card className="p-4">
+      <Card className={clsx('p-4', (stats?.active ?? 0) > 0 && 'border-accent/30 dark:border-accent/20 glow-accent')}>
         <Metric
           label="Active Goals"
           value={stats?.active ?? 0}
-          icon={<Target size={12} />}
+          icon={<Target size={12} className={(stats?.active ?? 0) > 0 ? 'text-accent' : ''} />}
           tooltip="Goals currently being pursued by the Cortex autonomous brain."
         />
       </Card>
-      <Card className="p-4">
+      <Card className={clsx('p-4', stats && (
+        stats.success_rate >= 0.7 ? 'border-success/20' :
+        stats.success_rate >= 0.4 ? 'border-warning/20' :
+        stats.success_rate > 0 ? 'border-danger/20' : ''
+      ))}>
         <Metric
           label="Success Rate"
           value={stats ? `${Math.round(stats.success_rate * 100)}%` : '--'}
-          icon={<TrendingUp size={12} />}
+          icon={<TrendingUp size={12} className={stats ? (
+            stats.success_rate >= 0.7 ? 'text-success' :
+            stats.success_rate >= 0.4 ? 'text-warning' : 'text-danger'
+          ) : ''} />}
           tooltip="Percentage of goal iterations that produced useful progress."
         />
       </Card>
@@ -573,7 +580,12 @@ function GoalCard({ goal }: { goal: Goal }) {
     <>
       <Card
         variant="hoverable"
-        className="p-4"
+        className={clsx(
+          'p-4',
+          goal.status === 'active' && 'border-l-2 border-l-accent',
+          goal.status === 'paused' && 'opacity-75',
+          (goal.status === 'completed' || goal.status === 'failed' || goal.status === 'cancelled') && 'opacity-60',
+        )}
         onClick={() => setExpanded(v => !v)}
       >
         {/* Header row */}
@@ -936,32 +948,45 @@ export function Goals() {
         description="Define autonomous objectives for Nova to pursue"
         helpEntries={HELP_ENTRIES}
         actions={
-          <div className="flex items-center gap-2">
-            {/* Request input — always visible */}
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={request}
-                onChange={e => setRequest(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleRequest()}
-                placeholder="Tell Nova what you want to achieve..."
-                disabled={sending}
-                className="flex-1 h-9 rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors"
-              />
-              <Button onClick={handleRequest} disabled={!request.trim() || sending} size="sm">
-                {sending ? 'Sending...' : 'Request'}
-              </Button>
-            </div>
-
-            {/* Direct creation button — only when setting enabled */}
-            {directCreation && (
-              <Button variant="outline" size="sm" onClick={() => setShowCreate(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1" /> Create Directly
-              </Button>
-            )}
-          </div>
+          directCreation ? (
+            <Button variant="outline" size="sm" onClick={() => setShowCreate(true)}>
+              <Plus className="w-3.5 h-3.5 mr-1" /> Create Directly
+            </Button>
+          ) : undefined
         }
       />
+
+      {/* Request input — prominent card below header */}
+      <Card className="p-4">
+        <div className="flex gap-3 items-start">
+          <div className="flex-1">
+            <textarea
+              value={request}
+              onChange={e => setRequest(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleRequest()
+                }
+              }}
+              placeholder="Tell Nova what you want to achieve... (e.g. 'Monitor Ollama releases weekly' or 'Track AI security advisories')"
+              disabled={sending}
+              rows={2}
+              className="w-full resize-none rounded-sm border border-border bg-surface-input px-3 py-2.5 text-compact text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 transition-colors"
+            />
+            <p className="mt-1.5 text-micro text-content-tertiary">
+              Nova will structure your request into an actionable goal with success criteria, then ask for confirmation before creating it.
+            </p>
+          </div>
+          <Button
+            onClick={handleRequest}
+            disabled={!request.trim() || sending}
+            loading={sending}
+          >
+            {sending ? 'Sending...' : 'Request'}
+          </Button>
+        </div>
+      </Card>
 
       {/* Stats row */}
       <p className="text-caption text-content-tertiary -mb-4">Active goals, iteration throughput, and cumulative LLM spend across all autonomous objectives.</p>
@@ -1032,11 +1057,11 @@ export function Goals() {
               title={statusFilter === 'all' ? 'No goals yet' : `No ${statusFilter} goals`}
               description={
                 statusFilter === 'all'
-                  ? 'Create a goal to start autonomous operation.'
+                  ? 'Tell Nova what you want to accomplish. It will plan, execute, and track progress autonomously.'
                   : 'Try selecting a different filter.'
               }
               action={
-                statusFilter === 'all'
+                statusFilter === 'all' && directCreation
                   ? { label: 'Create Goal', onClick: () => setShowCreate(true) }
                   : undefined
               }
