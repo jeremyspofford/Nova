@@ -11,6 +11,7 @@ import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
 import { ContextPanel } from '../../components/chat/ContextPanel'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
+import { useMobileNav } from '../../hooks/useMobileNav'
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -45,6 +46,9 @@ export function Chat() {
   const [modelManagerOpen, setModelManagerOpen] = useState(false)
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(() => getHiddenModels())
   const [contextCollapsed, setContextCollapsed] = useLocalStorage('chat.contextCollapsed', false)
+
+  const { setHidden: setNavHidden } = useMobileNav()
+  const keyboardOpenRef = useRef(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -170,25 +174,52 @@ export function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])  // Run once on mount only
 
-  // Prevent iOS keyboard from shifting the viewport (mobile only)
+  // Prevent iOS keyboard from shifting viewport + hide nav when keyboard open
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv || !containerRef.current) return
-    // Only apply on touch devices — on desktop, visualViewport.height includes
-    // the NavBar area, which would push the chat input below the fold
     if (!('ontouchstart' in window)) return
 
     const onResize = () => {
       if (containerRef.current) {
         containerRef.current.style.height = `${vv.height}px`
       }
+      // Hide nav when keyboard is open (viewport shrinks significantly).
+      // Compare against window.innerHeight which updates on orientation change.
+      const keyboardOpen = vv.height < window.innerHeight - 100
+      keyboardOpenRef.current = keyboardOpen
+      setNavHidden(keyboardOpen)
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
       })
     }
     vv.addEventListener('resize', onResize)
-    return () => vv.removeEventListener('resize', onResize)
-  }, [])
+    return () => {
+      vv.removeEventListener('resize', onResize)
+      keyboardOpenRef.current = false
+      setNavHidden(false)
+    }
+  }, [setNavHidden])
+
+  // Auto-hide mobile nav on scroll down (skip when keyboard is open — keyboard handler owns nav state)
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el || !('ontouchstart' in window)) return
+
+    let lastScrollTop = el.scrollTop
+    const threshold = 10
+
+    const onScroll = () => {
+      if (keyboardOpenRef.current) return // keyboard handler owns nav state
+      const delta = el.scrollTop - lastScrollTop
+      if (Math.abs(delta) < threshold) return
+      setNavHidden(delta > 0) // scrolling down = hide
+      lastScrollTop = el.scrollTop
+    }
+
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [setNavHidden])
 
   const handleSubmit = useCallback(async (text: string, fromQueue = false) => {
     if (isStreaming && !fromQueue) {

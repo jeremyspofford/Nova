@@ -22,6 +22,7 @@ import clsx from 'clsx'
 import { useAuth } from '../../stores/auth-store'
 import { hasMinRole, type Role } from '../../lib/roles'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
+import { useMobileNav } from '../../hooks/useMobileNav'
 
 type NavItem = {
   to: string
@@ -71,6 +72,7 @@ export function MobileNav() {
   const { user, authConfig } = useAuth()
   const userRole: Role = (user?.role as Role) || (authConfig?.trusted_network ? 'owner' : 'guest')
   const [brainEnabled] = useLocalStorage('brain.enabled', true)
+  const { hidden } = useMobileNav()
 
   const isActive = (to: string) => {
     return location.pathname === to
@@ -88,7 +90,10 @@ export function MobileNav() {
   return (
     <>
       {/* Bottom tab bar */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface border-t border-border-subtle pb-[env(safe-area-inset-bottom)] glass-nav dark:border-white/[0.06]">
+      <nav className={clsx(
+        'md:hidden fixed bottom-0 left-0 right-0 z-40 bg-surface border-t border-border-subtle pb-[env(safe-area-inset-bottom)] glass-nav dark:border-white/[0.06] transition-transform duration-fast',
+        hidden && 'translate-y-full',
+      )}>
         <div className="flex items-center justify-around h-14">
           {visibleTabs.map(tab => {
             const Icon = tab.icon
