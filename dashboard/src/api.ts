@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentSession, ApiKey, CodeReviewVerdict, GuardrailFinding, OAIModel, PipelineTask, Pod, PodAgent, UsageEvent } from './types'
+import type { AgentInfo, AgentSession, ApiKey, CodeReviewVerdict, EngramDetail, GuardrailFinding, OAIModel, PipelineTask, Pod, PodAgent, UsageEvent } from './types'
 
 // Admin secret is stored in localStorage so you can change it without
 // rebuilding the dashboard. Default matches the dev .env value.
@@ -1101,6 +1101,9 @@ export interface DomainSummary {
 
 export const getDomainSummary = () =>
   apiFetch<DomainSummary>('/mem/api/v1/engrams/sources/domain-summary')
+
+export const getEngramDetail = (engramId: string) =>
+  apiFetch<EngramDetail>(`/mem/api/v1/engrams/${engramId}`)
 
 // ── Engram Reindex ──────────────────────────────────────────────────────────
 
