@@ -7,6 +7,7 @@ import { useNotifications, toastVariantFor, type PipelineNotification } from '..
 import { useToast } from '../ToastProvider'
 import { useDebug } from '../../stores/debug-store'
 import { MobileNavProvider } from '../../hooks/useMobileNav'
+import { useIsMobile } from '../../hooks/useIsMobile'
 
 const STORAGE_KEY = 'nova-sidebar-collapsed'
 
@@ -28,6 +29,7 @@ export function AppLayout({
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const { isDebug } = useDebug()
   const qc = useQueryClient()
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     try {
@@ -60,7 +62,7 @@ export function AppLayout({
             </div>
           )}
         </main>
-        <MobileNav />
+        {!isMobile && <MobileNav />}
         {isDebug && <LogFrictionButton />}
       </div>
     </MobileNavProvider>

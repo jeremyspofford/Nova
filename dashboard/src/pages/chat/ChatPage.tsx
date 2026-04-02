@@ -494,7 +494,7 @@ export function Chat() {
                 )}
               </div>
             </div>
-            <div className="shrink-0 w-full px-4 md:px-8 pb-16 md:pb-4">
+            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
               <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
@@ -545,7 +545,7 @@ export function Chat() {
               </p>
             )}
 
-            <div className="shrink-0 w-full px-4 md:px-8 pb-16 md:pb-4">
+            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
               <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
