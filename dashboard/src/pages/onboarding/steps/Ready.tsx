@@ -1,4 +1,4 @@
-import { Check, MessageSquare, Settings } from 'lucide-react'
+import { Check, MessageSquare, Settings, Code } from 'lucide-react'
 import { Button } from '../../../components/ui'
 
 interface Props {
@@ -32,13 +32,23 @@ export function Ready({ backend, model, onFinish }: Props) {
         <Settings className="w-3 h-3" />
         You can change models and backends anytime in Settings.
       </p>
-      <Button
-        size="lg"
-        icon={<MessageSquare className="w-4 h-4" />}
-        onClick={onFinish}
-      >
-        Start Chatting
-      </Button>
+      <div className="flex gap-3">
+        <Button
+          size="lg"
+          icon={<MessageSquare className="w-4 h-4" />}
+          onClick={onFinish}
+        >
+          Start Chatting
+        </Button>
+        <Button
+          size="lg"
+          variant="secondary"
+          icon={<Code className="w-4 h-4" />}
+          onClick={() => { window.location.href = '/editors' }}
+        >
+          Connect Your Editor
+        </Button>
+      </div>
     </div>
   )
 }

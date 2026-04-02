@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { streamChat, discoverModels, resolveModel, apiFetch, getOrCreateActiveConversation, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
-import { useAuth } from '../../stores/auth-store'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
 import { useVoiceChat } from '../../hooks/useVoiceChat'
@@ -11,6 +10,7 @@ import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
 import { ContextPanel } from '../../components/chat/ContextPanel'
 import { useLocalStorage } from '../../hooks/useLocalStorage'
+import { useMobileNav } from '../../hooks/useMobileNav'
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -36,7 +36,6 @@ export function Chat() {
     webSearchEnabled,
     deepResearchEnabled,
   } = useChatStore()
-  const { isAuthenticated } = useAuth()
   const queryClient = useQueryClient()
 
   const { name: aiName, greeting } = useNovaIdentity()
@@ -45,6 +44,9 @@ export function Chat() {
   const [modelManagerOpen, setModelManagerOpen] = useState(false)
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(() => getHiddenModels())
   const [contextCollapsed, setContextCollapsed] = useLocalStorage('chat.contextCollapsed', false)
+
+  const { setHidden: setNavHidden } = useMobileNav()
+  const keyboardOpenRef = useRef(false)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -148,8 +150,6 @@ export function Chat() {
   // Never call resetConversation on failure — just leave the user in a
   // working state so they can keep chatting even if the API is down.
   useEffect(() => {
-    if (!isAuthenticated) return
-
     if (conversationId) {
       if (messages.length === 0 && !isStreaming) {
         loadConversation(conversationId).catch(() => {
@@ -170,25 +170,52 @@ export function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])  // Run once on mount only
 
-  // Prevent iOS keyboard from shifting the viewport (mobile only)
+  // Prevent iOS keyboard from shifting viewport + hide nav when keyboard open
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv || !containerRef.current) return
-    // Only apply on touch devices — on desktop, visualViewport.height includes
-    // the NavBar area, which would push the chat input below the fold
     if (!('ontouchstart' in window)) return
 
     const onResize = () => {
       if (containerRef.current) {
         containerRef.current.style.height = `${vv.height}px`
       }
+      // Hide nav when keyboard is open (viewport shrinks significantly).
+      // Compare against window.innerHeight which updates on orientation change.
+      const keyboardOpen = vv.height < window.innerHeight - 100
+      keyboardOpenRef.current = keyboardOpen
+      setNavHidden(keyboardOpen)
       requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
       })
     }
     vv.addEventListener('resize', onResize)
-    return () => vv.removeEventListener('resize', onResize)
-  }, [])
+    return () => {
+      vv.removeEventListener('resize', onResize)
+      keyboardOpenRef.current = false
+      setNavHidden(false)
+    }
+  }, [setNavHidden])
+
+  // Auto-hide mobile nav on scroll down (skip when keyboard is open — keyboard handler owns nav state)
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el || !('ontouchstart' in window)) return
+
+    let lastScrollTop = el.scrollTop
+    const threshold = 10
+
+    const onScroll = () => {
+      if (keyboardOpenRef.current) return // keyboard handler owns nav state
+      const delta = el.scrollTop - lastScrollTop
+      if (Math.abs(delta) < threshold) return
+      setNavHidden(delta > 0) // scrolling down = hide
+      lastScrollTop = el.scrollTop
+    }
+
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [setNavHidden])
 
   const handleSubmit = useCallback(async (text: string, fromQueue = false) => {
     if (isStreaming && !fromQueue) {
@@ -236,9 +263,9 @@ export function Chat() {
     }
     setIsStreaming(true)
 
-    // Auto-create conversation for authenticated users without one
+    // Auto-create conversation without one
     let activeConversationId = conversationId
-    if (isAuthenticated && !activeConversationId) {
+    if (!activeConversationId) {
       try {
         const conv = await apiFetch<{ id: string }>('/api/v1/conversations', {
           method: 'POST',
@@ -456,7 +483,7 @@ export function Chat() {
           /* Empty state: greeting at top, input pinned to bottom */
           <>
             <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-[780px] mx-auto px-4 md:px-8 py-6">
+              <div className="mx-auto px-3 md:px-8 py-6 max-w-none md:max-w-3xl xl:max-w-4xl">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -467,8 +494,8 @@ export function Chat() {
                 )}
               </div>
             </div>
-            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
-              <div className="max-w-[780px] mx-auto">
+            <div className="shrink-0 w-full px-4 md:px-8 pb-16 md:pb-4">
+              <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>
@@ -477,7 +504,7 @@ export function Chat() {
           /* Active chat: scrollable messages + bottom-pinned input */
           <>
             <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="max-w-[780px] mx-auto px-4 md:px-8 py-6 space-y-6">
+              <div className="mx-auto px-3 md:px-8 py-6 space-y-4 max-w-none md:max-w-3xl xl:max-w-4xl">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -518,8 +545,8 @@ export function Chat() {
               </p>
             )}
 
-            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
-              <div className="max-w-[780px] mx-auto">
+            <div className="shrink-0 w-full px-4 md:px-8 pb-16 md:pb-4">
+              <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>

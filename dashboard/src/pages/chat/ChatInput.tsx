@@ -165,18 +165,18 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     <div
       ref={dropZoneRef}
       className={clsx(
-        'relative bg-surface rounded-2xl border border-border-subtle p-3 safe-area-pb shadow-sm transition-colors duration-fast',
+        'relative bg-surface rounded-3xl border border-border-subtle p-3 safe-area-pb shadow-sm transition-colors duration-fast',
         isDragging && 'bg-accent-dim border-accent',
       )}
     >
-      {/* Model selector + controls row */}
-      <div className="flex items-center justify-between mb-2 gap-2">
+      {/* Model selector + controls row — hidden on mobile */}
+      <div className="hidden md:flex items-center justify-between mb-2 gap-2">
         <div className="flex items-center gap-1.5">
           <ModelPicker
             value={modelId}
             onChange={onModelChange}
             models={modelPickerItems}
-            className="w-72"
+            className="w-44 md:w-72"
             buttonClassName="flex items-center justify-between gap-2 w-full px-3 py-1.5 bg-stone-700 rounded-full text-[13px] font-mono text-stone-300 border-none cursor-pointer"
           />
           <Tooltip content="Manage models">
@@ -280,31 +280,33 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
       <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
 
       <div className="flex items-end gap-2">
-        {/* Drawer toggle */}
-        <Tooltip content={drawerOpen ? 'Close controls' : 'Open controls'}>
-          <button
-            type="button"
-            onClick={() => setDrawerOpen(o => !o)}
-            className={clsx(
-              'relative flex items-center justify-center rounded-full border p-2 transition-all duration-fast shrink-0',
-              drawerOpen
-                ? 'border-accent text-accent bg-accent-dim'
-                : 'border-border text-content-tertiary hover:bg-surface-elevated hover:text-content-primary',
-            )}
-            style={{ height: '40px', width: '40px' }}
-          >
-            <Plus
-              size={18}
-              className="transition-transform duration-normal"
-              style={{ transform: drawerOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
-            />
-            {!drawerOpen && pendingFiles.length > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-micro font-medium text-neutral-950">
-                {pendingFiles.length}
-              </span>
-            )}
-          </button>
-        </Tooltip>
+        {/* Drawer toggle — hidden on mobile for cleaner input */}
+        <div className="hidden md:block shrink-0">
+          <Tooltip content={drawerOpen ? 'Close controls' : 'Open controls'}>
+            <button
+              type="button"
+              onClick={() => setDrawerOpen(o => !o)}
+              className={clsx(
+                'relative flex items-center justify-center rounded-full border p-2 transition-all duration-fast',
+                drawerOpen
+                  ? 'border-accent text-accent bg-accent-dim'
+                  : 'border-border text-content-tertiary hover:bg-surface-elevated hover:text-content-primary',
+              )}
+              style={{ height: '40px', width: '40px' }}
+            >
+              <Plus
+                size={18}
+                className="transition-transform duration-normal"
+                style={{ transform: drawerOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
+              />
+              {!drawerOpen && pendingFiles.length > 0 && (
+                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-micro font-medium text-neutral-950">
+                  {pendingFiles.length}
+                </span>
+              )}
+            </button>
+          </Tooltip>
+        </div>
 
         <textarea
           ref={textareaRef}
@@ -318,9 +320,9 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           style={{ minHeight: '40px', maxHeight: '400px', fontSize: '16px' }}
         />
 
-        {/* Voice controls */}
+        {/* Voice controls — hidden on mobile, shown md+ */}
         {voice?.available && (
-          <>
+          <div className="hidden md:contents">
             {/* Conversation mode toggle */}
             <Tooltip content={voice.conversationMode ? 'Exit conversation mode (Esc)' : 'Start conversation mode'}>
               <button
@@ -360,7 +362,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
                 </button>
               </Tooltip>
             )}
-          </>
+          </div>
         )}
 
         <Tooltip content="Send message">

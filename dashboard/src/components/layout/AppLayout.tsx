@@ -6,6 +6,7 @@ import { LogFrictionButton } from '../LogFrictionButton'
 import { useNotifications, toastVariantFor, type PipelineNotification } from '../../hooks/useNotifications'
 import { useToast } from '../ToastProvider'
 import { useDebug } from '../../stores/debug-store'
+import { MobileNavProvider } from '../../hooks/useMobileNav'
 
 const STORAGE_KEY = 'nova-sidebar-collapsed'
 
@@ -47,19 +48,21 @@ export function AppLayout({
   useNotifications(handleNotification)
 
   return (
-    <div className="flex h-screen bg-surface-root dark:bg-transparent">
-      <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
-      <main className={`flex-1 min-h-0 ${fullWidth ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'}`}>
-        {fullWidth ? (
-          children
-        ) : (
-          <div className="mx-auto max-w-[1200px] w-full px-6 py-8 animate-fade-in">
-            {children}
-          </div>
-        )}
-      </main>
-      <MobileNav />
-      {isDebug && <LogFrictionButton />}
-    </div>
+    <MobileNavProvider>
+      <div className="flex h-screen bg-surface-root dark:bg-transparent">
+        <Sidebar collapsed={collapsed} onToggle={() => setCollapsed(c => !c)} />
+        <main className={`flex-1 min-h-0 ${fullWidth ? 'overflow-hidden' : 'overflow-y-auto custom-scrollbar'}`}>
+          {fullWidth ? (
+            children
+          ) : (
+            <div className="mx-auto max-w-[1200px] w-full px-6 py-8 animate-fade-in">
+              {children}
+            </div>
+          )}
+        </main>
+        <MobileNav />
+        {isDebug && <LogFrictionButton />}
+      </div>
+    </MobileNavProvider>
   )
 }
