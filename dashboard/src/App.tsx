@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { getAuthHeaders } from './api'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { useIsMobile } from './hooks/useIsMobile'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
 import { CommandPalette } from './components/CommandPalette'
@@ -23,6 +24,7 @@ import { Goals } from './pages/Goals'
 import { Sources } from './pages/Sources'
 import { Recovery } from './pages/Recovery'
 import { About } from './pages/About'
+import { Benchmarks } from './pages/Benchmarks'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
@@ -126,6 +128,13 @@ function HomeRoute() {
   return <Navigate to="/chat" replace />
 }
 
+/** On mobile viewports, redirect all non-chat routes to /chat. */
+function MobileGuard({ children }: { children: React.ReactNode }) {
+  const isMobile = useIsMobile()
+  if (isMobile) return <Navigate to="/chat" replace />
+  return <>{children}</>
+}
+
 function AppShell() {
   // Optimistic: assume backend is up. Normal refreshes render instantly.
   // Only show startup screen if the health check actually fails.
@@ -165,21 +174,22 @@ function AppShell() {
 
         {/* Routes WITH sidebar */}
         <Route path="/" element={<HomeRoute />} />
-        <Route path="/brain" element={<AppLayout fullWidth><ErrorBoundary><Brain /></ErrorBoundary></AppLayout>} />
+        <Route path="/brain" element={<MobileGuard><AppLayout fullWidth><ErrorBoundary><Brain /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/chat" element={<AppLayout fullWidth><ErrorBoundary><Chat /></ErrorBoundary></AppLayout>} />
-        <Route path="/tasks" element={<AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout>} />
-        <Route path="/friction" element={<AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout>} />
-        <Route path="/pods" element={<AppLayout><ErrorBoundary><Pods /></ErrorBoundary></AppLayout>} />
-        <Route path="/usage" element={<AppLayout><ErrorBoundary><Usage /></ErrorBoundary></AppLayout>} />
-        <Route path="/goals" element={<AppLayout><ErrorBoundary><Goals /></ErrorBoundary></AppLayout>} />
-        <Route path="/sources" element={<AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout>} />
-        <Route path="/integrations" element={<AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout>} />
-        <Route path="/models" element={<AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout>} />
-        <Route path="/editors" element={<AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout>} />
-        <Route path="/users" element={<AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout>} />
-        <Route path="/settings" element={<AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout>} />
-        <Route path="/recovery" element={<AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout>} />
-        <Route path="/about" element={<AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout>} />
+        <Route path="/tasks" element={<MobileGuard><AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/friction" element={<MobileGuard><AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/pods" element={<MobileGuard><AppLayout><ErrorBoundary><Pods /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/usage" element={<MobileGuard><AppLayout><ErrorBoundary><Usage /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/goals" element={<MobileGuard><AppLayout><ErrorBoundary><Goals /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/sources" element={<MobileGuard><AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/integrations" element={<MobileGuard><AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/models" element={<MobileGuard><AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/editors" element={<MobileGuard><AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/users" element={<MobileGuard><AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/settings" element={<MobileGuard><AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/recovery" element={<MobileGuard><AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/benchmarks" element={<MobileGuard><AppLayout><ErrorBoundary><Benchmarks /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/about" element={<MobileGuard><AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout></MobileGuard>} />
 
         {/* Redirects for old routes */}
         <Route path="/intelligence" element={<Navigate to="/sources#recommendations" replace />} />
