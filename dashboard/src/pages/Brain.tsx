@@ -141,10 +141,22 @@ export default function Brain() {
   const [bloomStrength, setBloomStrength] = useLocalStorage('brain.bloomStrength', 1.5)
   const [nodeLimit, setNodeLimit] = useLocalStorage('brain.nodeLimit', 2000)
 
-  // Graph data
+  const { data: engramStats } = useQuery<{
+    total_engrams: number
+    total_edges: number
+    total_archived: number
+    by_type: Record<string, { total: number; superseded: number }>
+  }>({
+    queryKey: ['engram-stats'],
+    queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
+    staleTime: 30_000,
+  })
+
+  // Graph data — include superseded engrams when requesting more than 5k (i.e., "All")
+  const includeAll = nodeLimit > 5000
   const { data: graph } = useQuery<GraphData>({
-    queryKey: ['brain-graph', nodeLimit],
-    queryFn: () => apiFetch(`/mem/api/v1/engrams/graph/lightweight?max_nodes=${nodeLimit}`),
+    queryKey: ['brain-graph', nodeLimit, includeAll],
+    queryFn: () => apiFetch(`/mem/api/v1/engrams/graph/lightweight?max_nodes=${nodeLimit}${includeAll ? '&include_superseded=true' : ''}`),
     staleTime: 30_000,
     retry: 1,
   })
@@ -262,17 +274,6 @@ export default function Brain() {
   const selectedNodeBasic = selectedNode
     ? activeGraph?.nodes.find(n => n.id === selectedNode) ?? null
     : null
-
-  const { data: engramStats } = useQuery<{
-    total_engrams: number
-    total_edges: number
-    total_archived: number
-    by_type: Record<string, { total: number; superseded: number }>
-  }>({
-    queryKey: ['engram-stats'],
-    queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
-    staleTime: 30_000,
-  })
 
   const { data: routerStatus } = useQuery<{ observation_count: number }>({
     queryKey: ['engram-router-status'],
