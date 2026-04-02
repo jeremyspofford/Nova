@@ -81,8 +81,13 @@ export function useVoiceChat({
   useEffect(() => { isTranscribingRef.current = isTranscribing }, [isTranscribing])
   useEffect(() => { conversationModeRef.current = conversationMode }, [conversationMode])
 
-  // Check voice service availability
+  // Check voice service availability (requires HTTPS or localhost for mediaDevices)
   useEffect(() => {
+    const hasMicAccess = !!(navigator.mediaDevices?.getUserMedia)
+    if (!hasMicAccess) {
+      setVoiceAvailable(false)
+      return
+    }
     const check = async () => {
       try {
         const resp = await fetch('/voice-api/health/ready')
@@ -235,6 +240,10 @@ export function useVoiceChat({
   const startRecording = useCallback(async () => {
     stopAllPlayback()
     try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        onError?.('Microphone requires HTTPS. Connect via localhost or enable HTTPS.')
+        return
+      }
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true },
       })
@@ -299,6 +308,11 @@ export function useVoiceChat({
     }
 
     // Setup warm mic
+    if (!navigator.mediaDevices?.getUserMedia) {
+      onError?.('Microphone requires HTTPS')
+      setConversationMode(false)
+      return
+    }
     let cancelled = false
     ;(async () => {
       try {
