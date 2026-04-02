@@ -103,9 +103,9 @@ export function MorphButton(props: MorphButtonProps) {
         {state === 'stop-recording' && <Square size={14} fill="currentColor" />}
         {state === 'stop-conversation' && <Square size={14} fill="currentColor" />}
       </button>
-      {/* One-time hint for long-press */}
+      {/* One-time hint for long-press — desktop only, too cluttered on mobile */}
       {showHint && state === 'mic' && voiceAvailable && (
-        <div className="absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap bg-surface-elevated text-content-secondary text-micro px-2 py-1 rounded-md shadow-sm border border-border-subtle pointer-events-none animate-fade-in">
+        <div className="hidden md:block absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap bg-surface-elevated text-content-secondary text-micro px-2 py-1 rounded-md shadow-sm border border-border-subtle pointer-events-none animate-fade-in">
           Hold for conversation
         </div>
       )}

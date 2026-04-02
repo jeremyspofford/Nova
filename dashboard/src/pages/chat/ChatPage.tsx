@@ -478,7 +478,7 @@ export function Chat() {
           /* Empty state: greeting centered, input pinned to bottom */
           <>
             <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex items-end">
-              <div className="mx-auto px-3 md:px-8 py-6 max-w-none md:max-w-3xl xl:max-w-4xl w-full">
+              <div className="mx-auto px-4 md:px-8 py-6 max-w-none md:max-w-3xl xl:max-w-4xl w-full">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -499,7 +499,7 @@ export function Chat() {
           /* Active chat: scrollable messages + bottom-pinned input */
           <>
             <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="mx-auto px-3 md:px-8 py-6 space-y-4 max-w-none md:max-w-3xl xl:max-w-4xl">
+              <div className="mx-auto px-4 md:px-8 py-6 space-y-4 max-w-none md:max-w-3xl xl:max-w-4xl">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',

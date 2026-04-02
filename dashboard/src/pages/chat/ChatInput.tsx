@@ -179,7 +179,10 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     <div
       ref={dropZoneRef}
       className={clsx(
-        'relative bg-surface rounded-3xl border border-border-subtle p-3 safe-area-pb shadow-sm transition-colors duration-fast',
+        'relative safe-area-pb transition-colors duration-fast',
+        // Desktop: card treatment. Mobile: clean, minimal — like Claude
+        'md:bg-surface md:rounded-3xl md:border md:border-border-subtle md:p-3 md:shadow-sm',
+        'p-2',
         isDragging && 'bg-accent-dim border-accent',
       )}
     >
@@ -303,26 +306,8 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
       <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
 
-      {/* Mobile controls row — model chip + text size */}
-      <div className="md:hidden mb-1 flex items-center gap-2">
-        <ModelPicker
-          value={modelId}
-          onChange={onModelChange}
-          models={modelPickerItems}
-          className="w-auto"
-          buttonClassName="flex items-center gap-1 px-2.5 py-1 bg-surface-elevated rounded-full text-micro font-mono text-content-secondary cursor-pointer border-none"
-        />
-        <Tooltip content={`Text size: ${textSize}`}>
-          <button
-            type="button"
-            onClick={cycleTextSize}
-            className="flex items-center gap-1 px-2 py-1 rounded-full bg-surface-elevated text-micro text-content-secondary hover:text-content-primary transition-colors duration-fast"
-          >
-            <ALargeSmall size={12} />
-            <span className="font-mono">{TEXT_LABELS[textSize]}</span>
-          </button>
-        </Tooltip>
-      </div>
+      {/* Mobile controls row — model chip + text size (hidden for now, clean input like Claude) */}
+      {/* TODO: expose model/text-size selection via a settings sheet or long-press */}
 
       <div className="flex items-end gap-2">
         {/* Drawer toggle — hidden on mobile for cleaner input */}
@@ -361,7 +346,12 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           placeholder={voice?.conversationMode ? 'Conversation mode active (Esc to exit)' : `Message ${aiName}...`}
           rows={1}
           disabled={voice?.conversationMode}
-          className="flex-1 resize-none overflow-y-auto rounded-sm border border-border bg-surface-input px-4 py-2.5 text-compact text-content-primary placeholder:text-content-tertiary outline-none transition-colors duration-fast focus:border-border-focus focus:ring-2 focus:ring-accent-500/40 disabled:opacity-50"
+          className={clsx(
+            'flex-1 resize-none overflow-y-auto text-content-primary placeholder:text-content-tertiary outline-none transition-colors duration-fast disabled:opacity-50',
+            // Desktop: bordered input. Mobile: borderless, clean like Claude
+            'md:rounded-sm md:border md:border-border md:bg-surface-input md:px-4 md:py-2.5 md:focus:border-border-focus md:focus:ring-2 md:focus:ring-accent-500/40',
+            'rounded-xl bg-surface-elevated/50 px-4 py-3 md:rounded-sm md:bg-surface-input',
+          )}
           style={{ minHeight: '40px', maxHeight: '400px', fontSize: '16px' }}
         />
 
