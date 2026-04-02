@@ -170,24 +170,26 @@ export function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])  // Run once on mount only
 
-  // Prevent iOS keyboard from shifting viewport + hide nav when keyboard open
+  // Mobile keyboard handling: keep input visible without collapsing the layout.
+  // Instead of resizing the container (which collapses flex-1 messages to zero),
+  // we scroll the input into view and let the browser handle the viewport shift.
   useEffect(() => {
     const vv = window.visualViewport
     if (!vv || !containerRef.current) return
     if (!('ontouchstart' in window)) return
 
     const onResize = () => {
-      if (containerRef.current) {
-        containerRef.current.style.height = `${vv.height}px`
-      }
-      // Hide nav when keyboard is open (viewport shrinks significantly).
-      // Compare against window.innerHeight which updates on orientation change.
+      // Track keyboard state for scroll handler
       const keyboardOpen = vv.height < window.innerHeight - 100
       keyboardOpenRef.current = keyboardOpen
       setNavHidden(keyboardOpen)
-      requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-      })
+
+      // When keyboard opens, scroll input into view without resizing the container
+      if (keyboardOpen) {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+        })
+      }
     }
     vv.addEventListener('resize', onResize)
     return () => {
@@ -473,7 +475,7 @@ export function Chat() {
   return (
     <div className="flex h-full w-full overflow-hidden">
       {/* Chat Area */}
-      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent">
+      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent h-[100dvh] md:h-auto">
         {messages.length === 0 ? (
           /* Empty state: greeting centered, input pinned to bottom */
           <>
@@ -489,7 +491,7 @@ export function Chat() {
                 )}
               </div>
             </div>
-            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
+            <div className="shrink-0 w-full px-3 md:px-8 pb-2 md:pb-4">
               <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
@@ -540,7 +542,7 @@ export function Chat() {
               </p>
             )}
 
-            <div className="shrink-0 w-full px-4 md:px-8 pb-4">
+            <div className="shrink-0 w-full px-3 md:px-8 pb-2 md:pb-4">
               <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
