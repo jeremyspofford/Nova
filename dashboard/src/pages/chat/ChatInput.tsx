@@ -179,10 +179,10 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     <div
       ref={dropZoneRef}
       className={clsx(
-        'relative safe-area-pb transition-colors duration-fast',
-        // Desktop: card treatment. Mobile: clean, minimal — like Claude
-        'md:bg-surface md:rounded-3xl md:border md:border-border-subtle md:p-3 md:shadow-sm',
-        'p-2',
+        'relative transition-colors duration-fast',
+        // Desktop: card treatment with safe area. Mobile: clean, minimal
+        'md:bg-surface md:rounded-3xl md:border md:border-border-subtle md:p-3 md:shadow-sm md:safe-area-pb',
+        'px-2 py-1 md:p-3',
         isDragging && 'bg-accent-dim border-accent',
       )}
     >

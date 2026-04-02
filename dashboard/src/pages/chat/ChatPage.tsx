@@ -475,7 +475,7 @@ export function Chat() {
   return (
     <div className="flex h-full w-full overflow-hidden">
       {/* Chat Area */}
-      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent h-[100dvh] md:h-auto">
+      <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent">
         {messages.length === 0 ? (
           /* Empty state: greeting centered, input pinned to bottom */
           <>
@@ -491,7 +491,7 @@ export function Chat() {
                 )}
               </div>
             </div>
-            <div className="shrink-0 w-full px-3 md:px-8 pb-2 md:pb-4">
+            <div className="shrink-0 w-full px-2 md:px-8 pb-[env(safe-area-inset-bottom)] md:pb-4">
               <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
@@ -542,7 +542,7 @@ export function Chat() {
               </p>
             )}
 
-            <div className="shrink-0 w-full px-3 md:px-8 pb-2 md:pb-4">
+            <div className="shrink-0 w-full px-2 md:px-8 pb-[env(safe-area-inset-bottom)] md:pb-4">
               <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
