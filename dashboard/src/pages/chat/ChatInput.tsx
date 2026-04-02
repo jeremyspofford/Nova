@@ -10,6 +10,7 @@ import { FilePreviewBar } from './FilePreviewBar'
 import { AudioLevelIndicator } from '../../components/ui/AudioLevelIndicator'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { ModelPicker } from '../../components/ui/ModelPicker'
+import { MorphButton } from '../../components/ui/MorphButton'
 import type { ConversationState } from '../../hooks/useVoiceChat'
 
 export interface VoiceControls {
@@ -279,6 +280,17 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
       <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
 
+      {/* Mobile model selector — compact chip, reuses ModelPicker */}
+      <div className="md:hidden mb-1">
+        <ModelPicker
+          value={modelId}
+          onChange={onModelChange}
+          models={modelPickerItems}
+          className="w-auto"
+          buttonClassName="flex items-center gap-1 px-2.5 py-1 bg-surface-elevated rounded-full text-micro font-mono text-content-secondary cursor-pointer border-none"
+        />
+      </div>
+
       <div className="flex items-end gap-2">
         {/* Drawer toggle — hidden on mobile for cleaner input */}
         <div className="hidden md:block shrink-0">
@@ -320,60 +332,18 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           style={{ minHeight: '40px', maxHeight: '400px', fontSize: '16px' }}
         />
 
-        {/* Voice controls — hidden on mobile, shown md+ */}
-        {voice?.available && (
-          <div className="hidden md:contents">
-            {/* Conversation mode toggle */}
-            <Tooltip content={voice.conversationMode ? 'Exit conversation mode (Esc)' : 'Start conversation mode'}>
-              <button
-                type="button"
-                onClick={() => voice.setConversationMode(m => !m)}
-                disabled={voice.isTranscribing}
-                className={clsx(
-                  'flex items-center justify-center rounded-full p-2 transition-colors duration-fast shrink-0',
-                  voice.conversationMode
-                    ? 'bg-accent text-neutral-950 hover:bg-accent-hover'
-                    : 'border border-border text-content-tertiary hover:bg-surface-elevated hover:text-content-primary',
-                )}
-                style={{ height: '40px', width: '40px' }}
-              >
-                <AudioLines size={16} />
-              </button>
-            </Tooltip>
-
-            {/* Manual mic button (hidden in conversation mode) */}
-            {!voice.conversationMode && (
-              <Tooltip content={voice.isRecording ? 'Stop recording' : voice.isTranscribing ? 'Transcribing...' : 'Push to talk'}>
-                <button
-                  type="button"
-                  onClick={voice.toggleRecording}
-                  disabled={voice.isTranscribing}
-                  className={clsx(
-                    'flex items-center justify-center rounded-full p-2 transition-colors duration-fast shrink-0',
-                    voice.isRecording
-                      ? 'bg-danger text-white hover:bg-red-500'
-                      : voice.isTranscribing
-                        ? 'border border-border text-content-tertiary cursor-wait'
-                        : 'border border-border text-content-tertiary hover:bg-surface-elevated hover:text-content-primary',
-                  )}
-                  style={{ height: '40px', width: '40px' }}
-                >
-                  {voice.isTranscribing ? <Loader2 size={16} className="animate-spin" /> : <Mic size={16} />}
-                </button>
-              </Tooltip>
-            )}
-          </div>
-        )}
-
-        <Tooltip content="Send message">
-          <button
-            onClick={handleSubmit}
-            disabled={!input.trim() || voice?.conversationMode}
-            className="w-11 h-11 rounded-full bg-teal-500 hover:bg-teal-600 text-white flex items-center justify-center shadow-[0_0_12px_rgba(25,168,158,0.3)] hover:shadow-[0_0_20px_rgba(25,168,158,0.4)] disabled:opacity-40 transition-all duration-150 shrink-0"
-          >
-            <Send size={16} />
-          </button>
-        </Tooltip>
+        {/* Morph button: send / mic / stop */}
+        <MorphButton
+          hasText={!!input.trim()}
+          isRecording={voice?.isRecording ?? false}
+          isTranscribing={voice?.isTranscribing ?? false}
+          conversationMode={voice?.conversationMode ?? false}
+          voiceAvailable={!!voice?.available}
+          onSend={handleSubmit}
+          onToggleRecording={voice?.toggleRecording ?? (() => {})}
+          onStartConversation={() => voice?.setConversationMode(true)}
+          onStopConversation={() => voice?.setConversationMode(false)}
+        />
       </div>
 
       {isDragging && (
