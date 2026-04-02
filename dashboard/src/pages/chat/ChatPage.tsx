@@ -35,6 +35,7 @@ export function Chat() {
     customInstructions,
     webSearchEnabled,
     deepResearchEnabled,
+    setDraftInput,
   } = useChatStore()
   const queryClient = useQueryClient()
 
@@ -86,7 +87,6 @@ export function Chat() {
   // ── Voice chat integration ──
   const silenceTimeoutMs = Number(localStorage.getItem('nova_voice_silence_timeout')) || 2000
   const bargeInThreshold = Number(localStorage.getItem('nova_voice_bargein_threshold')) || 0.15
-  const handleSubmitRef = useRef<(text: string) => void>(() => {})
   const pendingTranscriptRef = useRef<string | null>(null)
   const isStreamingRef = useRef(false)
   isStreamingRef.current = isStreaming
@@ -97,9 +97,9 @@ export function Chat() {
     if (isStreamingRef.current) {
       pendingTranscriptRef.current = text
     } else {
-      handleSubmitRef.current(text)
+      setDraftInput(text)
     }
-  }, [])
+  }, [setDraftInput])
 
   const handleVoiceError = useCallback((err: string) => {
     setError(err)
@@ -405,19 +405,14 @@ export function Chat() {
     }
   }, [isStreaming, messageQueue, handleSubmit])
 
-  // Keep voice submit ref in sync
-  useEffect(() => {
-    handleSubmitRef.current = handleSubmit
-  }, [handleSubmit])
-
   // Drain pending voice transcript when streaming ends
   useEffect(() => {
     if (!isStreaming && pendingTranscriptRef.current) {
       const text = pendingTranscriptRef.current
       pendingTranscriptRef.current = null
-      handleSubmit(text)
+      setDraftInput(text)
     }
-  }, [isStreaming, handleSubmit])
+  }, [isStreaming, setDraftInput])
 
   // Conversation mode: auto-listen when muted and stream finishes (TTS skipped)
   useEffect(() => {
