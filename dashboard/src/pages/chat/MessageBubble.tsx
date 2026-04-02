@@ -9,10 +9,30 @@ import { ActivityFeed } from '../../components/ActivityFeed'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import type { Message } from '../../stores/chat-store'
 
-export const MessageBubble = memo(function MessageBubble({ message }: { message: Message }) {
+type TextSize = 'small' | 'medium' | 'large'
+
+const TEXT_SIZE_CLASSES: Record<TextSize, string> = {
+  small: 'text-compact leading-relaxed',       // 13px — original
+  medium: 'text-body leading-relaxed',          // 14px — default now
+  large: 'text-[16px] leading-relaxed',         // 16px — Claude-like
+}
+
+// Conversation mode: larger text for arm's-length reading
+const VOICE_TEXT_CLASS = 'text-[18px] leading-relaxed'
+
+export const MessageBubble = memo(function MessageBubble({
+  message,
+  conversationMode = false,
+}: {
+  message: Message
+  conversationMode?: boolean
+}) {
   const { avatarUrl, isDefaultAvatar } = useNovaIdentity()
   const isUser = message.role === 'user'
   const isThinking = !isUser && message.isStreaming && !message.content
+  const textSize = (localStorage.getItem('nova_text_size') as TextSize) || 'medium'
+  // Conversation mode: latest streaming message gets large text
+  const isVoiceActive = conversationMode && message.isStreaming && !isUser
   const cleanedContent = useMemo(
     () => !isUser && message.content ? cleanToolArtifacts(message.content) : message.content,
     [isUser, message.content],
@@ -45,7 +65,7 @@ export const MessageBubble = memo(function MessageBubble({ message }: { message:
       )}>
         <div
           className={clsx(
-            'text-compact leading-relaxed',
+            isVoiceActive ? VOICE_TEXT_CLASS : TEXT_SIZE_CLASSES[textSize],
             isUser
               ? 'glass-card text-content-primary whitespace-pre-wrap rounded-tl-xl rounded-tr-sm rounded-br-xl rounded-bl-xl px-4 py-3'
               : clsx(

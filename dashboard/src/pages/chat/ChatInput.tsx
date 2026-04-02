@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Plus, SlidersHorizontal, Mic, Loader2, Volume2, VolumeX, AudioLines } from 'lucide-react'
+import { Send, Plus, SlidersHorizontal, Mic, Loader2, Volume2, VolumeX, AudioLines, ALargeSmall } from 'lucide-react'
 import clsx from 'clsx'
 import { useChatStore } from '../../stores/chat-store'
 import { useFileAttach } from '../../hooks/useFileAttach'
@@ -50,6 +50,19 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
   const { draftInput: input, setDraftInput: setInput, drawerOpen, setDrawerOpen, prefillInput, setPrefillInput } = useChatStore()
   const { pendingFiles, addFiles, removeFile, openFilePicker } = useFileAttach()
+
+  // Text size preference
+  const TEXT_SIZES = ['small', 'medium', 'large'] as const
+  const TEXT_LABELS: Record<string, string> = { small: 'S', medium: 'M', large: 'L' }
+  const [textSize, setTextSize] = useState(() => localStorage.getItem('nova_text_size') || 'medium')
+  const cycleTextSize = useCallback(() => {
+    setTextSize(prev => {
+      const idx = TEXT_SIZES.indexOf(prev as typeof TEXT_SIZES[number])
+      const next = TEXT_SIZES[(idx + 1) % TEXT_SIZES.length]
+      localStorage.setItem('nova_text_size', next)
+      return next
+    })
+  }, [])
 
   // Audio level from voice recording stream (for visualizer bars)
   const audioLevel = useAudioLevel(voice?.mediaStream ?? null)
@@ -189,6 +202,16 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
               <SlidersHorizontal size={14} />
             </button>
           </Tooltip>
+          <Tooltip content={`Text size: ${textSize}`}>
+            <button
+              type="button"
+              onClick={cycleTextSize}
+              className="flex items-center gap-1 rounded-sm p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated transition-colors duration-fast"
+            >
+              <ALargeSmall size={14} />
+              <span className="text-micro font-mono">{TEXT_LABELS[textSize]}</span>
+            </button>
+          </Tooltip>
           {voice?.available && (
             <Tooltip content={voice.muted ? 'Unmute voice responses' : 'Mute voice responses'}>
               <button
@@ -280,8 +303,8 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
 
       <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
 
-      {/* Mobile model selector — compact chip, reuses ModelPicker */}
-      <div className="md:hidden mb-1">
+      {/* Mobile controls row — model chip + text size */}
+      <div className="md:hidden mb-1 flex items-center gap-2">
         <ModelPicker
           value={modelId}
           onChange={onModelChange}
@@ -289,6 +312,16 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           className="w-auto"
           buttonClassName="flex items-center gap-1 px-2.5 py-1 bg-surface-elevated rounded-full text-micro font-mono text-content-secondary cursor-pointer border-none"
         />
+        <Tooltip content={`Text size: ${textSize}`}>
+          <button
+            type="button"
+            onClick={cycleTextSize}
+            className="flex items-center gap-1 px-2 py-1 rounded-full bg-surface-elevated text-micro text-content-secondary hover:text-content-primary transition-colors duration-fast"
+          >
+            <ALargeSmall size={12} />
+            <span className="font-mono">{TEXT_LABELS[textSize]}</span>
+          </button>
+        </Tooltip>
       </div>
 
       <div className="flex items-end gap-2">

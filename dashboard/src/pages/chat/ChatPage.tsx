@@ -475,10 +475,10 @@ export function Chat() {
       {/* Chat Area */}
       <div ref={containerRef} className="flex-1 flex flex-col min-w-0 overflow-hidden bg-surface-root dark:bg-transparent">
         {messages.length === 0 ? (
-          /* Empty state: greeting at top, input pinned to bottom */
+          /* Empty state: greeting centered, input pinned to bottom */
           <>
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="mx-auto px-3 md:px-8 py-6 max-w-none md:max-w-3xl xl:max-w-4xl">
+            <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar flex items-end">
+              <div className="mx-auto px-3 md:px-8 py-6 max-w-none md:max-w-3xl xl:max-w-4xl w-full">
                 {greeting && (
                   <MessageBubble message={{
                     id: 'greeting',
@@ -518,7 +518,7 @@ export function Chat() {
                         <div className="w-[3px] h-[3px] rounded-full bg-teal-500/20" />
                       </div>
                     )}
-                    <MessageBubble message={msg} />
+                    <MessageBubble message={msg} conversationMode={conversationMode} />
                   </div>
                 ))}
 
