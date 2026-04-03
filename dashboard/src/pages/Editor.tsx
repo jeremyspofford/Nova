@@ -5,8 +5,10 @@ import { Code, ExternalLink, Loader2, MonitorOff, Terminal } from 'lucide-react'
 type EditorState = 'detecting' | 'running' | 'stopped'
 type EditorFlavor = 'vscode' | 'neovim'
 
-const PROBE_PATHS: Record<EditorFlavor, string> = {
-  vscode: '/editor-vscode/',
+// code-server: localhost host port (can't do subpath proxy — absolute asset URLs)
+// neovim/ttyd: nginx proxy (supports --base-path natively)
+const EDITOR_URLS: Record<EditorFlavor, string> = {
+  vscode: 'http://localhost:8443',
   neovim: '/editor-neovim/',
 }
 
@@ -22,9 +24,8 @@ const FLAVOR_ICONS: Record<EditorFlavor, typeof Code> = {
 
 async function probeEditor(flavor: EditorFlavor): Promise<boolean> {
   try {
-    // Follow redirects (code-server 302s to workspace). Any successful
-    // response means the editor is up. 502/503 from nginx = not running.
-    const res = await fetch(PROBE_PATHS[flavor], { signal: AbortSignal.timeout(3000) })
+    const url = flavor === 'vscode' ? 'http://localhost:8443/healthz' : '/editor-neovim/'
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
     return res.ok
   } catch {
     return false
@@ -95,7 +96,7 @@ export default function Editor() {
   // Running state — render iframe
   const flavor = activeFlavor!
   const FlavorIcon = FLAVOR_ICONS[flavor]
-  const editorUrl = PROBE_PATHS[flavor]
+  const editorUrl = EDITOR_URLS[flavor]
 
   return (
     <div className="flex flex-col h-full">

@@ -753,21 +753,21 @@ services:
       - nova-internal
 
   # ── Embedded Editors (optional, one active at a time) ────────────────────────
-  # NOTE: Both editors are internal-only (no host port). Access via dashboard
-  # nginx proxy at /editor-vscode/ or /editor-neovim/.
+  # code-server: localhost-only host port (can't do subpath proxy — it
+  # generates absolute asset URLs at /). Dashboard iframe loads directly.
+  # Neovim/ttyd: internal-only via nginx (supports --base-path natively).
   editor-vscode:
     image: codercom/code-server:latest
     container_name: nova-editor-vscode
     profiles: ["editor-vscode"]
     restart: unless-stopped
-    # code-server doesn't support subpath serving. Nginx strips the
-    # /editor-vscode/ prefix before forwarding. WebSocket upgrade
-    # headers are passed through by nginx.
     command:
       - --bind-addr=0.0.0.0:8443
       - --auth=none
       - --disable-telemetry
       - /workspace
+    ports:
+      - "127.0.0.1:8443:8443"
     volumes:
       - ${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
       - ${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/home/coder/.local/share/code-server:rw
