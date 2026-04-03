@@ -769,9 +769,8 @@ services:
     ports:
       - "127.0.0.1:8443:8443"
     volumes:
-      - ${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
+      - ${EDITOR_WORKSPACE:-${NOVA_WORKSPACE:-${HOME}/.nova/workspace}}:/workspace:rw
       - ${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/home/coder/.local/share/code-server:rw
-      - ${HOME}:${HOME}:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8443/healthz"]
       <<: *nova-healthcheck
@@ -794,9 +793,8 @@ services:
       - EDITOR_DOTFILES_REPO=${EDITOR_DOTFILES_REPO:-}
       - NVIM_CONFIG_DIR=/root/.config/nvim
     volumes:
-      - ${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
+      - ${EDITOR_WORKSPACE:-${NOVA_WORKSPACE:-${HOME}/.nova/workspace}}:/workspace:rw
       - ${NEOVIM_CONFIG_PATH:-./data/editor-config/neovim}:/root/.config/nvim:rw
-      - ${HOME}:${HOME}:ro
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:7681/editor-neovim/"]
       <<: *nova-healthcheck
