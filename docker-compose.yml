@@ -770,9 +770,8 @@ services:
       - ${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
       - ${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/config:rw
       - ${HOME}:${HOME}:ro
-    # linuxserver/code-server wraps coder/code-server — pass proxy-base-path
-    # so asset URLs include the /editor-vscode/ prefix for nginx subpath proxy.
-    command: --proxy-base-path /editor-vscode
+    # linuxserver/code-server uses s6-overlay — command: is not passed to
+    # code-server. Subpath proxying is handled by nginx rewrite instead.
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8443/healthz"]
       <<: *nova-healthcheck

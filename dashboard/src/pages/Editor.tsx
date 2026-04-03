@@ -22,8 +22,8 @@ const FLAVOR_ICONS: Record<EditorFlavor, typeof Code> = {
 
 async function probeEditor(flavor: EditorFlavor): Promise<boolean> {
   try {
-    const res = await fetch(PROBE_PATHS[flavor], { method: 'HEAD', signal: AbortSignal.timeout(3000) })
-    return res.ok
+    const res = await fetch(PROBE_PATHS[flavor], { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(3000) })
+    return res.ok || res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)
   } catch {
     return false
   }
