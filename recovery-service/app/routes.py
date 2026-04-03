@@ -251,6 +251,8 @@ PROFILE_MAP = {
     "cloudflare-tunnel": "cloudflared",
     "tailscale": "tailscale",
     "bridges": "chat-bridge",
+    "editor-vscode": "editor-vscode",
+    "editor-neovim": "editor-neovim",
 }
 
 
