@@ -9,8 +9,8 @@ import { ServiceStatusBadge } from './shared'
 type EditorFlavor = 'vscode' | 'neovim'
 
 const FLAVOR_CONFIG: Record<EditorFlavor, { label: string; icon: typeof Code; profile: string; container: string; configEnvKey: string; configLabel: string }> = {
-  vscode: { label: 'VS Code', icon: Code, profile: 'editor-vscode', container: 'nova-editor-vscode', configEnvKey: 'EDITOR_VSCODE_CONFIG', configLabel: 'VS Code Config Path' },
-  neovim: { label: 'Neovim', icon: Terminal, profile: 'editor-neovim', container: 'nova-editor-neovim', configEnvKey: 'EDITOR_NEOVIM_CONFIG', configLabel: 'Neovim Config Path' },
+  vscode: { label: 'VS Code', icon: Code, profile: 'editor-vscode', container: 'nova-editor-vscode', configEnvKey: 'VSCODE_CONFIG_PATH', configLabel: 'VS Code Config Path' },
+  neovim: { label: 'Neovim', icon: Terminal, profile: 'editor-neovim', container: 'nova-editor-neovim', configEnvKey: 'NEOVIM_CONFIG_PATH', configLabel: 'Neovim Config Path' },
 }
 
 interface EditorState {
@@ -53,7 +53,7 @@ export default function EditorSection() {
 
   // Sync flavor selector to whichever is running
   useEffect(() => {
-    if (runningFlavor) set({ flavor: runningFlavor })
+    if (runningFlavor) setS(prev => ({ ...prev, flavor: runningFlavor }))
   }, [runningFlavor])
 
   const refresh = useCallback(() => {

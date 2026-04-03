@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { Code, ExternalLink, Loader2, MonitorOff, Terminal } from 'lucide-react'
 
-type EditorState = 'detecting' | 'running' | 'starting' | 'stopped'
+type EditorState = 'detecting' | 'running' | 'stopped'
 type EditorFlavor = 'vscode' | 'neovim'
 
 const PROBE_PATHS: Record<EditorFlavor, string> = {
@@ -39,7 +39,6 @@ async function detectActiveEditor(): Promise<EditorFlavor | null> {
 export default function Editor() {
   const [state, setState] = useState<EditorState>('detecting')
   const [activeFlavor, setActiveFlavor] = useState<EditorFlavor | null>(null)
-  const [startedAt, setStartedAt] = useState<number | null>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -55,13 +54,11 @@ export default function Editor() {
       setState('running')
       setActiveFlavor(flavor)
       stopPolling()
-    } else if (startedAt && Date.now() - startedAt < 60_000) {
-      setState('starting')
     } else {
       setState('stopped')
       stopPolling()
     }
-  }, [startedAt, stopPolling])
+  }, [stopPolling])
 
   useEffect(() => {
     detect()
@@ -71,27 +68,17 @@ export default function Editor() {
 
   if (state === 'detecting') {
     return (
-      <div className="flex items-center justify-center h-full text-stone-400">
+      <div className="flex items-center justify-center h-full text-content-tertiary">
         <Loader2 className="w-5 h-5 animate-spin mr-2" />
         Detecting editor...
       </div>
     )
   }
 
-  if (state === 'starting') {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-stone-400 gap-3">
-        <Loader2 className="w-8 h-8 animate-spin" />
-        <p>Editor starting...</p>
-        <p className="text-sm text-stone-500">This may take a moment on first launch while the image downloads.</p>
-      </div>
-    )
-  }
-
   if (state === 'stopped') {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-stone-400 gap-4">
-        <MonitorOff className="w-12 h-12 text-stone-500" />
+      <div className="flex flex-col items-center justify-center h-full text-content-tertiary gap-4">
+        <MonitorOff className="w-12 h-12 text-content-quaternary" />
         <p className="text-lg">No editor running</p>
         <Link
           to="/settings#connections"
@@ -111,8 +98,8 @@ export default function Editor() {
   return (
     <div className="flex flex-col h-full">
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-stone-900 border-b border-stone-700/50 shrink-0">
-        <div className="flex items-center gap-2 text-sm text-stone-300">
+      <div className="flex items-center justify-between px-4 py-2 bg-surface-card border-b border-border-subtle shrink-0">
+        <div className="flex items-center gap-2 text-sm text-content-primary">
           <FlavorIcon className="w-4 h-4" />
           <span>{FLAVOR_LABELS[flavor]}</span>
         </div>
@@ -120,7 +107,7 @@ export default function Editor() {
           href={editorUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center gap-1.5 text-xs text-stone-400 hover:text-stone-200 transition-colors"
+          className="flex items-center gap-1.5 text-xs text-content-tertiary hover:text-content-primary transition-colors"
         >
           <ExternalLink className="w-3.5 h-3.5" />
           Pop out
