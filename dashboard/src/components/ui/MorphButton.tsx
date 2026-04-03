@@ -67,12 +67,12 @@ export function MorphButton(props: MorphButtonProps) {
     if (longPressTriggered) return // handled by pointerUp
     switch (state) {
       case 'send': onSend(); break
-      case 'mic': onToggleRecording(); break
+      case 'mic': onStartConversation(); break  // Tap mic = start conversation mode
       case 'stop-recording': onToggleRecording(); break
       case 'stop-conversation': onStopConversation(); break
       case 'transcribing': break // disabled
     }
-  }, [state, longPressTriggered, onSend, onToggleRecording, onStopConversation])
+  }, [state, longPressTriggered, onSend, onToggleRecording, onStartConversation, onStopConversation])
 
   const disabled = state === 'transcribing'
   const isStop = state === 'stop-recording'

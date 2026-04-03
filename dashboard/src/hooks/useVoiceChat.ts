@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { getAuthHeaders } from '../api'
 
 interface UseVoiceChatOptions {
   onTranscript?: (text: string) => void
@@ -185,6 +186,7 @@ export function useVoiceChat({
 
         const resp = await fetch('/voice-api/api/v1/voice/transcribe', {
           method: 'POST',
+          headers: getAuthHeaders(),
           body: formData,
         })
 
@@ -517,7 +519,7 @@ export function useVoiceChat({
     try {
       const resp = await fetch('/voice-api/api/v1/voice/synthesize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({ text, voice: 'nova', model: 'tts-1' }),
       })
       if (!resp.ok) throw new Error(`TTS failed: ${resp.status}`)
