@@ -1,10 +1,7 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useState, useEffect, type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
 import { LogFrictionButton } from '../LogFrictionButton'
-import { useNotifications, toastVariantFor, type PipelineNotification } from '../../hooks/useNotifications'
-import { useToast } from '../ToastProvider'
 import { useDebug } from '../../stores/debug-store'
 import { MobileNavProvider } from '../../hooks/useMobileNav'
 import { useIsMobile } from '../../hooks/useIsMobile'
@@ -28,7 +25,6 @@ export function AppLayout({
 }) {
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const { isDebug } = useDebug()
-  const qc = useQueryClient()
   const isMobile = useIsMobile()
 
   useEffect(() => {
@@ -38,16 +34,6 @@ export function AppLayout({
       // Ignore storage errors
     }
   }, [collapsed])
-
-  const { addToast } = useToast()
-
-  const handleNotification = useCallback((n: PipelineNotification) => {
-    qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
-    qc.invalidateQueries({ queryKey: ['attention-count'] })
-    addToast({ variant: toastVariantFor(n.type), message: n.body || n.title })
-  }, [qc, addToast])
-
-  useNotifications(handleNotification)
 
   return (
     <MobileNavProvider>

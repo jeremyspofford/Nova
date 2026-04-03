@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
-import { getAuthHeaders } from './api'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { getAuthHeaders, apiFetch } from './api'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useIsMobile } from './hooks/useIsMobile'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
 import { CommandPalette } from './components/CommandPalette'
 import { StartupScreen } from './components/StartupScreen'
@@ -12,6 +12,8 @@ import { ThemeProvider } from './stores/theme-store'
 import { DebugProvider } from './stores/debug-store'
 import { AuthProvider, useAuth } from './stores/auth-store'
 import { ToastProvider } from './components/ToastProvider'
+import { useToast } from './components/ToastProvider'
+import { useNotifications, toastVariantFor, type PipelineNotification } from './hooks/useNotifications'
 import { Login } from './pages/Login'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
@@ -136,6 +138,119 @@ function MobileGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+/** Singleton notification listener — extracted from AppLayout to avoid duplicates with Brain keep-alive */
+function NotificationListener() {
+  const qc = useQueryClient()
+  const { addToast } = useToast()
+  const handleNotification = useCallback((n: PipelineNotification) => {
+    qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
+    qc.invalidateQueries({ queryKey: ['attention-count'] })
+    addToast({ variant: toastVariantFor(n.type), message: n.body || n.title })
+  }, [qc, addToast])
+  useNotifications(handleNotification)
+  return null
+}
+
+/** Prefetch Brain graph data so it's cached before user navigates to /brain */
+function BrainPrefetcher() {
+  useEffect(() => {
+    queryClient.prefetchQuery({
+      queryKey: ['engram-stats'],
+      queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
+      staleTime: 30_000,
+    })
+    queryClient.prefetchQuery({
+      queryKey: ['brain-graph', 2000, false],
+      queryFn: () => apiFetch('/mem/api/v1/engrams/graph/lightweight?max_nodes=2000'),
+      staleTime: 30_000,
+    })
+  }, [])
+  return null
+}
+
+/** Routes + Brain keep-alive — must be inside BrowserRouter */
+function RoutedContent() {
+  const location = useLocation()
+  const isMobile = useIsMobile()
+  const isBrainRoute = location.pathname === '/brain'
+  const [brainMounted, setBrainMounted] = useState(false)
+
+  // Deferred Brain mount — background init after browser idle, or immediate if user opens /brain
+  useEffect(() => {
+    if (isMobile) return
+    const ric = window.requestIdleCallback ?? ((cb: IdleRequestCallback) => window.setTimeout(cb, 2000))
+    const cic = window.cancelIdleCallback ?? clearTimeout
+    const id = ric(() => setBrainMounted(true), { timeout: 5000 })
+    return () => cic(id)
+  }, [isMobile])
+
+  // If user navigates to /brain before idle fires, mount immediately
+  useEffect(() => {
+    if (isBrainRoute && !brainMounted && !isMobile) setBrainMounted(true)
+  }, [isBrainRoute, brainMounted, isMobile])
+
+  return (
+    <>
+      <Routes>
+        {/* Routes WITHOUT sidebar */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/onboarding" element={<OnboardingWizard />} />
+        <Route path="/invite/:code" element={<Invite />} />
+        <Route path="/expired" element={<Expired />} />
+        <Route path="/dev/components" element={<ComponentGallery />} />
+
+        {/* Routes WITH sidebar */}
+        <Route path="/" element={<HomeRoute />} />
+        {/* Brain: mobile redirects to chat, desktop renders nothing (keep-alive below handles it) */}
+        <Route path="/brain" element={isMobile ? <Navigate to="/chat" replace /> : null} />
+        <Route path="/chat" element={<AppLayout fullWidth><ErrorBoundary><Chat /></ErrorBoundary></AppLayout>} />
+        <Route path="/tasks" element={<MobileGuard><AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/friction" element={<MobileGuard><AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/pods" element={<MobileGuard><AppLayout><ErrorBoundary><Pods /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/usage" element={<MobileGuard><AppLayout><ErrorBoundary><Usage /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/goals" element={<MobileGuard><AppLayout><ErrorBoundary><Goals /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/sources" element={<MobileGuard><AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/integrations" element={<MobileGuard><AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/models" element={<MobileGuard><AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/editor" element={<MobileGuard><AppLayout fullWidth><ErrorBoundary><Suspense fallback={null}><Editor /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/ide-connections" element={<MobileGuard><AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/users" element={<MobileGuard><AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/settings" element={<MobileGuard><AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/recovery" element={<MobileGuard><AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/benchmarks" element={<MobileGuard><AppLayout><ErrorBoundary><Benchmarks /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/about" element={<MobileGuard><AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout></MobileGuard>} />
+
+        {/* Redirects for old routes */}
+        <Route path="/intelligence" element={<Navigate to="/sources#recommendations" replace />} />
+        <Route path="/mcp" element={<Navigate to="/integrations" replace />} />
+        <Route path="/agents" element={<Navigate to="/integrations#agents" replace />} />
+        <Route path="/keys" element={<Navigate to="/settings#keys" replace />} />
+        <Route path="/skills" element={<Navigate to="/settings#behavior" replace />} />
+        <Route path="/editors" element={<Navigate to="/ide-connections" replace />} />
+        <Route path="/rules" element={<Navigate to="/settings#behavior" replace />} />
+      </Routes>
+
+      {/* Brain keep-alive — mounted after idle, rendered with fixed positioning.
+          When active: z-[5] covers the null route content.
+          When hidden: invisible + pointer-events-none, paused to save GPU. */}
+      {brainMounted && (
+        <div
+          className={isBrainRoute
+            ? 'fixed inset-0 z-[5]'
+            : 'fixed inset-0 invisible pointer-events-none -z-10'}
+          aria-hidden={!isBrainRoute}
+        >
+          <AppLayout fullWidth>
+            <ErrorBoundary>
+              <Brain hidden={!isBrainRoute} />
+            </ErrorBoundary>
+          </AppLayout>
+        </div>
+      )}
+    </>
+  )
+}
+
 function AppShell() {
   // Optimistic: assume backend is up. Normal refreshes render instantly.
   // Only show startup screen if the health check actually fails.
@@ -165,43 +280,9 @@ function AppShell() {
     <ChatProvider>
     <BrowserRouter>
       <CommandPalette />
-      <Routes>
-        {/* Routes WITHOUT sidebar */}
-        <Route path="/login" element={<Login />} />
-        <Route path="/onboarding" element={<OnboardingWizard />} />
-        <Route path="/invite/:code" element={<Invite />} />
-        <Route path="/expired" element={<Expired />} />
-        <Route path="/dev/components" element={<ComponentGallery />} />
-
-        {/* Routes WITH sidebar */}
-        <Route path="/" element={<HomeRoute />} />
-        <Route path="/brain" element={<MobileGuard><AppLayout fullWidth><ErrorBoundary><Brain /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/chat" element={<AppLayout fullWidth><ErrorBoundary><Chat /></ErrorBoundary></AppLayout>} />
-        <Route path="/tasks" element={<MobileGuard><AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/friction" element={<MobileGuard><AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/pods" element={<MobileGuard><AppLayout><ErrorBoundary><Pods /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/usage" element={<MobileGuard><AppLayout><ErrorBoundary><Usage /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/goals" element={<MobileGuard><AppLayout><ErrorBoundary><Goals /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/sources" element={<MobileGuard><AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/integrations" element={<MobileGuard><AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/models" element={<MobileGuard><AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/editor" element={<MobileGuard><AppLayout fullWidth><ErrorBoundary><Suspense fallback={null}><Editor /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/ide-connections" element={<MobileGuard><AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/users" element={<MobileGuard><AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/settings" element={<MobileGuard><AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/recovery" element={<MobileGuard><AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/benchmarks" element={<MobileGuard><AppLayout><ErrorBoundary><Benchmarks /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/about" element={<MobileGuard><AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout></MobileGuard>} />
-
-        {/* Redirects for old routes */}
-        <Route path="/intelligence" element={<Navigate to="/sources#recommendations" replace />} />
-        <Route path="/mcp" element={<Navigate to="/integrations" replace />} />
-        <Route path="/agents" element={<Navigate to="/integrations#agents" replace />} />
-        <Route path="/keys" element={<Navigate to="/settings#keys" replace />} />
-        <Route path="/skills" element={<Navigate to="/settings#behavior" replace />} />
-        <Route path="/editors" element={<Navigate to="/ide-connections" replace />} />
-        <Route path="/rules" element={<Navigate to="/settings#behavior" replace />} />
-      </Routes>
+      <NotificationListener />
+      <BrainPrefetcher />
+      <RoutedContent />
     </BrowserRouter>
     </ChatProvider>
     </OnboardingGate>

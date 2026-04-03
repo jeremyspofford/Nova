@@ -97,6 +97,7 @@ interface ForceGraph3DProps {
   onSelectNode: (id: string) => void
   onBackgroundClick?: () => void
   autoSpin?: boolean
+  paused?: boolean
   bgColor?: string
   className?: string
   focusClusterId?: number | null
@@ -1123,6 +1124,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   onSelectNode,
   onBackgroundClick,
   autoSpin = true,
+  paused = false,
   bgColor = '#000000',
   className,
   focusClusterId,
@@ -1188,6 +1190,11 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   const linksVisibleRef = useRef(false)
   // Activity visualization refs (imperative handle)
   const globalPulseRef = useRef<{ active: boolean; startTime: number; duration: number }>({ active: false, startTime: 0, duration: 0 })
+  // Keep-alive pause/resume
+  const pausedRef = useRef(paused)
+  pausedRef.current = paused
+  const rotationFrameRef = useRef(0)
+  const tickFnRef = useRef<(() => void) | null>(null)
 
   useImperativeHandle(ref, () => ({
     highlightNodes(ids: string[]) {
@@ -1536,13 +1543,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     // ── Auto-rotation — spins until user interacts, resets on remount ────
     spinningRef.current = autoSpin
-    let rotationFrame: number
 
     const camPos = new Vector3()
     const nodePos = new Vector3()
 
     let tickCount = 0
     const tick = () => {
+      if (pausedRef.current) return  // Keep-alive: skip work when hidden
       sharedUniforms.uTime.value = Date.now() * 0.001
       tickCount++
 
@@ -1628,8 +1635,9 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         }
       } catch { /* ok */ }
 
-      rotationFrame = requestAnimationFrame(tick)
+      rotationFrameRef.current = requestAnimationFrame(tick)
     }
+    tickFnRef.current = tick
     tick()
 
     // Stop spinning on any user interaction with the graph
@@ -1638,6 +1646,11 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     graphRef.current = graph
     initializedRef.current = true
+
+    // If mounted in paused state (keep-alive background init), pause after warmup completes
+    if (pausedRef.current) {
+      try { graph.pauseAnimation() } catch { /* ok */ }
+    }
 
     // Push camera far plane to see distant stars, milky way, and solar systems
     const camera = graph.camera()
@@ -1686,7 +1699,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         }
       } catch { /* ok */ }
 
-      cancelAnimationFrame(rotationFrame)
+      cancelAnimationFrame(rotationFrameRef.current)
+      tickFnRef.current = null
       el.removeEventListener('pointerdown', stopSpin)
       ro.disconnect()
       if (starfieldRef.current) {
@@ -1711,6 +1725,21 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   useEffect(() => {
     spinningRef.current = autoSpin
   }, [autoSpin])
+
+  // Keep-alive: pause/resume rendering when visibility changes
+  useEffect(() => {
+    const graph = graphRef.current
+    if (!graph || !initializedRef.current) return
+
+    if (paused) {
+      cancelAnimationFrame(rotationFrameRef.current)
+      try { graph.pauseAnimation() } catch { /* ok */ }
+    } else {
+      try { graph.resumeAnimation() } catch { /* ok */ }
+      // Restart our custom tick loop
+      if (tickFnRef.current) tickFnRef.current()
+    }
+  }, [paused])
 
   // Live-update background + starfield without reinitializing graph
   useEffect(() => {
@@ -1887,13 +1916,20 @@ function updateGraphData(graph: any, nodes: GraphNode[], edges: GraphEdge[], use
 
   graph.graphData({ nodes: graphNodes, links: graphLinks })
 
+  // Save positions after synchronous warmup — enables instant re-mount
+  // even if the cooling phase is interrupted (e.g., keep-alive pause)
+  if (!hasCachedLayout) {
+    requestAnimationFrame(() => savePositionCache(graph.graphData()))
+  }
+
   // Cached layout: zoom immediately. Fresh layout: wait for simulation to settle.
   const settleMs = hasCachedLayout ? 100 : (nodes.length > 500 ? 3000 : 1200)
 
   // Add cluster/domain labels after simulation settles
   setTimeout(() => {
-    // Restore saved camera or zoom-to-fit for fresh layout
-    if (hasCachedLayout && _cameraCache) {
+    // Restore saved camera if available (covers keep-alive re-init and re-mount).
+    // Only fall back to zoomToFit for a truly first-time load with no prior camera state.
+    if (_cameraCache) {
       try {
         const cam = graph.camera()
         const ctrl = graph.controls()

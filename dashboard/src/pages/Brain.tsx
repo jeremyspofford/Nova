@@ -115,7 +115,7 @@ function ScoreBar({ value, label, color }: { value: number; label: string; color
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export default function Brain() {
+export default function Brain({ hidden = false }: { hidden?: boolean }) {
   const graphRef = useRef<ForceGraph3DHandle>(null)
   const { avatarUrl } = useNovaIdentity()
   const [sidebarCollapsed] = useLocalStorage('nova-sidebar-collapsed', false)
@@ -342,6 +342,15 @@ export default function Brain() {
     return { ...graphWithClusterReps, nodes: filteredNodes, edges: filteredEdges }
   }, [graphWithClusterReps, typeFilter])
 
+  // Freeze graph data while hidden — prevents ForceGraph3D from re-initializing
+  // (and losing camera position) when React Query refetches in the background.
+  const frozenGraphRef = useRef(filteredGraphData)
+  if (!hidden) frozenGraphRef.current = filteredGraphData
+  if (!frozenGraphRef.current) frozenGraphRef.current = filteredGraphData
+  const displayGraph = frozenGraphRef.current
+
+  // Track whether the graph has ever loaded data (for loading animation)
+  const graphReady = (displayGraph?.nodes?.length ?? 0) > 0
 
   // Navigate to node (explore from here)
   const exploreNode = (nodeId: string) => {
@@ -362,9 +371,9 @@ export default function Brain() {
       {/* Full-viewport graph */}
       <ForceGraph3D
         ref={graphRef}
-        nodes={filteredGraphData?.nodes ?? []}
-        edges={filteredGraphData?.edges ?? []}
-        clusters={filteredGraphData?.clusters}
+        nodes={displayGraph?.nodes ?? []}
+        edges={displayGraph?.edges ?? []}
+        clusters={displayGraph?.clusters}
         selectedId={selectedNode}
         onSelectNode={setSelectedNode}
         onBackgroundClick={() => setSelectedNode(null)}
@@ -373,6 +382,7 @@ export default function Brain() {
         focusNodeId={focusNode?.id ?? null}
         focusNodeTs={focusNode?.ts}
         autoSpin={false}
+        paused={hidden}
         bgColor="galaxy"
         layoutPreset={layout}
         neuralMode={{
@@ -393,6 +403,26 @@ export default function Brain() {
         showSolarSystems={false}
         className="w-full h-full"
       />
+
+      {/* ── Loading overlay ─────────────────────────────────────────── */}
+      {!graphReady && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black">
+          <div className="relative w-20 h-20">
+            <div className="absolute inset-0 rounded-full border border-teal-500/20" />
+            <div
+              className="absolute inset-0 rounded-full border-t-2 border-teal-400/60 animate-spin"
+              style={{ animationDuration: '2s' }}
+            />
+            <div className="absolute inset-3 rounded-full border border-teal-500/10" />
+            <div
+              className="absolute inset-3 rounded-full border-t border-teal-300/40 animate-spin"
+              style={{ animationDuration: '3s', animationDirection: 'reverse' }}
+            />
+            <div className="absolute inset-7 rounded-full bg-teal-500/15 animate-pulse" />
+          </div>
+          <p className="mt-6 text-stone-600 text-xs tracking-wider uppercase">Initializing Brain</p>
+        </div>
+      )}
 
       {/* ── HUD: Glass top bar ──────────────────────────────────────── */}
       <div className="fixed top-0 left-0 right-0 z-10 h-[52px] flex items-center px-5 glass-overlay border-b border-white/[0.12] border-t-white/[0.20]">
