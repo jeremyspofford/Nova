@@ -25,12 +25,13 @@ Nova is a complete autonomous AI platform, but users still have to leave the das
 
 - **Image:** `linuxserver/code-server`
 - **Profile:** `editor-vscode`
-- **Port:** `8140:8443` (code-server uses 8443 internally)
+- **Port:** Internal only (8443) — no host port binding. Accessed exclusively via nginx proxy.
 - **Volumes:**
   - `${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw` — working directory
   - `${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/config:rw` — settings, extensions, keybindings
   - `${HOME}:${HOME}:ro` — read-only home access for browsing other files
-- **Environment:** `DEFAULT_WORKSPACE=/workspace`, `PUID`/`PGID` for file permissions
+- **Environment:** `DEFAULT_WORKSPACE=/workspace`, `PUID`/`PGID` for file permissions, `PASSWORD=""` and `PROXY_DOMAIN=localhost` (disables code-server's built-in auth — Nova's auth layer is the boundary)
+- **Command args:** `--proxy-base-path /editor-vscode` (required for subpath proxy — without this, code-server serves assets at `/` and every resource 404s behind nginx)
 - **Healthcheck:** curl against code-server's built-in `/healthz`
 - **Dependencies:** None — editor is fully independent of other Nova services
 
@@ -38,15 +39,21 @@ Nova is a complete autonomous AI platform, but users still have to leave the das
 
 - **Image:** Custom Dockerfile (Alpine-based)
 - **Profile:** `editor-neovim`
-- **Port:** `8140:7681` (ttyd default)
+- **Port:** Internal only (7681) — no host port binding. Accessed exclusively via nginx proxy.
 - **Volumes:**
   - `${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw` — working directory
   - `${NEOVIM_CONFIG_PATH:-./data/editor-config/neovim}:/root/.config/nvim:rw` — neovim config
   - `${HOME}:${HOME}:ro` — read-only home access
 - **Healthcheck:** curl against ttyd's HTTP port
-- **Entrypoint:** `ttyd --writable --port 7681 nvim /workspace`
+- **Entrypoint:** `ttyd --writable --base-path /editor-neovim --port 7681 nvim /workspace`
 
-Both services bind to host port 8140. Only one runs at a time.
+### Auth Posture
+
+Neither editor exposes a host port. They are only reachable through the dashboard's nginx proxy, which sits behind Nova's existing auth layer (`REQUIRE_AUTH` / JWT / admin secret). code-server's built-in password auth is disabled. ttyd runs without `--credential`. This is a deliberate choice — Nova owns the auth boundary, and adding a second auth layer inside the iframe would be a broken UX (two login prompts).
+
+### Network
+
+Both services are internal-only on the `nova-internal` Docker network. No host port binding means no direct access bypassing Nova's auth. Only the dashboard nginx proxy can reach them.
 
 ## Neovim Container (Custom Dockerfile)
 
@@ -60,7 +67,7 @@ Both services bind to host port 8140. Only one runs at a time.
 
 **Entrypoint script:**
 1. If `EDITOR_DOTFILES_REPO` is set and config dir is empty, `git clone` into neovim config path. If already cloned, `git pull`.
-2. Launch `ttyd --writable --port 7681 nvim /workspace`
+2. Launch `ttyd --writable --base-path /editor-neovim --port 7681 nvim /workspace`
 
 **Not included:** No language-specific runtimes beyond node/python. No preloaded plugin managers — user configs bootstrap themselves on first launch.
 
@@ -73,7 +80,6 @@ Two location blocks in `dashboard/nginx.conf`:
 ```nginx
 location /editor-vscode/ {
     set $editor_vscode http://editor-vscode:8443;
-    rewrite ^/editor-vscode/(.*) /$1 break;
     proxy_pass $editor_vscode;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -81,11 +87,12 @@ location /editor-vscode/ {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
 }
 
 location /editor-neovim/ {
     set $editor_neovim http://editor-neovim:7681;
-    rewrite ^/editor-neovim/(.*) /$1 break;
     proxy_pass $editor_neovim;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
@@ -93,17 +100,23 @@ location /editor-neovim/ {
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
 }
 ```
 
-Dashboard knows which flavor is active and iframes the correct path. Docker DNS only resolves running containers — requests to a stopped editor's path simply fail, and the dashboard handles this gracefully.
+No `rewrite` strip-prefix — both editors are configured with their base path (`--proxy-base-path /editor-vscode` for code-server, `--base-path /editor-neovim` for ttyd) so they serve assets at the correct subpath natively.
+
+Timeouts set to 3600s (1 hour) for WebSocket connections — editors have long idle periods between keystrokes, and nginx's default 60s read timeout would kill the session.
+
+Dashboard knows which flavor is active and iframes the correct path. Docker DNS only resolves running containers — requests to a stopped editor's path return 502, and the dashboard handles this gracefully.
 
 ## Dashboard Integration
 
 ### Routes
 
 - New full-width route: `/editor` in `App.tsx`
-- Existing `/editors` route renamed to `/ide-connections` (external IDE configuration)
+- Existing `/editors` route renamed to `/ide-connections` (external IDE configuration). Add `<Navigate>` redirect from `/editors` to `/ide-connections` to avoid breaking bookmarks.
 - Sidebar: "Editor" under Infrastructure opens the embedded editor. "IDE Connections" (renamed) remains for external editor setup.
 
 ### Editor Page (`pages/Editor.tsx`)
@@ -117,7 +130,7 @@ Dashboard knows which flavor is active and iframes the correct path. Docker DNS 
 - Thin top bar with: flavor indicator, workspace path, pop-out button
 - Pop-out button opens the proxied URL in a new browser tab
 
-**Detection:** Page probes both nginx paths on mount. Whichever responds is the active editor.
+**Detection:** Page probes both nginx paths on mount. Whichever returns 200 is the active editor. Both returning 502 means no editor is running (show the setup prompt). Both returning 502 after an editor was previously running may indicate a crash — show "Editor stopped unexpectedly" with a restart link.
 
 ### Settings Section (`pages/settings/EditorSection.tsx`)
 
@@ -174,7 +187,11 @@ Shared filesystem only. Nova's agents read/write `/workspace` as they always hav
 
 ## Port Allocation
 
-Editor service: **8140** (both flavors, mutually exclusive)
+Editor services are internal-only (no host port binding):
+- **editor-vscode:** 8443 (container-internal)
+- **editor-neovim:** 7681 (container-internal)
+
+Accessed exclusively through dashboard nginx proxy at `/editor-vscode/` and `/editor-neovim/`.
 
 ## Files to Create/Modify
 
@@ -186,9 +203,10 @@ Editor service: **8140** (both flavors, mutually exclusive)
 - `dashboard/src/pages/settings/EditorSection.tsx` — editor settings
 
 **Modified files:**
-- `docker-compose.yml` — two new service definitions
-- `dashboard/nginx.conf` — two new location blocks
-- `dashboard/src/App.tsx` — new `/editor` route, rename `/editors` to `/ide-connections`
+- `docker-compose.yml` — two new service definitions (internal-only, no host port)
+- `dashboard/nginx.conf` — two new location blocks with WebSocket upgrade and 1h timeouts
+- `dashboard/src/App.tsx` — new `/editor` route, rename `/editors` to `/ide-connections`, add redirect from `/editors`
 - `dashboard/src/components/layout/Sidebar.tsx` — add "Editor" nav item, rename "Editors" to "IDE Connections"
 - `dashboard/src/pages/Settings.tsx` — add Editor section to nav groups
+- `recovery-service/app/routes.py` — add `editor-vscode` and `editor-neovim` to `PROFILE_MAP` (hard-coded allowlist that rejects unknown profiles with 400)
 - `.env.example` — new editor variables
