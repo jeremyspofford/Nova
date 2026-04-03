@@ -27,6 +27,8 @@ OPTIONAL_SERVICES = {
     "nova-sglang": "local-sglang",
     "cloudflared": "cloudflare-tunnel",
     "tailscale": "tailscale",
+    "editor-vscode": "editor-vscode",
+    "editor-neovim": "editor-neovim",
 }
 
 

@@ -1,8 +1,8 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Code, Terminal, Loader2, Play, Square, RefreshCw } from 'lucide-react'
-import { patchEnv, manageComposeProfile, getServiceStatus, getEnvVars } from '../../api-recovery'
-import type { ServiceStatus } from '../../api-recovery'
+import { patchEnv, manageComposeProfile, getAllServiceStatus, getEnvVars } from '../../api-recovery'
+import type { AllServicesResponse } from '../../api-recovery'
 import { Section } from '../../components/ui'
 import { ServiceStatusBadge } from './shared'
 
@@ -22,22 +22,23 @@ interface EditorState {
   dotfilesRepo: string
 }
 
-function deriveRunning(services: ServiceStatus[] | undefined) {
-  const vsRunning = services?.some(s => s.container_name === 'nova-editor-vscode' && s.status === 'running') ?? false
-  const nvimRunning = services?.some(s => s.container_name === 'nova-editor-neovim' && s.status === 'running') ?? false
+function deriveRunning(data: AllServicesResponse | undefined) {
+  const optional = data?.optional ?? []
+  const vsRunning = optional.some(s => s.service === 'editor-vscode' && s.status === 'running')
+  const nvimRunning = optional.some(s => s.service === 'editor-neovim' && s.status === 'running')
   return { vsRunning, nvimRunning }
 }
 
 export default function EditorSection() {
   const queryClient = useQueryClient()
 
-  const { data: services } = useQuery<ServiceStatus[]>({
-    queryKey: ['service-status'],
-    queryFn: getServiceStatus,
-    refetchInterval: 10_000,
+  const { data: allServices } = useQuery<AllServicesResponse>({
+    queryKey: ['all-service-status'],
+    queryFn: getAllServiceStatus,
+    refetchInterval: 5_000,
   })
 
-  const { vsRunning, nvimRunning } = deriveRunning(services)
+  const { vsRunning, nvimRunning } = deriveRunning(allServices)
   const activeRunning = vsRunning || nvimRunning
   const runningFlavor: EditorFlavor | null = vsRunning ? 'vscode' : nvimRunning ? 'neovim' : null
 
