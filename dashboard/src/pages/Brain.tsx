@@ -349,8 +349,9 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
   if (!frozenGraphRef.current) frozenGraphRef.current = filteredGraphData
   const displayGraph = frozenGraphRef.current
 
-  // Track whether the graph has ever loaded data (for loading animation)
-  const graphReady = (displayGraph?.nodes?.length ?? 0) > 0
+  // Loading state — stays true until ForceGraph3D has actually rendered a frame
+  const [graphReady, setGraphReady] = useState(false)
+  const handleGraphReady = useCallback(() => setGraphReady(true), [])
 
   // Navigate to node (explore from here)
   const exploreNode = (nodeId: string) => {
@@ -383,6 +384,7 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
         focusNodeTs={focusNode?.ts}
         autoSpin={false}
         paused={hidden}
+        onReady={handleGraphReady}
         bgColor="galaxy"
         layoutPreset={layout}
         neuralMode={{

@@ -116,6 +116,7 @@ interface ForceGraph3DProps {
   showAsteroids?: boolean
   showSolarSystems?: boolean
   clusterSeparation?: number
+  onReady?: () => void
 }
 
 // ── Fibonacci sphere — evenly distributes cluster homes on a sphere ──────────
@@ -1143,12 +1144,15 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showAsteroids = true,
   showSolarSystems = true,
   clusterSeparation = 0.3,
+  onReady,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
   const isLargeGraph = nodes.length > 200
   const layoutRef = useRef(LAYOUT_PRESETS[layoutPreset] ?? LAYOUT_PRESETS[DEFAULT_LAYOUT])
   const containerRef = useRef<HTMLDivElement>(null)
   const coreGeoRef = useRef(new SphereGeometry(1, 10, 10))
+  const onReadyRef = useRef(onReady)
+  onReadyRef.current = onReady
   const hitGeoRef = useRef(new BoxGeometry(1, 1, 1))
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
@@ -1646,6 +1650,13 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
     graphRef.current = graph
     initializedRef.current = true
+
+    // Signal ready after the first frame renders (not synchronously —
+    // warmup blocks the main thread, so the loading overlay needs to
+    // stay visible until the browser has actually painted the graph)
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      onReadyRef.current?.()
+    }))
 
     // If mounted in paused state (keep-alive background init), pause after warmup completes
     if (pausedRef.current) {
