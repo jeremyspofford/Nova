@@ -15,7 +15,7 @@ RUN apk add --no-cache \
     bash
 
 COPY editor-neovim/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN chmod +x /entrypoint.sh && mkdir -p /root/.config/nvim
 
 WORKDIR /workspace
 

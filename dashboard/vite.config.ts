@@ -50,6 +50,20 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path: string) => path.replace(/^\/bridge-api/, ''),
       },
+      // Embedded Editors — VS Code and Neovim
+      // code-server: strip prefix (serves at root)
+      // neovim/ttyd: keep prefix (configured with --base-path)
+      '/editor-vscode': {
+        target: 'http://localhost:8443',
+        changeOrigin: true,
+        ws: true,
+        rewrite: (path: string) => path.replace(/^\/editor-vscode/, ''),
+      },
+      '/editor-neovim': {
+        target: 'http://localhost:7681',
+        changeOrigin: true,
+        ws: true,
+      },
     },
   },
 })
