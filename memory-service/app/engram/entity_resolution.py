@@ -105,6 +105,48 @@ async def find_similar_engram(
     return None
 
 
+async def find_similar_engram_any_type(
+    session: AsyncSession,
+    embedding: list[float],
+    threshold: float = 0.92,
+    tenant_id: str = "00000000-0000-0000-0000-000000000001",
+) -> dict | None:
+    """Find an existing engram by embedding similarity regardless of type.
+
+    Used for cross-type dedup: prevents "The user's name is Jeremy" from
+    existing as both a fact and an entity.
+    """
+    result = await session.execute(
+        text("""
+            SELECT id, type, content, importance, activation, access_count, confidence,
+                   1 - (embedding <=> CAST(:embedding AS halfvec)) AS similarity
+            FROM engrams
+            WHERE tenant_id = CAST(:tenant_id AS uuid)
+              AND NOT superseded
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> CAST(:embedding AS halfvec)
+            LIMIT 1
+        """),
+        {
+            "embedding": to_pg_vector(embedding),
+            "tenant_id": tenant_id,
+        },
+    )
+    row = result.fetchone()
+    if row and row.similarity >= threshold:
+        return {
+            "id": row.id,
+            "type": row.type,
+            "content": row.content,
+            "importance": row.importance,
+            "activation": row.activation,
+            "access_count": row.access_count,
+            "confidence": row.confidence,
+            "similarity": row.similarity,
+        }
+    return None
+
+
 async def update_existing_engram(
     session: AsyncSession,
     engram_id: UUID,

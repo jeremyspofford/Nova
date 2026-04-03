@@ -26,6 +26,7 @@ from .entity_resolution import (
     find_contradiction_candidates,
     find_existing_entity,
     find_similar_engram,
+    find_similar_engram_any_type,
     update_existing_engram,
 )
 
@@ -249,20 +250,19 @@ async def _process_event(raw_payload: str) -> dict:
             except Exception:
                 log.warning("Failed to create relationship edge", exc_info=True)
 
-        # Step 4: Create co-occurrence edges (all engrams from same input are related)
+        # Step 4: Create co-occurrence edges (sequential neighbors only, not O(n²) all-pairs)
         all_ids = list(index_to_id.values())
-        for j in range(len(all_ids)):
-            for k in range(j + 1, len(all_ids)):
-                if all_ids[j] != all_ids[k]:
-                    try:
-                        created = await _create_edge(
-                            session, all_ids[j], all_ids[k],
-                            "related_to", 0.3,  # co-occurrence edges are weaker
-                        )
-                        if created:
-                            edges_created += 1
-                    except Exception:
-                        pass  # co-occurrence edges are best-effort
+        for j in range(len(all_ids) - 1):
+            if all_ids[j] != all_ids[j + 1]:
+                try:
+                    created = await _create_edge(
+                        session, all_ids[j], all_ids[j + 1],
+                        "related_to", 0.3,  # co-occurrence edges are weaker
+                    )
+                    if created:
+                        edges_created += 1
+                except Exception:
+                    pass  # co-occurrence edges are best-effort
 
         # Step 5: Handle contradictions
         for contradiction in decomposition.contradictions:
@@ -381,6 +381,18 @@ async def _store_or_update_engram(
             if source_ref_id:
                 await _append_source_ref(session, similar["id"], source_ref_id)
             return similar["id"], False
+
+    # Cross-type dedup: catch "Jeremy" as both fact and entity
+    cross_match = await find_similar_engram_any_type(
+        session, embedding,
+        threshold=settings.engram_entity_similarity_threshold,  # 0.92
+    )
+    if cross_match:
+        await update_existing_engram(session, cross_match["id"], importance_boost=max(0, importance - cross_match["importance"]) * 0.3)
+        log.debug("Cross-type dedup: merged %s into existing %s engram %s", decomposed_type, cross_match["type"], cross_match["id"])
+        if source_ref_id:
+            await _append_source_ref(session, cross_match["id"], source_ref_id)
+        return cross_match["id"], False
 
     # Create new engram
     fragments = {

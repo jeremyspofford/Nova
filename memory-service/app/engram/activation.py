@@ -76,17 +76,29 @@ async def spreading_activation(
                 -- Seeds: top-N by cosine similarity
                 SELECT
                     s.id,
-                    s.activation,
+                    s.boosted_sim AS activation,
                     0 AS hop,
                     ARRAY[s.id] AS path
                 FROM (
                     SELECT e.id,
-                           (1 - (e.embedding <=> CAST(:embedding AS halfvec)))::real AS activation
+                           (
+                               (1 - (e.embedding <=> CAST(:embedding AS halfvec)))
+                               -- Source-type boost: personal knowledge surfaces first
+                               * CASE e.source_type
+                                   WHEN 'chat' THEN 1.5
+                                   WHEN 'consolidation' THEN 1.2
+                                   WHEN 'knowledge' THEN 0.7
+                                   WHEN 'intel' THEN 0.5
+                                   ELSE 1.0
+                                 END
+                               -- Confidence weighting: high-trust sources outrank low-trust
+                               * COALESCE(e.confidence, 0.5)
+                           )::real AS boosted_sim
                     FROM engrams e
                     WHERE NOT e.superseded
                       AND e.embedding IS NOT NULL
                       AND e.tenant_id = CAST(:tenant_id AS uuid)
-                    ORDER BY e.embedding <=> CAST(:embedding AS halfvec)
+                    ORDER BY boosted_sim DESC
                     LIMIT :seed_count
                 ) s
 
@@ -160,7 +172,8 @@ async def spreading_activation(
         # Convergent amplification
         convergence_bonus = 1.0 + 0.2 * max(0, row.convergence_paths - 1)
 
-        final_score = row.activation * row.importance * recency_boost * convergence_bonus
+        confidence = row.confidence if row.confidence else 0.5
+        final_score = row.activation * row.importance * confidence * recency_boost * convergence_bonus
 
         import json as _json
         fragments = None

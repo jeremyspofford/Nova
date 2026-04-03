@@ -40,6 +40,12 @@ data/sources/
 .DS_Store
 *.log
 
+# Playwright MCP snapshots
+.playwright-mcp/
+
+# Screenshots
+*.png
+
 # Website
 website/node_modules/
 website/dist/

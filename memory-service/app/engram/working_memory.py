@@ -216,13 +216,16 @@ async def assemble_context(
 
     # 4. Reconstruct memories from activated engrams
     if activated:
-        ctx.engram_ids = [str(e.id) for e in activated]
+        # Topic engrams are index/cluster nodes — useful for activation graph
+        # traversal but not for context injection. Exclude from reconstruction.
+        content_engrams = [e for e in activated if e.type not in ("topic",)]
+        ctx.engram_ids = [str(e.id) for e in content_engrams]
         ctx.engram_summaries = [
             {"id": str(e.id), "type": e.type, "preview": e.content[:80].strip()}
-            for e in activated
+            for e in content_engrams
         ]
         memory_text = await reconstruct(
-            session, activated,
+            session, content_engrams,
             context=query,
             self_model_summary=self_model,
         )

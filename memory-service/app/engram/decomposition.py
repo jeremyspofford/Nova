@@ -99,7 +99,13 @@ async def resolve_model(model: str) -> str:
 
 DECOMPOSITION_SYSTEM_PROMPT_CHAT = """You are a memory decomposition engine. Extract structured knowledge from a conversation between a user and an AI assistant.
 
-FOCUS: Extract information about the USER — their identity, preferences, knowledge, decisions, and experiences. The assistant's responses are context, not knowledge.
+FOCUS: Extract information the USER STATES about themselves — their identity, preferences, knowledge, decisions, and experiences. The assistant's responses are context, not knowledge.
+
+CRITICAL — ASKING vs STATING:
+- A user ASKING about something ("What is X?", "Tell me about Y", "How does Z work?") is NOT a fact or preference about the user. Do NOT create engrams like "The user is interested in X" or "The user wants to know about Y" from questions.
+- Only create engrams from things the user STATES or DECLARES: "I work at Aria Labs", "I prefer Python over Go", "I'm studying for AWS certification".
+- Questions reveal the conversation topic, not the user's identity. Skip them.
+- Exception: if a question reveals context ("How do I fix the auth bug I introduced yesterday?"), extract the stated fact ("User introduced an auth bug") but NOT "user is interested in auth bugs".
 
 OUTPUT FORMAT: Valid JSON (no markdown fences). Return a DecompositionResult:
 {
@@ -119,9 +125,14 @@ ENGRAM GUIDELINES:
 TYPES:
 - fact: Self-contained statement about the user or their world (1-3 sentences, include context)
 - entity: Atomic identifier — a person, place, project, tool, concept (name only, keep short)
-- preference: User preference with rationale ("prefers X because Y")
+- preference: User preference with rationale ("prefers X because Y") — ONLY from explicit user statements, never inferred from questions
 - episode: Something that happened, with context ("on date X, user did Y because Z")
 - procedure: How to do something the user described (steps together, not split)
+
+ANTI-PATTERNS — do NOT create engrams like these:
+- "The user wants to know about X" (this is a question, not a fact)
+- "The user is interested in X" (unless they explicitly said "I'm interested in X")
+- "The user is asking about X" (questions are ephemeral, not identity)
 
 IMPORTANCE (0.0-1.0):
 - 0.9: Core identity, critical decisions, strong preferences
@@ -140,7 +151,7 @@ RELATIONSHIPS: Connect engrams that have meaningful associations. Use:
 
 CONTRADICTIONS: If a new statement contradicts something the user previously said, flag it.
 
-If the conversation is just greetings or contains no extractable knowledge, return {"engrams": [], "relationships": [], "contradictions": []}.
+If the conversation is just greetings, one-off questions with no self-revealing context, or contains no extractable knowledge, return {"engrams": [], "relationships": [], "contradictions": []}.
 """
 
 DECOMPOSITION_SYSTEM_PROMPT_INTEL = """You are a memory decomposition engine. Extract structured knowledge from external content (news articles, blog posts, forum discussions, documentation).
@@ -192,10 +203,28 @@ def _sanitize_decomposition(parsed: dict) -> None:
     Rather than rejecting the entire result (losing valid engrams), coerce
     unknown relations to 'related_to' and fix malformed contradictions.
     """
-    # Coerce invalid relation types
+    # Coerce invalid relation types and fix field name variants
+    clean_rels = []
     for rel in parsed.get("relationships", []):
-        if isinstance(rel, dict) and rel.get("relation") not in _VALID_RELATIONS:
+        if not isinstance(rel, dict):
+            continue
+        if rel.get("relation") not in _VALID_RELATIONS:
             rel["relation"] = "related_to"
+        # LLMs sometimes use source/target instead of from_index/to_index
+        if "from_index" not in rel and "source" in rel:
+            rel["from_index"] = rel.pop("source")
+        if "to_index" not in rel and "target" in rel:
+            rel["to_index"] = rel.pop("target")
+        # Drop relationships missing required index fields
+        if "from_index" in rel and "to_index" in rel:
+            # Ensure indices are integers
+            try:
+                rel["from_index"] = int(rel["from_index"])
+                rel["to_index"] = int(rel["to_index"])
+                clean_rels.append(rel)
+            except (ValueError, TypeError):
+                continue
+    parsed["relationships"] = clean_rels
 
     # Fix malformed contradictions (LLM sometimes uses 'engram_indices' instead of
     # the expected 'new_index' + 'existing_content_hint' fields)

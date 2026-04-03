@@ -89,3 +89,13 @@ These are the gaps preventing Nova from being truly self-directed. Ordered by im
 **How:** Run `/design-consultation` to audit the existing dashboard, extract the implicit system, and produce a DESIGN.md as the project's design source of truth.
 **Blocked by:** Nothing — can be done anytime. Recommended before the chat pod dashboard integration (Step 4).
 **Added:** 2026-03-19
+
+### Full User Entity Management UI
+**What:** Dashboard page showing the user entity with edit/delete per attribute. Visual management of "what Nova knows about me."
+**Why:** The correction flow (via chat) handles corrections for the common case, but power users need direct visual management of their identity — inspect, edit, delete individual attributes.
+**How:** New dashboard route `/identity`, new memory-service endpoints (`GET /api/v1/user-entities/{id}`, `PATCH /api/v1/user-entities/{id}`, `DELETE /api/v1/user-entities/{id}/attributes/{key}`). Table view of enriched envelope attributes (value, confidence, learned_at, source).
+**Blocked by:** User Identity Graph feature (retrieval_pool + user_entities table)
+**Depends on:** Multi-user auth (for scoping)
+**Effort:** M (human: ~1 week / CC: ~2 hours)
+**Priority:** P3
+**Added:** 2026-04-02

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     engram_activation_threshold: float = 0.1
     engram_max_results: int = 20
     engram_reconstruction_model: str = "auto"
-    engram_narrative_cluster_threshold: int = 20  # min engrams for LLM narrative reconstruction (template assembly below this)
+    engram_narrative_cluster_threshold: int = 999  # disabled — template assembly always; LLM narrative hallucinates false connections
 
     # Engram Network (Phase 3: Working Memory Gate)
     engram_wm_self_model_budget: int = 500
