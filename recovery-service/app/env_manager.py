@@ -36,6 +36,13 @@ ENV_WHITELIST = {
     "VLLM_MODEL",
     "SGLANG_MODEL",
     "VLLM_GPU_MEMORY_UTILIZATION",
+    # Self-modification
+    "NOVA_GITHUB_PAT",
+    "NOVA_GITHUB_REPO",
+    "NOVA_GITHUB_USER",
+    "NOVA_GITHUB_EMAIL",
+    "SELFMOD_ENABLED",
+    "SELFMOD_RATE_LIMIT_PER_HOUR",
 }
 
 # Keys whose values should be masked in GET responses
@@ -48,6 +55,8 @@ SECRET_KEYS = {
     "CLAUDE_CODE_OAUTH_TOKEN", "CHATGPT_ACCESS_TOKEN",
     # OAuth secret
     "GOOGLE_CLIENT_SECRET",
+    # Self-modification
+    "NOVA_GITHUB_PAT",
 }
 
 ENV_FILE = os.getenv("NOVA_ENV_FILE", "/project/.env")

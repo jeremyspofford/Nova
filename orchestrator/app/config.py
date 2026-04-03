@@ -104,5 +104,13 @@ class Settings(BaseSettings):
     # Bridge service auth — shared secret for bridge-to-orchestrator trust (X-Service-Secret header)
     bridge_service_secret: str = ""
 
+    # Self-modification (GitHub PR gate)
+    nova_github_pat: str = ""
+    nova_github_repo: str = ""
+    nova_github_user: str = ""
+    nova_github_email: str = ""
+    selfmod_rate_limit_per_hour: int = 5
+    selfmod_enabled: bool = False
+
 
 settings = Settings()

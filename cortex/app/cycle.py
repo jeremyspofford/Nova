@@ -574,9 +574,36 @@ async def _execute_maintain(drive: DriveResult, plan: str) -> str:
 
 
 async def _execute_improve(drive: DriveResult, plan: str) -> str:
-    """Execute an improve action — log improvement opportunity."""
+    """Execute an improve action — dispatch selfmod tasks or log improvement opportunity."""
     contradictions = drive.context.get("contradictions", [])
     router_status = drive.context.get("router_status")
+    selfmod_trigger = drive.context.get("selfmod_trigger")
+
+    # Self-modification opportunity — dispatch a pipeline task with nova sandbox
+    if selfmod_trigger:
+        sandbox = "nova"
+        try:
+            orch = get_orchestrator()
+            resp = await orch.post(
+                "/api/v1/pipeline/tasks",
+                json={
+                    "user_input": f"[Cortex self-modification] {plan}",
+                    "metadata": {
+                        "source": "cortex",
+                        "drive": "improve",
+                        "sandbox_override": sandbox,
+                        "selfmod_trigger": selfmod_trigger,
+                    },
+                },
+                headers={"Authorization": f"Bearer {settings.cortex_api_key}"},
+            )
+            if resp.status_code in (200, 201, 202):
+                task_id = resp.json().get("task_id", "unknown")
+                return f"Dispatched self-modification task {task_id} (sandbox={sandbox}). Plan: {plan[:200]}"
+            else:
+                return f"Failed to dispatch selfmod task: HTTP {resp.status_code} — {resp.text[:200]}"
+        except Exception as e:
+            return f"Failed to dispatch selfmod task: {e}"
 
     parts = []
     if contradictions:

@@ -10,7 +10,7 @@ import time as _time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -716,6 +716,14 @@ async def update_platform_config(
         except Exception as e:
             log.warning("Failed to publish config %s to Redis: %s", key, e)
 
+    # Publish memory.* config changes to Redis for runtime provider switching
+    if key.startswith("memory."):
+        try:
+            from app.config_sync import push_config_to_redis
+            await push_config_to_redis(key, req.value)
+        except Exception as e:
+            log.warning("Failed to publish config %s to Redis: %s", key, e)
+
     # Publish voice.* config changes to Redis for voice-service pickup
     if key.startswith("voice."):
         try:
@@ -1302,3 +1310,112 @@ async def delete_rule_endpoint(rule_id: UUID, _admin: AdminDep):
     ok = await _delete_rule(rule_id)
     if not ok:
         raise HTTPException(status_code=400, detail="Cannot delete system rule")
+
+
+# ── Benchmark Results ─────────────────────────────────────────────────────────
+
+@router.get("/api/v1/benchmarks/results")
+async def get_benchmark_results(_admin: AdminDep):
+    """Return parsed benchmark results for the dashboard."""
+    import glob
+    from pathlib import Path
+
+    # Inside container: /app/benchmarks/results; local dev: ./benchmarks/results
+    results_dir = (
+        Path("/app/benchmarks/results")
+        if Path("/app/benchmarks/results").exists()
+        else Path("benchmarks/results")
+    )
+    if not results_dir.exists():
+        return {"runs": [], "latest": None}
+
+    files = sorted(glob.glob(str(results_dir / "*.jsonl")), reverse=True)
+    if not files:
+        return {"runs": [], "latest": None}
+
+    runs = []
+    for f in files[:10]:  # Last 10 runs
+        try:
+            lines = Path(f).read_text().strip().split("\n")
+            entries = []
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entries.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+            summaries = [e for e in entries if e.get("type") == "summary"]
+            per_query = [e for e in entries if e.get("type") != "summary"]
+            runs.append({
+                "file": Path(f).name,
+                "summaries": summaries,
+                "per_query": per_query,
+            })
+        except Exception as exc:
+            log.warning("Failed to parse benchmark file %s: %s", f, exc)
+            continue
+
+    return {"runs": runs, "latest": runs[0] if runs else None}
+
+
+# ── Self-Modification ────────────────────────────────────────────────────────
+
+@router.get("/api/v1/selfmod/status")
+async def selfmod_status(request: Request):
+    """Self-modification configuration status."""
+    from app.config import settings
+    from app.store import get_redis
+    import time
+
+    # Count PRs this hour
+    redis = get_redis()
+    window = int(time.time() / 3600)
+    rkey = f"nova:selfmod:ratelimit:{window}"
+    prs_this_hour = int(await redis.get(rkey) or 0)
+
+    return {
+        "enabled": settings.selfmod_enabled,
+        "pat_configured": bool(settings.nova_github_pat),
+        "repo": settings.nova_github_repo,
+        "rate_limit_per_hour": settings.selfmod_rate_limit_per_hour,
+        "prs_this_hour": prs_this_hour,
+    }
+
+
+@router.get("/api/v1/selfmod/prs")
+async def selfmod_list_prs(
+    request: Request,
+    status: str = "all",
+    limit: int = 20,
+):
+    """List self-modification PRs from audit trail."""
+    pool = get_pool()
+    query = "SELECT * FROM selfmod_prs"
+    params = []
+    if status != "all":
+        query += " WHERE status = $1"
+        params.append(status)
+    query += " ORDER BY created_at DESC LIMIT $" + str(len(params) + 1)
+    params.append(min(limit, 100))
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+    return [dict(r) for r in rows]
+
+
+@router.get("/api/v1/selfmod/prs/{pr_id}")
+async def selfmod_pr_detail(request: Request, pr_id: str):
+    """Get PR detail with fresh GitHub status."""
+    import uuid as _uuid
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM selfmod_prs WHERE id = $1",
+            _uuid.UUID(pr_id),
+        )
+    if not row:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="PR not found")
+    return dict(row)

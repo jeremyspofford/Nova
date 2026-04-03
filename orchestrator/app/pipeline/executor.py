@@ -816,6 +816,15 @@ async def _run_agent(
                     pass
         except Exception:
             pass  # DB unavailable — safe default
+
+    # Per-task sandbox override (set via metadata.sandbox_override, e.g. cortex selfmod dispatch)
+    sandbox_override = task.metadata.get("sandbox_override")
+    if sandbox_override:
+        try:
+            tier = SandboxTier(sandbox_override)
+        except ValueError:
+            pass
+
     sandbox_token = set_sandbox(tier)
     self_mod = await read_self_modification_config()
     self_mod_token = set_self_modification(self_mod)

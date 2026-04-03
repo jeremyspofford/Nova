@@ -1180,3 +1180,38 @@ export const updateRule = (id: string, data: Record<string, unknown>) =>
   apiFetch(`/api/v1/rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) })
 export const deleteRule = (id: string) =>
   apiFetch(`/api/v1/rules/${id}`, { method: 'DELETE' })
+
+// ── Self-Modification ──────────────────────────────────────────────────────
+
+export interface SelfModStatus {
+  enabled: boolean
+  pat_configured: boolean
+  repo: string
+  rate_limit_per_hour: number
+  prs_this_hour: number
+}
+
+export interface SelfModPR {
+  id: string
+  pr_number: number
+  branch_name: string
+  title: string
+  body: string
+  status: string
+  ci_status: string
+  files_changed: number
+  goal_id: string | null
+  task_id: string | null
+  created_at: string
+  updated_at: string
+  merged_at: string | null
+  closed_at: string | null
+}
+
+export async function getSelfModStatus(): Promise<SelfModStatus> {
+  return apiFetch<SelfModStatus>('/api/v1/selfmod/status')
+}
+
+export async function getSelfModPRs(): Promise<SelfModPR[]> {
+  return apiFetch<SelfModPR[]>('/api/v1/selfmod/prs')
+}

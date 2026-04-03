@@ -5,7 +5,7 @@ import {
   Bot, Wrench, Palette, Users, Bug, Database, Lock,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
   FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell, Mic,
-  Brain, GitMerge, Wand2, ShieldAlert, Key, Target,
+  Brain, GitMerge, Wand2, ShieldAlert, Key, Target, GitPullRequest,
 } from 'lucide-react'
 import { getPlatformConfig, updatePlatformConfig, type PlatformConfigEntry } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -34,12 +34,14 @@ import { SkillsSection } from './settings/SkillsSection'
 import { RulesSection } from './settings/RulesSection'
 import { KeysSection } from './settings/KeysSection'
 import { VaultwardenSection } from './settings/VaultwardenSection'
+import { SelfModSection } from './settings/SelfModSection'
 import { GoalCreationSection } from './settings/GoalCreationSection'
 import { SelfModelSection } from './settings/SelfModelSection'
 import { ConsolidationSection } from './settings/ConsolidationSection'
 import { MaintenanceSection } from './settings/MaintenanceSection'
 import { EngramSourcesSection } from './settings/EngramSourcesSection'
 import { RouterStatusSection } from './settings/RouterStatusSection'
+import { MemoryProviderSection } from './settings/MemoryProviderSection'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
@@ -81,6 +83,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'sandbox', label: 'Agent Sandbox', icon: Shield },
       { id: 'keys', label: 'API Keys', icon: Key },
       { id: 'vault', label: 'Secrets Manager', icon: Shield },
+      { id: 'selfmod', label: 'Self-Modification', icon: GitPullRequest },
     ],
   },
   {
@@ -111,6 +114,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Memory',
     icon: Brain,
     items: [
+      { id: 'memory-provider', label: 'Memory Provider', icon: Database },
       { id: 'self-model', label: 'Self-Model', icon: Brain },
       { id: 'engram-sources', label: 'Engram Sources', icon: Database },
       { id: 'router-status', label: 'Neural Router', icon: Activity },
@@ -579,6 +583,12 @@ export function Settings() {
           </div>
         )}
 
+        {show('selfmod') && (
+          <div id="selfmod">
+            <SelfModSection />
+          </div>
+        )}
+
         {/* ── Behavior ─────────────────────────────────────────────── */}
 
         {show('skills') && (
@@ -704,6 +714,12 @@ export function Settings() {
         )}
 
         {/* ── Memory ───────────────────────────────────────────────────── */}
+
+        {show('memory-provider') && (
+          <div id="memory-provider">
+            <MemoryProviderSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+          </div>
+        )}
 
         {show('self-model') && (
           <div id="self-model">

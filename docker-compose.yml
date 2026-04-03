@@ -349,6 +349,12 @@ services:
       CREDENTIAL_MASTER_KEY: ${CREDENTIAL_MASTER_KEY:-}
       BRIDGE_SERVICE_SECRET: ${BRIDGE_SERVICE_SECRET:-}
       HOST_HOME: ${HOME}
+      NOVA_GITHUB_PAT: ${NOVA_GITHUB_PAT:-}
+      NOVA_GITHUB_REPO: ${NOVA_GITHUB_REPO:-}
+      NOVA_GITHUB_USER: ${NOVA_GITHUB_USER:-}
+      NOVA_GITHUB_EMAIL: ${NOVA_GITHUB_EMAIL:-}
+      SELFMOD_RATE_LIMIT_PER_HOUR: ${SELFMOD_RATE_LIMIT_PER_HOUR:-5}
+      SELFMOD_ENABLED: ${SELFMOD_ENABLED:-false}
     # Mount the host workspace at /workspace so agents can read/write files.
     # Set NOVA_WORKSPACE in .env to point at any directory.
     # Default: ~/.nova/workspace (created by setup.sh)
@@ -807,6 +813,119 @@ services:
     profiles:
       - tailscale
 
+  # ── Benchmark Baselines ──────────────────────────────────────────────────────
+  baseline-pgvector:
+    <<: *nova-common
+    profiles: ["benchmark"]
+    build:
+      context: .
+      dockerfile: baseline-pgvector/Dockerfile
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8003",
+      ]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-nova}:${POSTGRES_PASSWORD:-nova}@postgres:5432/${POSTGRES_DB:-nova}
+      LLM_GATEWAY_URL: http://llm-gateway:8001
+      PORT: "8003"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BASELINE_PGVECTOR_PORT:-8003}:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llm-gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8003/health/live', timeout=3)",
+        ]
+
+  baseline-mem0:
+    <<: *nova-common
+    profiles: ["benchmark"]
+    build:
+      context: .
+      dockerfile: baseline-mem0/Dockerfile
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8004",
+      ]
+    environment:
+      OLLAMA_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      LLM_GATEWAY_URL: http://llm-gateway:8001
+      MEM0_DATA_DIR: /data/mem0
+      PORT: "8004"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BASELINE_MEM0_PORT:-8004}:8004"
+    volumes:
+      - mem0-data:/data/mem0
+    depends_on:
+      llm-gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8004/health/live', timeout=3)",
+        ]
+
+  baseline-markdown:
+    <<: *nova-common
+    profiles: ["benchmark"]
+    build:
+      context: .
+      dockerfile: baseline-markdown/Dockerfile
+    command:
+      [
+        "uvicorn",
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8005",
+      ]
+    environment:
+      LLM_GATEWAY_URL: http://llm-gateway:8001
+      MARKDOWN_DIR: /data/markdown
+      PORT: "8005"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "${BASELINE_MARKDOWN_PORT:-8005}:8005"
+    volumes:
+      - ./data/markdown:/data/markdown:ro
+    depends_on:
+      llm-gateway:
+        condition: service_healthy
+    healthcheck:
+      <<: *nova-healthcheck
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8005/health/live', timeout=3)",
+        ]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Networks
 # ─────────────────────────────────────────────────────────────────────────────
@@ -826,3 +945,4 @@ volumes:
   nova-sglang-cache:
   tailscale-state:
   vaultwarden-data:
+  mem0-data:

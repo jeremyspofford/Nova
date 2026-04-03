@@ -36,6 +36,8 @@ from app.tools.intel_tools import INTEL_TOOLS
 from app.tools.intel_tools import execute_tool as _exec_intel
 from app.tools.config_tools import CONFIG_TOOLS
 from app.tools.config_tools import execute_tool as _exec_config
+from app.tools.github_tools import GITHUB_TOOLS
+from app.tools.github_tools import execute_tool as _exec_github
 
 
 # ── Registry ──────────────────────────────────────────────────────────────────
@@ -58,6 +60,7 @@ _REGISTRY: list[ToolGroup] = [
     ToolGroup("Memory", "Knowledge Retrieval", "Search, recall, and read from Nova's memory system", MEMORY_TOOLS, _exec_memory),
     ToolGroup("Intel", "Intelligence Analysis", "Query intel feeds, create recommendations, check dismissed content", INTEL_TOOLS, _exec_intel),
     ToolGroup("Config", "Skills & Rules", "Manage prompt skills and behavior rules", CONFIG_TOOLS, _exec_config),
+    ToolGroup("GitHub", "Self-Modification", "Create branches, push code, and manage pull requests on Nova's own repo", GITHUB_TOOLS, _exec_github),
 ]
 
 # Derived from registry — same shapes the rest of the codebase expects

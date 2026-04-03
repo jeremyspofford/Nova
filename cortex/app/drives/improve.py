@@ -39,17 +39,32 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
     except Exception as e:
         log.debug("Failed to check router status: %s", e)
 
+    # Self-modification opportunity
+    if ctx:
+        for s in ctx.stimuli:
+            if s.get("type") in ("system.selfmod_opportunity", "engram.improvement_suggestion"):
+                urgency = max(urgency, 0.5)
+                description_parts.append(s.get("description", "Self-modification opportunity detected"))
+                context["selfmod_trigger"] = s
+                break
+
     if urgency == 0.0:
         return DriveResult(
             name="improve", priority=3, urgency=0.0,
             description="No improvement signals",
         )
 
+    proposed_action = (
+        "Assess the improvement opportunity and create a PR if warranted"
+        if "selfmod_trigger" in context
+        else "Investigate and resolve detected issues"
+    )
+
     return DriveResult(
         name="improve",
         priority=3,
         urgency=round(urgency, 2),
         description="; ".join(description_parts),
-        proposed_action="Investigate and resolve detected issues",
+        proposed_action=proposed_action,
         context=context,
     )
