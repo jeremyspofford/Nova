@@ -21,10 +21,12 @@ ifneq ($(filter auto host,$(OLLAMA_BASE_URL)),)
   export OLLAMA_BASE_URL := $(RESOLVED_OLLAMA_URL)
 endif
 
-COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice
+EDITOR_PROFILE := $(if $(filter vscode,$(EDITOR_FLAVOR)),--profile editor-vscode,$(if $(filter neovim,$(EDITOR_FLAVOR)),--profile editor-neovim,))
+COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice $(EDITOR_PROFILE)
 ALL_PROFILES = --profile voice --profile website --profile bridges --profile knowledge \
                --profile local-ollama --profile local-vllm --profile local-sglang \
-               --profile cloudflare-tunnel --profile tailscale
+               --profile cloudflare-tunnel --profile tailscale \
+               --profile editor-vscode --profile editor-neovim
 
 # ─────────────────────────────────────────────────────────────────────────────
 help: ## Show available commands
