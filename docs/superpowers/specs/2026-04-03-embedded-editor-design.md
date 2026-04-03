@@ -30,7 +30,7 @@ Nova is a complete autonomous AI platform, but users still have to leave the das
   - `${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw` — working directory
   - `${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/config:rw` — settings, extensions, keybindings
   - `${HOME}:${HOME}:ro` — read-only home access for browsing other files
-- **Environment:** `DEFAULT_WORKSPACE=/workspace`, `PUID`/`PGID` for file permissions, `PASSWORD=""` and `PROXY_DOMAIN=localhost` (disables code-server's built-in auth — Nova's auth layer is the boundary)
+- **Environment:** `DEFAULT_WORKSPACE=/workspace`, `PUID`/`PGID` for file permissions, `PORT=8443` (explicit), `HASHED_PASSWORD=""` (linuxserver uses `HASHED_PASSWORD` — setting empty disables auth). Note: verify against current linuxserver/code-server docs at implementation time, as env var names may change between versions.
 - **Command args:** `--proxy-base-path /editor-vscode` (required for subpath proxy — without this, code-server serves assets at `/` and every resource 404s behind nginx)
 - **Healthcheck:** curl against code-server's built-in `/healthz`
 - **Dependencies:** None — editor is fully independent of other Nova services
@@ -54,6 +54,10 @@ Neither editor exposes a host port. They are only reachable through the dashboar
 ### Network
 
 Both services are internal-only on the `nova-internal` Docker network. No host port binding means no direct access bypassing Nova's auth. Only the dashboard nginx proxy can reach them.
+
+### Security Note: Home Directory Mount
+
+Both editors mount `${HOME}:${HOME}:ro` for browsing files outside the workspace. This gives the editor read access to the entire home directory, including `.ssh/`, `.aws/`, `.gnupg/`, and other credential stores. This is acceptable for a single-user local deployment (the user already has access to their own home), but users should evaluate whether this mount is necessary. The Settings UI config path fields provide an alternative — point the workspace at a specific project directory rather than relying on home-directory browsing. In multi-user or exposed deployments, this mount should be removed or scoped to a narrower path.
 
 ## Neovim Container (Custom Dockerfile)
 
@@ -105,7 +109,7 @@ location /editor-neovim/ {
 }
 ```
 
-No `rewrite` strip-prefix — both editors are configured with their base path (`--proxy-base-path /editor-vscode` for code-server, `--base-path /editor-neovim` for ttyd) so they serve assets at the correct subpath natively.
+**Important: no `rewrite` strip-prefix.** This diverges from every other location block in nginx.conf, which strips the prefix before forwarding. The editor blocks intentionally keep the prefix because both editors are configured with their base path (`--proxy-base-path /editor-vscode` for code-server, `--base-path /editor-neovim` for ttyd) and expect requests to arrive with the prefix intact. Add an inline comment in the nginx config explaining this — otherwise a future maintainer will "fix" it to match the existing pattern and break the editor.
 
 Timeouts set to 3600s (1 hour) for WebSocket connections — editors have long idle periods between keystrokes, and nginx's default 60s read timeout would kill the session.
 
@@ -130,7 +134,11 @@ Dashboard knows which flavor is active and iframes the correct path. Docker DNS 
 - Thin top bar with: flavor indicator, workspace path, pop-out button
 - Pop-out button opens the proxied URL in a new browser tab
 
-**Detection:** Page probes both nginx paths on mount. Whichever returns 200 is the active editor. Both returning 502 means no editor is running (show the setup prompt). Both returning 502 after an editor was previously running may indicate a crash — show "Editor stopped unexpectedly" with a restart link.
+**Detection:** Page probes both nginx paths on mount, then polls every 3s while in a non-ready state. Three states:
+
+- **Running** — one path returns 200. Render the iframe.
+- **Starting** — both return 502, but a start action was triggered recently (track via local state or a timestamp). Show a loading spinner with "Editor starting..." Poll until 200 or timeout (60s).
+- **Stopped** — both return 502, no recent start action. Show "No editor running. Start one in Settings > Editor." If an editor was previously running in this session, show "Editor stopped unexpectedly" with a restart link.
 
 ### Settings Section (`pages/settings/EditorSection.tsx`)
 
@@ -208,5 +216,9 @@ Accessed exclusively through dashboard nginx proxy at `/editor-vscode/` and `/ed
 - `dashboard/src/App.tsx` — new `/editor` route, rename `/editors` to `/ide-connections`, add redirect from `/editors`
 - `dashboard/src/components/layout/Sidebar.tsx` — add "Editor" nav item, rename "Editors" to "IDE Connections"
 - `dashboard/src/pages/Settings.tsx` — add Editor section to nav groups
-- `recovery-service/app/routes.py` — add `editor-vscode` and `editor-neovim` to `PROFILE_MAP` (hard-coded allowlist that rejects unknown profiles with 400)
+- `recovery-service/app/routes.py` — add to `PROFILE_MAP` (hard-coded allowlist that rejects unknown profiles with 400):
+  ```python
+  "editor-vscode": "editor-vscode",
+  "editor-neovim": "editor-neovim",
+  ```
 - `.env.example` — new editor variables
