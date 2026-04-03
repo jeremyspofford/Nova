@@ -22,8 +22,10 @@ const FLAVOR_ICONS: Record<EditorFlavor, typeof Code> = {
 
 async function probeEditor(flavor: EditorFlavor): Promise<boolean> {
   try {
-    const res = await fetch(PROBE_PATHS[flavor], { method: 'HEAD', redirect: 'manual', signal: AbortSignal.timeout(3000) })
-    return res.ok || res.type === 'opaqueredirect' || (res.status >= 300 && res.status < 400)
+    // Follow redirects (code-server 302s to workspace). Any successful
+    // response means the editor is up. 502/503 from nginx = not running.
+    const res = await fetch(PROBE_PATHS[flavor], { signal: AbortSignal.timeout(3000) })
+    return res.ok
   } catch {
     return false
   }
