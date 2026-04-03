@@ -50,8 +50,14 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path: string) => path.replace(/^\/bridge-api/, ''),
       },
-      // Embedded Neovim editor — proxied through nginx (ttyd supports base-path)
-      // VS Code (code-server) uses localhost:8443 directly (no proxy needed)
+      // Embedded Editors
+      // VS Code: proxy health probe to localhost:8443 (iframe loads direct)
+      '/editor-vscode': {
+        target: 'http://localhost:8443',
+        changeOrigin: true,
+        rewrite: (path: string) => path.replace(/^\/editor-vscode/, ''),
+      },
+      // Neovim: proxy through nginx (ttyd supports --base-path)
       '/editor-neovim': {
         target: 'http://localhost:3000',
         changeOrigin: true,

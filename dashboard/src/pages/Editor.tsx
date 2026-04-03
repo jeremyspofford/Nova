@@ -24,7 +24,8 @@ const FLAVOR_ICONS: Record<EditorFlavor, typeof Code> = {
 
 async function probeEditor(flavor: EditorFlavor): Promise<boolean> {
   try {
-    const url = flavor === 'vscode' ? 'http://localhost:8443/healthz' : '/editor-neovim/'
+    // Same-origin proxy paths to avoid CORS — Vite/nginx handle the forwarding
+    const url = flavor === 'vscode' ? '/editor-vscode/healthz' : '/editor-neovim/'
     const res = await fetch(url, { signal: AbortSignal.timeout(3000) })
     return res.ok
   } catch {
@@ -84,7 +85,7 @@ export default function Editor() {
         <MonitorOff className="w-12 h-12 text-content-disabled" />
         <p className="text-lg">No editor running</p>
         <Link
-          to="/settings#connections"
+          to="/settings#editor"
           className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-500 transition-colors"
         >
           Start one in Settings
