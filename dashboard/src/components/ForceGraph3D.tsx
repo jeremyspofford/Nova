@@ -79,7 +79,7 @@ export interface NeuralModeConfig {
   enabled: boolean
   breathingRate?: number      // Hz, default 0.02
   breathingAmplitude?: number // 0-1, default 0.05
-  bloomStrength?: number      // default 1.5 (current default is 1.0)
+  bloomStrength?: number      // default 0.2, range 0-1
   particlesAlways?: boolean   // override large-graph particle disable
 }
 
@@ -784,10 +784,9 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     const bhCore = new Sprite(bhCoreMat)
     bhCore.position.set(-3000, 1200, -5000)
     bhCore.scale.set(60, 60, 1)
-    bhCore.renderOrder = 1
     group.add(bhCore)
 
-    // Layer 2: accretion disk glow (renders on top)
+    // Layer 2: accretion disk glow (additive blending adds glow around the core)
     const bhDiskMat = new SpriteMaterial({
       map: makeBlackHoleTexture(), transparent: true, opacity: 0.9,
       blending: AdditiveBlending, depthWrite: false,
@@ -795,7 +794,6 @@ function createStarfield(options: { bgStars: boolean; innerStars: boolean; nebul
     const bhDisk = new Sprite(bhDiskMat)
     bhDisk.position.set(-3000, 1200, -5000)
     bhDisk.scale.set(200, 200, 1)
-    bhDisk.renderOrder = 2
     group.add(bhDisk)
   }
 
@@ -1522,8 +1520,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
     // ── Bloom post-processing ──────────────────────────────────────────
     try {
       const bloomStrength = neuralModeRef.current?.enabled
-        ? (neuralModeRef.current.bloomStrength ?? 1.5)
-        : 1.0
+        ? (neuralModeRef.current.bloomStrength ?? 0.2)
+        : 0.2
       const bloomPass = new UnrealBloomPass(
         new Vector2(Math.floor(width / 2), Math.floor(height / 2)),
         bloomStrength,   // strength
@@ -1610,7 +1608,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
 
           // Global bloom breathing
           if (bloomPassRef.current) {
-            const baseStrength = neuralCfg.bloomStrength ?? 1.2
+            const baseStrength = neuralCfg.bloomStrength ?? 0.2
             const breathe = 1 + Math.sin(time * 0.02 * Math.PI * 2) * 0.05
             bloomPassRef.current.strength = baseStrength * breathe
           }

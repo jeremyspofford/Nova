@@ -25,7 +25,7 @@ from nova_contracts import (
     ToolCallRef,
 )
 
-from app.clients import get_llm_client, get_memory_client
+from app.clients import get_llm_client, get_memory_client, get_memory_client_async
 from app.config import settings
 from app.stimulus import emit_stimulus
 from app.store import get_redis
@@ -388,7 +388,7 @@ async def _get_domain_priming(session_id: str) -> str:
     without consuming significant context.
     """
     try:
-        memory_client = get_memory_client()
+        memory_client = await get_memory_client_async()
 
         lines = []
 
@@ -454,7 +454,7 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
         except Exception as e:
             log.debug("Memory cache lookup failed (falling through): %s", e)
 
-    memory_client = get_memory_client()
+    memory_client = await get_memory_client_async()
     try:
         resp = await memory_client.post(
             "/api/v1/engrams/context",
@@ -490,7 +490,7 @@ async def _prewarm_memory(session_id: str, query: str) -> None:
         cache_key = f"nova:memory_cache:{session_id}"
 
         # Fetch fresh context from memory-service
-        memory_client = get_memory_client()
+        memory_client = await get_memory_client_async()
         resp = await memory_client.post(
             "/api/v1/engrams/context",
             json={"query": query, "session_id": session_id},
@@ -1142,7 +1142,7 @@ async def _mark_engrams_used(
     if not retrieval_log_id or not engram_ids:
         return
     try:
-        memory_client = get_memory_client()
+        memory_client = await get_memory_client_async()
         await memory_client.post(
             "/api/v1/engrams/mark-used",
             json={

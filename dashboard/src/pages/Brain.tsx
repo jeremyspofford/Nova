@@ -138,7 +138,8 @@ export default function Brain() {
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
-  const [bloomStrength, setBloomStrength] = useLocalStorage('brain.bloomStrength', 1.5)
+  const [rawBloom, setBloomStrength] = useLocalStorage('brain.bloomStrength', 0.2)
+  const bloomStrength = Math.min(rawBloom, 1.0)
   const [nodeLimit, setNodeLimit] = useLocalStorage('brain.nodeLimit', 2000)
 
   const { data: engramStats } = useQuery<{
@@ -181,7 +182,7 @@ export default function Brain() {
     }
     if (nodeCount > 500) return {
       showEdges,
-      bloomStrength: Math.min(bloomStrength, 1.2),
+      bloomStrength: Math.min(bloomStrength, 1.0),
       particlesAlways: false,
     }
     return {
@@ -686,8 +687,8 @@ export default function Brain() {
                 <input
                   type="range"
                   min="0"
-                  max="3"
-                  step="0.1"
+                  max="1"
+                  step="0.05"
                   value={bloomStrength}
                   onChange={(e) => setBloomStrength(parseFloat(e.target.value))}
                   className="flex-1 h-1 accent-teal-500 bg-white/10 rounded-full appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-webkit-slider-thumb]:appearance-none"

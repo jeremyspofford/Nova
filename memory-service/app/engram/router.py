@@ -828,7 +828,8 @@ async def get_graph(
 
 @engram_router.get("/graph/lightweight")
 async def get_graph_lightweight(
-    max_nodes: int = Query(default=2000, ge=10, le=5000),
+    max_nodes: int = Query(default=2000, ge=10, le=50000),
+    include_superseded: bool = Query(default=False),
 ):
     """Return a minimal subgraph for Brain rendering.
 
@@ -838,12 +839,13 @@ async def get_graph_lightweight(
     """
     async with get_db() as session:
         # Fetch engram fields — include truncated content + source_type for sidebar/tooltips
+        where_clause = "" if include_superseded else "WHERE NOT superseded"
         engrams_result = await session.execute(
-            text("""
+            text(f"""
                 SELECT id::text, type, importance,
                        LEFT(content, 120) AS content_preview, source_type
                 FROM engrams
-                WHERE NOT superseded
+                {where_clause}
                 ORDER BY importance DESC
                 LIMIT :limit
             """),

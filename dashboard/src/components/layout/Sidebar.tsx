@@ -12,6 +12,7 @@ import {
   Monitor,
   Plug,
   BarChart3,
+  FlaskConical,
   Settings,
   ChevronsLeft,
   ChevronsRight,
@@ -42,7 +43,6 @@ export const navSections: NavSection[] = [
   {
     // Core — no label, always visible
     items: [
-      { to: '/brain', label: 'Brain', icon: Brain, minRole: 'guest' },
       { to: '/chat', label: 'Chat', icon: MessageSquare, minRole: 'guest' },
       { to: '/tasks', label: 'Tasks', icon: ListTodo, minRole: 'member' },
       { to: '/goals', label: 'Goals', icon: Target, minRole: 'member' },
@@ -52,6 +52,7 @@ export const navSections: NavSection[] = [
   {
     label: 'Knowledge',
     items: [
+      { to: '/brain', label: 'Brain', icon: Brain, minRole: 'guest' },
       { to: '/sources', label: 'Knowledge', icon: Globe, minRole: 'member' },
     ],
   },
@@ -68,6 +69,7 @@ export const navSections: NavSection[] = [
     label: 'System',
     items: [
       { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
+      { to: '/benchmarks', label: 'Benchmarks', icon: FlaskConical, minRole: 'admin' },
       { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
     ],

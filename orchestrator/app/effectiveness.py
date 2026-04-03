@@ -154,8 +154,8 @@ async def _send_memory_feedback() -> int:
 
     # Send to memory-service
     try:
-        from .clients import get_memory_client
-        client = get_memory_client()
+        from .clients import get_memory_client_async
+        client = await get_memory_client_async()
         resp = await client.post("/api/v1/engrams/outcome-feedback", json=feedback)
         if resp.status_code in (200, 201):
             log.info("Sent %d engram outcome feedback entries", len(feedback))

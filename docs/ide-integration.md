@@ -10,63 +10,58 @@ Any tool that speaks the OpenAI chat completions protocol works out of the box.
 ### Quick start
 
 1. Install the [Continue extension](https://marketplace.visualstudio.com/items?itemName=Continue.continue)
-2. Open the config: **Cmd+Shift+P** → `Continue: Open config.json`
-3. Add an entry to the `models` array:
+2. Open the config: **Cmd+Shift+P** → `Continue: Open config.yaml`
+3. Add an entry to the `models` list:
 
-```json
-{
-  "models": [
-    {
-      "title": "Nova (Claude Sonnet)",
-      "provider": "openai",
-      "model": "claude-max/claude-sonnet-4-6",
-      "apiBase": "http://localhost:8001/v1",
-      "apiKey": "unused"
-    }
-  ]
-}
+```yaml
+models:
+  - name: Nova (Claude Sonnet)
+    provider: openai
+    model: claude-max/claude-sonnet-4-6
+    apiBase: http://localhost:8001/v1
+    roles:
+      - chat
+      - edit
 ```
 
-`apiKey` is required by Continue's JSON schema but Nova ignores its value.
 `apiBase` is the only thing that matters — it redirects traffic from `api.openai.com` to Nova.
 
 ### Recommended model set
 
-Add multiple entries to switch models from the Continue sidebar:
+Add multiple entries to switch models from the Continue sidebar. Use `roles` to assign each model to specific tasks:
 
-```json
-{
-  "models": [
-    {
-      "title": "Nova · Sonnet (fast)",
-      "provider": "openai",
-      "model": "claude-max/claude-sonnet-4-5",
-      "apiBase": "http://localhost:8001/v1",
-      "apiKey": "unused"
-    },
-    {
-      "title": "Nova · Sonnet (latest)",
-      "provider": "openai",
-      "model": "claude-max/claude-sonnet-4-6",
-      "apiBase": "http://localhost:8001/v1",
-      "apiKey": "unused"
-    },
-    {
-      "title": "Nova · Opus (most capable)",
-      "provider": "openai",
-      "model": "claude-max/claude-opus-4",
-      "apiBase": "http://localhost:8001/v1",
-      "apiKey": "unused"
-    },
-    {
-      "title": "Nova · GPT-4o",
-      "provider": "openai",
-      "model": "openai/gpt-4o",
-      "apiBase": "http://localhost:8001/v1",
-      "apiKey": "unused"
-    }
-  ]
-}
+```yaml
+models:
+  - name: "Nova: Sonnet (fast)"
+    provider: openai
+    model: claude-max/claude-sonnet-4-5
+    apiBase: http://localhost:8001/v1
+    roles:
+      - chat
+      - edit
+      - apply
+  - name: "Nova: Sonnet (latest)"
+    provider: openai
+    model: claude-max/claude-sonnet-4-6
+    apiBase: http://localhost:8001/v1
+    roles:
+      - chat
+      - edit
+      - apply
+  - name: "Nova: Opus (most capable)"
+    provider: openai
+    model: claude-max/claude-opus-4
+    apiBase: http://localhost:8001/v1
+    roles:
+      - chat
+      - edit
+  - name: "Nova: GPT-4o"
+    provider: openai
+    model: openai/gpt-4o
+    apiBase: http://localhost:8001/v1
+    roles:
+      - chat
+      - edit
 ```
 
 ### Verify available models
@@ -88,7 +83,19 @@ curl -X POST http://localhost:8000/api/v1/keys \
   -d '{"name": "continue-dev", "rate_limit_rpm": 120}'
 ```
 
-Use the returned `key` value (shown once) as the `apiKey` field in the config above.
+Then add `apiKey` to your model entries:
+
+```yaml
+models:
+  - name: Nova (Claude Sonnet)
+    provider: openai
+    model: claude-max/claude-sonnet-4-6
+    apiBase: http://localhost:8001/v1
+    apiKey: sk-nova-your-key-here
+    roles:
+      - chat
+      - edit
+```
 
 ---
 

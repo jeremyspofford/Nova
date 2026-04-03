@@ -1,26 +1,66 @@
 """
 HTTP clients for downstream services.
 Uses httpx with connection pooling; clients are module-level singletons.
+Runtime memory provider URL can be overridden via Redis (nova:config:memory.provider_url).
 """
 from __future__ import annotations
+
+import logging
 
 import httpx
 
 from app.config import settings
 
+log = logging.getLogger(__name__)
+
 _memory_client: httpx.AsyncClient | None = None
+_memory_client_url: str | None = None  # Track current URL for runtime switching
 _llm_client: httpx.AsyncClient | None = None
 _orchestrator_client: httpx.AsyncClient | None = None
 
 
-def get_memory_client() -> httpx.AsyncClient:
-    global _memory_client
-    if _memory_client is None or _memory_client.is_closed:
+async def _get_memory_url() -> str:
+    """Resolve the memory service URL: Redis override > static config."""
+    try:
+        from app.redis import get_redis
+        redis = get_redis()
+        override = await redis.get("nova:config:memory.provider_url")
+        if override:
+            return override if isinstance(override, str) else override.decode()
+    except Exception:
+        pass
+    return settings.memory_service_url
+
+
+async def get_memory_client_async() -> httpx.AsyncClient:
+    """Get memory client, checking for runtime URL override via Redis."""
+    global _memory_client, _memory_client_url
+    url = await _get_memory_url()
+    if _memory_client is None or _memory_client.is_closed or url != _memory_client_url:
+        if _memory_client and not _memory_client.is_closed:
+            await _memory_client.aclose()
         _memory_client = httpx.AsyncClient(
-            base_url=settings.memory_service_url,
+            base_url=url,
             timeout=30.0,
             limits=httpx.Limits(max_connections=20),
         )
+        if _memory_client_url and url != _memory_client_url:
+            log.info("Memory provider switched: %s → %s", _memory_client_url, url)
+        _memory_client_url = url
+    return _memory_client
+
+
+def get_memory_client() -> httpx.AsyncClient:
+    """Sync getter for backwards compatibility. Uses last-known URL."""
+    global _memory_client, _memory_client_url
+    url = _memory_client_url or settings.memory_service_url
+    if _memory_client is None or _memory_client.is_closed:
+        _memory_client = httpx.AsyncClient(
+            base_url=url,
+            timeout=30.0,
+            limits=httpx.Limits(max_connections=20),
+        )
+        _memory_client_url = url
     return _memory_client
 
 

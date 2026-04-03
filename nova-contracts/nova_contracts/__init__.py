@@ -42,6 +42,14 @@ from .engram import (
     IngestResponse,
     EngramDetail,
 )
+from .memory import (
+    ContextRequest,
+    ContextResponse,
+    MemoryIngestRequest,
+    MemoryIngestResponse,
+    MarkUsedRequest,
+    ProviderStats,
+)
 
 __all__ = [
     "ModelCapability", "ContentBlock", "Message", "extract_text_content",
@@ -54,4 +62,7 @@ __all__ = [
     "EngramType", "EdgeRelation", "IngestionSourceType", "IngestionEvent",
     "DecomposedEngram", "DecomposedRelationship", "DecomposedContradiction",
     "DecompositionResult", "IngestRequest", "IngestResponse", "EngramDetail",
+    "ContextRequest", "ContextResponse",
+    "MemoryIngestRequest", "MemoryIngestResponse",
+    "MarkUsedRequest", "ProviderStats",
 ]
