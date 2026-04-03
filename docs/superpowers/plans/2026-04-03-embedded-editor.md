@@ -21,7 +21,7 @@
 | `editor-neovim/entrypoint.sh` | Dotfiles clone/pull + ttyd launch |
 | `dashboard/src/pages/Editor.tsx` | Embedded editor page (iframe, detection, three-state UI) |
 | `dashboard/src/pages/settings/EditorSection.tsx` | Editor settings (flavor, paths, dotfiles, start/stop) |
-| `dashboard/src/pages/IdeConnections.tsx` | Renamed from Editors.tsx (re-export for clean rename) |
+| `editor-vscode/.gitkeep` | Placeholder for VS Code editor service directory |
 
 **Modified files:**
 | File | Change |
@@ -112,11 +112,19 @@ Then: `curl -sf http://localhost:7681/ | head -c 200`
 Expected: HTML response from ttyd
 Cleanup: `docker stop test-neovim`
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Create editor-vscode placeholder directory**
 
 ```bash
-git add editor-neovim/
-git commit -m "feat(editor): add neovim + ttyd container image"
+mkdir -p editor-vscode && touch editor-vscode/.gitkeep
+```
+
+This directory exists as a placeholder for the VS Code editor service. The upstream `linuxserver/code-server` image is used directly — no custom Dockerfile needed.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add editor-neovim/ editor-vscode/
+git commit -m "feat(editor): add neovim + ttyd container image and vscode placeholder"
 ```
 
 ---
@@ -149,8 +157,11 @@ Insert after the vaultwarden service block (after line 753 in `docker-compose.ym
       - ${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
       - ${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/config:rw
       - ${HOME}:${HOME}:ro
+    # linuxserver/code-server wraps coder/code-server — pass proxy-base-path
+    # so asset URLs include the /editor-vscode/ prefix for nginx subpath proxy.
+    command: --proxy-base-path /editor-vscode
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8443/editor-vscode/healthz"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8443/healthz"]
       <<: *nova-healthcheck
     logging:
       driver: json-file
@@ -509,7 +520,7 @@ git commit -m "feat(editor): add embedded editor page with three-state detection
 import { useState, useEffect } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Code, Terminal, Play, Square, Loader2 } from 'lucide-react'
-import { patchEnv, manageComposeProfile, getContainerStatus } from '../../api-recovery'
+import { patchEnv, manageComposeProfile, getServiceStatus } from '../../api-recovery'
 
 type EditorFlavor = 'vscode' | 'neovim'
 
@@ -544,9 +555,9 @@ export default function EditorSection() {
     async function check() {
       setChecking(true)
       try {
-        const statuses = await getContainerStatus()
-        const vsRunning = statuses?.['nova-editor-vscode']?.running
-        const nvimRunning = statuses?.['nova-editor-neovim']?.running
+        const services = await getServiceStatus()
+        const vsRunning = services.some((s: { container_name: string; status: string }) => s.container_name === 'nova-editor-vscode' && s.status === 'running')
+        const nvimRunning = services.some((s: { container_name: string; status: string }) => s.container_name === 'nova-editor-neovim' && s.status === 'running')
         setRunning(vsRunning ? 'vscode' : nvimRunning ? 'neovim' : null)
       } catch {
         setRunning(null)
@@ -883,7 +894,7 @@ Expected: `200`
 
 - [ ] **Step 4: Verify neovim editor**
 
-Stop vscode: `docker compose --profile editor-vscode stop editor-vscode`
+Stop vscode: `docker compose stop editor-vscode`
 Start neovim: `docker compose --profile editor-neovim up -d editor-neovim`
 
 Run: `curl -sf -o /dev/null -w '%{http_code}' http://localhost:3000/editor-neovim/`
@@ -906,7 +917,7 @@ Expected: Redirects to `/ide-connections`.
 
 - [ ] **Step 8: Cleanup and commit**
 
-Stop editor: `docker compose --profile editor-neovim stop editor-neovim`
+Stop editor: `docker compose stop editor-neovim`
 
 ```bash
 git add -A
