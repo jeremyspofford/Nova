@@ -14,7 +14,7 @@ RUN apk add --no-cache \
     openssh-client \
     bash
 
-COPY entrypoint.sh /entrypoint.sh
+COPY editor-neovim/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 WORKDIR /workspace

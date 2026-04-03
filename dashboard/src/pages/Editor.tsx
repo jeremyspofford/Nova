@@ -78,7 +78,7 @@ export default function Editor() {
   if (state === 'stopped') {
     return (
       <div className="flex flex-col items-center justify-center h-full text-content-tertiary gap-4">
-        <MonitorOff className="w-12 h-12 text-content-quaternary" />
+        <MonitorOff className="w-12 h-12 text-content-disabled" />
         <p className="text-lg">No editor running</p>
         <Link
           to="/settings#connections"

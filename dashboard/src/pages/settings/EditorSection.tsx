@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Code, Terminal, Loader2, Play, Square, RefreshCw } from 'lucide-react'
-import { patchEnv, manageComposeProfile, getServiceStatus } from '../../api-recovery'
+import { patchEnv, manageComposeProfile, getServiceStatus, getEnvVars } from '../../api-recovery'
 import type { ServiceStatus } from '../../api-recovery'
 import { Section } from '../../components/ui'
 import { ServiceStatusBadge } from './shared'
@@ -50,6 +50,19 @@ export default function EditorSection() {
     dotfilesRepo: '',
   })
   const set = (patch: Partial<EditorState>) => setS(prev => ({ ...prev, ...patch }))
+
+  // Load current env values on mount
+  useEffect(() => {
+    getEnvVars().then(env => {
+      setS(prev => ({
+        ...prev,
+        flavor: (env.EDITOR_FLAVOR as EditorFlavor) || prev.flavor,
+        workspacePath: env.EDITOR_WORKSPACE || '',
+        configPath: env[FLAVOR_CONFIG[(env.EDITOR_FLAVOR as EditorFlavor) || 'vscode'].configEnvKey] || '',
+        dotfilesRepo: env.EDITOR_DOTFILES_REPO || '',
+      }))
+    }).catch(() => { /* recovery service may not be up yet */ })
+  }, [])
 
   // Sync flavor selector to whichever is running
   useEffect(() => {
