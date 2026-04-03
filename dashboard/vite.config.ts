@@ -51,16 +51,15 @@ export default defineConfig({
         rewrite: (path: string) => path.replace(/^\/bridge-api/, ''),
       },
       // Embedded Editors — VS Code and Neovim
-      // code-server: strip prefix (serves at root)
-      // neovim/ttyd: keep prefix (configured with --base-path)
+      // Editor containers are internal-only (no host port). Route through
+      // the dashboard nginx container which is on the Docker network.
       '/editor-vscode': {
-        target: 'http://localhost:8443',
+        target: 'http://localhost:3000',
         changeOrigin: true,
         ws: true,
-        rewrite: (path: string) => path.replace(/^\/editor-vscode/, ''),
       },
       '/editor-neovim': {
-        target: 'http://localhost:7681',
+        target: 'http://localhost:3000',
         changeOrigin: true,
         ws: true,
       },
