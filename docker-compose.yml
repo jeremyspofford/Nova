@@ -756,22 +756,22 @@ services:
   # NOTE: Both editors are internal-only (no host port). Access via dashboard
   # nginx proxy at /editor-vscode/ or /editor-neovim/.
   editor-vscode:
-    image: linuxserver/code-server:latest
+    image: codercom/code-server:latest
     container_name: nova-editor-vscode
     profiles: ["editor-vscode"]
     restart: unless-stopped
-    environment:
-      - DEFAULT_WORKSPACE=/workspace
-      - PUID=${PUID:-1000}
-      - PGID=${PGID:-1000}
-      - PORT=8443
-      - HASHED_PASSWORD=
+    # code-server doesn't support subpath serving. Nginx strips the
+    # /editor-vscode/ prefix before forwarding. WebSocket upgrade
+    # headers are passed through by nginx.
+    command:
+      - --bind-addr=0.0.0.0:8443
+      - --auth=none
+      - --disable-telemetry
+      - /workspace
     volumes:
       - ${EDITOR_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
-      - ${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/config:rw
+      - ${VSCODE_CONFIG_PATH:-./data/editor-config/vscode}:/home/coder/.local/share/code-server:rw
       - ${HOME}:${HOME}:ro
-    # linuxserver/code-server uses s6-overlay — command: is not passed to
-    # code-server. Subpath proxying is handled by nginx rewrite instead.
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8443/healthz"]
       <<: *nova-healthcheck
