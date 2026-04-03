@@ -34,6 +34,7 @@ import { OnboardingWizard } from './pages/onboarding/OnboardingWizard'
 import ComponentGallery from './pages/dev/ComponentGallery'
 
 const Editors = lazy(() => import('./pages/Editors'))
+const Editor = lazy(() => import('./pages/Editor'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -184,7 +185,8 @@ function AppShell() {
         <Route path="/sources" element={<MobileGuard><AppLayout><ErrorBoundary><Sources /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/integrations" element={<MobileGuard><AppLayout><ErrorBoundary><Integrations /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/models" element={<MobileGuard><AppLayout><ErrorBoundary><Models /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/editors" element={<MobileGuard><AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/editor" element={<MobileGuard><AppLayout fullWidth><ErrorBoundary><Suspense fallback={null}><Editor /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/ide-connections" element={<MobileGuard><AppLayout><ErrorBoundary><Suspense fallback={null}><Editors /></Suspense></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/users" element={<MobileGuard><AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/settings" element={<MobileGuard><AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/recovery" element={<MobileGuard><AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout></MobileGuard>} />
@@ -197,6 +199,7 @@ function AppShell() {
         <Route path="/agents" element={<Navigate to="/integrations#agents" replace />} />
         <Route path="/keys" element={<Navigate to="/settings#keys" replace />} />
         <Route path="/skills" element={<Navigate to="/settings#behavior" replace />} />
+        <Route path="/editors" element={<Navigate to="/ide-connections" replace />} />
         <Route path="/rules" element={<Navigate to="/settings#behavior" replace />} />
       </Routes>
     </BrowserRouter>

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Bot, Wrench, Palette, Users, Bug, Database, Lock,
+  Bot, Wrench, Palette, Users, Bug, Database, Lock, Code,
   CircleUser, Shield, Radio as RadioIcon, Globe, MessageSquare,
   FileCode, Layers, Gauge, Activity, RotateCcw, HeartPulse, Bell, Mic,
   Brain, GitMerge, Wand2, ShieldAlert, Key, Target, GitPullRequest,
@@ -42,6 +42,7 @@ import { MaintenanceSection } from './settings/MaintenanceSection'
 import { EngramSourcesSection } from './settings/EngramSourcesSection'
 import { RouterStatusSection } from './settings/RouterStatusSection'
 import { MemoryProviderSection } from './settings/MemoryProviderSection'
+import EditorSection from './settings/EditorSection'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
 import { Skeleton } from '../components/ui'
@@ -129,6 +130,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { id: 'remote-access', label: 'Remote Access', icon: Globe },
       { id: 'chat-integrations', label: 'Chat Integrations', icon: MessageSquare },
+      { id: 'editor', label: 'Editor', icon: Code },
       { id: 'notifications', label: 'Notifications', icon: Bell },
     ],
   },
@@ -762,6 +764,12 @@ export function Settings() {
         {show('chat-integrations') && (
           <div id="chat-integrations">
             <ChatIntegrationsSection />
+          </div>
+        )}
+
+        {show('editor') && (
+          <div id="editor">
+            <EditorSection />
           </div>
         )}
 

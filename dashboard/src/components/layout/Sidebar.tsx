@@ -9,6 +9,7 @@ import {
   Brain,
   Boxes,
   Code,
+  Cable,
   Monitor,
   Plug,
   BarChart3,
@@ -61,7 +62,8 @@ export const navSections: NavSection[] = [
     items: [
       { to: '/pods', label: 'Pods', icon: Boxes, minRole: 'admin' },
       { to: '/models', label: 'Models', icon: Monitor, minRole: 'member' },
-      { to: '/editors', label: 'Editors', icon: Code, minRole: 'member' },
+      { to: '/editor', label: 'Editor', icon: Code, minRole: 'member' },
+      { to: '/ide-connections', label: 'IDE Connections', icon: Cable, minRole: 'member' },
       { to: '/integrations', label: 'Integrations', icon: Plug, minRole: 'admin' },
     ],
   },
