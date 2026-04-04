@@ -71,7 +71,7 @@ export const navSections: NavSection[] = [
     label: 'System',
     items: [
       { to: '/usage', label: 'Usage', icon: BarChart3, minRole: 'member' },
-      { to: '/benchmarks', label: 'Benchmarks', icon: FlaskConical, minRole: 'admin' },
+      { to: '/ai-quality', label: 'AI Quality', icon: FlaskConical, minRole: 'admin' },
       { to: '/users', label: 'Users', icon: Users, minRole: 'admin' },
       { to: '/settings', label: 'Settings', icon: Settings, minRole: 'admin' },
     ],

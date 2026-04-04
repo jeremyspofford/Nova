@@ -26,7 +26,7 @@ import { Goals } from './pages/Goals'
 import { Sources } from './pages/Sources'
 import { Recovery } from './pages/Recovery'
 import { About } from './pages/About'
-import { Benchmarks } from './pages/Benchmarks'
+import { AIQuality } from './pages/AIQuality'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
@@ -217,7 +217,7 @@ function RoutedContent() {
         <Route path="/users" element={<MobileGuard><AppLayout><ErrorBoundary><Users /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/settings" element={<MobileGuard><AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/recovery" element={<MobileGuard><AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout></MobileGuard>} />
-        <Route path="/benchmarks" element={<MobileGuard><AppLayout><ErrorBoundary><Benchmarks /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/ai-quality" element={<MobileGuard><AppLayout><ErrorBoundary><AIQuality /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/about" element={<MobileGuard><AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout></MobileGuard>} />
 
         {/* Redirects for old routes */}
@@ -228,6 +228,7 @@ function RoutedContent() {
         <Route path="/skills" element={<Navigate to="/settings#behavior" replace />} />
         <Route path="/editors" element={<Navigate to="/ide-connections" replace />} />
         <Route path="/rules" element={<Navigate to="/settings#behavior" replace />} />
+        <Route path="/benchmarks" element={<Navigate to="/ai-quality" replace />} />
       </Routes>
 
       {/* Brain keep-alive — mounted after idle, rendered with fixed positioning.
