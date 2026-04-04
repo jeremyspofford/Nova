@@ -1,4 +1,4 @@
-.PHONY: help setup up dev build down logs ps watch migrate backup restore website test test-quick prune prune-all
+.PHONY: help setup up dev build down logs ps watch migrate backup restore website test test-quick benchmark-quality prune prune-all
 
 DASHBOARD    = dashboard
 
@@ -78,6 +78,9 @@ test: ## Run integration tests against running services
 test-quick: ## Smoke test (health endpoints only)
 	@cd tests && uv run --with pytest --with pytest-asyncio --with httpx --with websockets --with python-dotenv \
 	  pytest -v --tb=short -k "health"
+
+benchmark-quality: ## Run AI quality benchmark suite
+	python -m benchmarks.quality.runner
 
 # ── Backup / Restore ─────────────────────────────────────────────────────────
 backup: ## Create a database backup (emergency — normally use the Recovery UI)
