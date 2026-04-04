@@ -406,6 +406,35 @@ async def mark_used(
     return {"status": "ok"}
 
 
+# ── Batch Fetch ────────────────────────────────────────────────────────
+
+
+class BatchRequest(BaseModel):
+    ids: list[str]
+
+
+class BatchItem(BaseModel):
+    id: str
+    content: str
+    node_type: str
+
+
+@engram_router.post("/batch", response_model=list[BatchItem])
+async def batch_get_engrams(req: BatchRequest):
+    """Return engram content for a list of IDs. Used by quality scorer."""
+    if not req.ids:
+        return []
+    async with get_db() as session:
+        placeholders = ", ".join(f":id_{i}" for i in range(len(req.ids)))
+        params = {f"id_{i}": uid for i, uid in enumerate(req.ids)}
+        result = await session.execute(
+            text(f"SELECT id::text, content, type FROM engrams WHERE id::text IN ({placeholders})"),
+            params,
+        )
+        rows = result.fetchall()
+    return [BatchItem(id=r[0], content=r[1], node_type=r[2]) for r in rows]
+
+
 # ── Phase 6: Graph Visualization ───────────────────────────────────────
 
 

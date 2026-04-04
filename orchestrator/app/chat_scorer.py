@@ -15,6 +15,7 @@ if keywords don't produce a high-confidence result.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -22,6 +23,12 @@ from datetime import datetime, timezone, timedelta
 from .db import get_pool
 from .store import get_redis
 from .clients import get_llm_client
+from app.quality_scorer import (
+    score_memory_relevance,
+    score_memory_recall,
+    score_tool_accuracy,
+    score_response_coherence,
+)
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +129,37 @@ async def _score_turn(
     return await _score_by_similarity(user_msg, prev_user_msg, assistant_msg)
 
 
+async def _write_quality_scores(
+    conn,
+    conversation_id: str,
+    message_id: str | None,
+    scores: list[dict],
+) -> int:
+    """Write per-dimension quality scores to quality_scores table."""
+    written = 0
+    for s in scores:
+        if s is None:
+            continue
+        try:
+            await conn.execute(
+                """
+                INSERT INTO quality_scores
+                    (conversation_id, message_id, dimension, score, confidence, metadata)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                conversation_id,
+                message_id,
+                s["dimension"],
+                s["score"],
+                s.get("confidence"),
+                json.dumps(s.get("metadata", {})),
+            )
+            written += 1
+        except Exception as e:
+            log.debug("Failed to write quality score %s: %s", s.get("dimension"), e)
+    return written
+
+
 async def _process_new_messages() -> int:
     """Process new messages and score preceding assistant responses.
 
@@ -170,7 +208,7 @@ async def _process_new_messages() -> int:
             # Get the preceding assistant message
             assistant_row = await conn.fetchrow(
                 """
-                SELECT content, created_at FROM messages
+                SELECT id, content, created_at, metadata FROM messages
                 WHERE conversation_id = $1
                   AND role = 'assistant'
                   AND created_at < $2
@@ -197,6 +235,10 @@ async def _process_new_messages() -> int:
 
             assistant_msg = assistant_row["content"] or ""
             prev_user_msg = prev_user_row["content"] if prev_user_row else None
+
+            # Aliases used by quality scoring block below
+            user_text = user_msg
+            assistant_text = assistant_msg
 
             # Score
             score, confidence = await _score_turn(user_msg, prev_user_msg, assistant_msg)
@@ -225,6 +267,58 @@ async def _process_new_messages() -> int:
 
             if result and result != "UPDATE 0":
                 scores_written += 1
+
+            # ── Quality dimension scoring (async, non-blocking) ──
+            try:
+                quality_scores = []
+
+                # Memory relevance — check if engrams were injected
+                engram_ids = []
+                if assistant_row.get("metadata"):
+                    meta = assistant_row["metadata"]
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    engram_ids = meta.get("engram_ids", [])
+
+                if engram_ids:
+                    relevance = await score_memory_relevance(engram_ids, user_text)
+                    quality_scores.append(relevance)
+
+                # Memory recall — correction detection
+                recall = score_memory_recall(user_text)
+                quality_scores.append(recall)
+
+                # Tool accuracy — parse agent session output
+                # agent_sessions has no conversation_id; join through tasks table
+                session_output = None
+                session_row = await conn.fetchrow(
+                    """SELECT s.output FROM agent_sessions s
+                       JOIN tasks t ON t.id = s.task_id
+                       WHERE t.conversation_id = $1
+                       ORDER BY s.completed_at DESC NULLS LAST LIMIT 1""",
+                    conv_id,
+                )
+                if session_row and session_row["output"]:
+                    output = session_row["output"]
+                    session_output = json.loads(output) if isinstance(output, str) else output
+
+                tool_score = score_tool_accuracy(session_output)
+                quality_scores.append(tool_score)
+                had_tools = tool_score is not None
+
+                # Response coherence — skip if tools were used
+                coherence = await score_response_coherence(
+                    user_text, assistant_text, had_tool_calls=had_tools
+                )
+                quality_scores.append(coherence)
+
+                written = await _write_quality_scores(
+                    conn, str(conv_id), str(assistant_row["id"]), quality_scores
+                )
+                if written > 0:
+                    log.debug("Wrote %d quality scores for conversation %s", written, conv_id)
+            except Exception as e:
+                log.debug("Quality scoring failed (non-fatal): %s", e)
 
     # Update cursor
     await redis.set(CURSOR_KEY, new_cursor.isoformat())

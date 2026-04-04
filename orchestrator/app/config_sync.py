@@ -143,3 +143,40 @@ async def sync_voice_config_to_redis() -> None:
         log.info("Synced %d voice config keys to Redis", len(rows))
     except Exception as e:
         log.warning("Voice config sync to Redis failed (non-fatal): %s", e)
+
+
+async def sync_features_config_to_redis() -> None:
+    """Push features.* config to all service Redis DBs that need them.
+
+    Unlike LLM config (db1 only), feature flags are read by cortex (db5),
+    intel-worker (db6), and knowledge-worker (db8). Write to each.
+    """
+    SERVICE_DBS = [5, 6, 8]  # cortex, intel-worker, knowledge-worker
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT key, value FROM platform_config WHERE key LIKE 'features.%'"
+            )
+        if not rows:
+            return
+
+        base_url = settings.redis_url.rsplit("/", 1)[0]
+        for db in SERVICE_DBS:
+            import re as _re
+            db_url = _re.sub(r"/\d+$", f"/{db}", settings.redis_url)
+            if f"/{db}" not in db_url:
+                db_url = f"{base_url}/{db}"
+            r = aioredis.from_url(db_url, decode_responses=True)
+            try:
+                for row in rows:
+                    val = row["value"]
+                    if val is not None:
+                        raw = json.dumps(val) if not isinstance(val, str) else val
+                        await r.set(f"nova:config:{row['key']}", raw)
+            finally:
+                await r.aclose()
+
+        log.info("Synced %d features config keys to Redis dbs %s", len(rows), SERVICE_DBS)
+    except Exception as e:
+        log.warning("Features config sync to Redis failed (non-fatal): %s", e)

@@ -100,11 +100,12 @@ async def lifespan(app: FastAPI):
     await _seed_config_from_env()
 
     # Sync DB config to Redis so LLM gateway has correct values immediately
-    from app.config_sync import sync_llm_config_to_redis, sync_inference_config_to_redis, sync_engram_config_to_redis, sync_voice_config_to_redis
+    from app.config_sync import sync_llm_config_to_redis, sync_inference_config_to_redis, sync_engram_config_to_redis, sync_voice_config_to_redis, sync_features_config_to_redis
     await sync_llm_config_to_redis()
     await sync_inference_config_to_redis()
     await sync_engram_config_to_redis()
     await sync_voice_config_to_redis()
+    await sync_features_config_to_redis()
 
     # Guarantee one canonical Nova agent exists; prune any duplicates
     primary = await ensure_primary_agent()
@@ -179,6 +180,7 @@ app.add_middleware(
 from app.engram_router import router as engram_router
 from app.linked_accounts_router import router as linked_accounts_router
 from app.workspace_router import workspace_router
+from app.quality_router import quality_router
 
 app.include_router(health_router)
 app.include_router(router)
@@ -191,3 +193,4 @@ app.include_router(knowledge_router)
 app.include_router(engram_router)
 app.include_router(linked_accounts_router)
 app.include_router(workspace_router)
+app.include_router(quality_router)
