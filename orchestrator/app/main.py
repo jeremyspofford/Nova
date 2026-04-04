@@ -179,6 +179,7 @@ app.add_middleware(
 from app.engram_router import router as engram_router
 from app.linked_accounts_router import router as linked_accounts_router
 from app.workspace_router import workspace_router
+from app.quality_router import quality_router
 
 app.include_router(health_router)
 app.include_router(router)
@@ -191,3 +192,4 @@ app.include_router(knowledge_router)
 app.include_router(engram_router)
 app.include_router(linked_accounts_router)
 app.include_router(workspace_router)
+app.include_router(quality_router)

@@ -56,3 +56,56 @@ class TestEngramBatchEndpoint:
         assert "id" in results[0]
         assert "content" in results[0]
         assert "node_type" in results[0]
+
+
+class TestQualityAPI:
+    """Quality score API endpoints."""
+
+    async def test_scores_endpoint_returns_200(
+        self, orchestrator_client: httpx.AsyncClient, admin_headers: dict
+    ):
+        r = await orchestrator_client.get(
+            "/api/v1/quality/scores?granularity=daily",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    async def test_summary_endpoint_returns_200(
+        self, orchestrator_client: httpx.AsyncClient, admin_headers: dict
+    ):
+        r = await orchestrator_client.get(
+            "/api/v1/quality/summary?period=7d",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert "dimensions" in data
+        assert "composite" in data
+        assert "period_days" in data
+
+    async def test_summary_requires_admin(
+        self, orchestrator_client: httpx.AsyncClient
+    ):
+        r = await orchestrator_client.get("/api/v1/quality/summary?period=7d")
+        assert r.status_code in (401, 403)
+
+
+class TestBenchmarkAPI:
+    """Quality benchmark run API endpoints."""
+
+    async def test_benchmark_results_endpoint(
+        self, orchestrator_client: httpx.AsyncClient, admin_headers: dict
+    ):
+        r = await orchestrator_client.get(
+            "/api/v1/benchmarks/quality-results",
+            headers=admin_headers,
+        )
+        assert r.status_code == 200
+        assert isinstance(r.json(), list)
+
+    async def test_benchmark_results_requires_admin(
+        self, orchestrator_client: httpx.AsyncClient
+    ):
+        r = await orchestrator_client.get("/api/v1/benchmarks/quality-results")
+        assert r.status_code in (401, 403)
