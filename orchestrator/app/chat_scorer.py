@@ -245,21 +245,26 @@ async def _process_new_messages() -> int:
 
             # Find matching usage_event (session_id = conversation_id, within 120s)
             # PostgreSQL doesn't allow ORDER BY/LIMIT in UPDATE — use subquery
+            # Compute time range in Python to avoid asyncpg type-inference
+            # ambiguity with BETWEEN ($2 - INTERVAL ...) AND $2
             ref_time = assistant_row["created_at"]
+            ref_time_lower = ref_time - timedelta(seconds=120)
             result = await conn.execute(
                 """
                 UPDATE usage_events
-                SET outcome_score = $3, outcome_confidence = $4
+                SET outcome_score = $4, outcome_confidence = $5
                 WHERE id = (
                     SELECT id FROM usage_events
                     WHERE session_id = $1
-                      AND created_at BETWEEN ($2 - INTERVAL '120 seconds') AND $2
+                      AND created_at >= $2
+                      AND created_at <= $3
                       AND outcome_score IS NULL
                     ORDER BY created_at DESC
                     LIMIT 1
                 )
                 """,
                 conv_id,
+                ref_time_lower,
                 ref_time,
                 score,
                 confidence,

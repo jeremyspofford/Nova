@@ -172,6 +172,24 @@ export function Chat() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])  // Run once on mount only
 
+  // Cross-device sync: refetch messages when tab/app regains focus.
+  // Handles the case where messages were sent from another device.
+  useEffect(() => {
+    let lastRefresh = 0
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (isStreamingRef.current) return
+      if (Date.now() - lastRefresh < 5_000) return
+      lastRefresh = Date.now()
+      if (conversationId) {
+        loadConversation(conversationId).catch(() => {})
+        queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [conversationId, loadConversation, queryClient])
+
   // Desktop: keyboard + scroll-based nav hiding.
   // Mobile (chat-only PWA): skip entirely — no nav bar to hide, h-[100dvh] handles keyboard.
   useEffect(() => {

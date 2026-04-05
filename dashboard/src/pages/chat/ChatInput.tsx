@@ -362,6 +362,7 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           isTranscribing={voice?.isTranscribing ?? false}
           conversationMode={voice?.conversationMode ?? false}
           voiceAvailable={!!voice?.available}
+          insecureContext={!voice?.available && typeof window !== 'undefined' && !window.isSecureContext}
           onSend={handleSubmit}
           onToggleRecording={voice?.toggleRecording ?? (() => {})}
           onStartConversation={() => voice?.setConversationMode(true)}

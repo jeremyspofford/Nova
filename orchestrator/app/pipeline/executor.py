@@ -248,6 +248,8 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
 
     # Per-task model override (set via metadata.model_override in the API request)
     model_override: str | None = task.metadata.get("model_override") or None
+    # Per-task sandbox override (set via metadata.sandbox_override, e.g. cortex selfmod dispatch)
+    sandbox_override: str | None = task.metadata.get("sandbox_override") or None
 
     # Classify task complexity for model routing (Phase 3)
     from .complexity_classifier import classify_complexity
@@ -341,6 +343,7 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
                 abort = await _run_parallel_group(
                     group_agents, task_id, state, pod, checkpoint,
                     code_review_iterations, model_override, complexity=complexity,
+                    sandbox_override=sandbox_override,
                 )
                 if abort:
                     await mark_task_failed(task_id, f"Parallel group '{group_name}' had a fatal agent failure")
@@ -431,7 +434,7 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
             continue
 
         # ── Run this agent ─────────────────────────────────────────────
-        result, session_id = await _run_agent(agent, task_id, state, pod, code_review_iterations, model_override=model_override, complexity=complexity)
+        result, session_id = await _run_agent(agent, task_id, state, pod, code_review_iterations, model_override=model_override, complexity=complexity, sandbox_override=sandbox_override)
 
         if result is None:
             # Agent failed with on_failure=abort → task fails
@@ -579,6 +582,7 @@ async def _run_parallel_group(
     code_review_iterations: int,
     model_override: str | None,
     complexity: str | None = None,
+    sandbox_override: str | None = None,
 ) -> bool:
     """
     Run a group of agents concurrently via asyncio.gather.
@@ -607,6 +611,7 @@ async def _run_parallel_group(
         result, session_id = await _run_agent(
             agent, task_id, state, pod, code_review_iterations,
             model_override=model_override, complexity=complexity,
+            sandbox_override=sandbox_override,
         )
         return agent, result, session_id
 
@@ -668,6 +673,7 @@ async def _run_agent(
     code_review_iteration: int = 0,
     model_override: str | None = None,
     complexity: str | None = None,
+    sandbox_override: str | None = None,
 ) -> tuple[dict | None, str | None]:
     """
     Instantiate and run a single agent. Returns (output_dict, session_id).
@@ -818,7 +824,6 @@ async def _run_agent(
             pass  # DB unavailable — safe default
 
     # Per-task sandbox override (set via metadata.sandbox_override, e.g. cortex selfmod dispatch)
-    sandbox_override = task.metadata.get("sandbox_override")
     if sandbox_override:
         try:
             tier = SandboxTier(sandbox_override)

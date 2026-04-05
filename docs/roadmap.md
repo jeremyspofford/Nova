@@ -203,6 +203,56 @@ Cross-cutting reliability work shipped across hardening phases:
 
 ---
 
+## WIP Snapshot — 2026-04-03
+
+Uncommitted work, stashed branches, and feature branch status as of this date.
+
+### Uncommitted on `main` (5 files)
+
+| File | Change |
+|---|---|
+| `orchestrator/app/chat_scorer.py` | Fix asyncpg type-inference ambiguity — replaced `BETWEEN ($2 - INTERVAL ...) AND $2` with explicit Python-computed time bounds |
+| `orchestrator/app/pipeline/executor.py` | Thread `sandbox_override` from task metadata through `_run_agent()` / `_run_parallel_group()` as a param instead of re-reading metadata inside `_run_agent` |
+| `dashboard/src/components/ui/MorphButton.tsx` | UI component changes (may be incomplete) |
+| `dashboard/src/pages/chat/ChatInput.tsx` | Chat input change (1 line) |
+| `dashboard/src/pages/chat/ChatPage.tsx` | Chat page additions (18 lines, may be incomplete) |
+
+### Stashed Work
+
+| Stash | Branch | Content |
+|---|---|---|
+| `stash@{0}` | `feat/intelligence-and-goal-maturation` | Platform API credential health validation (actual API calls to verify keys) |
+| `stash@{1}` | `main` | Agent fleet spec doc fixes |
+
+### Feature Branches
+
+**Close to landing:**
+
+| Branch | Status |
+|---|---|
+| `feat/voice-chat` | Voice service works. Node highlighting, rate limiting, cost tracking remain. |
+| `feat/source-provenance-memory-tools` | Core delivered (16 tasks). Feedback loop + dashboard toggle remain (small). |
+
+**Blocked / needs work:**
+
+| Branch | Status |
+|---|---|
+| `feature/p1-autonomous-loop` | Blocked — 5 reinforcing bugs cause infinite skip loop. Tier 1-5 plan exists (~4 days). See P1: Autonomous Loop Activation below. |
+| `feat/intelligence-and-goal-maturation` | Has stashed credential validation work. Maturation pipeline is a stub (columns exist, no executor). |
+| `feature/cortex-learning-from-experience` | Spec complete (`docs/specs/2026-03-28-cortex-learning-from-experience.md`), implementation not started. |
+
+**Stale — triage before resuming:**
+
+| Branch | Status |
+|---|---|
+| `feature/unified-chat-pwa` | Telegram integrations broken. Needs investigation. |
+| `feature/design-pass-p1` | Unknown progress — review branch state. |
+| `feat/ide-integration-onboarding` | Unknown — check branch state. |
+| `feature/nova-mediated-creation` | Remote only — may be superseded by cortex work. |
+| `feature/dashboard-nav-restructure` | Remote only — may conflict with recent editor sidebar work. |
+
+---
+
 ## In Progress — Partially Delivered
 
 ### Voice Chat
