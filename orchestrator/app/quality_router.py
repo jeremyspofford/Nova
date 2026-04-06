@@ -182,7 +182,7 @@ async def run_quality_benchmark(
             VALUES ('running', $1)
             RETURNING id::text
             """,
-            json.dumps({"category_filter": category}),
+            {"category_filter": category},
         )
 
     # Run benchmark in background
@@ -329,8 +329,8 @@ async def _run_benchmark_background(run_id: str, category: str | None = None):
                 WHERE id = CAST($1 AS uuid)
                 """,
                 run_id, composite,
-                json.dumps(results["category_scores"]),
-                json.dumps(results["cases"]),
+                results["category_scores"],
+                results["cases"],
             )
         log.info("Benchmark [%s] complete: %.1f%% composite", run_id[:8], composite)
 
@@ -345,7 +345,7 @@ async def _run_benchmark_background(run_id: str, category: str | None = None):
                         metadata = metadata || $2
                     WHERE id = CAST($1 AS uuid)
                     """,
-                    run_id, json.dumps({"error": str(e)}),
+                    run_id, {"error": str(e)},
                 )
         except Exception:
             pass
@@ -367,9 +367,9 @@ async def post_quality_benchmark_results(
             RETURNING id::text
             """,
             results.get("composite_score", 0),
-            json.dumps(results.get("category_scores", {})),
-            json.dumps(results.get("cases", [])),
-            json.dumps({"run_id": results.get("run_id"), "started_at": results.get("started_at")}),
+            results.get("category_scores", {}),
+            results.get("cases", []),
+            {"run_id": results.get("run_id"), "started_at": results.get("started_at")},
         )
     return {"id": run_id, "status": "completed"}
 
