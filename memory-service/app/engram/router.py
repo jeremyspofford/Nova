@@ -287,6 +287,66 @@ async def correct_engram(req: CorrectionRequest):
     }
 
 
+# ── Post-wipe Onboarding ────────────────────────────────────────────────
+
+
+class BootstrapFact(BaseModel):
+    attribute: str  # e.g., "name", "role", "interests"
+    value: str
+
+
+class BootstrapRequest(BaseModel):
+    facts: list[BootstrapFact]
+
+
+@engram_router.post("/user-profile/bootstrap")
+async def bootstrap_user_profile(req: BootstrapRequest):
+    """Seed initial user profile facts. Used after factory reset or first boot."""
+    from app.embedding import get_embedding, to_pg_vector
+
+    async with get_db() as session:
+        created_ids = []
+        for fact in req.facts:
+            if not fact.value.strip():
+                continue
+
+            content = f"The user's {fact.attribute} is {fact.value}"
+            emb = await get_embedding(content, session)
+
+            import uuid
+            new_id = uuid.uuid4()
+
+            # Check for existing similar entity (dedup)
+            if emb:
+                existing = await session.execute(
+                    text("""
+                        SELECT id FROM engrams
+                        WHERE type IN ('entity', 'fact')
+                          AND source_type IN ('chat', 'consolidation')
+                          AND NOT superseded
+                          AND embedding IS NOT NULL
+                          AND 1 - (embedding <=> CAST(:emb AS halfvec)) > 0.90
+                        LIMIT 1
+                    """),
+                    {"emb": to_pg_vector(emb)},
+                )
+                if existing.fetchone():
+                    continue  # Already know this, skip
+
+            await session.execute(
+                text("""
+                    INSERT INTO engrams (id, type, content, embedding, source_type, confidence, importance, activation, created_at, updated_at)
+                    VALUES (CAST(:id AS uuid), 'fact', :content, CAST(:emb AS halfvec), 'chat', 0.95, 0.8, 1.0, NOW(), NOW())
+                """),
+                {"id": str(new_id), "content": content, "emb": to_pg_vector(emb) if emb else None},
+            )
+            created_ids.append(str(new_id))
+
+        await session.commit()
+
+    return {"created": len(created_ids), "engram_ids": created_ids}
+
+
 # ── Phase 2: Spreading Activation + Reconstruction ────────────────────
 
 

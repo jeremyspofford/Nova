@@ -164,3 +164,49 @@ class TestMemoryCorrection:
                 if items:
                     # batch returns content but not confidence — check via activate
                     pass  # confidence verified by the endpoint setting 0.95
+
+
+class TestBootstrap:
+    """Verify the user profile bootstrap endpoint."""
+
+    async def test_bootstrap_creates_facts(self):
+        """POST /user-profile/bootstrap should create personal engrams."""
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(f"{MEMORY_URL}/user-profile/bootstrap", json={
+                "facts": [
+                    {"attribute": "test-name", "value": "nova-test-bootstrap-user"},
+                    {"attribute": "test-role", "value": "integration tester"},
+                ]
+            })
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["created"] >= 1, "Bootstrap should create at least 1 engram"
+            assert len(data["engram_ids"]) >= 1
+
+    async def test_bootstrap_dedup(self):
+        """Bootstrapping the same fact twice should not create duplicates."""
+        async with httpx.AsyncClient(timeout=30) as c:
+            payload = {"facts": [{"attribute": "test-dedup", "value": "nova-test-dedup-check"}]}
+
+            r1 = await c.post(f"{MEMORY_URL}/user-profile/bootstrap", json=payload)
+            assert r1.status_code == 200
+            count1 = r1.json()["created"]
+
+            r2 = await c.post(f"{MEMORY_URL}/user-profile/bootstrap", json=payload)
+            assert r2.status_code == 200
+            count2 = r2.json()["created"]
+
+            # Second call should skip (dedup by embedding similarity)
+            assert count2 == 0, f"Second bootstrap created {count2} engrams — dedup failed"
+
+    async def test_bootstrap_skips_empty(self):
+        """Empty values should be skipped."""
+        async with httpx.AsyncClient(timeout=30) as c:
+            resp = await c.post(f"{MEMORY_URL}/user-profile/bootstrap", json={
+                "facts": [
+                    {"attribute": "empty", "value": ""},
+                    {"attribute": "whitespace", "value": "   "},
+                ]
+            })
+            assert resp.status_code == 200
+            assert resp.json()["created"] == 0

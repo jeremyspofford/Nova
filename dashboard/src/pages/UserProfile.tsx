@@ -100,6 +100,101 @@ function CorrectionModal({ engramId, onClose, onSuccess }: { engramId: string; o
   )
 }
 
+function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
+  const [name, setName] = useState('')
+  const [role, setRole] = useState('')
+  const [interests, setInterests] = useState('')
+  const [location, setLocation] = useState('')
+
+  const mutation = useMutation({
+    mutationFn: () => {
+      const facts = [
+        name.trim() && { attribute: 'name', value: name.trim() },
+        role.trim() && { attribute: 'role', value: role.trim() },
+        interests.trim() && { attribute: 'interests', value: interests.trim() },
+        location.trim() && { attribute: 'location', value: location.trim() },
+      ].filter(Boolean)
+
+      return apiFetch('/mem/api/v1/engrams/user-profile/bootstrap', {
+        method: 'POST',
+        body: JSON.stringify({ facts }),
+      })
+    },
+    onSuccess: onComplete,
+  })
+
+  const hasAny = name.trim() || role.trim() || interests.trim() || location.trim()
+
+  return (
+    <div className="bg-surface-card border border-border-subtle rounded-lg p-6">
+      <div className="text-center mb-6">
+        <User size={32} className="mx-auto mb-3 text-teal-400" />
+        <h2 className="text-body font-semibold text-content-primary">Welcome! Tell Nova about yourself</h2>
+        <p className="text-compact text-content-secondary mt-1">
+          This helps Nova personalize responses. All fields are optional.
+        </p>
+      </div>
+
+      <div className="space-y-4 max-w-md mx-auto">
+        <div>
+          <label className="block text-compact font-medium text-content-secondary mb-1">Name</label>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="What should Nova call you?"
+            className="w-full rounded-md border border-border-subtle bg-surface-elevated text-content-primary p-2 text-compact focus:outline-none focus:ring-1 focus:ring-accent-primary"
+          />
+        </div>
+        <div>
+          <label className="block text-compact font-medium text-content-secondary mb-1">Role</label>
+          <input
+            value={role}
+            onChange={e => setRole(e.target.value)}
+            placeholder="What do you do?"
+            className="w-full rounded-md border border-border-subtle bg-surface-elevated text-content-primary p-2 text-compact focus:outline-none focus:ring-1 focus:ring-accent-primary"
+          />
+        </div>
+        <div>
+          <label className="block text-compact font-medium text-content-secondary mb-1">Interests</label>
+          <input
+            value={interests}
+            onChange={e => setInterests(e.target.value)}
+            placeholder="What topics do you care about?"
+            className="w-full rounded-md border border-border-subtle bg-surface-elevated text-content-primary p-2 text-compact focus:outline-none focus:ring-1 focus:ring-accent-primary"
+          />
+        </div>
+        <div>
+          <label className="block text-compact font-medium text-content-secondary mb-1">Location</label>
+          <input
+            value={location}
+            onChange={e => setLocation(e.target.value)}
+            placeholder="Where are you based?"
+            className="w-full rounded-md border border-border-subtle bg-surface-elevated text-content-primary p-2 text-compact focus:outline-none focus:ring-1 focus:ring-accent-primary"
+          />
+        </div>
+      </div>
+
+      <div className="flex justify-center mt-6">
+        <button
+          onClick={() => mutation.mutate()}
+          disabled={!hasAny || mutation.isPending}
+          className="px-6 py-2 bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 disabled:opacity-50 text-compact font-medium"
+        >
+          {mutation.isPending ? (
+            <span className="flex items-center gap-2"><Loader2 size={14} className="animate-spin" /> Saving...</span>
+          ) : (
+            'Get started'
+          )}
+        </button>
+      </div>
+
+      {mutation.isError && (
+        <p className="text-center text-micro text-red-400 mt-3">Failed to save profile. Try again.</p>
+      )}
+    </div>
+  )
+}
+
 export function UserProfile() {
   const queryClient = useQueryClient()
   const [correcting, setCorrecting] = useState<string | null>(null)
@@ -135,11 +230,7 @@ export function UserProfile() {
       </div>
 
       {isEmpty ? (
-        <div className="text-center py-12 text-content-tertiary">
-          <User size={32} className="mx-auto mb-3 opacity-50" />
-          <p className="text-body">Nova doesn't know anything about you yet.</p>
-          <p className="text-compact mt-1">Start chatting and Nova will learn your preferences over time.</p>
-        </div>
+        <OnboardingWizard onComplete={() => queryClient.invalidateQueries({ queryKey: ['user-profile'] })} />
       ) : (
         <>
           {profile.entities.length > 0 && (
