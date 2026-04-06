@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, X, ChevronRight, Network, Settings } from 'lucide-react'
+import { Search, X, ChevronRight, Network, Settings, Palette } from 'lucide-react'
 import { apiFetch } from '../api'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
@@ -136,6 +136,9 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
   const [showClusterGalaxies, setShowClusterGalaxies] = useLocalStorage('brain.showClusterGalaxies', true)
   const [showMilkyWay, setShowMilkyWay] = useLocalStorage('brain.showMilkyWay', true)
   const [typeFilter, setTypeFilter] = useState<string | null>(null)
+  const [colorBy, setColorBy] = useState<'type' | 'source'>(() => {
+    try { return (localStorage.getItem('nova_brain_color_by') as 'type' | 'source') || 'type' } catch { return 'type' }
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [topicsOpen, setTopicsOpen] = useState(false)
   const [rawBloom, setBloomStrength] = useLocalStorage('brain.bloomStrength', 0.2)
@@ -403,6 +406,7 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
         showMilkyWay={showMilkyWay}
         showAsteroids={false}
         showSolarSystems={false}
+        colorBy={colorBy}
         className="w-full h-full"
       />
 
@@ -472,6 +476,21 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
             Chat
           </button>
           <div className="w-px h-5 bg-white/10 mx-0.5" />
+          <button
+            onClick={() => {
+              const next = colorBy === 'type' ? 'source' : 'type'
+              setColorBy(next)
+              try { localStorage.setItem('nova_brain_color_by', next) } catch {}
+            }}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 ${
+              colorBy === 'source'
+                ? 'text-teal-400 bg-teal-500/15'
+                : 'text-stone-500 hover:text-stone-300 hover:bg-white/5'
+            }`}
+            title={`Color by: ${colorBy}`}
+          >
+            <Palette size={15} />
+          </button>
           <button
             onClick={() => setSettingsOpen(v => !v)}
             className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors duration-150 ${

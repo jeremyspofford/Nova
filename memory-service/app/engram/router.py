@@ -103,6 +103,24 @@ async def engram_stats():
         total_edges = (await session.execute(text("SELECT count(*) FROM engram_edges"))).scalar()
         total_archived = (await session.execute(text("SELECT count(*) FROM engram_archive"))).scalar()
 
+        profile_rows = await session.execute(
+            text("""
+                SELECT source_type, type, count(*) AS cnt
+                FROM engrams
+                WHERE NOT superseded AND type IN ('entity', 'fact', 'preference')
+                GROUP BY source_type, type
+            """)
+        )
+        user_profile = {"entity_count": 0, "fact_count": 0, "preference_count": 0}
+        for row in profile_rows:
+            if row.source_type in ("chat", "consolidation"):
+                if row.type == "entity":
+                    user_profile["entity_count"] += row.cnt
+                elif row.type == "fact":
+                    user_profile["fact_count"] += row.cnt
+                elif row.type == "preference":
+                    user_profile["preference_count"] += row.cnt
+
     return {
         "total_engrams": total_engrams,
         "total_edges": total_edges,
@@ -110,7 +128,82 @@ async def engram_stats():
         "by_type": by_type,
         "by_relation": by_relation,
         "by_source_type": by_source_type,
+        "user_profile": user_profile,
     }
+
+
+@engram_router.get("/user-profile")
+async def get_user_profile():
+    """Return what Nova knows about the user — entities, facts, preferences from personal sources."""
+    async with get_db() as session:
+        entity_rows = await session.execute(
+            text("""
+                SELECT id::text, content, confidence, importance,
+                       created_at, last_accessed, source_meta::text
+                FROM engrams
+                WHERE type = 'entity'
+                  AND source_type IN ('chat', 'consolidation')
+                  AND NOT superseded
+                ORDER BY importance DESC, access_count DESC
+                LIMIT 50
+            """)
+        )
+
+        detail_rows = await session.execute(
+            text("""
+                SELECT id::text, type, content, confidence, importance,
+                       created_at, source_meta::text
+                FROM engrams
+                WHERE type IN ('fact', 'preference')
+                  AND source_type IN ('chat', 'consolidation')
+                  AND NOT superseded
+                ORDER BY importance DESC, access_count DESC
+                LIMIT 100
+            """)
+        )
+
+    import json as _json
+
+    entities = []
+    for r in entity_rows:
+        meta = {}
+        if r.source_meta:
+            try:
+                meta = _json.loads(r.source_meta)
+            except Exception:
+                pass
+        entities.append({
+            "id": r.id,
+            "name": r.content,
+            "confidence": r.confidence,
+            "importance": r.importance,
+            "learned_at": r.created_at.isoformat() if r.created_at else None,
+            "last_seen": r.last_accessed.isoformat() if r.last_accessed else None,
+            "source": meta.get("session_id") or meta.get("title") or "conversation",
+        })
+
+    facts = []
+    preferences = []
+    for r in detail_rows:
+        meta = {}
+        if r.source_meta:
+            try:
+                meta = _json.loads(r.source_meta)
+            except Exception:
+                pass
+        item = {
+            "id": r.id,
+            "content": r.content,
+            "confidence": r.confidence,
+            "learned_at": r.created_at.isoformat() if r.created_at else None,
+            "source": meta.get("session_id") or meta.get("title") or "conversation",
+        }
+        if r.type == "fact":
+            facts.append(item)
+        else:
+            preferences.append(item)
+
+    return {"entities": entities, "facts": facts, "preferences": preferences}
 
 
 # ── Phase 2: Spreading Activation + Reconstruction ────────────────────

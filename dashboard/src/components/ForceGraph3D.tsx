@@ -40,6 +40,7 @@ interface GraphNode {
   importance: number
   cluster_id?: number
   cluster_label?: string
+  source_type?: string
   // Full fields — only present from full endpoint or detail fetch
   content?: string
   activation?: number
@@ -116,6 +117,7 @@ interface ForceGraph3DProps {
   showAsteroids?: boolean
   showSolarSystems?: boolean
   clusterSeparation?: number
+  colorBy?: 'type' | 'source'
   onReady?: () => void
 }
 
@@ -165,6 +167,18 @@ const TYPE_COLORS: Record<string, string> = {
 }
 const DEFAULT_COLOR = '#71717a'
 
+const SOURCE_COLORS: Record<string, string> = {
+  chat: '#60a5fa',           // blue — personal conversations
+  consolidation: '#a78bfa',  // purple — synthesized knowledge
+  intel: '#f97316',          // orange — intel feeds
+  knowledge: '#34d399',      // green — knowledge crawl
+  self_reflection: '#818cf8',// indigo — self-model
+  pipeline: '#f87171',       // red — pipeline extraction
+  tool: '#fbbf24',           // amber — tool output
+  cortex: '#e879f9',         // pink — cortex
+  external: '#94a3b8',       // slate — external
+}
+
 const NEURAL_TYPE_COLORS: Record<string, string> = {
   fact:       '#3b82f6',
   entity:     '#14b8a6',
@@ -185,7 +199,10 @@ const CLUSTER_COLORS = [
   '#a78bfa', '#67e8f9', '#fca5a5', '#86efac', '#fde68a',
 ]
 
-function getNodeColor(node: GraphNode, useCluster: boolean, neural?: boolean): string {
+function getNodeColor(node: GraphNode, useCluster: boolean, neural?: boolean, colorBy?: 'type' | 'source'): string {
+  if (colorBy === 'source' && node.source_type) {
+    return SOURCE_COLORS[node.source_type] ?? '#6b7280'
+  }
   if (useCluster && node.cluster_id != null) {
     return CLUSTER_COLORS[node.cluster_id % CLUSTER_COLORS.length]
   }
@@ -323,6 +340,7 @@ function buildStarInstances(
   geometry: SphereGeometry,
   clusters: ClusterInfo[] | undefined,
   neuralEnabled: boolean,
+  colorBy?: 'type' | 'source',
 ): { mesh: InstancedMesh; nodeIndexMap: Map<string, number> } {
   const count = nodes.length
   if (count === 0) {
@@ -347,7 +365,7 @@ function buildStarInstances(
     nodeIndexMap.set(node.id, i)
 
     const importance = node.importance ?? 0
-    const color = getNodeColor(node, useClusterColors, neuralEnabled)
+    const color = getNodeColor(node, useClusterColors, neuralEnabled, colorBy)
 
     tmpColor.set(color)
     colors[i * 3] = tmpColor.r
@@ -1144,6 +1162,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   showAsteroids = true,
   showSolarSystems = true,
   clusterSeparation = 0.3,
+  colorBy = 'type',
   onReady,
 }: ForceGraph3DProps, ref) {
   const useClusterColors = (clusters?.length ?? 0) > 0
@@ -1185,6 +1204,8 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
   clusterSeparationRef.current = clusterSeparation
   const showEdgesRef = useRef(showEdges)
   useEffect(() => { showEdgesRef.current = showEdges }, [showEdges])
+  const colorByRef = useRef(colorBy)
+  colorByRef.current = colorBy
   // Instanced star rendering — single draw call for all nodes
   const instancedMeshRef = useRef<InstancedMesh | null>(null)
   const nodeIndexMapRef = useRef<Map<string, number>>(new Map())
@@ -1281,6 +1302,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
           coreGeoRef.current,
           clusters,
           neuralModeRef.current?.enabled ?? false,
+          colorByRef.current,
         )
         instancedMeshRef.current = newMesh
         nodeIndexMapRef.current = nodeIndexMap
@@ -1305,7 +1327,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       .nodeVal((node: any) => 1 + (node.importance ?? 0) * 8)
       .nodeLabel((node: any) => {
         const type = node.type === 'self_model' ? 'self model' : (node.type ?? '')
-        const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
+        const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled, colorByRef.current)
         const clusterLine = node.cluster_label
           ? `<div style="color:${color};font-weight:600;margin-bottom:2px;font-size:10px;letter-spacing:0.5px;">${node.cluster_label}</div>`
           : ''
@@ -1329,7 +1351,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         // Show topic labels: one per cluster, on the most important node in that cluster.
         // Works on all graph sizes — max ~20 labels keeps it clean.
         if (node._isClusterRep && node.cluster_label) {
-          const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled)
+          const color = getNodeColor(node, useClusterColors, neuralModeRef.current?.enabled, colorByRef.current)
           const group = new Group()
           group.add(hitMesh)
           const labelTex = makeNodeLabelTexture(node.cluster_label, color)
@@ -1373,7 +1395,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       .linkColor((link: any) => {
         const sourceNode = typeof link.source === 'object' ? link.source : null
         if (!sourceNode) return '#60a5fa'
-        return getNodeColor(sourceNode, useClusterColors, neuralModeRef.current?.enabled)
+        return getNodeColor(sourceNode, useClusterColors, neuralModeRef.current?.enabled, colorByRef.current)
       })
       .linkOpacity(isLargeGraph ? 0.15 : 0.4)
       .linkWidth((link: any) => isLargeGraph ? 0.3 + (link.weight ?? 0) * 0.8 : 0.6 + (link.weight ?? 0) * 1.8)
@@ -1685,6 +1707,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
         coreGeoRef.current,
         clusters,
         neuralModeRef.current?.enabled ?? false,
+        colorByRef.current,
       )
       instancedMeshRef.current = starMesh
       nodeIndexMapRef.current = nodeIndexMap
@@ -1730,7 +1753,7 @@ export const ForceGraph3D = forwardRef<ForceGraph3DHandle, ForceGraph3DProps>(fu
       try { graph._destructor?.() } catch { /* ok */ }
       while (el.firstChild) el.removeChild(el.firstChild)
     }
-  }, [nodes, edges])
+  }, [nodes, edges, colorBy])
 
   // Sync autoSpin prop to ref
   useEffect(() => {
