@@ -17,11 +17,11 @@ import { MemoryHealth } from '../components/MemoryHealth'
 type SourceTab = 'health' | 'personal' | 'feeds' | 'shared' | 'recommendations'
 
 const SOURCE_TABS: { id: SourceTab; label: string; icon: typeof Globe }[] = [
-  { id: 'health', label: 'Health', icon: HeartPulse },
   { id: 'personal', label: 'Personal', icon: Globe },
   { id: 'feeds', label: 'Feeds', icon: Rss },
   { id: 'shared', label: 'Shared', icon: Users },
   { id: 'recommendations', label: 'Recommendations', icon: Lightbulb },
+  { id: 'health', label: 'Health', icon: HeartPulse },
 ]
 
 const HELP_ENTRIES = [

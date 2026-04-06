@@ -198,7 +198,7 @@ async def _run_benchmark_background(run_id: str, category: str | None = None):
     # Use container-internal URLs
     orch_base = "http://localhost:8000"
     memory_base = "http://memory-service:8002"
-    admin_headers = {"X-Admin-Secret": settings.admin_secret}
+    admin_headers = {"X-Admin-Secret": settings.nova_admin_secret}
 
     # Inline benchmark cases (benchmarks package isn't in the container)
     cases = [
@@ -269,7 +269,7 @@ async def _run_benchmark_background(run_id: str, category: str | None = None):
                                 sr = await client.get(f"{orch_base}/api/v1/tasks/{task_id}", headers=admin_headers)
                                 if sr.status_code == 200:
                                     task = sr.json()
-                                    if task.get("status") in ("complete", "failed", "cancelled"):
+                                    if task.get("status") in ("complete", "failed", "cancelled", "clarification_needed", "pending_human_review"):
                                         responses.append(task)
                                         break
                                 await asyncio.sleep(2)
@@ -406,3 +406,16 @@ async def get_quality_benchmark_results(
         }
         for row in rows
     ]
+
+
+@quality_router.delete("/api/v1/benchmarks/quality-results")
+async def delete_all_benchmark_results(_admin: AdminDep):
+    """Delete all benchmark runs and quality scores."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        bench_del = await conn.execute("DELETE FROM quality_benchmark_runs")
+        score_del = await conn.execute("DELETE FROM quality_scores")
+    return {
+        "benchmark_runs_deleted": int(bench_del.split()[-1]) if bench_del else 0,
+        "quality_scores_deleted": int(score_del.split()[-1]) if score_del else 0,
+    }

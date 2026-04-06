@@ -13,6 +13,7 @@ import {
   Loader2,
   ChevronDown,
   ChevronRight,
+  Trash2,
 } from 'lucide-react'
 import { apiFetch } from '../api'
 import { PageHeader } from '../components/layout/PageHeader'
@@ -310,6 +311,15 @@ function BenchmarksTab() {
     },
   })
 
+  // Clear all mutation
+  const clearAll = useMutation({
+    mutationFn: () => apiFetch('/api/v1/benchmarks/quality-results', { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quality-benchmark-results'] })
+      queryClient.invalidateQueries({ queryKey: ['quality-scores'] })
+    },
+  })
+
   const runs = qualityRuns ?? []
   const memRuns = memData?.runs ?? []
   const currentMemRun = memRuns[selectedMemRun] ?? null
@@ -338,15 +348,28 @@ function BenchmarksTab() {
       <section className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-h2 text-content-primary">Quality Benchmarks</h2>
-          <Button
-            size="sm"
-            icon={runBenchmark.isPending ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-            loading={runBenchmark.isPending}
-            onClick={() => runBenchmark.mutate()}
-            disabled={runBenchmark.isPending}
-          >
-            Run Benchmark
-          </Button>
+          <div className="flex gap-2">
+            {runs.length > 0 && (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon={clearAll.isPending ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                onClick={() => clearAll.mutate()}
+                disabled={clearAll.isPending}
+              >
+                Clear All
+              </Button>
+            )}
+            <Button
+              size="sm"
+              icon={runBenchmark.isPending ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+              loading={runBenchmark.isPending}
+              onClick={() => runBenchmark.mutate()}
+              disabled={runBenchmark.isPending}
+            >
+              Run Benchmark
+            </Button>
+          </div>
         </div>
 
         {runBenchmark.isError && (
