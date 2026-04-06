@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 
 from uuid import UUID
 
@@ -129,6 +130,144 @@ async def engram_stats():
         "by_relation": by_relation,
         "by_source_type": by_source_type,
         "user_profile": user_profile,
+    }
+
+
+@engram_router.get("/health")
+async def memory_health():
+    """Comprehensive memory system diagnostics — is the system self-improving?"""
+    async with get_db() as session:
+        # 1. Outcome feedback
+        outcome_row = await session.execute(text("""
+            SELECT count(*) FILTER (WHERE outcome_count > 0) AS with_outcomes,
+                   round((avg(outcome_avg) FILTER (WHERE outcome_count > 0))::numeric, 3) AS avg_score,
+                   max(outcome_count) AS max_obs
+            FROM engrams
+        """))
+        o = outcome_row.fetchone()
+
+        # 2. Recalibration
+        recalib_row = await session.execute(text("""
+            SELECT count(*) FILTER (WHERE outcome_count >= 5 AND outcome_avg > 0.65) AS boost,
+                   count(*) FILTER (WHERE outcome_count >= 5 AND outcome_avg < 0.45) AS demote,
+                   count(*) FILTER (WHERE last_recalibrated_at IS NOT NULL) AS recalibrated
+            FROM engrams WHERE outcome_count > 0 AND NOT superseded
+        """))
+        r = recalib_row.fetchone()
+
+        # 3. Activation distribution
+        act_row = await session.execute(text("""
+            SELECT count(*) FILTER (WHERE activation >= 1.0) AS full,
+                   count(*) FILTER (WHERE activation >= 0.5 AND activation < 1.0) AS mid,
+                   count(*) FILTER (WHERE activation >= 0.05 AND activation < 0.5) AS low,
+                   count(*) FILTER (WHERE activation < 0.05) AS floor_val
+            FROM engrams WHERE NOT superseded
+        """))
+        a = act_row.fetchone()
+
+        # 4. Co-activations
+        coact_row = await session.execute(text("""
+            SELECT count(*) FILTER (WHERE co_activations > 1) AS strengthened,
+                   max(co_activations) AS max_coact
+            FROM engram_edges
+        """))
+        c = coact_row.fetchone()
+
+        # 5. Consolidation
+        topic_row = await session.execute(text("""
+            SELECT count(*) FILTER (WHERE NOT superseded) AS living,
+                   count(*) FILTER (WHERE superseded) AS superseded
+            FROM engrams WHERE type = 'topic'
+        """))
+        t = topic_row.fetchone()
+
+        last_consol = await session.execute(text("""
+            SELECT created_at, engrams_reviewed,
+                   COALESCE(topics_created, 0) AS topics_created,
+                   engrams_merged, edges_pruned
+            FROM consolidation_log
+            ORDER BY created_at DESC LIMIT 1
+        """))
+        lc = last_consol.fetchone()
+
+        # 6. Neural router
+        nr_row = await session.execute(text("""
+            SELECT count(*) AS models,
+                   max(trained_at) AS latest
+            FROM neural_router_models
+        """))
+        nr = nr_row.fetchone()
+
+        obs_row = await session.execute(text("SELECT count(*) FROM retrieval_log"))
+        obs_count = obs_row.scalar()
+
+        # 7. Age check (for activation decay status)
+        age_row = await session.execute(text("""
+            SELECT min(created_at) AS oldest,
+                   count(*) FILTER (WHERE created_at < NOW() - INTERVAL '30 days') AS older_30d
+            FROM engrams WHERE NOT superseded
+        """))
+        age = age_row.fetchone()
+
+    # Build issues list
+    issues = []
+    if (o.with_outcomes or 0) == 0:
+        issues.append("Outcome feedback is not flowing — engrams have no outcome scores")
+    if (c.max_coact or 1) <= 1:
+        issues.append("Co-activations never increment — Hebbian learning is inactive")
+    if (a.mid or 0) == 0 and (a.low or 0) == 0:
+        oldest_days = (datetime.now(timezone.utc) - age.oldest).days if age.oldest else 0
+        if oldest_days >= 30:
+            issues.append("All engrams at full activation despite being 30+ days old — decay may not be running")
+        else:
+            issues.append(f"Activation decay hasn't kicked in yet — oldest engram is {oldest_days} days old, decay starts at 30")
+    total_topics = (t.living or 0) + (t.superseded or 0)
+    if total_topics > 0 and (t.superseded or 0) / total_topics > 0.80:
+        issues.append(f"Topic supersession rate is {(t.superseded or 0) * 100 // total_topics}% — consolidation may be churning")
+    if (r.recalibrated or 0) == 0 and (o.with_outcomes or 0) > 50:
+        issues.append("No engrams have been recalibrated despite having outcome data")
+
+    self_improving = (o.with_outcomes or 0) > 0 and len(issues) <= 2
+
+    return {
+        "outcome_feedback": {
+            "engrams_with_outcomes": o.with_outcomes or 0,
+            "avg_outcome_score": float(o.avg_score) if o.avg_score else None,
+            "max_observations": o.max_obs or 0,
+            "recalibration": {
+                "boost_eligible": r.boost or 0,
+                "demote_eligible": r.demote or 0,
+                "recalibrated_total": r.recalibrated or 0,
+            },
+        },
+        "activation": {
+            "full": a.full or 0,
+            "mid": a.mid or 0,
+            "low": a.low or 0,
+            "floor": a.floor_val or 0,
+        },
+        "co_activations": {
+            "edges_strengthened": c.strengthened or 0,
+            "max_co_activations": c.max_coact or 0,
+        },
+        "consolidation": {
+            "living_topics": t.living or 0,
+            "superseded_topics": t.superseded or 0,
+            "supersession_rate": round((t.superseded or 0) / max(total_topics, 1), 3),
+            "last_run": lc.created_at.isoformat() if lc else None,
+            "last_run_stats": {
+                "topics_created": lc.topics_created if lc else 0,
+                "engrams_merged": lc.engrams_merged if lc else 0,
+                "edges_pruned": lc.edges_pruned if lc else 0,
+            } if lc else None,
+        },
+        "neural_router": {
+            "models_trained": nr.models or 0,
+            "retrieval_observations": obs_count or 0,
+            "latest_model_date": nr.latest.isoformat() if nr.latest else None,
+        },
+        "self_improving": self_improving,
+        "issues": issues,
     }
 
 

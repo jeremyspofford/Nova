@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Brain, ChevronRight, Globe, Lightbulb, Plus, Rss, Users } from 'lucide-react'
+import { Brain, ChevronRight, Globe, HeartPulse, Lightbulb, Plus, Rss, Users } from 'lucide-react'
 import clsx from 'clsx'
 import { getKnowledgeSources, getKnowledgeStats, getIntelStats, getIntelRecommendations, updateRecommendation, getDomainSummary, type KnowledgeSource, type IntelRecommendation } from '../api'
 import { useTabHash } from '../hooks/useTabHash'
@@ -12,10 +12,12 @@ import { CredentialManager } from '../components/sources/CredentialManager'
 import { FeedStatusBar } from '../components/intel/FeedStatusBar'
 import { FeedManagerModal } from '../components/intel/FeedManagerModal'
 import { RecommendationCard } from '../components/intel/RecommendationCard'
+import { MemoryHealth } from '../components/MemoryHealth'
 
-type SourceTab = 'personal' | 'feeds' | 'shared' | 'recommendations'
+type SourceTab = 'health' | 'personal' | 'feeds' | 'shared' | 'recommendations'
 
 const SOURCE_TABS: { id: SourceTab; label: string; icon: typeof Globe }[] = [
+  { id: 'health', label: 'Health', icon: HeartPulse },
   { id: 'personal', label: 'Personal', icon: Globe },
   { id: 'feeds', label: 'Feeds', icon: Rss },
   { id: 'shared', label: 'Shared', icon: Users },
@@ -23,6 +25,7 @@ const SOURCE_TABS: { id: SourceTab; label: string; icon: typeof Globe }[] = [
 ]
 
 const HELP_ENTRIES = [
+  { term: 'Memory Health', definition: 'Live diagnostics showing whether the memory system is self-improving: outcome feedback, activation decay, Hebbian learning, consolidation, and neural router training.' },
   { term: 'Personal Sources', definition: 'Websites, GitHub profiles, and docs you want Nova to learn from. Crawled automatically and stored as engram memories.' },
   { term: 'Feeds', definition: 'RSS, Hacker News, Reddit, or GitHub sources that Nova monitors for new content and grades as recommendations.' },
   { term: 'Shared Sources', definition: 'Knowledge sources visible to all users. Admin-managed.' },
@@ -35,7 +38,7 @@ const HELP_ENTRIES = [
 ]
 
 export function Sources() {
-  const [activeTab, setActiveTab] = useTabHash<SourceTab>('personal', ['personal', 'feeds', 'shared', 'recommendations'])
+  const [activeTab, setActiveTab] = useTabHash<SourceTab>('personal', ['health', 'personal', 'feeds', 'shared', 'recommendations'])
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [feedManagerOpen, setFeedManagerOpen] = useState(false)
 
@@ -78,6 +81,7 @@ export function Sources() {
         description="Knowledge sources and intelligence feeds powering Nova's memory"
         helpEntries={HELP_ENTRIES}
         actions={
+          activeTab === 'health' ? undefined :
           activeTab === 'feeds' || activeTab === 'recommendations' ? (
             <Button
               variant="secondary"
@@ -184,6 +188,7 @@ export function Sources() {
       />
 
       {/* Tab content */}
+      {activeTab === 'health' && <MemoryHealth />}
       {activeTab === 'personal' && (
         <PersonalTab onAddSource={() => setAddModalOpen(true)} />
       )}
