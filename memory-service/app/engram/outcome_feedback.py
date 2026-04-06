@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
-# Thresholds
-POSITIVE_THRESHOLD = 0.7
-NEGATIVE_THRESHOLD = 0.4
+# Thresholds — calibrated to actual chat_scorer distribution (avg ~0.55)
+POSITIVE_THRESHOLD = 0.65
+NEGATIVE_THRESHOLD = 0.45
 ACTIVATION_BOOST = 0.05
 IMPORTANCE_NUDGE = 0.05
 IMPORTANCE_FLOOR = 0.1

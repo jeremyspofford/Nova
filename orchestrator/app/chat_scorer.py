@@ -26,6 +26,7 @@ from .clients import get_llm_client
 from app.quality_scorer import (
     score_memory_relevance,
     score_memory_recall,
+    score_memory_usage,
     score_tool_accuracy,
     score_response_coherence,
 )
@@ -288,6 +289,10 @@ async def _process_new_messages() -> int:
                 if engram_ids:
                     relevance = await score_memory_relevance(engram_ids, user_text)
                     quality_scores.append(relevance)
+
+                    # Memory usage — did the response actually use retrieved memories?
+                    usage = await score_memory_usage(engram_ids, assistant_text)
+                    quality_scores.append(usage)
 
                 # Memory recall — correction detection
                 recall = score_memory_recall(user_text)

@@ -225,6 +225,77 @@ async def score_response_coherence(
         return None
 
 
+async def score_memory_usage(
+    engram_ids: list[str],
+    response_text: str,
+) -> dict[str, Any] | None:
+    """Score whether retrieved engrams were actually used in the response.
+
+    Checks if key phrases from engram content appear in the assistant's response.
+    High score = memory was useful. Low score = memory was retrieved but ignored.
+    No embedding calls needed — pure text matching for speed.
+    """
+    if not engram_ids or not response_text:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            batch_r = await client.post(
+                f"{MEMORY_SERVICE}/api/v1/engrams/batch",
+                json={"ids": engram_ids[:10]},  # Cap at 10 to limit cost
+            )
+            if batch_r.status_code != 200:
+                return None
+            engrams = batch_r.json()
+
+        if not engrams:
+            return None
+
+        response_lower = response_text.lower()
+        used = 0
+        checked = 0
+        used_ids = []
+
+        for engram in engrams:
+            content = engram.get("content", "")
+            if len(content) < 10:
+                continue
+            checked += 1
+
+            # Extract key phrases (3+ word sequences) from engram content
+            words = content.lower().split()
+            # Check 3-grams for presence in response
+            found = False
+            for i in range(len(words) - 2):
+                trigram = " ".join(words[i:i+3])
+                if len(trigram) > 8 and trigram in response_lower:
+                    found = True
+                    break
+
+            if found:
+                used += 1
+                used_ids.append(engram["id"])
+
+        if checked == 0:
+            return None
+
+        score = used / checked
+
+        return {
+            "dimension": "memory_usage",
+            "score": score,
+            "confidence": min(1.0, checked / 5.0),
+            "metadata": {
+                "engrams_checked": checked,
+                "engrams_used": used,
+                "used_ids": used_ids,
+            },
+        }
+    except Exception as e:
+        log.debug("memory_usage scoring failed: %s", e)
+        return None
+
+
 async def score_task_completion(
     task_status: str,
     task_id: str,
