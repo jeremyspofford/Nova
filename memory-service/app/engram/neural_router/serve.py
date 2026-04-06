@@ -134,7 +134,7 @@ def neural_rerank(
             if arch == "embedding" and query_embedding is not None:
                 # Extract embedding features
                 candidate_embeddings = [
-                    c.get("embedding", [0.0] * 768) for c in candidates
+                    c.get("embedding") or [0.0] * 768 for c in candidates
                 ]
                 q_emb, e_emb = extract_embedding_features(
                     query_embedding, candidate_embeddings
