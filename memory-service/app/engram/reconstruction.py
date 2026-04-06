@@ -38,6 +38,81 @@ RELATION_CONNECTORS = {
 }
 
 
+async def _semantic_dedup(session: AsyncSession, engrams: list[ActivatedEngram]) -> list[ActivatedEngram]:
+    """Remove semantic duplicates by embedding cosine similarity.
+
+    Fetches embeddings for activated engrams, groups by >0.85 similarity,
+    keeps only the highest-scored engram per group.
+    """
+    if len(engrams) <= 1:
+        return engrams
+
+    ids = [e.id for e in engrams]
+    id_to_engram = {e.id: e for e in engrams}
+
+    # Fetch embeddings for all activated engrams
+    # Use IN clause with individual CAST params (asyncpg doesn't handle list→uuid[])
+    placeholders = ", ".join(f"CAST(:id_{i} AS uuid)" for i in range(len(ids)))
+    params = {f"id_{i}": ids[i] for i in range(len(ids))}
+    result = await session.execute(
+        text(f"""
+            SELECT id::text, embedding::text
+            FROM engrams
+            WHERE id IN ({placeholders})
+              AND embedding IS NOT NULL
+        """),
+        params,
+    )
+    rows = result.fetchall()
+
+    # Parse embeddings into float arrays
+    id_to_emb: dict[str, list[float]] = {}
+    for row in rows:
+        try:
+            # pgvector text format: "[0.1,0.2,...]"
+            emb_str = row.embedding.strip("[]")
+            id_to_emb[row.id] = [float(x) for x in emb_str.split(",")]
+        except Exception:
+            continue
+
+    if len(id_to_emb) < 2:
+        return engrams
+
+    # Group by similarity — simple greedy clustering
+    # Sorted by final_score so the best engram becomes the cluster representative
+    sorted_engrams = sorted(engrams, key=lambda e: e.final_score, reverse=True)
+    kept: list[ActivatedEngram] = []
+    consumed: set[str] = set()
+
+    for e in sorted_engrams:
+        if e.id in consumed:
+            continue
+        kept.append(e)
+        consumed.add(e.id)
+
+        if e.id not in id_to_emb:
+            continue
+
+        # Mark similar engrams as consumed
+        e_emb = id_to_emb[e.id]
+        e_mag = sum(x * x for x in e_emb) ** 0.5
+        if e_mag < 1e-9:
+            continue
+        for other in sorted_engrams:
+            if other.id in consumed or other.id not in id_to_emb:
+                continue
+            o_emb = id_to_emb[other.id]
+            o_mag = sum(x * x for x in o_emb) ** 0.5
+            if o_mag < 1e-9:
+                continue
+            # Cosine similarity (halfvec embeddings are NOT L2-normalized)
+            cos_sim = sum(a * b for a, b in zip(e_emb, o_emb)) / (e_mag * o_mag)
+            if cos_sim > 0.80:
+                consumed.add(other.id)
+
+    return kept
+
+
 async def reconstruct(
     session: AsyncSession,
     activated: list[ActivatedEngram],
@@ -51,6 +126,9 @@ async def reconstruct(
     """
     if not activated:
         return ""
+
+    # Semantic dedup — remove near-duplicate engrams by embedding similarity
+    activated = await _semantic_dedup(session, activated)
 
     # Find clusters of interconnected engrams
     clusters = await _find_clusters(session, activated)

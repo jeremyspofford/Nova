@@ -171,11 +171,12 @@ class TestBootstrap:
 
     async def test_bootstrap_creates_facts(self):
         """POST /user-profile/bootstrap should create personal engrams."""
+        import uuid
+        unique = str(uuid.uuid4())[:8]
         async with httpx.AsyncClient(timeout=30) as c:
             resp = await c.post(f"{MEMORY_URL}/user-profile/bootstrap", json={
                 "facts": [
-                    {"attribute": "test-name", "value": "nova-test-bootstrap-user"},
-                    {"attribute": "test-role", "value": "integration tester"},
+                    {"attribute": f"test-{unique}", "value": f"nova-test-bootstrap-{unique}"},
                 ]
             })
             assert resp.status_code == 200
