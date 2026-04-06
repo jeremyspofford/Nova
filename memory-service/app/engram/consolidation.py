@@ -268,6 +268,7 @@ async def _extract_patterns(session) -> int:
                 JOIN engrams e ON e.id = ee.target_id AND e.content = :entity
                 JOIN engram_edges ee2 ON ee2.target_id = e.id
                 JOIN engrams e2 ON e2.id = ee2.source_id AND NOT e2.superseded
+                  AND e2.source_type = e.source_type
                 WHERE e2.type IN ('fact', 'preference', 'episode', 'procedure')
                 ORDER BY e2.importance DESC, e2.access_count DESC
                 LIMIT 10
@@ -510,6 +511,7 @@ async def _resolve_contradictions(session) -> int:
             WHERE ee.relation = 'contradicts'
               AND NOT e1.superseded
               AND NOT e2.superseded
+              AND e1.source_type = e2.source_type
         """)
     )
     contradictions = result.fetchall()
@@ -556,6 +558,7 @@ async def _merge_duplicates(session) -> int:
             FROM engrams e1
             JOIN engrams e2 ON e2.id > e1.id
               AND e2.type = e1.type
+              AND e2.source_type = e1.source_type
               AND NOT e2.superseded
               AND NOT e1.superseded
               AND e1.embedding IS NOT NULL

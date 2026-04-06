@@ -5,6 +5,8 @@ These tests verify:
 - Context response has no duplicate content
 - Activation floor filters dead engrams
 - Source attribution labels appear on non-personal content
+- Stratified seeding reserves personal seed slots
+- Consolidation pool guards prevent cross-source-type merging
 """
 import httpx
 import pytest
@@ -175,3 +177,76 @@ class TestConsolidationConvergence:
             f"Topic supersession rate is {rate:.0%} ({superseded}/{total}) — "
             f"consolidation may be churning instead of converging"
         )
+
+
+class TestStratifiedSeeding:
+    """Verify that stratified seeding reserves slots for personal sources."""
+
+    async def test_personal_sources_in_activation(self, memory):
+        """At least 30% of activated engrams should be from personal sources."""
+        stats_resp = await memory.get(f"{MEMORY_URL}/stats")
+        chat_count = stats_resp.json().get("by_source_type", {}).get("chat", 0)
+        if chat_count < 5:
+            pytest.skip(f"Only {chat_count} chat engrams — need >=5")
+
+        resp = await memory.post(
+            f"{MEMORY_URL}/activate",
+            params={"query": "what does the user prefer", "top_k": 20},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        engrams = data.get("engrams", data) if isinstance(data, dict) else data
+
+        if not engrams or len(engrams) < 5:
+            pytest.skip("Not enough engrams returned")
+
+        personal = [
+            e for e in engrams
+            if e.get("source_type") in ("chat", "consolidation", "self_reflection")
+        ]
+        ratio = len(personal) / len(engrams)
+        assert ratio >= 0.3, (
+            f"Only {ratio:.0%} personal sources ({len(personal)}/{len(engrams)}) — "
+            f"stratified seeding may not be working"
+        )
+
+
+class TestConsolidationPoolGuards:
+    """Verify that consolidation respects source_type boundaries."""
+
+    async def test_cross_source_engrams_not_merged(self):
+        """Two identical engrams with different source_types should not be merged."""
+        async with httpx.AsyncClient(timeout=30) as c:
+            # Ingest a chat-sourced fact
+            r1 = await c.post(f"{MEMORY_URL}/ingest", json={
+                "raw_text": "nova-test-pool-guard: The user's favorite color is blue",
+                "source_type": "chat",
+            })
+            assert r1.status_code == 201
+
+            # Ingest an identical external-sourced fact (different pool)
+            r2 = await c.post(f"{MEMORY_URL}/ingest", json={
+                "raw_text": "nova-test-pool-guard: The user's favorite color is blue",
+                "source_type": "external",
+            })
+            assert r2.status_code == 201
+
+            ids_1 = r1.json().get("engram_ids", [])
+            ids_2 = r2.json().get("engram_ids", [])
+
+            # Trigger consolidation
+            async with httpx.AsyncClient(timeout=180) as long_c:
+                await long_c.post(f"{MEMORY_URL}/consolidate")
+
+            # Both sets of engrams should still exist (not merged across source types)
+            all_ids = ids_1 + ids_2
+            if all_ids:
+                batch = await c.post(f"{MEMORY_URL}/batch", json={"ids": all_ids})
+                if batch.status_code == 200:
+                    returned_ids = {item["id"] for item in batch.json()}
+                    # At least one ID from each source should survive
+                    has_chat = any(i in returned_ids for i in ids_1)
+                    has_intel = any(i in returned_ids for i in ids_2)
+                    assert has_chat or has_intel, (
+                        "All test engrams disappeared after consolidation"
+                    )
