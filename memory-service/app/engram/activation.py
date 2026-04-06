@@ -8,6 +8,7 @@ amplification boosting engrams reached by multiple independent paths.
 from __future__ import annotations
 
 import logging
+import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -67,23 +68,23 @@ async def spreading_activation(
     query_embedding = await get_embedding(query, session)
     embedding_str = to_pg_vector(query_embedding)
 
+    # Stratified seed selection: reserve a fraction of slots for personal sources
+    # so intel volume can't drown out chat/consolidation memories.
+    personal_seed_count = math.ceil(seed_count * settings.engram_personal_seed_ratio)
+    general_seed_count = seed_count - personal_seed_count
+
     # Run the spreading activation CTE
     # The CTE spreads activation through edges, tracking paths for convergence.
     # We also follow edges in reverse (target→source) since associations are bidirectional.
     result = await session.execute(
         text("""
             WITH RECURSIVE activation_spread AS (
-                -- Seeds: top-N by cosine similarity
-                SELECT
-                    s.id,
-                    s.boosted_sim AS activation,
-                    0 AS hop,
-                    ARRAY[s.id] AS path
+                -- Personal seeds (guaranteed chat/consolidation representation)
+                SELECT id, boosted_sim AS activation, 0 AS hop, ARRAY[id] AS path
                 FROM (
                     SELECT e.id,
                            (
                                (1 - (e.embedding <=> CAST(:embedding AS halfvec)))
-                               -- Source-type boost: personal knowledge surfaces first
                                * CASE e.source_type
                                    WHEN 'chat' THEN 1.5
                                    WHEN 'consolidation' THEN 1.2
@@ -91,16 +92,44 @@ async def spreading_activation(
                                    WHEN 'intel' THEN 0.5
                                    ELSE 1.0
                                  END
-                               -- Confidence weighting: high-trust sources outrank low-trust
                                * COALESCE(e.confidence, 0.5)
                            )::real AS boosted_sim
                     FROM engrams e
                     WHERE NOT e.superseded
                       AND e.embedding IS NOT NULL
                       AND e.tenant_id = CAST(:tenant_id AS uuid)
+                      AND e.source_type IN ('chat', 'consolidation', 'self_reflection')
+                      AND e.activation >= :activation_floor
                     ORDER BY boosted_sim DESC
-                    LIMIT :seed_count
-                ) s
+                    LIMIT :personal_seed_count
+                ) personal
+
+                UNION ALL
+
+                -- General seeds (best non-personal sources)
+                SELECT id, boosted_sim AS activation, 0 AS hop, ARRAY[id] AS path
+                FROM (
+                    SELECT e.id,
+                           (
+                               (1 - (e.embedding <=> CAST(:embedding AS halfvec)))
+                               * CASE e.source_type
+                                   WHEN 'chat' THEN 1.5
+                                   WHEN 'consolidation' THEN 1.2
+                                   WHEN 'knowledge' THEN 0.7
+                                   WHEN 'intel' THEN 0.5
+                                   ELSE 1.0
+                                 END
+                               * COALESCE(e.confidence, 0.5)
+                           )::real AS boosted_sim
+                    FROM engrams e
+                    WHERE NOT e.superseded
+                      AND e.embedding IS NOT NULL
+                      AND e.tenant_id = CAST(:tenant_id AS uuid)
+                      AND e.activation >= :activation_floor
+                      AND e.source_type NOT IN ('chat', 'consolidation', 'self_reflection')
+                    ORDER BY boosted_sim DESC
+                    LIMIT :general_seed_count
+                ) general
 
                 UNION ALL
 
@@ -149,11 +178,13 @@ async def spreading_activation(
         {
             "embedding": embedding_str,
             "tenant_id": tenant_id,
-            "seed_count": seed_count,
+            "personal_seed_count": personal_seed_count,
+            "general_seed_count": general_seed_count,
             "max_hops": max_hops,
             "decay_factor": decay_factor,
             "threshold": activation_threshold,
             "max_results": max_results,
+            "activation_floor": settings.engram_prune_activation_floor,
         },
     )
 

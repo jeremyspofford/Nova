@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     engram_decay_factor: float = 0.6
     engram_activation_threshold: float = 0.1
     engram_max_results: int = 20
+    engram_personal_seed_ratio: float = 0.4  # fraction of seed slots reserved for personal sources
     engram_reconstruction_model: str = "auto"
     engram_narrative_cluster_threshold: int = 999  # disabled — template assembly always; LLM narrative hallucinates false connections
 
@@ -58,7 +59,7 @@ class Settings(BaseSettings):
     engram_consolidation_model: str = "auto"
     engram_edge_decay: float = 0.95
     engram_prune_activation_floor: float = 0.01
-    engram_merge_similarity_threshold: float = 0.95
+    engram_merge_similarity_threshold: float = 0.88
 
     # Engram Network (Topic Clustering)
     engram_cluster_min_size: int = 5            # HDBSCAN min_cluster_size

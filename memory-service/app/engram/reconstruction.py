@@ -144,6 +144,22 @@ def _template_assemble(cluster: list[ActivatedEngram]) -> str:
     # Sort by activation (most relevant first)
     ordered = sorted(cluster, key=lambda e: e.final_score, reverse=True)
 
+    # Deduplicate near-identical content within the cluster
+    seen_fingerprints: set[str] = set()
+    deduped: list[ActivatedEngram] = []
+    for e in ordered:
+        fp = e.content[:100].strip().lower()
+        if fp not in seen_fingerprints:
+            seen_fingerprints.add(fp)
+            deduped.append(e)
+    ordered = deduped
+
+    # Source attribution — personal sources render clean, others get a tag
+    def _fmt(e: ActivatedEngram) -> str:
+        if e.source_type in ('chat', 'consolidation', 'self_reflection'):
+            return f"- {e.content}"
+        return f"- [{e.source_type}] {e.content}"
+
     # Group by type for structured output
     by_type: dict[str, list[ActivatedEngram]] = defaultdict(list)
     for engram in ordered:
@@ -154,43 +170,58 @@ def _template_assemble(cluster: list[ActivatedEngram]) -> str:
     # Facts first
     if "fact" in by_type:
         for e in by_type["fact"]:
-            lines.append(f"- {e.content}")
+            lines.append(_fmt(e))
 
     # Preferences
     if "preference" in by_type:
         for e in by_type["preference"]:
-            lines.append(f"- {e.content}")
+            lines.append(_fmt(e))
 
     # Episodes (with temporal framing)
     if "episode" in by_type:
         for e in by_type["episode"]:
-            lines.append(f"- {e.content}")
+            lines.append(_fmt(e))
 
     # Procedures
     if "procedure" in by_type:
         for e in by_type["procedure"]:
-            lines.append(f"- {e.content}")
+            lines.append(_fmt(e))
 
     # Schemas (generalized patterns)
     if "schema" in by_type:
         for e in by_type["schema"]:
-            lines.append(f"- Pattern: {e.content}")
+            if e.source_type in ('chat', 'consolidation', 'self_reflection'):
+                lines.append(f"- Pattern: {e.content}")
+            else:
+                lines.append(f"- [{e.source_type}] Pattern: {e.content}")
 
     # Entities (brief mentions)
     if "entity" in by_type:
-        entity_names = [e.content for e in by_type["entity"][:5]]
-        if entity_names:
-            lines.append(f"- Related: {', '.join(entity_names)}")
+        entities = by_type["entity"][:5]
+        if entities:
+            # Tag with source if any non-personal entities are present
+            has_external = any(
+                e.source_type not in ('chat', 'consolidation', 'self_reflection')
+                for e in entities
+            )
+            entity_names = [e.content for e in entities]
+            if has_external:
+                lines.append(f"- [mixed] Related: {', '.join(entity_names)}")
+            else:
+                lines.append(f"- Related: {', '.join(entity_names)}")
 
     # Goals
     if "goal" in by_type:
         for e in by_type["goal"]:
-            lines.append(f"- Goal: {e.content}")
+            if e.source_type in ('chat', 'consolidation', 'self_reflection'):
+                lines.append(f"- Goal: {e.content}")
+            else:
+                lines.append(f"- [{e.source_type}] Goal: {e.content}")
 
     # Self-model entries
     if "self_model" in by_type:
         for e in by_type["self_model"]:
-            lines.append(f"- {e.content}")
+            lines.append(_fmt(e))
 
     return "\n".join(lines)
 

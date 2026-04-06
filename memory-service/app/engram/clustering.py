@@ -236,8 +236,8 @@ async def _create_topic_engram(
         text("""
             SELECT id FROM engrams
             WHERE type = 'topic'
-              AND NOT superseded
               AND embedding IS NOT NULL
+              AND (NOT superseded OR updated_at > NOW() - INTERVAL '6 hours')
               AND 1 - (embedding <=> CAST(:emb AS halfvec)) > 0.75
             LIMIT 1
         """),
@@ -494,8 +494,16 @@ async def maintain_topics(session: AsyncSession) -> dict:
                 """),
                 {"id": str(topic.id)},
             )
+            edge_result = await session.execute(
+                text("""
+                    DELETE FROM engram_edges
+                    WHERE target_id = CAST(:id AS uuid) AND relation = 'part_of'
+                """),
+                {"id": str(topic.id)},
+            )
+            edges_removed = edge_result.rowcount
             stats["dissolved"] += 1
-            log.info("Dissolved topic '%s' (only %d members)", topic.content[:40], topic.member_count)
+            log.info("Dissolved topic '%s' (only %d members, removed %d part_of edges)", topic.content[:40], topic.member_count, edges_removed)
             continue
 
         meta = topic.source_meta if isinstance(topic.source_meta, dict) else _json.loads(topic.source_meta or "{}")
@@ -543,6 +551,45 @@ async def maintain_topics(session: AsyncSession) -> dict:
                             emb_arrays.append([float(x) for x in vec_str.split(",")])
                         centroid = np.mean(emb_arrays, axis=0).tolist()
                         meta["centroid"] = to_pg_vector(centroid)
+
+                    # Check if regenerated embedding now overlaps with another living topic
+                    overlap = await session.execute(
+                        text("""
+                            SELECT id FROM engrams
+                            WHERE type = 'topic'
+                              AND NOT superseded
+                              AND id != CAST(:topic_id AS uuid)
+                              AND embedding IS NOT NULL
+                              AND 1 - (embedding <=> CAST(:new_emb AS halfvec)) > 0.88
+                            LIMIT 1
+                        """),
+                        {
+                            "topic_id": str(topic.id),
+                            "new_emb": to_pg_vector(new_embedding),
+                        },
+                    )
+                    overlap_row = overlap.fetchone()
+                    if overlap_row:
+                        # Dissolve this topic — it now overlaps with an existing one
+                        await session.execute(
+                            text("UPDATE engrams SET superseded = TRUE WHERE id = CAST(:id AS uuid)"),
+                            {"id": str(topic.id)},
+                        )
+                        edge_result = await session.execute(
+                            text("""
+                                DELETE FROM engram_edges
+                                WHERE target_id = CAST(:id AS uuid) AND relation = 'part_of'
+                            """),
+                            {"id": str(topic.id)},
+                        )
+                        stats.setdefault("merged_on_regen", 0)
+                        stats["merged_on_regen"] += 1
+                        log.info(
+                            "Dissolved regenerated topic '%s' — overlaps with topic %s",
+                            new_content[:40],
+                            overlap_row.id,
+                        )
+                        continue
 
                     await session.execute(
                         text("""

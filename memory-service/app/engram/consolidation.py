@@ -459,7 +459,8 @@ async def _hebbian_update(session) -> tuple[int, int]:
 
     # Weaken: decay edge weights slightly — only for edges older than 7 days
     # (protect young edges from being decayed before they get a chance to strengthen)
-    # Structural edges (instance_of, part_of) are exempt from decay — they must never fade
+    # Structural edges (instance_of) are exempt from decay — they must never fade
+    # part_of edges are allowed to decay (but not hard-pruned) so stale topic membership fades
     result = await session.execute(
         text("""
             UPDATE engram_edges
@@ -467,7 +468,7 @@ async def _hebbian_update(session) -> tuple[int, int]:
             WHERE co_activations <= 1
               AND weight > 0.01
               AND created_at < NOW() - INTERVAL '7 days'
-              AND relation NOT IN ('instance_of', 'part_of')
+              AND relation NOT IN ('instance_of')
             RETURNING id
         """),
         {"decay": settings.engram_edge_decay},
@@ -542,7 +543,7 @@ async def _resolve_contradictions(session) -> int:
 
 
 async def _merge_duplicates(session) -> int:
-    """Phase 5b: Merge near-duplicate engrams (same type, similarity > 0.95).
+    """Phase 5b: Merge near-duplicate engrams (same type, similarity > threshold, default 0.88).
 
     Keeps the one with higher access_count, combines edge connections.
     """

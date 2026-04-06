@@ -219,6 +219,19 @@ async def assemble_context(
         # Topic engrams are index/cluster nodes — useful for activation graph
         # traversal but not for context injection. Exclude from reconstruction.
         content_engrams = [e for e in activated if e.type not in ("topic",)]
+
+        # Interleave personal and non-personal engrams so budget truncation
+        # doesn't drop all chat memories when intel dominates top scores
+        personal = [e for e in content_engrams if e.source_type in ('chat', 'consolidation', 'self_reflection')]
+        other = [e for e in content_engrams if e.source_type not in ('chat', 'consolidation', 'self_reflection')]
+        interleaved: list = []
+        for i in range(max(len(personal), len(other))):
+            if i < len(personal):
+                interleaved.append(personal[i])
+            if i < len(other):
+                interleaved.append(other[i])
+        content_engrams = interleaved
+
         ctx.engram_ids = [str(e.id) for e in content_engrams]
         ctx.engram_summaries = [
             {"id": str(e.id), "type": e.type, "preview": e.content[:80].strip()}
