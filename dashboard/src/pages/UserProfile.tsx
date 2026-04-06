@@ -33,7 +33,7 @@ function ConfidenceBadge({ value }: { value: number }) {
   return <span className={`text-micro ${color}`}>{pct}%</span>
 }
 
-function ProfileItem({ item, onCorrect }: { item: ProfileFact; onCorrect: (id: string) => void }) {
+function ProfileItem({ item, onCorrect }: { item: ProfileFact; onCorrect: (id: string, content: string) => void }) {
   return (
     <div className="flex items-start justify-between gap-2 py-2 border-b border-border-subtle/30 last:border-0">
       <div className="flex-1 min-w-0">
@@ -46,7 +46,7 @@ function ProfileItem({ item, onCorrect }: { item: ProfileFact; onCorrect: (id: s
         </p>
       </div>
       <button
-        onClick={() => onCorrect(item.id)}
+        onClick={() => onCorrect(item.id, item.content)}
         className="shrink-0 p-1 rounded-xs text-content-tertiary hover:text-content-secondary hover:bg-surface-elevated transition-colors"
         title="Correct this"
       >
@@ -56,8 +56,8 @@ function ProfileItem({ item, onCorrect }: { item: ProfileFact; onCorrect: (id: s
   )
 }
 
-function CorrectionModal({ engramId, onClose, onSuccess }: { engramId: string; onClose: () => void; onSuccess: () => void }) {
-  const [text, setText] = useState('')
+function CorrectionModal({ engramId, currentContent, onClose, onSuccess }: { engramId: string; currentContent: string; onClose: () => void; onSuccess: () => void }) {
+  const [text, setText] = useState(currentContent)
   const mutation = useMutation({
     mutationFn: () => apiFetch<{ corrected: number }>('/mem/api/v1/engrams/correct', {
       method: 'POST',
@@ -66,6 +66,8 @@ function CorrectionModal({ engramId, onClose, onSuccess }: { engramId: string; o
     onSuccess: () => { onSuccess(); onClose() },
   })
 
+  const hasChanged = text.trim() !== currentContent.trim()
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="bg-surface-card border border-border-subtle rounded-lg p-4 w-full max-w-md shadow-xl">
@@ -73,10 +75,10 @@ function CorrectionModal({ engramId, onClose, onSuccess }: { engramId: string; o
           <h3 className="text-body font-semibold text-content-primary">Correct this memory</h3>
           <button onClick={onClose} className="text-content-tertiary hover:text-content-secondary"><X size={16} /></button>
         </div>
+        <p className="text-micro text-content-tertiary mb-2">Edit the text below or rewrite it. The old version will be superseded.</p>
         <textarea
           value={text}
           onChange={e => setText(e.target.value)}
-          placeholder="Type the correction..."
           className="w-full rounded-md border border-border-subtle bg-surface-elevated text-content-primary p-2 text-compact resize-none focus:outline-none focus:ring-1 focus:ring-accent-primary"
           rows={3}
           autoFocus
@@ -85,7 +87,7 @@ function CorrectionModal({ engramId, onClose, onSuccess }: { engramId: string; o
           <button onClick={onClose} className="px-3 py-1.5 text-compact text-content-secondary hover:text-content-primary">Cancel</button>
           <button
             onClick={() => mutation.mutate()}
-            disabled={!text.trim() || mutation.isPending}
+            disabled={!text.trim() || !hasChanged || mutation.isPending}
             className="px-3 py-1.5 text-compact bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 disabled:opacity-50 flex items-center"
           >
             {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
@@ -197,7 +199,7 @@ function OnboardingWizard({ onComplete }: { onComplete: () => void }) {
 
 export function UserProfile() {
   const queryClient = useQueryClient()
-  const [correcting, setCorrecting] = useState<string | null>(null)
+  const [correcting, setCorrecting] = useState<{ id: string; content: string } | null>(null)
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['user-profile'],
@@ -240,7 +242,7 @@ export function UserProfile() {
               </h2>
               <div className="bg-surface-card border border-border-subtle rounded-lg px-3">
                 {profile.entities.map(e => (
-                  <ProfileItem key={e.id} item={{ id: e.id, content: e.name, confidence: e.confidence, learned_at: e.learned_at, source: e.source }} onCorrect={setCorrecting} />
+                  <ProfileItem key={e.id} item={{ id: e.id, content: e.name, confidence: e.confidence, learned_at: e.learned_at, source: e.source }} onCorrect={(id, content) => setCorrecting({ id, content })} />
                 ))}
               </div>
             </section>
@@ -253,7 +255,7 @@ export function UserProfile() {
               </h2>
               <div className="bg-surface-card border border-border-subtle rounded-lg px-3">
                 {profile.facts.map(f => (
-                  <ProfileItem key={f.id} item={f} onCorrect={setCorrecting} />
+                  <ProfileItem key={f.id} item={f} onCorrect={(id, content) => setCorrecting({ id, content })} />
                 ))}
               </div>
             </section>
@@ -266,7 +268,7 @@ export function UserProfile() {
               </h2>
               <div className="bg-surface-card border border-border-subtle rounded-lg px-3">
                 {profile.preferences.map(p => (
-                  <ProfileItem key={p.id} item={p} onCorrect={setCorrecting} />
+                  <ProfileItem key={p.id} item={p} onCorrect={(id, content) => setCorrecting({ id, content })} />
                 ))}
               </div>
             </section>
@@ -276,7 +278,8 @@ export function UserProfile() {
 
       {correcting && (
         <CorrectionModal
-          engramId={correcting}
+          engramId={correcting.id}
+          currentContent={correcting.content}
           onClose={() => setCorrecting(null)}
           onSuccess={() => queryClient.invalidateQueries({ queryKey: ['user-profile'] })}
         />

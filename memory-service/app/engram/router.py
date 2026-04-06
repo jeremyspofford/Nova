@@ -144,6 +144,7 @@ async def get_user_profile():
                 WHERE type = 'entity'
                   AND source_type IN ('chat', 'consolidation')
                   AND NOT superseded
+                  AND content NOT LIKE 'nova-test-%'
                 ORDER BY importance DESC, access_count DESC
                 LIMIT 50
             """)
@@ -157,6 +158,7 @@ async def get_user_profile():
                 WHERE type IN ('fact', 'preference')
                   AND source_type IN ('chat', 'consolidation')
                   AND NOT superseded
+                  AND content NOT LIKE 'nova-test-%'
                 ORDER BY importance DESC, access_count DESC
                 LIMIT 100
             """)
