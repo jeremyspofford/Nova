@@ -309,6 +309,7 @@ export interface EngramSummary {
   id: string
   type: string
   preview: string
+  source_type?: string
 }
 
 export interface ActivityStep {

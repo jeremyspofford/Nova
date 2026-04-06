@@ -1,0 +1,195 @@
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { User, Brain, Heart, Pencil, X, Check, Loader2 } from 'lucide-react'
+import { apiFetch } from '../api'
+
+interface ProfileEntity {
+  id: string
+  name: string
+  confidence: number
+  importance: number
+  learned_at: string | null
+  last_seen: string | null
+  source: string
+}
+
+interface ProfileFact {
+  id: string
+  content: string
+  confidence: number
+  learned_at: string | null
+  source: string
+}
+
+interface UserProfileData {
+  entities: ProfileEntity[]
+  facts: ProfileFact[]
+  preferences: ProfileFact[]
+}
+
+function ConfidenceBadge({ value }: { value: number }) {
+  const pct = Math.round(value * 100)
+  const color = pct >= 80 ? 'text-emerald-400' : pct >= 50 ? 'text-amber-400' : 'text-red-400'
+  return <span className={`text-micro ${color}`}>{pct}%</span>
+}
+
+function ProfileItem({ item, onCorrect }: { item: ProfileFact; onCorrect: (id: string) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-2 py-2 border-b border-border-subtle/30 last:border-0">
+      <div className="flex-1 min-w-0">
+        <p className="text-compact text-content-primary">{item.content}</p>
+        <p className="text-micro text-content-tertiary mt-0.5">
+          <ConfidenceBadge value={item.confidence} />
+          {item.learned_at && (
+            <span className="ml-2">{new Date(item.learned_at).toLocaleDateString()}</span>
+          )}
+        </p>
+      </div>
+      <button
+        onClick={() => onCorrect(item.id)}
+        className="shrink-0 p-1 rounded-xs text-content-tertiary hover:text-content-secondary hover:bg-surface-elevated transition-colors"
+        title="Correct this"
+      >
+        <Pencil size={12} />
+      </button>
+    </div>
+  )
+}
+
+function CorrectionModal({ engramId, onClose, onSuccess }: { engramId: string; onClose: () => void; onSuccess: () => void }) {
+  const [text, setText] = useState('')
+  const mutation = useMutation({
+    mutationFn: () => apiFetch<{ corrected: number }>('/mem/api/v1/engrams/correct', {
+      method: 'POST',
+      body: JSON.stringify({ correction: text, engram_id: engramId }),
+    }),
+    onSuccess: () => { onSuccess(); onClose() },
+  })
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="bg-surface-card border border-border-subtle rounded-lg p-4 w-full max-w-md shadow-xl">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-body font-semibold text-content-primary">Correct this memory</h3>
+          <button onClick={onClose} className="text-content-tertiary hover:text-content-secondary"><X size={16} /></button>
+        </div>
+        <textarea
+          value={text}
+          onChange={e => setText(e.target.value)}
+          placeholder="Type the correction..."
+          className="w-full rounded-md border border-border-subtle bg-surface-elevated text-content-primary p-2 text-compact resize-none focus:outline-none focus:ring-1 focus:ring-accent-primary"
+          rows={3}
+          autoFocus
+        />
+        <div className="flex justify-end gap-2 mt-3">
+          <button onClick={onClose} className="px-3 py-1.5 text-compact text-content-secondary hover:text-content-primary">Cancel</button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={!text.trim() || mutation.isPending}
+            className="px-3 py-1.5 text-compact bg-accent-primary text-white rounded-md hover:bg-accent-primary/90 disabled:opacity-50 flex items-center"
+          >
+            {mutation.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            <span className="ml-1">Apply</span>
+          </button>
+        </div>
+        {mutation.isError && (
+          <p className="text-micro text-red-400 mt-2">Failed to apply correction</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+export function UserProfile() {
+  const queryClient = useQueryClient()
+  const [correcting, setCorrecting] = useState<string | null>(null)
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['user-profile'],
+    queryFn: () => apiFetch<UserProfileData>('/mem/api/v1/engrams/user-profile'),
+    staleTime: 10_000,
+  })
+
+  if (isLoading) return (
+    <div className="flex items-center justify-center h-64 text-content-tertiary">
+      <Loader2 className="animate-spin mr-2" size={16} /> Loading profile...
+    </div>
+  )
+
+  if (error) return (
+    <div className="flex items-center justify-center h-64 text-red-400">
+      Failed to load profile
+    </div>
+  )
+
+  const profile = data!
+  const isEmpty = !profile.entities.length && !profile.facts.length && !profile.preferences.length
+
+  return (
+    <div className="max-w-2xl mx-auto p-6 space-y-6">
+      <div>
+        <h1 className="text-heading-lg text-content-primary">What Nova Knows About You</h1>
+        <p className="text-compact text-content-secondary mt-1">
+          These are facts, entities, and preferences learned from your conversations.
+        </p>
+      </div>
+
+      {isEmpty ? (
+        <div className="text-center py-12 text-content-tertiary">
+          <User size={32} className="mx-auto mb-3 opacity-50" />
+          <p className="text-body">Nova doesn't know anything about you yet.</p>
+          <p className="text-compact mt-1">Start chatting and Nova will learn your preferences over time.</p>
+        </div>
+      ) : (
+        <>
+          {profile.entities.length > 0 && (
+            <section>
+              <h2 className="flex items-center gap-2 text-body font-semibold text-content-primary mb-2">
+                <Brain size={16} className="text-teal-400" /> Entities ({profile.entities.length})
+              </h2>
+              <div className="bg-surface-card border border-border-subtle rounded-lg px-3">
+                {profile.entities.map(e => (
+                  <ProfileItem key={e.id} item={{ id: e.id, content: e.name, confidence: e.confidence, learned_at: e.learned_at, source: e.source }} onCorrect={setCorrecting} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {profile.facts.length > 0 && (
+            <section>
+              <h2 className="flex items-center gap-2 text-body font-semibold text-content-primary mb-2">
+                <User size={16} className="text-blue-400" /> Facts ({profile.facts.length})
+              </h2>
+              <div className="bg-surface-card border border-border-subtle rounded-lg px-3">
+                {profile.facts.map(f => (
+                  <ProfileItem key={f.id} item={f} onCorrect={setCorrecting} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          {profile.preferences.length > 0 && (
+            <section>
+              <h2 className="flex items-center gap-2 text-body font-semibold text-content-primary mb-2">
+                <Heart size={16} className="text-emerald-400" /> Preferences ({profile.preferences.length})
+              </h2>
+              <div className="bg-surface-card border border-border-subtle rounded-lg px-3">
+                {profile.preferences.map(p => (
+                  <ProfileItem key={p.id} item={p} onCorrect={setCorrecting} />
+                ))}
+              </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {correcting && (
+        <CorrectionModal
+          engramId={correcting}
+          onClose={() => setCorrecting(null)}
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ['user-profile'] })}
+        />
+      )}
+    </div>
+  )
+}

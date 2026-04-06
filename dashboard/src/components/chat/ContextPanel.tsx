@@ -20,6 +20,15 @@ const TYPE_LABELS: Record<string, string> = {
   topic: 'Topic',
 }
 
+const SOURCE_BADGE: Record<string, { label: string; className: string }> = {
+  chat: { label: 'Personal', className: 'text-blue-400' },
+  consolidation: { label: 'Synthesized', className: 'text-purple-400' },
+  intel: { label: 'Intel', className: 'text-orange-400' },
+  knowledge: { label: 'Crawled', className: 'text-emerald-400' },
+  external: { label: 'External', className: 'text-slate-400' },
+  pipeline: { label: 'Pipeline', className: 'text-red-400' },
+}
+
 function EngramRow({ engram, onViewDetail }: { engram: EngramSummary; onViewDetail: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const typeLabel = TYPE_LABELS[engram.type] ?? engram.type
@@ -57,6 +66,14 @@ function EngramRow({ engram, onViewDetail }: { engram: EngramSummary; onViewDeta
             <span className="text-micro font-semibold uppercase text-content-tertiary">Type</span>
             <span className="text-micro text-content-secondary">{typeLabel}</span>
           </div>
+          {engram.source_type && SOURCE_BADGE[engram.source_type] && (
+            <div className="flex items-center gap-2">
+              <span className="text-micro font-semibold uppercase text-content-tertiary">Source</span>
+              <span className={clsx('text-micro', SOURCE_BADGE[engram.source_type].className)}>
+                {SOURCE_BADGE[engram.source_type].label}
+              </span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <span className="text-micro font-semibold uppercase text-content-tertiary">ID</span>
             <span className="text-mono-sm font-mono text-content-tertiary select-all">

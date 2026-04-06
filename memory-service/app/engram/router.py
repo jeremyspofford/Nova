@@ -16,7 +16,7 @@ from collections import defaultdict, deque
 
 from uuid import UUID
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
@@ -204,6 +204,87 @@ async def get_user_profile():
             preferences.append(item)
 
     return {"entities": entities, "facts": facts, "preferences": preferences}
+
+
+# ── Memory Correction ─────────────────────────────────────────────────
+
+
+class CorrectionRequest(BaseModel):
+    correction: str  # e.g., "My name is Jeremy, not James"
+    engram_id: str | None = None  # optional — target a specific engram
+
+
+@engram_router.post("/correct")
+async def correct_engram(req: CorrectionRequest):
+    """Apply a user correction to an entity or fact engram."""
+    from app.embedding import get_embedding, to_pg_vector
+
+    async with get_db() as session:
+        old_content = None
+        target_id = None
+
+        if req.engram_id:
+            # Direct correction — find the specific engram
+            row = await session.execute(
+                text("SELECT id, content FROM engrams WHERE id = CAST(:id AS uuid) AND NOT superseded"),
+                {"id": req.engram_id},
+            )
+            found = row.fetchone()
+            if not found:
+                raise HTTPException(status_code=404, detail="Engram not found")
+            target_id = found.id
+            old_content = found.content
+        else:
+            # Semantic search — find the most relevant personal entity/fact
+            emb = await get_embedding(req.correction, session)
+            if emb is None:
+                raise HTTPException(status_code=503, detail="Embedding service unavailable")
+            row = await session.execute(
+                text("""
+                    SELECT id, content, 1 - (embedding <=> CAST(:emb AS halfvec)) AS sim
+                    FROM engrams
+                    WHERE type IN ('entity', 'fact', 'preference')
+                      AND source_type IN ('chat', 'consolidation')
+                      AND NOT superseded
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> CAST(:emb AS halfvec)
+                    LIMIT 1
+                """),
+                {"emb": to_pg_vector(emb)},
+            )
+            found = row.fetchone()
+            if not found or found.sim < 0.4:
+                raise HTTPException(status_code=404, detail="No matching engram found for correction")
+            target_id = found.id
+            old_content = found.content
+
+        # Supersede the old engram
+        await session.execute(
+            text("UPDATE engrams SET superseded = TRUE, updated_at = NOW() WHERE id = CAST(:id AS uuid)"),
+            {"id": str(target_id)},
+        )
+
+        # Create the corrected engram
+        import uuid as _uuid
+        new_id = _uuid.uuid4()
+        emb = await get_embedding(req.correction, session)
+
+        await session.execute(
+            text("""
+                INSERT INTO engrams (id, type, content, embedding, source_type, confidence, importance, activation, created_at, updated_at)
+                VALUES (CAST(:id AS uuid), 'fact', :content, CAST(:emb AS halfvec), 'chat', 0.95, 0.8, 1.0, NOW(), NOW())
+            """),
+            {"id": str(new_id), "content": req.correction, "emb": to_pg_vector(emb) if emb else None},
+        )
+
+        await session.commit()
+
+    return {
+        "corrected": 1,
+        "old_content": old_content,
+        "new_content": req.correction,
+        "engram_id": str(new_id),
+    }
 
 
 # ── Phase 2: Spreading Activation + Reconstruction ────────────────────

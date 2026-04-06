@@ -234,7 +234,7 @@ async def assemble_context(
 
         ctx.engram_ids = [str(e.id) for e in content_engrams]
         ctx.engram_summaries = [
-            {"id": str(e.id), "type": e.type, "preview": e.content[:80].strip()}
+            {"id": str(e.id), "type": e.type, "preview": e.content[:80].strip(), "source_type": e.source_type}
             for e in content_engrams
         ]
         memory_text = await reconstruct(

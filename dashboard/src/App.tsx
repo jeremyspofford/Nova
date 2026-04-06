@@ -27,6 +27,7 @@ import { Sources } from './pages/Sources'
 import { Recovery } from './pages/Recovery'
 import { About } from './pages/About'
 import { AIQuality } from './pages/AIQuality'
+import { UserProfile } from './pages/UserProfile'
 import { Users } from './pages/Users'
 import { Invite } from './pages/Invite'
 import { Expired } from './pages/Expired'
@@ -218,6 +219,7 @@ function RoutedContent() {
         <Route path="/settings" element={<MobileGuard><AppLayout><ErrorBoundary><Settings /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/recovery" element={<MobileGuard><AppLayout><ErrorBoundary><Recovery /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/ai-quality" element={<MobileGuard><AppLayout><ErrorBoundary><AIQuality /></ErrorBoundary></AppLayout></MobileGuard>} />
+        <Route path="/profile" element={<MobileGuard><AppLayout><ErrorBoundary><UserProfile /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/about" element={<MobileGuard><AppLayout><ErrorBoundary><About /></ErrorBoundary></AppLayout></MobileGuard>} />
 
         {/* Redirects for old routes */}
