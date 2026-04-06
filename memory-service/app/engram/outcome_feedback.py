@@ -141,8 +141,8 @@ async def process_feedback(
                     a_uuid, b_uuid = UUID(eid_a), UUID(eid_b)
                 except ValueError:
                     continue
-                # Update edge in both directions (if exists)
-                await session.execute(
+                # Update existing edge or create new co-activation edge
+                result = await session.execute(
                     text("""
                         UPDATE engram_edges
                         SET weight = LEAST(:ceiling, weight + :boost),
@@ -150,6 +150,7 @@ async def process_feedback(
                             last_co_activated = NOW()
                         WHERE (source_id = :a AND target_id = :b)
                            OR (source_id = :b AND target_id = :a)
+                        RETURNING id
                     """),
                     {
                         "a": a_uuid, "b": b_uuid,
@@ -157,6 +158,18 @@ async def process_feedback(
                         "ceiling": EDGE_WEIGHT_CEILING,
                     },
                 )
+                if not result.fetchone():
+                    # No existing edge — create one from co-retrieval
+                    await session.execute(
+                        text("""
+                            INSERT INTO engram_edges (source_id, target_id, relation, weight, co_activations, last_co_activated)
+                            VALUES (:a, :b, 'related_to', :boost, 2, NOW())
+                            ON CONFLICT (source_id, target_id, relation) DO UPDATE
+                            SET co_activations = engram_edges.co_activations + 1,
+                                last_co_activated = NOW()
+                        """),
+                        {"a": a_uuid, "b": b_uuid, "boost": EDGE_WEIGHT_BOOST},
+                    )
                 stats["edges"] += 1
 
     await session.commit()
