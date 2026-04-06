@@ -102,7 +102,43 @@ export function Sources() {
         }
       />
 
-      {/* Domain summary hero */}
+      {/* Pending recommendations banner */}
+      {pendingRecCount > 0 && activeTab !== 'recommendations' && (
+        <button
+          onClick={() => setActiveTab('recommendations')}
+          className="flex items-center gap-2 w-full rounded-md border border-accent/20 bg-accent/5 px-4 py-2.5 text-left transition-colors hover:bg-accent/10"
+        >
+          <Lightbulb size={16} className="text-accent shrink-0" />
+          <span className="text-compact text-content-secondary">
+            <strong className="text-accent">{pendingRecCount}</strong> new recommendation{pendingRecCount !== 1 ? 's' : ''} waiting for review
+          </span>
+          <ChevronRight size={14} className="ml-auto text-content-tertiary" />
+        </button>
+      )}
+
+      {/* Tabs */}
+      <Tabs
+        tabs={SOURCE_TABS}
+        activeTab={activeTab}
+        onChange={(id) => setActiveTab(id as SourceTab)}
+      />
+
+      {/* Tab content */}
+      {activeTab === 'health' && <MemoryHealth />}
+      {activeTab === 'personal' && (
+        <PersonalTab onAddSource={() => setAddModalOpen(true)} />
+      )}
+      {activeTab === 'feeds' && (
+        <FeedsTab onManageFeeds={() => setFeedManagerOpen(true)} />
+      )}
+      {activeTab === 'shared' && (
+        <SharedTab onAddSource={() => setAddModalOpen(true)} />
+      )}
+      {activeTab === 'recommendations' && (
+        <RecommendationsTab onManageFeeds={() => setFeedManagerOpen(true)} />
+      )}
+
+      {/* Domain summary */}
       {domainSummary && domainSummary.domains.length > 0 ? (
         <Card className={clsx(
           'p-5 relative overflow-hidden',
@@ -164,42 +200,6 @@ export function Sources() {
             </Card>
           </div>
         )
-      )}
-
-      {/* Pending recommendations banner */}
-      {pendingRecCount > 0 && activeTab !== 'recommendations' && (
-        <button
-          onClick={() => setActiveTab('recommendations')}
-          className="flex items-center gap-2 w-full rounded-md border border-accent/20 bg-accent/5 px-4 py-2.5 text-left transition-colors hover:bg-accent/10"
-        >
-          <Lightbulb size={16} className="text-accent shrink-0" />
-          <span className="text-compact text-content-secondary">
-            <strong className="text-accent">{pendingRecCount}</strong> new recommendation{pendingRecCount !== 1 ? 's' : ''} waiting for review
-          </span>
-          <ChevronRight size={14} className="ml-auto text-content-tertiary" />
-        </button>
-      )}
-
-      {/* Tabs */}
-      <Tabs
-        tabs={SOURCE_TABS}
-        activeTab={activeTab}
-        onChange={(id) => setActiveTab(id as SourceTab)}
-      />
-
-      {/* Tab content */}
-      {activeTab === 'health' && <MemoryHealth />}
-      {activeTab === 'personal' && (
-        <PersonalTab onAddSource={() => setAddModalOpen(true)} />
-      )}
-      {activeTab === 'feeds' && (
-        <FeedsTab onManageFeeds={() => setFeedManagerOpen(true)} />
-      )}
-      {activeTab === 'shared' && (
-        <SharedTab onAddSource={() => setAddModalOpen(true)} />
-      )}
-      {activeTab === 'recommendations' && (
-        <RecommendationsTab onManageFeeds={() => setFeedManagerOpen(true)} />
       )}
 
       {/* Credentials section */}
