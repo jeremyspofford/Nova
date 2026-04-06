@@ -239,7 +239,7 @@ async def create_api_key_record(
                       created_at, last_used_at, metadata
             """,
             name, key_hash, key_prefix, rate_limit_rpm,
-            json.dumps(metadata or {}),
+            metadata or {},
         )
     return _row_to_dict(row)
 
@@ -303,7 +303,7 @@ async def insert_usage_event(
             output_tokens,
             float(cost_usd) if cost_usd is not None else None,
             duration_ms,
-            json.dumps(metadata) if metadata else "{}",
+            metadata or {},
             outcome_score,
             outcome_confidence,
             agent_name,

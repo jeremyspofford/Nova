@@ -174,6 +174,14 @@ async def run_consolidation(trigger: str = "manual") -> dict:
             except Exception:
                 log.warning("Consolidation Phase 5 (merging) failed", exc_info=True)
 
+            # Phase 5b: Activation decay — unused engrams gradually fade
+            try:
+                async with session.begin_nested():
+                    decayed = await _decay_unused_activations(session)
+                    stats["activations_decayed"] = decayed
+            except Exception:
+                log.warning("Consolidation Phase 5b (activation decay) failed", exc_info=True)
+
             # Phase 6: Self-Model Update
             try:
                 async with session.begin_nested():
@@ -541,6 +549,32 @@ async def _resolve_contradictions(session) -> int:
             resolved += 1
 
     return resolved
+
+
+async def _decay_unused_activations(session) -> int:
+    """Gradually reduce activation for engrams not accessed recently.
+
+    Engrams not accessed in 30+ days lose 10% activation per consolidation cycle.
+    Self-model and entity types are exempt (identity facts should persist).
+    Floor is 0.05 — engrams never fully die, just become very unlikely to surface.
+    """
+    result = await session.execute(
+        text("""
+            UPDATE engrams
+            SET activation = GREATEST(0.05, activation * 0.90),
+                updated_at = NOW()
+            WHERE NOT superseded
+              AND activation > 0.05
+              AND type NOT IN ('self_model', 'entity')
+              AND (last_accessed IS NULL OR last_accessed < NOW() - INTERVAL '30 days')
+              AND created_at < NOW() - INTERVAL '30 days'
+            RETURNING id
+        """)
+    )
+    decayed = len(result.fetchall())
+    if decayed > 0:
+        log.info("Decayed activation for %d unused engrams", decayed)
+    return decayed
 
 
 

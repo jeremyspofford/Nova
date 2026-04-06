@@ -113,7 +113,7 @@ async def _send_memory_feedback() -> int:
     if cursor_raw:
         cursor = datetime.fromisoformat(cursor_raw)
     else:
-        cursor = datetime.now(timezone.utc) - timedelta(hours=1)
+        cursor = datetime.now(timezone.utc) - timedelta(days=30)
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -172,10 +172,13 @@ async def _send_memory_feedback() -> int:
 
 
 async def effectiveness_loop() -> None:
-    """Background loop — recompute every hour."""
+    """Background loop — recompute every hour and send outcome feedback to memory."""
     while True:
         try:
             await compute_and_publish()
+            sent = await _send_memory_feedback()
+            if sent:
+                log.info("Sent %d outcome feedback entries to memory-service", sent)
         except Exception:
             log.exception("Effectiveness matrix computation failed")
         await asyncio.sleep(3600)
