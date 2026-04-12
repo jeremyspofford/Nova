@@ -1,10 +1,30 @@
 STUB_ROUTES = [
-    ("GET",  "/events",       None),
-    ("POST", "/events",       {"type": "test", "source": "test", "subject": "test"}),
-    ("GET",  "/board",        None),
-    ("GET",  "/tools",        None),
-    ("GET",  "/runs",         None),
-    ("GET",  "/llm/providers", None),
+    # Events
+    ("GET",   "/events",                    None),
+    ("POST",  "/events",                    {"type": "test", "source": "test", "subject": "test"}),
+    # Board
+    ("GET",   "/board",                     None),
+    ("PATCH", "/board/tasks/some-id",       {"board_column_id": "col-1"}),
+    # Tools
+    ("GET",   "/tools",                     None),
+    ("GET",   "/tools/some-tool",           None),
+    ("POST",  "/tools/some-tool/invoke",    {"input": {}}),
+    # Runs
+    ("GET",   "/runs",                      None),
+    ("GET",   "/runs/some-id",              None),
+    ("GET",   "/tasks/some-id/runs",        None),
+    # Approvals
+    ("POST",  "/tasks/some-id/approvals",   {"summary": "test"}),
+    ("GET",   "/approvals/some-id",         None),
+    ("POST",  "/approvals/some-id/respond", {"decision": "approved", "decided_by": "user"}),
+    # Entities
+    ("GET",   "/entities",                  None),
+    ("GET",   "/entities/some-id",          None),
+    ("POST",  "/entities/sync",             {}),
+    # LLM providers
+    ("GET",   "/llm/providers",             None),
+    ("GET",   "/llm/providers/some-id",     None),
+    ("POST",  "/llm/route",                 {"purpose": "test", "input": {}, "privacy_preference": "local_preferred"}),
 ]
 
 
