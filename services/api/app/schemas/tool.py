@@ -25,9 +25,10 @@ class ToolListResponse(BaseModel):
 class ToolInvokeRequest(BaseModel):
     input: dict[str, Any]
     task_id: str | None = None
-    requested_by: str | None = None
 
 
 class ToolInvokeResponse(BaseModel):
     run_id: str
     status: str
+    output: dict[str, Any] | None = None
+    error: str | None = None
