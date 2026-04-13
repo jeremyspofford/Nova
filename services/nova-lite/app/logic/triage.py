@@ -1,6 +1,8 @@
 import json
 import logging
 
+from app.client import NovaClientError
+
 log = logging.getLogger(__name__)
 
 
@@ -36,12 +38,16 @@ def classify_and_create(client, event: dict) -> dict:
         return existing[0]
 
     prompt = _build_triage_prompt(event)
-    response = client.llm_route(
-        purpose="triage",
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        response = client.llm_route(
+            purpose="triage",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        fields = _parse_triage_response(response)
+    except NovaClientError as exc:
+        log.warning("LLM unavailable during triage for event %s: %s", event["id"], exc)
+        fields = None
 
-    fields = _parse_triage_response(response)
     if fields is None:
         log.warning(
             "Triage LLM response unparseable for event %s, using subject as title",

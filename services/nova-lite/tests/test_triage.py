@@ -41,6 +41,16 @@ def test_falls_back_on_missing_title_key(fake_client):
     assert task["title"] == SAMPLE_EVENT["subject"]
 
 
+def test_falls_back_on_llm_error(fake_client):
+    from app.client import NovaClientError
+    def fail_llm_route(*args, **kwargs):
+        raise NovaClientError(503, "LLM unavailable")
+    fake_client.llm_route = fail_llm_route
+    task = classify_and_create(fake_client, SAMPLE_EVENT)
+    assert task["title"] == SAMPLE_EVENT["subject"]
+    assert task["origin_event_id"] == "event-1"
+
+
 def test_dedup_skips_creation_if_task_exists(fake_client):
     existing = fake_client.post_task({
         "title": "existing", "origin_event_id": "event-1"
