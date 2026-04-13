@@ -39,5 +39,74 @@ def seed_llm_providers(db: Session, settings) -> None:
 
 
 def seed_tools(db: Session) -> None:
-    """Placeholder — full implementation in Task 5."""
-    pass
+    """Upsert the Phase 2 tool definitions. Safe to re-run on every startup."""
+    from app.models.tool import Tool
+
+    tool_definitions = [
+        dict(
+            name="debug.echo",
+            display_name="Debug Echo",
+            description="Returns its input unchanged. Used for testing the tool invocation loop.",
+            adapter_type="internal",
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=5,
+            enabled=True,
+            tags=["debug"],
+        ),
+        dict(
+            name="ha.light.turn_on",
+            display_name="HA: Turn On Light",
+            description=(
+                "Turns on a Home Assistant light entity. "
+                "Requires HA_BASE_URL and HA_TOKEN environment variables."
+            ),
+            adapter_type="home_assistant",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "entity_id": {"type": "string"},
+                    "brightness": {"type": "integer", "minimum": 0, "maximum": 255},
+                },
+                "required": ["entity_id"],
+            },
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["home_assistant", "light"],
+        ),
+        dict(
+            name="devops.summarize_ci_failure",
+            display_name="DevOps: Summarize CI Failure",
+            description="Uses the LLM to summarize a CI failure from a URL and log snippet.",
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string"},
+                    "log_snippet": {"type": "string"},
+                },
+                "required": ["url", "log_snippet"],
+            },
+            output_schema={"type": "object", "properties": {"summary": {"type": "string"}}},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=30,
+            enabled=True,
+            tags=["devops", "ci"],
+        ),
+    ]
+
+    for defn in tool_definitions:
+        tool = db.query(Tool).filter(Tool.name == defn["name"]).first()
+        if tool:
+            for k, v in defn.items():
+                setattr(tool, k, v)
+        else:
+            db.add(Tool(**defn))
+
+    db.commit()
