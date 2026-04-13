@@ -37,5 +37,20 @@ services:
       db:
         condition: service_healthy
 
+  nova-lite:
+    build:
+      context: ../services/nova-lite
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NOVA_API_URL: ${NOVA_API_URL:-http://api:8000}
+      LOOP_INTERVAL_SECONDS: ${LOOP_INTERVAL_SECONDS:-15}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - nova-lite-state:/app/state
+    restart: unless-stopped
+
 volumes:
   nova_db:
+  nova-lite-state:
