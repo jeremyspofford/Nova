@@ -1,5 +1,6 @@
 import json
 import logging
+from app.client import NovaClientError
 from app.logic.planner import Plan
 
 log = logging.getLogger(__name__)
@@ -22,7 +23,11 @@ def _build_summary_prompt(task: dict, plan: Plan, results: list[dict]) -> str:
 def summarize(client, task: dict, plan: Plan, results: list[dict]) -> str:
     """Use LLM to produce a result_summary string for the task."""
     prompt = _build_summary_prompt(task, plan, results)
-    return client.llm_route(
-        purpose="summarize",
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        return client.llm_route(
+            purpose="summarize",
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except NovaClientError as exc:
+        log.warning("Summarization failed for task %s: %s", task.get("id"), exc)
+        return ""

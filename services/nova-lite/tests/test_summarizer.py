@@ -18,3 +18,12 @@ def test_summarize_with_no_actions(fake_client):
     fake_client._llm_response = "Nothing needed."
     result = summarize(fake_client, {"id": "t1", "title": "Test"}, Plan(), [])
     assert result == "Nothing needed."
+
+
+def test_summarize_returns_empty_string_on_llm_error(fake_client):
+    from app.client import NovaClientError
+    def raise_error(**kwargs):
+        raise NovaClientError(503, "unavailable")
+    fake_client.llm_route = raise_error
+    result = summarize(fake_client, {"id": "t1", "title": "Test"}, Plan(), [])
+    assert result == ""
