@@ -25,7 +25,7 @@ def test_get_tools_default_only_enabled(client, db_session):
     assert "debug.echo" in names
 
 
-def test_get_tools_enabled_false_shows_all(client, db_session):
+def test_get_tools_enabled_false_shows_only_disabled(client, db_session):
     from app.tools.seed import seed_tools
     from app.models.tool import Tool
     seed_tools(db_session)
@@ -35,6 +35,7 @@ def test_get_tools_enabled_false_shows_all(client, db_session):
     response = client.get("/tools?enabled=false")
     names = {t["name"] for t in response.json()["tools"]}
     assert "ha.light.turn_on" in names
+    assert "debug.echo" not in names
 
 
 def test_get_tool_by_name(client, db_session):
@@ -89,6 +90,18 @@ def test_invoke_run_linked_to_task(client, db_session):
 def test_invoke_unknown_tool_404(client):
     response = client.post("/tools/unknown.tool/invoke", json={"input": {}})
     assert response.status_code == 404
+
+
+def test_invoke_tool_failure_returns_failed_status(client, db_session):
+    from app.tools.seed import seed_tools
+    from unittest.mock import patch
+    seed_tools(db_session)
+    with patch("app.tools.handlers.dispatch", side_effect=RuntimeError("handler crashed")):
+        response = client.post("/tools/debug.echo/invoke", json={"input": {}})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["error"] is not None
 
 
 def test_invoke_disabled_tool_400(client, db_session):

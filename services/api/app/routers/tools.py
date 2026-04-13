@@ -67,4 +67,4 @@ def invoke_tool(name: str, body: ToolInvokeRequest, db: Session = Depends(get_db
         db.commit()
 
     db.refresh(run)
-    return ToolInvokeResponse(run_id=run.id, status=run.status)
+    return ToolInvokeResponse(run_id=run.id, status=run.status, output=run.output, error=run.error)
