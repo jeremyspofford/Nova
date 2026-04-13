@@ -101,3 +101,34 @@ def test_process_task_marks_failed_when_tool_fails(fake_client):
 
     process_task(fake_client, task)
     assert fake_client.tasks["task-5"]["status"] == "failed"
+
+
+def test_process_task_marks_failed_when_executor_raises(fake_client):
+    """If executor returns empty results (tool error on first call), task should be failed."""
+    from app.client import NovaClientError
+    task = {
+        "id": "task-6",
+        "title": "Failing tool",
+        "risk_class": "low",
+        "approval_required": False,
+        "status": "inbox",
+    }
+    fake_client.tasks["task-6"] = task
+    fake_client.tools = [{"name": "debug.echo", "description": "echo", "input_schema": {}}]
+
+    responses = iter([
+        json.dumps({
+            "actions": [{"tool_name": "debug.echo", "input": {}, "reason": "test"}],
+            "reasoning": "Trying.",
+        }),
+        "Tool crashed.",
+    ])
+    fake_client.llm_route = lambda purpose, messages, privacy_preference="local_preferred": next(responses)
+
+    # First invoke_tool call raises NovaClientError → executor returns []
+    def fail_invoke(tool_name, input, task_id=None):
+        raise NovaClientError(500, "tool crashed")
+    fake_client.invoke_tool = fail_invoke
+
+    process_task(fake_client, task)
+    assert fake_client.tasks["task-6"]["status"] == "failed"

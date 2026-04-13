@@ -47,7 +47,7 @@ def process_task(client, task: dict) -> None:
     client.patch_task(task_id, {"status": "running"})
     results = executor.execute(client, task, current_plan)
 
-    all_succeeded = all(r.get("status") == "succeeded" for r in results)
+    all_succeeded = bool(results) and all(r.get("status") == "succeeded" for r in results)
     summary = summarizer.summarize(client, task, current_plan, results)
     client.patch_task(task_id, {
         "status": "done" if all_succeeded else "failed",
