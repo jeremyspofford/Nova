@@ -119,12 +119,12 @@ Request body (all from 15-16 spec):
 ```
 - `type`, `source`, `subject` are required
 - `id` is generated (uuid4), `timestamp` is set server-side to UTC now
-- Returns HTTP 201 with full `Event` object
+- Returns HTTP 201 with `{"id": "<uuid>", "timestamp": "<iso8601>"}` — the minimal shape from 15-16 spec
 
 **`GET /events`**
 
 Query parameters:
-- `since` (ISO 8601 UTC string, optional) — return only events with `timestamp > since`
+- `since` (ISO 8601 UTC string, optional, additive extension not in 15-16) — return only events with `timestamp > since`; used by Nova-lite as its polling cursor
 - `type` (optional)
 - `source` (optional)
 - `priority` (optional)
@@ -165,7 +165,28 @@ Response:
 
 `run_id` is omitted from the Phase 2 response (observability is Phase 5).
 
-**Provider selection logic** (in `app/llm_client.py`):
+**`app/llm_client.py` — public interface:**
+
+```python
+def route(db: Session, request: LLMRouteRequest) -> str:
+    """Select a provider and call the LLM. Returns the response text.
+    Called by the POST /llm/route HTTP handler."""
+    ...
+
+def route_internal(db: Session, purpose: str, messages: list[dict], privacy_preference: str = "local_preferred") -> str:
+    """Same logic as route(), but callable in-process without an HTTP round-trip.
+    Used by devops.summarize_ci_failure and any future internal callers."""
+    from app.schemas.llm_provider import LLMRouteRequest
+    return route(db, LLMRouteRequest(
+        purpose=purpose,
+        input={"messages": messages},
+        privacy_preference=privacy_preference,
+    ))
+```
+
+Both functions share the same provider selection and call logic; `route_internal` is a thin wrapper that constructs the request object.
+
+**Provider selection logic** (shared by both functions in `app/llm_client.py`):
 
 1. Load all `LLMProviderProfile` records where `enabled=true`
 2. If none found: raise `503 Service Unavailable` with `{"detail": "No LLM providers configured. Set OLLAMA_BASE_URL and OLLAMA_MODEL to configure a local provider."}`
@@ -213,7 +234,7 @@ HA_TOKEN=                             (optional)
 
 ### Tools
 
-**`GET /tools`** — returns `{"tools": Tool[]}` for all tools where `enabled=true`.
+**`GET /tools`** — returns `{"tools": Tool[]}`. Optional query parameter `enabled` (boolean, default `true`) — pass `enabled=false` to include disabled tools or omit to get only enabled ones.
 
 **`GET /tools/{name}`** — returns single Tool or 404.
 
@@ -382,7 +403,7 @@ Typed methods wrapping `httpx.Client`:
 ```python
 class NovaClient:
     def get_events(self, since: str, limit: int = 10) -> list[dict]: ...
-    def get_tasks(self, status: str, limit: int = 5, origin_event_id: str | None = None) -> list[dict]: ...
+    def get_tasks(self, status: str | None = None, limit: int = 5, origin_event_id: str | None = None) -> list[dict]: ...
     def post_task(self, payload: dict) -> dict: ...
     def patch_task(self, task_id: str, updates: dict) -> dict: ...
     def post_approval(self, task_id: str, payload: dict) -> dict: ...
@@ -508,11 +529,12 @@ def run_loop(client, state):
 def process_task(client, task):
     # Check approval requirement
     if task["risk_class"] == "high" or task["approval_required"]:
+        # POST /tasks/{id}/approvals sets task status=needs_approval server-side;
+        # no separate patch_task call needed here.
         client.post_approval(task["id"], {
             "summary": f"Nova-lite wants to act on: {task['title']}",
             "consequence": task.get("description"),
         })
-        client.patch_task(task["id"], {"status": "needs_approval"})
         return
 
     plan = planner.plan(client, task)
