@@ -105,11 +105,11 @@ def _call_provider_real(provider, messages: list[dict]) -> str:
     if provider.provider_type == "local":
         api_key = "ollama"
     else:
-        api_key = (
-            os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("ANTHROPIC_API_KEY")
-            or "missing-api-key"
-        )
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Cloud provider selected but no OPENAI_API_KEY or ANTHROPIC_API_KEY is set"
+            )
 
     client = OpenAI(base_url=provider.endpoint_ref, api_key=api_key)
     response = client.chat.completions.create(

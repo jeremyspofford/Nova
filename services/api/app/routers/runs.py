@@ -10,7 +10,7 @@ router = APIRouter(tags=["runs"])
 
 @router.get("/runs", tags=["runs"])
 def list_runs():
-    raise HTTPException(status_code=501)
+    raise HTTPException(status_code=501, detail="Not implemented")
 
 
 @router.get("/runs/{run_id}", response_model=RunRead)

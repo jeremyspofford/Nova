@@ -23,6 +23,10 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql://nova:nova@db:5432/nova}
       DEPLOYMENT_MODE: ${DEPLOYMENT_MODE:-local}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
+      HA_BASE_URL: ${HA_BASE_URL:-}
+      HA_TOKEN: ${HA_TOKEN:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
