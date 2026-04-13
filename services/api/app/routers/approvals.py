@@ -1,16 +1,41 @@
-from fastapi import APIRouter
-from app.schemas.approval import ApprovalRequest, ApprovalResponse
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.database import get_db
+from app.models.approval import Approval
+from app.models.task import Task
+from app.schemas.approval import ApprovalCreate, ApprovalRead
 
 router = APIRouter(tags=["approvals"])
 
-@router.post("/tasks/{task_id}/approvals")
-def request_approval(task_id: str, body: ApprovalRequest):
-    raise NotImplementedError
+
+@router.post("/tasks/{task_id}/approvals", response_model=ApprovalRead, status_code=201)
+def request_approval(task_id: str, body: ApprovalCreate, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    approval = Approval(
+        task_id=task_id,
+        requested_by="nova-lite",
+        summary=body.summary,
+        consequence=body.consequence,
+        options=body.options,
+        status="pending",
+    )
+    db.add(approval)
+
+    # Server-side: set task status to needs_approval
+    task.status = "needs_approval"
+    db.commit()
+    db.refresh(approval)
+    return ApprovalRead.model_validate(approval)
+
 
 @router.get("/approvals/{approval_id}")
 def get_approval(approval_id: str):
-    raise NotImplementedError
+    raise HTTPException(status_code=501)
+
 
 @router.post("/approvals/{approval_id}/respond")
-def respond_to_approval(approval_id: str, body: ApprovalResponse):
-    raise NotImplementedError
+def respond_to_approval(approval_id: str):
+    raise HTTPException(status_code=501)

@@ -40,6 +40,7 @@ def list_tasks(
     priority: str | None = Query(None),
     risk_class: str | None = Query(None),
     approval_required: bool | None = Query(None),
+    origin_event_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -59,6 +60,8 @@ def list_tasks(
         query = query.filter(Task.risk_class == risk_class)
     if approval_required is not None:
         query = query.filter(Task.approval_required == approval_required)
+    if origin_event_id:
+        query = query.filter(Task.origin_event_id == origin_event_id)
     tasks = query.offset(offset).limit(limit).all()
     return TaskListResponse(tasks=[TaskResponse.from_orm_task(t) for t in tasks])
 
