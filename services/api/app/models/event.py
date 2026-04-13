@@ -1,5 +1,6 @@
+from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, DateTime, String, func
+from sqlalchemy import Column, DateTime, String
 from sqlalchemy.types import JSON
 from app.database import Base
 
@@ -12,7 +13,7 @@ class Event(Base):
     source = Column(String, nullable=False)
     subject = Column(String, nullable=False)
     payload = Column(JSON, nullable=False, default=dict)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     correlation_id = Column(String, nullable=True)
     priority = Column(String, nullable=False, default="normal")
     risk_class = Column(String, nullable=False, default="low")
