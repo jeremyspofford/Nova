@@ -72,3 +72,16 @@ def test_plan_caps_at_three_actions(fake_client):
     fake_client._llm_response = json.dumps({"actions": actions, "reasoning": "many steps"})
     result = plan(fake_client, SAMPLE_TASK)
     assert len(result.actions) <= 3
+
+
+def test_plan_falls_back_to_empty_on_nova_client_error(fake_client):
+    from app.client import NovaClientError
+    fake_client.tools = SAMPLE_TOOLS
+
+    def raise_error(**kwargs):
+        raise NovaClientError(503, "LLM unavailable")
+
+    fake_client.llm_route = raise_error
+    result = plan(fake_client, SAMPLE_TASK)
+    assert isinstance(result, Plan)
+    assert result.actions == []

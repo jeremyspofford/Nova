@@ -2,6 +2,8 @@ import json
 import logging
 from dataclasses import dataclass, field
 
+from app.client import NovaClientError
+
 log = logging.getLogger(__name__)
 
 MAX_ACTIONS = 3
@@ -57,10 +59,18 @@ def _parse_plan_response(response: str) -> Plan:
 
 def plan(client, task: dict) -> Plan:
     """Given a task in inbox/ready, ask LLM for 0-3 tool actions."""
-    tools = client.get_tools()
+    try:
+        tools = client.get_tools()
+    except NovaClientError as exc:
+        log.warning("Could not fetch tools for task %s: %s", task.get("id"), exc)
+        return Plan()
     prompt = _build_plan_prompt(task, tools)
-    response = client.llm_route(
-        purpose="plan",
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        response = client.llm_route(
+            purpose="plan",
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except NovaClientError as exc:
+        log.warning("LLM unavailable during planning for task %s: %s", task.get("id"), exc)
+        return Plan()
     return _parse_plan_response(response)
