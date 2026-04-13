@@ -27,9 +27,15 @@ class NovaClient:
             raise NovaClientError(resp.status_code, resp.text)
         return resp.json()
 
+    def _request(self, method: str, path: str, **kwargs) -> dict:
+        try:
+            resp = self._http.request(method, path, **kwargs)
+        except httpx.RequestError as exc:
+            raise NovaClientError(0, str(exc)) from exc
+        return self._check(resp)
+
     def get_events(self, since: str, limit: int = 10) -> list[dict]:
-        resp = self._http.get("/events", params={"since": since, "limit": limit})
-        return self._check(resp)["events"]
+        return self._request("GET", "/events", params={"since": since, "limit": limit})["events"]
 
     def get_tasks(
         self,
@@ -42,20 +48,16 @@ class NovaClient:
             params["status"] = status
         if origin_event_id is not None:
             params["origin_event_id"] = origin_event_id
-        resp = self._http.get("/tasks", params=params)
-        return self._check(resp)["tasks"]
+        return self._request("GET", "/tasks", params=params)["tasks"]
 
     def post_task(self, payload: dict) -> dict:
-        resp = self._http.post("/tasks", json=payload)
-        return self._check(resp)
+        return self._request("POST", "/tasks", json=payload)
 
     def patch_task(self, task_id: str, updates: dict) -> dict:
-        resp = self._http.patch(f"/tasks/{task_id}", json=updates)
-        return self._check(resp)
+        return self._request("PATCH", f"/tasks/{task_id}", json=updates)
 
     def get_tools(self) -> list[dict]:
-        resp = self._http.get("/tools")
-        return self._check(resp)["tools"]
+        return self._request("GET", "/tools")["tools"]
 
     def invoke_tool(
         self, tool_name: str, input: dict, task_id: str | None = None
@@ -63,12 +65,10 @@ class NovaClient:
         body: dict = {"input": input}
         if task_id is not None:
             body["task_id"] = task_id
-        resp = self._http.post(f"/tools/{tool_name}/invoke", json=body)
-        return self._check(resp)
+        return self._request("POST", f"/tools/{tool_name}/invoke", json=body)
 
     def post_approval(self, task_id: str, payload: dict) -> dict:
-        resp = self._http.post(f"/tasks/{task_id}/approvals", json=payload)
-        return self._check(resp)
+        return self._request("POST", f"/tasks/{task_id}/approvals", json=payload)
 
     def llm_route(
         self,
@@ -81,5 +81,4 @@ class NovaClient:
             "input": {"messages": messages},
             "privacy_preference": privacy_preference,
         }
-        resp = self._http.post("/llm/route", json=body)
-        return self._check(resp)["output"]
+        return self._request("POST", "/llm/route", json=body)["output"]

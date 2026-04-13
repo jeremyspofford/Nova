@@ -56,3 +56,14 @@ def test_llm_route_returns_output_string():
 def test_client_closes_cleanly():
     client = NovaClient("http://test:8000", transport=_OkTransport({"events": []}))
     client.close()  # Should not raise
+
+
+def test_raises_nova_client_error_on_network_error():
+    class _NetworkErrorTransport(httpx.BaseTransport):
+        def handle_request(self, request):
+            raise httpx.ConnectError("Connection refused")
+
+    client = NovaClient("http://test:8000", transport=_NetworkErrorTransport())
+    with pytest.raises(NovaClientError) as exc:
+        client.get_events(since="2026-01-01T00:00:00Z")
+    assert exc.value.status_code == 0
