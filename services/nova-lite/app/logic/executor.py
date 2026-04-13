@@ -1,5 +1,5 @@
-from app.client import NovaClientError
 import logging
+from app.client import NovaClientError
 from app.logic.planner import Plan
 
 log = logging.getLogger(__name__)
