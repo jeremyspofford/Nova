@@ -13,7 +13,7 @@ def test_post_approval_creates_record(client):
     assert data["options"] == ["approve", "deny"]  # default
     assert data["requested_by"] == "nova-lite"
     assert "id" in data
-    assert "requested_at" in data
+    assert data["requested_at"] is not None
 
 
 def test_post_approval_moves_task_to_needs_approval(client):
@@ -36,3 +36,10 @@ def test_post_approval_custom_options(client):
 def test_post_approval_task_not_found(client):
     response = client.post("/tasks/nonexistent/approvals", json={"summary": "test"})
     assert response.status_code == 404
+
+
+def test_post_approval_conflict_on_duplicate_pending(client):
+    task = client.post("/tasks", json={"title": "task"}).json()
+    client.post(f"/tasks/{task['id']}/approvals", json={"summary": "first request"})
+    response = client.post(f"/tasks/{task['id']}/approvals", json={"summary": "duplicate"})
+    assert response.status_code == 409

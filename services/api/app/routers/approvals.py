@@ -14,6 +14,13 @@ def request_approval(task_id: str, body: ApprovalCreate, db: Session = Depends(g
     if not task:
         raise HTTPException(404, "Task not found")
 
+    existing = db.query(Approval).filter(
+        Approval.task_id == task_id,
+        Approval.status == "pending"
+    ).first()
+    if existing:
+        raise HTTPException(409, "A pending approval already exists for this task")
+
     approval = Approval(
         task_id=task_id,
         requested_by="nova-lite",
@@ -33,9 +40,9 @@ def request_approval(task_id: str, body: ApprovalCreate, db: Session = Depends(g
 
 @router.get("/approvals/{approval_id}")
 def get_approval(approval_id: str):
-    raise HTTPException(status_code=501)
+    raise HTTPException(status_code=501, detail="Not implemented")
 
 
 @router.post("/approvals/{approval_id}/respond")
 def respond_to_approval(approval_id: str):
-    raise HTTPException(status_code=501)
+    raise HTTPException(status_code=501, detail="Not implemented")
