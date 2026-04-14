@@ -6,6 +6,10 @@ class Settings(BaseSettings):
     deployment_mode: str = "local"
     service_name: str = "nova-api"
     version: str = "0.1.0"
+    ollama_base_url: str = ""
+    ollama_model: str = "gemma3:4b"
+    ha_base_url: str = ""
+    ha_token: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

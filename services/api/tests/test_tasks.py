@@ -71,3 +71,13 @@ def test_patch_task(client):
 def test_patch_task_not_found(client):
     response = client.patch("/tasks/nonexistent-id", json={"title": "x"})
     assert response.status_code == 404
+
+
+def test_list_tasks_filter_by_origin_event_id(client):
+    client.post("/tasks", json={"title": "from event", "origin_event_id": "evt-abc"})
+    client.post("/tasks", json={"title": "no event"})
+    response = client.get("/tasks?origin_event_id=evt-abc")
+    assert response.status_code == 200
+    tasks = response.json()["tasks"]
+    assert len(tasks) == 1
+    assert tasks[0]["origin_event_id"] == "evt-abc"

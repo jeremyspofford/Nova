@@ -1,34 +1,28 @@
+# These routes remain 501 stubs after Phase 2.
+# Routes implemented in Phase 2 (events, /llm/route, tools, runs/{id}, tasks/{id}/runs,
+# tasks/{id}/approvals) are removed from this list and tested in their own test files.
 STUB_ROUTES = [
-    # Events
-    ("GET",   "/events",                    None),
-    ("POST",  "/events",                    {"type": "test", "source": "test", "subject": "test"}),
     # Board
     ("GET",   "/board",                     None),
     ("PATCH", "/board/tasks/some-id",       {"board_column_id": "col-1"}),
-    # Tools
-    ("GET",   "/tools",                     None),
-    ("GET",   "/tools/some-tool",           None),
-    ("POST",  "/tools/some-tool/invoke",    {"input": {}}),
-    # Runs
+    # Runs — generic list stays 501 (only /runs/{id} and /tasks/{id}/runs are implemented)
     ("GET",   "/runs",                      None),
-    ("GET",   "/runs/some-id",              None),
-    ("GET",   "/tasks/some-id/runs",        None),
-    # Approvals
-    ("POST",  "/tasks/some-id/approvals",   {"summary": "test"}),
+    # Approvals — respond and get-by-id stay 501 (only POST /tasks/{id}/approvals is implemented)
     ("GET",   "/approvals/some-id",         None),
     ("POST",  "/approvals/some-id/respond", {"decision": "approved", "decided_by": "user"}),
     # Entities
     ("GET",   "/entities",                  None),
     ("GET",   "/entities/some-id",          None),
     ("POST",  "/entities/sync",             {}),
-    # LLM providers
+    # LLM providers list — only /llm/route is implemented; provider list/detail stay 501
     ("GET",   "/llm/providers",             None),
     ("GET",   "/llm/providers/some-id",     None),
-    ("POST",  "/llm/route",                 {"purpose": "test", "input": {}, "privacy_preference": "local_preferred"}),
 ]
 
 
 def test_stub_routes_return_501(client):
     for method, path, body in STUB_ROUTES:
         response = client.request(method, path, json=body)
-        assert response.status_code == 501, f"{method} {path} returned {response.status_code}, expected 501"
+        assert response.status_code == 501, (
+            f"{method} {path} returned {response.status_code}, expected 501"
+        )

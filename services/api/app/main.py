@@ -1,8 +1,24 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.routers import health, tasks, events, board, tools, runs, approvals, entities, llm
+import app.database as _db
+from app.tools.seed import seed_tools, seed_llm_providers
+from app.config import settings
 
-app = FastAPI(title="Nova API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    db = _db.SessionLocal()
+    try:
+        seed_tools(db)
+        seed_llm_providers(db, settings)
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title="Nova API", version="0.1.0", lifespan=lifespan)
 
 
 @app.exception_handler(NotImplementedError)

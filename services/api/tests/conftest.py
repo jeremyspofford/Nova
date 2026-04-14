@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
+import app.database as _app_database
 from app.main import app
 
 TEST_DATABASE_URL = "sqlite:///:memory:"
@@ -20,6 +21,12 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Redirect the app's engine and SessionLocal to the StaticPool test engine.
+# This ensures lifespan/seed functions that call SessionLocal() directly
+# operate on the same shared in-memory DB that test fixtures create tables on.
+_app_database.engine = engine
+_app_database.SessionLocal = TestingSessionLocal
 
 
 @pytest.fixture(autouse=True)
