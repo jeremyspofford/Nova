@@ -2,8 +2,7 @@
 # Routes implemented in Phase 2 (events, /llm/route, tools, runs/{id}, tasks/{id}/runs,
 # tasks/{id}/approvals) are removed from this list and tested in their own test files.
 STUB_ROUTES = [
-    # Board
-    ("GET",   "/board",                     None),
+    # Board — GET /board is implemented; PATCH remains a stub
     ("PATCH", "/board/tasks/some-id",       {"board_column_id": "col-1"}),
     # Runs — generic list stays 501 (only /runs/{id} and /tasks/{id}/runs are implemented)
     ("GET",   "/runs",                      None),
