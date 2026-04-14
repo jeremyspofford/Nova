@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.approval import Approval
 from app.models.task import Task
 from app.schemas.approval import ApprovalCreate, ApprovalRead, ApprovalRespondRequest
+from app.utils import STATUS_TO_COLUMN
 
 router = APIRouter(tags=["approvals"])
 
@@ -32,8 +33,9 @@ def request_approval(task_id: str, body: ApprovalCreate, db: Session = Depends(g
     )
     db.add(approval)
 
-    # Server-side: set task status to needs_approval
+    # Server-side: set task status to needs_approval and sync board column
     task.status = "needs_approval"
+    task.board_column_id = STATUS_TO_COLUMN["needs_approval"]
     db.commit()
     db.refresh(approval)
     return ApprovalRead.model_validate(approval)
@@ -80,7 +82,9 @@ def respond_to_approval(
     task = db.query(Task).filter(Task.id == approval.task_id).first()
     if not task:
         raise HTTPException(404, "Task not found")
-    task.status = "ready" if outcome == "approved" else "cancelled"
+    new_status = "ready" if outcome == "approved" else "cancelled"
+    task.status = new_status
+    task.board_column_id = STATUS_TO_COLUMN[new_status]
 
     db.commit()
     db.refresh(approval)

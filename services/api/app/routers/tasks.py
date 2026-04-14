@@ -4,12 +4,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.task import Task
 from app.schemas.task import TaskCreate, TaskListResponse, TaskResponse, TaskUpdate
+from app.utils import STATUS_TO_COLUMN
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.post("", response_model=TaskResponse, status_code=201)
 def create_task(body: TaskCreate, db: Session = Depends(get_db)):
+    initial_status = "pending"
     task = Task(
         id=str(uuid4()),
         title=body.title,
@@ -24,6 +26,7 @@ def create_task(body: TaskCreate, db: Session = Depends(get_db)):
         due_at=body.due_at,
         labels=body.labels,
         metadata_=body.metadata,
+        board_column_id=STATUS_TO_COLUMN.get(initial_status, "col-inbox"),
     )
     db.add(task)
     db.commit()
@@ -84,6 +87,8 @@ def update_task(task_id: str, body: TaskUpdate, db: Session = Depends(get_db)):
         # Pydantic model_dump() already resolves enum members to their .value strings
         attr = "metadata_" if field == "metadata" else field
         setattr(task, attr, value)
+    if "status" in update_data and "board_column_id" not in update_data:
+        task.board_column_id = STATUS_TO_COLUMN.get(update_data["status"], task.board_column_id)
     db.commit()
     db.refresh(task)
     return TaskResponse.from_orm_task(task)
