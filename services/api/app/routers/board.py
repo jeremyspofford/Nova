@@ -51,6 +51,17 @@ def get_board(
     )
 
 
-@router.patch("/tasks/{task_id}")
-def move_task(task_id: str, body: BoardColumnMove):
-    raise HTTPException(status_code=501, detail="Not implemented")
+@router.patch("/tasks/{task_id}", response_model=TaskResponse)
+def move_task(task_id: str, body: BoardColumnMove, db: Session = Depends(get_db)):
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    column = db.query(BoardColumn).filter(BoardColumn.id == body.board_column_id).first()
+    if not column:
+        raise HTTPException(404, "Column not found")
+
+    task.board_column_id = body.board_column_id
+    db.commit()
+    db.refresh(task)
+    return TaskResponse.from_orm_task(task)

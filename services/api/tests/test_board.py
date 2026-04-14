@@ -68,6 +68,47 @@ def test_seed_board_columns_creates_8_columns(db_session):
     ]
 
 
+def test_patch_board_task_moves_to_column(client, db_session):
+    from app.tools.seed import seed_board_columns
+    from app.models.board_column import BoardColumn
+    seed_board_columns(db_session)
+    done_col = db_session.query(BoardColumn).filter(BoardColumn.name == "Done").first()
+
+    task = client.post("/tasks", json={"title": "movable"}).json()
+    response = client.patch(f"/board/tasks/{task['id']}", json={"board_column_id": done_col.id})
+    assert response.status_code == 200
+    assert response.json()["board_column_id"] == done_col.id
+
+
+def test_patch_board_task_404_unknown_task(client, db_session):
+    from app.tools.seed import seed_board_columns
+    from app.models.board_column import BoardColumn
+    seed_board_columns(db_session)
+    col = db_session.query(BoardColumn).first()
+    response = client.patch("/board/tasks/nonexistent", json={"board_column_id": col.id})
+    assert response.status_code == 404
+
+
+def test_patch_board_task_404_unknown_column(client):
+    task = client.post("/tasks", json={"title": "task"}).json()
+    response = client.patch(f"/board/tasks/{task['id']}", json={"board_column_id": "nonexistent-col"})
+    assert response.status_code == 404
+
+
+def test_patch_board_task_reflects_in_get_board(client, db_session):
+    from app.tools.seed import seed_board_columns
+    from app.models.board_column import BoardColumn
+    seed_board_columns(db_session)
+    ready_col = db_session.query(BoardColumn).filter(BoardColumn.name == "Ready").first()
+
+    task = client.post("/tasks", json={"title": "to move"}).json()
+    client.patch(f"/board/tasks/{task['id']}", json={"board_column_id": ready_col.id})
+
+    board = client.get("/board").json()
+    ready_tasks = board["tasks_by_column"].get(ready_col.id, [])
+    assert any(t["id"] == task["id"] for t in ready_tasks)
+
+
 def test_seed_board_columns_is_idempotent(db_session):
     from app.tools.seed import seed_board_columns
     from app.models.board_column import BoardColumn
