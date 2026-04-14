@@ -17,6 +17,7 @@ export function ApprovalBanner({ approval, taskId }: ApprovalBannerProps) {
       queryClient.invalidateQueries({ queryKey: ["board"] })
       queryClient.invalidateQueries({ queryKey: ["task", taskId] })
       queryClient.invalidateQueries({ queryKey: ["task-approvals", taskId] })
+      queryClient.invalidateQueries({ queryKey: ["approval", approval.id] })
     },
     onError: () => {
       // Error is surfaced via mutation.isError — no rethrow needed
@@ -43,7 +44,7 @@ export function ApprovalBanner({ approval, taskId }: ApprovalBannerProps) {
         {options.map(opt => (
           <button
             key={opt}
-            className={`approval-btn approval-btn--${opt === "approve" ? "approve" : "deny"}`}
+            className={`approval-btn approval-btn--${opt}`}
             disabled={mutation.isPending}
             onClick={() => mutation.mutate({ decision: opt })}
             aria-label={opt.charAt(0).toUpperCase() + opt.slice(1)}
