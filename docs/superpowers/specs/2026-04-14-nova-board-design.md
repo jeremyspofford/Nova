@@ -8,7 +8,7 @@
 
 ## Overview
 
-Nova Board is the human control surface for Nova Suite. It is a 7-column Kanban board where the operator can view tasks created by Nova-lite, approve or deny agent actions, monitor tool runs, and filter the task backlog by status, risk, and labels. It polls the Nova API every 5 seconds and is designed so that the polling transport can be replaced with WebSocket in a future phase without changing any components.
+Nova Board is the human control surface for Nova Suite. It is an 8-column Kanban board where the operator can view tasks created by Nova-lite, approve or deny agent actions, monitor tool runs, and filter the task backlog by status, risk, and labels. It polls the Nova API every 5 seconds and is designed so that the polling transport can be replaced with WebSocket in a future phase without changing any components.
 
 ---
 
@@ -22,13 +22,13 @@ Four currently-stubbed endpoints are promoted to full implementations:
 
 | Endpoint | Description |
 |---|---|
-| `GET /board` | Return 7 board columns and tasks grouped by column |
+| `GET /board` | Return 8 board columns and tasks grouped by column |
 | `PATCH /board/tasks/{id}` | Move a task to a different board column |
 | `GET /approvals/{id}` | Fetch a single approval request |
 | `POST /approvals/{id}/respond` | Submit an approve/deny decision |
 
 ### Startup seeding
-`services/api/app/tools/seed.py` gains a `seed_board_columns()` function that upserts the 7 canonical columns on every API startup.
+`services/api/app/tools/seed.py` gains a `seed_board_columns()` function that upserts the 8 canonical columns on every API startup.
 
 ---
 
@@ -63,7 +63,7 @@ Status, priority, and risk are always communicated with both color and text — 
 
 ### Production
 ```
-browser → board container (nginx:5173) → static files
+browser → board container (nginx:80, host:5173) → static files
 browser → api container (:8000) → FastAPI
 ```
 No reverse proxy required for local use. The browser talks directly to both services.
@@ -96,9 +96,10 @@ services/board/
     App.tsx                    — Board + TaskDetail layout root
     api/
       client.ts                — fetch wrapper (prepends VITE_API_URL, throws on non-2xx)
-      board.ts                 — getBoard(), moveTask(taskId, columnId)
-      tasks.ts                 — getTasks(filters), getTask(id), patchTask(id, patch)
-      approvals.ts             — getApproval(id), respondToApproval(id, decision, reason?)
+      board.ts                 — getBoard(filters?), moveTask(taskId, columnId)
+      tasks.ts                 — getTasks(filters): TaskListResponse; getTask(id): TaskResponse;
+                                  getRuns(taskId): { runs: Run[] }; patchTask(id, patch): TaskResponse
+      approvals.ts             — getApproval(id): ApprovalRead; respondToApproval(id, decision, decidedBy, reason?): ApprovalRead
     stores/
       uiStore.ts               — Zustand: selectedTaskId, openModal, activeFilters
     hooks/
@@ -107,7 +108,7 @@ services/board/
       useApproval.ts           — useQuery(['approval', approvalId]) when task has pending approval
     components/
       Board/
-        Board.tsx              — renders 7 Column components from useBoard data
+        Board.tsx              — renders 8 Column components from useBoard data
         Column.tsx             — column header, WIP limit pill, TaskCard list
         TaskCard.tsx           — title, status/priority/risk badges, approval warning indicator
       TaskDetail/
@@ -131,13 +132,13 @@ services/board/
 1. `useBoard` fires `GET /board` on mount and every 5 000 ms
 2. Response: `{ columns: BoardColumn[], tasks_by_column: { [columnId]: Task[] } }`
 3. `Board.tsx` maps columns → `Column.tsx` → `TaskCard.tsx` per task
-4. FilterBar state in Zustand is passed as query params to `getBoard()` (status, risk_class, labels)
+4. FilterBar state in Zustand is passed as query params to `getBoard()` (status, risk_class, labels, priority)
 5. Changing a filter invalidates the board query → immediate refetch
 
 ### Task detail
 1. Click TaskCard → `uiStore.setSelectedTask(id)`
 2. `TaskDetail.tsx` becomes visible (CSS `transform` / `opacity`, not mount/unmount)
-3. `useTask(id)` fetches `GET /tasks/{id}` and `GET /tasks/{id}/runs`
+3. `useTask(id)` fetches `GET /tasks/{id}` and `GET /tasks/{id}/runs` (returns `{ runs: Run[] }` with `id`, `tool_name`, `status`, `started_at`, `finished_at`, `error` fields)
 4. If `task.approval_required && task.status === 'needs_approval'`: `useApproval` fetches the pending approval
 5. `ApprovalBanner` renders with summary, consequence, and option buttons
 
@@ -166,7 +167,14 @@ Response shape:
 ```json
 {
   "columns": [
-    { "id": "...", "name": "Inbox", "order": 1, "wip_limit": null, "description": null }
+    {
+      "id": "...",
+      "name": "Inbox",
+      "order": 1,
+      "work_in_progress_limit": null,
+      "status_filter": null,
+      "description": null
+    }
   ],
   "tasks_by_column": {
     "<column_id>": [ /* Task objects */ ]
@@ -179,19 +187,22 @@ Supports the same query filters as `GET /tasks`: `status`, `risk_class`, `labels
 ### PATCH /board/tasks/{id}
 Accepts `{ "board_column_id": "<id>" }`. Updates `task.board_column_id`. Returns the updated `TaskResponse`. 404 if task or column not found.
 
+This endpoint exists for semantic clarity as a dedicated "move" action. It does not replace `PATCH /tasks/{id}`, which remains the general-purpose task update endpoint. Both can update `board_column_id`; the board UI uses this endpoint for drag/move operations.
+
 ### GET /approvals/{id}
 Returns the full `ApprovalRead` schema. 404 if not found.
 
 ### POST /approvals/{id}/respond
 Accepts `{ "decision": "approve"|"deny"|<custom>, "decided_by": string, "reason": string|null }`.
-- Sets `approval.status` to `"approved"` or `"denied"` (or the raw decision string for custom options)
+- Sets `approval.status` to `"approved"` or `"denied"` — always one of these two enum values regardless of the custom option string chosen. The raw custom string is stored in `approval.decision` only. (Full status enum: `pending | approved | denied | cancelled`; `cancelled` is set by task cancellation, not this endpoint — the 409 guard fires on any non-`pending` status including `cancelled`.)
 - Sets `approval.decided_by`, `approval.decided_at`, `approval.decision`, `approval.reason`
-- Updates `task.status` to `"ready"` on approve, `"cancelled"` on deny
+- Updates `task.status`: approve → `"ready"`, deny → `"cancelled"`
 - Returns updated `ApprovalRead`
 - 409 if approval is not in `pending` status
+- 404 if approval not found
 
 ### Board column seeding
-`seed_board_columns(db)` upserts 7 columns on startup:
+`seed_board_columns(db)` upserts 8 columns on startup:
 
 | Order | Name | Description |
 |---|---|---|
@@ -202,6 +213,7 @@ Accepts `{ "decision": "approve"|"deny"|<custom>, "decided_by": string, "reason"
 | 5 | Needs Approval | Requires human decision before proceeding |
 | 6 | Done | Completed successfully |
 | 7 | Failed | Terminated with error |
+| 8 | Cancelled | Denied or explicitly cancelled |
 
 Called from `main.py` lifespan alongside existing `seed_tools` and `seed_llm_providers`.
 
@@ -223,14 +235,15 @@ Stage 2 (serve): nginx:alpine — copy dist, copy nginx.conf
 ### docker-compose.yml additions
 ```yaml
 board:
-  build: ../services/board
+  build:
+    context: ../services/board
+    args:
+      VITE_API_URL: ""   # empty = same-origin; override for non-localhost API
   ports:
     - "5173:80"
-  environment:
-    # VITE_API_URL baked at build time — not used at runtime by nginx
 ```
 
-Note: `VITE_API_URL` is a build-time variable (Vite inlines it). For local development, leave it empty (browser uses same-origin) and run `npm run dev` instead of the container.
+`VITE_API_URL` is a build-time variable (Vite inlines it at `npm run build`). It must be passed as a Docker build arg (`ARG VITE_API_URL` in the Dockerfile), not as a runtime environment variable — nginx does not read it. For local development, run `npm run dev` instead of the container; Vite's dev proxy handles API routing transparently.
 
 ---
 
@@ -253,11 +266,11 @@ New test files:
 ## Success Criteria
 
 - `docker compose up` starts all three services (db, api, board) cleanly
-- Board shows 7 columns with tasks populated from seeded data
+- Board shows 8 columns with tasks populated from seeded data
 - Clicking a task opens the detail panel; clicking outside closes it
 - Tasks in `needs_approval` status show the ApprovalBanner with working Approve/Deny
 - Approving a task moves it to Ready column within one poll cycle (≤5s)
-- Denying a task moves it to Cancelled (or Failed column if no Cancelled column)
+- Denying a task moves it to the Cancelled column (order 8)
 - FilterBar filters update the board without page reload
 - Both light and dark mode render correctly
 - All Vitest and pytest tests pass
