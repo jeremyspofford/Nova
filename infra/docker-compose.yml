@@ -51,6 +51,16 @@ services:
       - nova-lite-state:/app/state
     restart: unless-stopped
 
+  board:
+    build:
+      context: ../services/board
+      args:
+        VITE_API_URL: ""
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+
 volumes:
   nova_db:
   nova-lite-state:

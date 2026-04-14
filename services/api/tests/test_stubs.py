@@ -1,15 +1,11 @@
 # These routes remain 501 stubs after Phase 2.
 # Routes implemented in Phase 2 (events, /llm/route, tools, runs/{id}, tasks/{id}/runs,
 # tasks/{id}/approvals) are removed from this list and tested in their own test files.
+# PATCH /board/tasks/{id} is now implemented (Task 3); removed from stubs.
+# GET /approvals/{id} and POST /approvals/{id}/respond are now implemented (Task 4); removed.
 STUB_ROUTES = [
-    # Board
-    ("GET",   "/board",                     None),
-    ("PATCH", "/board/tasks/some-id",       {"board_column_id": "col-1"}),
     # Runs — generic list stays 501 (only /runs/{id} and /tasks/{id}/runs are implemented)
     ("GET",   "/runs",                      None),
-    # Approvals — respond and get-by-id stay 501 (only POST /tasks/{id}/approvals is implemented)
-    ("GET",   "/approvals/some-id",         None),
-    ("POST",  "/approvals/some-id/respond", {"decision": "approved", "decided_by": "user"}),
     # Entities
     ("GET",   "/entities",                  None),
     ("GET",   "/entities/some-id",          None),

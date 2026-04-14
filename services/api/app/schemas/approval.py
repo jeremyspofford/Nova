@@ -23,3 +23,9 @@ class ApprovalRead(BaseModel):
     decided_at: datetime | None
     decision: str | None
     reason: str | None
+
+
+class ApprovalRespondRequest(BaseModel):
+    decision: str
+    decided_by: str
+    reason: str | None = None
