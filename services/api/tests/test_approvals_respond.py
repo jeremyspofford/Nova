@@ -85,3 +85,20 @@ def test_respond_with_reason(client):
     })
     assert response.status_code == 200
     assert response.json()["reason"] == "looks safe"
+
+
+def test_get_task_approvals_returns_list(client):
+    task, approval = _create_task_with_approval(client)
+    response = client.get(f"/tasks/{task['id']}/approvals")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] == approval["id"]
+    assert data[0]["status"] == "pending"
+
+
+def test_get_task_approvals_empty_for_unknown_task(client):
+    response = client.get("/tasks/nonexistent/approvals")
+    assert response.status_code == 200
+    assert response.json() == []

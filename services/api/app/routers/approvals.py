@@ -39,6 +39,12 @@ def request_approval(task_id: str, body: ApprovalCreate, db: Session = Depends(g
     return ApprovalRead.model_validate(approval)
 
 
+@router.get("/tasks/{task_id}/approvals", response_model=list[ApprovalRead])
+def list_task_approvals(task_id: str, db: Session = Depends(get_db)):
+    approvals = db.query(Approval).filter(Approval.task_id == task_id).all()
+    return [ApprovalRead.model_validate(a) for a in approvals]
+
+
 @router.get("/approvals/{approval_id}", response_model=ApprovalRead)
 def get_approval(approval_id: str, db: Session = Depends(get_db)):
     approval = db.query(Approval).filter(Approval.id == approval_id).first()
