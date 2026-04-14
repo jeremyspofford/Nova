@@ -1,5 +1,5 @@
 """
-Startup seeding for tools and LLM providers.
+Startup seeding for tools, LLM providers, and board columns.
 Called from main.py lifespan on every startup (upsert — safe to re-run).
 """
 from sqlalchemy.orm import Session
@@ -34,6 +34,32 @@ def seed_llm_providers(db: Session, settings) -> None:
             latency_class="medium",
         )
         db.add(provider)
+
+    db.commit()
+
+
+def seed_board_columns(db: Session) -> None:
+    """Upsert the 8 canonical board columns. Safe to re-run on every startup."""
+    from app.models.board_column import BoardColumn
+
+    columns = [
+        dict(id="col-inbox",     name="Inbox",          order=1, description="New tasks not yet triaged"),
+        dict(id="col-ready",     name="Ready",          order=2, description="Approved and ready to execute"),
+        dict(id="col-running",   name="Running",        order=3, description="Currently executing"),
+        dict(id="col-waiting",   name="Waiting",        order=4, description="Paused, waiting on external signal"),
+        dict(id="col-approval",  name="Needs Approval", order=5, description="Requires human decision before proceeding"),
+        dict(id="col-done",      name="Done",           order=6, description="Completed successfully"),
+        dict(id="col-failed",    name="Failed",         order=7, description="Terminated with error"),
+        dict(id="col-cancelled", name="Cancelled",      order=8, description="Denied or explicitly cancelled"),
+    ]
+
+    for defn in columns:
+        col = db.query(BoardColumn).filter(BoardColumn.id == defn["id"]).first()
+        if col:
+            for k, v in defn.items():
+                setattr(col, k, v)
+        else:
+            db.add(BoardColumn(**defn))
 
     db.commit()
 
