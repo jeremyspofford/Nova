@@ -398,15 +398,6 @@ body {
   background: var(--accent-gray-bg);
 }
 
-/* Responsive: force tabbed below 900px */
-@media (max-width: 899px) {
-  .app-shell__chat-pane,
-  .app-shell__board-pane {
-    width: 100% !important;
-    border: none !important;
-  }
-}
-
 /* Settings page */
 .settings-page {
   max-width: 520px;
