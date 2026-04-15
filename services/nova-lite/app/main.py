@@ -23,7 +23,7 @@ def _handle_signal(signum, frame):
 
 
 def process_task(client, task: dict) -> None:
-    """Act on a single inbox task: approve, plan, execute, or summarize."""
+    """Act on a single pending task: approve, plan, execute, or summarize."""
     task_id = task["id"]
 
     if task.get("risk_class") == "high" or task.get("approval_required"):
@@ -71,8 +71,8 @@ def run_loop(client: NovaClient, state: CursorState) -> None:
                     log.warning("Triage failed for event %s: %s", event.get("id"), e)
             state.save_cursor(cursor)
 
-            # ── 2. Act on inbox tasks ─────────────────────────
-            tasks = client.get_tasks(status="inbox", limit=5)
+            # ── 2. Act on pending tasks ──────────────────────────
+            tasks = client.get_tasks(status="pending", limit=5)
             for task in tasks:
                 try:
                     process_task(client, task)
