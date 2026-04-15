@@ -74,51 +74,91 @@ def _parse_json_safe(text: str) -> dict | None:
 
 Note: `_extract_json` exists in `services/nova-lite/app/logic/utils.py` but NOT in `services/api`. Do not import across service boundaries — define the helper inline in `conversations.py` as above.
 
-**Decision logic (Python):**
+**Execution ordering — critical constraint:**
+
+FastAPI's `StreamingResponse` consumes the `generate()` generator lazily (after response headers are sent). This means anything that must inform the system prompt — classification result, tool execution, tool output — **must happen synchronously before `generate()` is defined**, captured as closure variables. The generator then reads those variables when it runs.
+
+**Decision logic and tool execution (outside the generator):**
 
 ```python
-# route_internal returns a str (raw LLM output)
+# --- Run BEFORE defining generate() ---
+
+# Step 1: Classify
 result: str = llm_client.route_internal(db, "classify", classify_messages)
-classification = _parse_json_safe(result)  # returns None on parse failure
+classification = _parse_json_safe(result)
 
+tool_name = None
+tool_context = None  # injected into system prompt inside generator
+
+c = classification or {}
 if (
-    classification
-    and classification.get("intent") == "action"
-    and classification.get("confidence", 0) >= 0.7
-    and classification.get("tool_name")
+    c.get("intent") == "action"
+    and c.get("confidence", 0) >= 0.7
+    and c.get("tool_name") in tool_handlers._REGISTRY  # registry check BEFORE Run creation
 ):
-    # Execute tool
-    ...
-else:
-    # Fall through to normal conversation response
-    ...
+    tool_name = c["tool_name"]
+    tool_input = c.get("tool_input") or {}
+
+    # Step 2: Create Run, execute, update Run
+    run = Run(
+        id=str(uuid4()),
+        tool_name=tool_name,
+        task_id=None,
+        executor_type="chat",
+        trigger_type="chat",
+        input=tool_input,
+        status="running",
+        started_at=datetime.now(UTC),
+    )
+    db.add(run)
+    db.commit()
+
+    try:
+        output = tool_handlers.dispatch(tool_name, tool_input, db, cfg)
+        run.status = "succeeded"
+        run.output = output
+        run.summary = f"{tool_name} → succeeded"
+        tool_context = f"You just ran `{tool_name}`. Result: {json.dumps(output)}. Status: succeeded."
+    except Exception as exc:
+        run.status = "failed"
+        run.error = str(exc)
+        run.summary = f"{tool_name} → failed"
+        tool_context = f"You tried to run `{tool_name}` but it failed: {exc}."
+    finally:
+        run.finished_at = datetime.now(UTC)
+        db.commit()
+
+# tool_name and tool_context are now available as closure variables
 ```
 
-Silent fallback on parse failure or low confidence — no error shown to user.
+Unknown tool names (`tool_name not in tool_handlers._REGISTRY`) fall through silently — no Run is created, no error shown. Only the registry check (not `dispatch()`) gates Run creation.
 
-**Streaming acknowledgment** (emitted before tool runs):
-
-```python
-yield f"data: {json.dumps({'delta': f'[Running {tool_name}...]\n'})}\n\n"
-```
-
-**Tool result injection into response call:**
+**Generator (defined after tool execution):**
 
 ```python
-tool_context = f"You just ran `{tool_name}`. Result: {json.dumps(run_output)}. Status: {run_status}."
-# If failed: "You tried to run `{tool_name}` but it failed: {error}."
-# Prepend this to the system prompt for the response LLM call.
+def generate():
+    # Emit acknowledgment if a tool ran
+    if tool_name:
+        yield f"data: {json.dumps({'delta': f'[Running {tool_name}...]\n'})}\n\n"
+        # Note: tool already ran before generate() was entered; this is a UX indicator only
+
+    # Build system prompt with optional tool context
+    base_prompt = _build_system_prompt(db)
+    system_prompt = (tool_context + "\n\n" + base_prompt) if tool_context else base_prompt
+
+    messages = [{"role": "system", "content": system_prompt}, ...history]
+
+    for chunk in llm_client.route_streaming(db, "chat", messages):
+        yield f"data: {json.dumps({'delta': chunk})}\n\n"
+
+    yield f"data: {json.dumps({'complete': True})}\n\n"
+
+return StreamingResponse(generate(), media_type="text/event-stream")
 ```
 
 **`_build_system_prompt` change:**
 
-The existing function includes the line `"You cannot execute tools directly from chat."` — remove this line. When a tool was executed, prepend tool context before the rest of the system prompt:
-
-```python
-tool_context = f"You just ran `{tool_name}`. Result: {json.dumps(run_output)}. Status: {run_status}."
-# If failed: f"You tried to run `{tool_name}` but it failed: {error}."
-system_prompt = tool_context + "\n\n" + _build_system_prompt(db)
-```
+Remove the line `"You cannot execute tools directly from chat."` from the existing function. Tool context is prepended separately (see above) rather than modifying `_build_system_prompt` itself.
 
 **Chat-triggered Run record — DB transaction sequence:**
 
@@ -436,8 +476,8 @@ GET /activity → shows new Run entry at top of feed
 |----------|----------|
 | Classification JSON parse fails | Silent fallback to conversation |
 | Classification confidence < 0.7 | Silent fallback to conversation |
-| Tool name not found in registry | Silent fallback to conversation |
-| Tool execution fails | Run marked failed; LLM response says "I tried X but failed: {error}" |
+| Tool name not found in registry | Silent fallback to conversation; **no Run record created** |
+| Tool execution fails | Run marked failed; `tool_context` set to error string; LLM response says "I tried X but failed: {error}" |
 | Activity API unavailable | Frontend shows error state with retry button |
 
 ---
