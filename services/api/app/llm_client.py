@@ -93,10 +93,12 @@ def route_streaming(
     privacy_preference: str = "local_preferred",
     _caller=None,
 ):
-    """Generator: yields string chunks from the first available provider.
+    """Validate provider selection eagerly, then return a chunk generator.
+
+    Raises NoProvidersError / NoMatchingProvidersError immediately (before any
+    yielding) so HTTP handlers can return a 4xx without opening the SSE stream.
 
     _caller(provider, messages) -> Iterator[str]  — injectable for tests.
-    Raises NoProvidersError / NoMatchingProvidersError before yielding if setup fails.
     """
     _caller = _caller or _call_provider_streaming_real
 
@@ -110,7 +112,12 @@ def route_streaming(
     if not candidates:
         raise NoMatchingProvidersError()
 
-    yield from _caller(candidates[0], messages)
+    return _stream_chunks(candidates[0], messages, _caller)
+
+
+def _stream_chunks(provider, messages: list[dict], caller):
+    """Inner generator — only called after route_streaming() validation passes."""
+    yield from caller(provider, messages)
 
 
 def _select_candidates(providers: list, privacy_preference: str) -> list:
