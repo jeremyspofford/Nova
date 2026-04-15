@@ -3,9 +3,7 @@ import { Link } from "react-router-dom"
 import { useShallow } from "zustand/react/shallow"
 import { useUIStore } from "./stores/uiStore"
 import { useChatStore } from "./stores/chatStore"
-import { Board } from "./components/Board/Board"
-import { FilterBar } from "./components/shared/FilterBar"
-import { TaskDetail } from "./components/TaskDetail/TaskDetail"
+import { ActivityFeed } from "./components/Activity/ActivityFeed"
 import { Toast } from "./components/shared/Toast"
 import { ChatPanel } from "./components/Chat/ChatPanel"
 import { createConversation } from "./api/chat"
@@ -34,14 +32,12 @@ export function AppShell() {
             Chat
           </button>
           <button
-            className={`app-shell__tab${activeTab === "board" ? " app-shell__tab--active" : ""}`}
-            onClick={() => setActiveTab("board")}
+            className={`app-shell__tab${activeTab === "activity" ? " app-shell__tab--active" : ""}`}
+            onClick={() => setActiveTab("activity")}
           >
-            Board
+            Activity
           </button>
         </nav>
-
-        {activeTab === "board" && <FilterBar />}
 
         <Link to="/settings" className="app-shell__settings-link" aria-label="Settings">
           ⚙
@@ -50,14 +46,7 @@ export function AppShell() {
 
       <div className="app-shell__body">
         <div className="app-shell__tab-content">
-          {activeTab === "chat" ? (
-            <ChatPanel />
-          ) : (
-            <div className="board-with-detail">
-              <Board />
-              <TaskDetail />
-            </div>
-          )}
+          {activeTab === "chat" ? <ChatPanel /> : <ActivityFeed />}
         </div>
       </div>
 

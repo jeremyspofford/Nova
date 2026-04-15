@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/react"
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { vi, beforeEach, it, expect } from "vitest"
 import { MemoryRouter } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
@@ -8,7 +8,7 @@ import { useUIStore } from "../../stores/uiStore"
 import { useChatStore } from "../../stores/chatStore"
 import { useSettingsStore } from "../../stores/settingsStore"
 
-vi.mock("../../components/Board/Board", () => ({ Board: () => <div data-testid="board" /> }))
+vi.mock("../../components/Activity/ActivityFeed", () => ({ ActivityFeed: () => <div data-testid="activity-feed" /> }))
 vi.mock("../../components/Chat/ChatPanel", () => ({ ChatPanel: () => <div data-testid="chat-panel" /> }))
 vi.mock("../../components/TaskDetail/TaskDetail", () => ({ TaskDetail: () => null }))
 vi.mock("../../components/shared/FilterBar", () => ({ FilterBar: () => <div data-testid="filter-bar" /> }))
@@ -33,19 +33,19 @@ beforeEach(() => {
 it("renders Chat tab and chat panel by default", () => {
   render(<AppShell />, { wrapper: makeWrapper() })
   expect(screen.getByTestId("chat-panel")).toBeInTheDocument()
-  expect(screen.queryByTestId("board")).not.toBeInTheDocument()
+  expect(screen.queryByTestId("activity-feed")).not.toBeInTheDocument()
 })
 
-it("renders Chat and Board tab buttons", () => {
+it("renders Chat and Activity tab buttons", () => {
   render(<AppShell />, { wrapper: makeWrapper() })
   expect(screen.getByRole("button", { name: /chat/i })).toBeInTheDocument()
-  expect(screen.getByRole("button", { name: /board/i })).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: /activity/i })).toBeInTheDocument()
 })
 
-it("clicking Board tab shows board and hides chat panel", () => {
+it("clicking Activity tab shows activity feed and hides chat panel", () => {
   render(<AppShell />, { wrapper: makeWrapper() })
-  fireEvent.click(screen.getByRole("button", { name: /board/i }))
-  expect(screen.getByTestId("board")).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: /activity/i }))
+  expect(screen.getByTestId("activity-feed")).toBeInTheDocument()
   expect(screen.queryByTestId("chat-panel")).not.toBeInTheDocument()
 })
 

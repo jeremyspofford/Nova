@@ -32,8 +32,8 @@ it("setFilters updates activeFilters", () => {
 })
 
 it("setActiveTab updates activeTab", () => {
-  useUIStore.getState().setActiveTab("board")
-  expect(useUIStore.getState().activeTab).toBe("board")
+  useUIStore.getState().setActiveTab("activity")
+  expect(useUIStore.getState().activeTab).toBe("activity")
 })
 
 it("activeTab defaults to chat", () => {

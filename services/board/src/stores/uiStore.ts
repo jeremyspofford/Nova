@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import type { BoardFilters } from "../api/board"
 
-type ActiveTab = "chat" | "board"
+type ActiveTab = "chat" | "activity"
 
 interface UIState {
   selectedTaskId: string | null
