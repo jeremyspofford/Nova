@@ -181,3 +181,102 @@ def test_send_message_conversation_not_found(client):
         json={"content": "hi"},
     )
     assert resp.status_code == 404
+
+
+def test_parse_json_safe_parses_plain_json():
+    from app.routers.conversations import _parse_json_safe
+    assert _parse_json_safe('{"intent": "action", "confidence": 0.9}') == {
+        "intent": "action", "confidence": 0.9
+    }
+
+
+def test_parse_json_safe_strips_markdown_fences():
+    from app.routers.conversations import _parse_json_safe
+    text = '```json\n{"intent": "conversation"}\n```'
+    assert _parse_json_safe(text) == {"intent": "conversation"}
+
+
+def test_parse_json_safe_returns_none_on_invalid():
+    from app.routers.conversations import _parse_json_safe
+    assert _parse_json_safe("not json") is None
+    assert _parse_json_safe("") is None
+
+
+def test_action_intent_executes_tool_and_creates_run(client, db_session):
+    """When classifier returns action intent, tool runs and a Run is created."""
+    make_provider_in_db(db_session)
+    conv = client.post("/conversations").json()
+
+    classify_resp = '{"intent": "action", "tool_name": "debug.echo", "tool_input": {"message": "hi"}, "confidence": 0.95}'
+
+    with patch("app.llm_client._call_provider_real", side_effect=[classify_resp, "Done!"]):
+        resp = client.post(
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "echo hi", "stream": False},
+        )
+
+    assert resp.status_code == 201
+    from app.models.run import Run
+    runs = db_session.query(Run).all()
+    assert len(runs) == 1
+    assert runs[0].tool_name == "debug.echo"
+    assert runs[0].trigger_type == "chat"
+    assert runs[0].status == "succeeded"
+    assert runs[0].summary == "debug.echo → succeeded"
+
+
+def test_low_confidence_falls_through_no_run(client, db_session):
+    """confidence < 0.7 → no Run created, normal reply."""
+    make_provider_in_db(db_session)
+    conv = client.post("/conversations").json()
+
+    classify_resp = '{"intent": "action", "tool_name": "debug.echo", "tool_input": {}, "confidence": 0.5}'
+
+    with patch("app.llm_client._call_provider_real", side_effect=[classify_resp, "Not sure."]):
+        resp = client.post(
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "maybe echo?", "stream": False},
+        )
+
+    assert resp.status_code == 201
+    from app.models.run import Run
+    assert db_session.query(Run).count() == 0
+
+
+def test_unknown_tool_falls_through_no_run(client, db_session):
+    """tool_name not in _REGISTRY → no Run created."""
+    make_provider_in_db(db_session)
+    conv = client.post("/conversations").json()
+
+    classify_resp = '{"intent": "action", "tool_name": "nonexistent.tool", "tool_input": {}, "confidence": 0.95}'
+
+    with patch("app.llm_client._call_provider_real", side_effect=[classify_resp, "Nope."]):
+        resp = client.post(
+            f"/conversations/{conv['id']}/messages",
+            json={"content": "do the thing", "stream": False},
+        )
+
+    assert resp.status_code == 201
+    from app.models.run import Run
+    assert db_session.query(Run).count() == 0
+
+
+def test_action_sse_emits_running_acknowledgment(client, db_session):
+    """Streaming path emits [Running tool...] as first delta."""
+    make_provider_in_db(db_session)
+    conv = client.post("/conversations").json()
+
+    classify_resp = '{"intent": "action", "tool_name": "debug.echo", "tool_input": {"message": "t"}, "confidence": 0.9}'
+
+    with patch("app.llm_client._call_provider_real", return_value=classify_resp):
+        with patch("app.llm_client._call_provider_streaming_real", fake_streaming_caller):
+            resp = client.post(
+                f"/conversations/{conv['id']}/messages",
+                json={"content": "echo t", "stream": True},
+            )
+
+    import json as _json
+    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
+    events = [_json.loads(l[6:]) for l in lines]
+    deltas = [e["delta"] for e in events if "delta" in e]
+    assert deltas[0].startswith("[Running debug.echo")
