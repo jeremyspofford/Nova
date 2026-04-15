@@ -28,7 +28,7 @@ Nova Board currently treats the Kanban board as the primary UI with chat as a to
 |---|---|
 | `src/main.tsx` | Wrap app in `<RouterProvider>` |
 | `src/App.tsx` | Becomes thin route host; layout logic moves to AppShell |
-| `src/stores/uiStore.ts` | Remove `chatOpen` and `toggleChat` |
+| `src/stores/uiStore.ts` | Remove `chatOpen` and `toggleChat`; add `activeTab: 'chat' \| 'board'` and `setActiveTab()` |
 | `src/stores/chatStore.ts` | Add `persist` middleware to survive page reload |
 | `src/styles/tokens.css` | Add `[data-theme="light"]` and `[data-theme="dark"]` selectors |
 | `src/styles/global.css` | Update layout classes for split/tabbed shell |
@@ -105,7 +105,7 @@ The media query block remains unchanged, handling the `'system'` case. The `data
 - Chat is on the left or right based on `chatSide`
 - Board columns are `min-width: 200px; max-width: 240px; flex-shrink: 0`
 - Board container is `overflow-x: auto; display: flex; gap: 10px`
-- At viewport width < 900px, split mode auto-falls back to tabbed layout regardless of the setting
+- At viewport width < 900px, split mode auto-falls back to tabbed layout regardless of the setting; `activeTab` is not reset when this fallback triggers — whatever tab was active stays active
 
 ### Tabbed mode
 
@@ -121,7 +121,7 @@ The media query block remains unchanged, handling the `'system'` case. The `data
 - Filters appear in the header only when the Board tab is active
 - Each tab takes full width and height below the header
 
-Tab state is managed via React Router — `/` defaults to whichever tab was last active (stored in `uiStore` as `activeTab: 'chat' | 'board'`), or `'chat'` by default.
+Tab state is managed by `uiStore` (`activeTab: 'chat' | 'board'`, default `'chat'`), not by the router. The tab links are `<button>` elements that call `setActiveTab()`. The router only distinguishes `/` (the app) from `/settings`; there are no sub-routes for tabs. `activeTab` is not persisted — it resets to `'chat'` on page load.
 
 ---
 
@@ -150,7 +150,7 @@ Two sections, rendered as grouped rows (no save button — changes apply immedia
 - **Mode** — segmented control: `Split | Tabbed`
 - **Chat side** — segmented control: `Left | Right`
 
-The "Chat side" row is visually dimmed (but still functional) when Mode is set to Tabbed, since it only meaningfully affects split mode.
+The "Chat side" row is visually dimmed (reduced opacity) but remains fully interactive when Mode is set to Tabbed — it is not `disabled`. The value is always retained: changing it while in Tabbed mode saves correctly, so switching back to Split applies the stored value without any additional action from the user.
 
 ---
 
