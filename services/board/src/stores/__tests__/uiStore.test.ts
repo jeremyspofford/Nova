@@ -6,6 +6,7 @@ beforeEach(() => {
     selectedTaskId: null,
     toast: null,
     activeFilters: {},
+    activeTab: "chat",
   })
 })
 
@@ -28,4 +29,13 @@ it("setToast updates toast message", () => {
 it("setFilters updates activeFilters", () => {
   useUIStore.getState().setFilters({ status: "running", labels: ["ci"] })
   expect(useUIStore.getState().activeFilters).toEqual({ status: "running", labels: ["ci"] })
+})
+
+it("setActiveTab updates activeTab", () => {
+  useUIStore.getState().setActiveTab("board")
+  expect(useUIStore.getState().activeTab).toBe("board")
+})
+
+it("activeTab defaults to chat", () => {
+  expect(useUIStore.getState().activeTab).toBe("chat")
 })
