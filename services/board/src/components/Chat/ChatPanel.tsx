@@ -12,7 +12,16 @@ export function ChatPanel() {
     useShallow(s => ({ chatOpen: s.chatOpen, toggleChat: s.toggleChat }))
   )
   const { conversationId, streamingContent, isStreaming, startStreaming, appendDelta, finishStreaming } =
-    useChatStore()
+    useChatStore(
+      useShallow(s => ({
+        conversationId: s.conversationId,
+        streamingContent: s.streamingContent,
+        isStreaming: s.isStreaming,
+        startStreaming: s.startStreaming,
+        appendDelta: s.appendDelta,
+        finishStreaming: s.finishStreaming,
+      }))
+    )
   const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
 
