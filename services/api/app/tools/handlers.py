@@ -39,6 +39,43 @@ def handle_ha_light_turn_on(input: dict, cfg=None) -> dict:
     return {"status": "ok", "entity_id": input["entity_id"]}
 
 
+def handle_ha_light_turn_off(input: dict, cfg=None) -> dict:
+    """Calls the Home Assistant light.turn_off service.
+
+    input: {"entity_id": "light.xyz"}
+    Raises RuntimeError if HA_BASE_URL or HA_TOKEN are not configured.
+    """
+    cfg = cfg or _settings
+    if not cfg.ha_base_url or not cfg.ha_token:
+        raise RuntimeError(
+            "HA not configured: set HA_BASE_URL and HA_TOKEN environment variables"
+        )
+    resp = httpx.post(
+        f"{cfg.ha_base_url}/api/services/light/turn_off",
+        headers={"Authorization": f"Bearer {cfg.ha_token}"},
+        json={"entity_id": input["entity_id"]},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return {"status": "ok", "entity_id": input["entity_id"]}
+
+
+def handle_http_request(input: dict, db=None, cfg=None) -> dict:
+    """Makes an HTTP GET or POST request.
+
+    input: {"method": "GET"|"POST", "url": "...", "headers"?: {...},
+            "body"?: {...}, "timeout_seconds"?: 30}
+    Returns {"status_code": int, "body": str} — body truncated to 2048 chars.
+    """
+    method = input["method"].upper()
+    url = input["url"]
+    headers = input.get("headers", {})
+    body = input.get("body")
+    timeout = input.get("timeout_seconds", 30)
+    resp = httpx.request(method, url, headers=headers, json=body, timeout=timeout)
+    return {"status_code": resp.status_code, "body": resp.text[:2048]}
+
+
 def handle_devops_summarize_ci_failure(input: dict, db: Session) -> dict:
     """Uses the LLM (via route_internal) to summarize a CI failure.
 
@@ -61,6 +98,8 @@ def handle_devops_summarize_ci_failure(input: dict, db: Session) -> dict:
 _REGISTRY: dict[str, tuple] = {
     "debug.echo": (handle_debug_echo, []),
     "ha.light.turn_on": (handle_ha_light_turn_on, ["settings"]),
+    "ha.light.turn_off": (handle_ha_light_turn_off, ["settings"]),
+    "http.request": (handle_http_request, []),
     "devops.summarize_ci_failure": (handle_devops_summarize_ci_failure, ["db"]),
 }
 

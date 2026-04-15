@@ -63,3 +63,89 @@ def test_dispatch_unknown_tool_raises():
     from app.tools.handlers import dispatch
     with pytest.raises(KeyError):
         dispatch("nonexistent.tool", {}, None, None)
+
+
+def test_ha_light_turn_off_raises_when_not_configured(monkeypatch):
+    from app.tools import handlers
+    from app.config import settings
+    monkeypatch.setattr(settings, "ha_base_url", "")
+    with pytest.raises(RuntimeError, match="HA not configured"):
+        handlers.handle_ha_light_turn_off({"entity_id": "light.test"}, settings)
+
+
+def test_ha_light_turn_off_calls_ha_api(monkeypatch):
+    from app.tools import handlers
+    from app.config import settings
+    monkeypatch.setattr(settings, "ha_base_url", "http://fake-ha:8123")
+    monkeypatch.setattr(settings, "ha_token", "fake-token")
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    with patch("app.tools.handlers.httpx.post", return_value=mock_response):
+        result = handlers.handle_ha_light_turn_off({"entity_id": "light.office"}, settings)
+    assert result == {"status": "ok", "entity_id": "light.office"}
+
+
+def test_http_request_get_success():
+    from app.tools.handlers import handle_http_request
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "Hello World"
+    with patch("app.tools.handlers.httpx.request", return_value=mock_resp):
+        result = handle_http_request({"method": "GET", "url": "http://example.com"}, None, None)
+    assert result == {"status_code": 200, "body": "Hello World"}
+
+
+def test_http_request_truncates_large_body():
+    from app.tools.handlers import handle_http_request
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "x" * 3000
+    with patch("app.tools.handlers.httpx.request", return_value=mock_resp):
+        result = handle_http_request({"method": "GET", "url": "http://example.com"}, None, None)
+    assert len(result["body"]) == 2048
+
+
+def test_http_request_post_passes_headers_and_body():
+    from app.tools.handlers import handle_http_request
+    mock_resp = MagicMock()
+    mock_resp.status_code = 201
+    mock_resp.text = '{"ok": true}'
+    with patch("app.tools.handlers.httpx.request", return_value=mock_resp) as mock_req:
+        handle_http_request(
+            {
+                "method": "POST",
+                "url": "http://api.example.com/items",
+                "headers": {"Authorization": "Bearer tok"},
+                "body": {"name": "test"},
+                "timeout_seconds": 15,
+            },
+            None, None,
+        )
+    call = mock_req.call_args
+    assert call.args[0] == "POST"
+    assert call.kwargs["headers"] == {"Authorization": "Bearer tok"}
+    assert call.kwargs["timeout"] == 15
+
+
+def test_dispatch_ha_light_turn_off(monkeypatch):
+    """Smoke test: dispatch routes ha.light.turn_off to correct handler."""
+    from app.tools.handlers import dispatch
+    from app.config import settings
+    monkeypatch.setattr(settings, "ha_base_url", "http://fake-ha:8123")
+    monkeypatch.setattr(settings, "ha_token", "fake-token")
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    with patch("app.tools.handlers.httpx.post", return_value=mock_response):
+        result = dispatch("ha.light.turn_off", {"entity_id": "light.kitchen"}, None, settings)
+    assert result == {"status": "ok", "entity_id": "light.kitchen"}
+
+
+def test_dispatch_http_request():
+    """Smoke test: dispatch routes http.request to correct handler."""
+    from app.tools.handlers import dispatch
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "ok"
+    with patch("app.tools.handlers.httpx.request", return_value=mock_resp):
+        result = dispatch("http.request", {"method": "GET", "url": "http://example.com"}, None, None)
+    assert result == {"status_code": 200, "body": "ok"}

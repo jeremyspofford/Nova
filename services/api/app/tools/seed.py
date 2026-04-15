@@ -106,6 +106,55 @@ def seed_tools(db: Session) -> None:
             tags=["home_assistant", "light"],
         ),
         dict(
+            name="ha.light.turn_off",
+            display_name="HA: Turn Off Light",
+            description="Turns off a Home Assistant light entity. Requires HA_BASE_URL and HA_TOKEN.",
+            adapter_type="home_assistant",
+            input_schema={
+                "type": "object",
+                "properties": {"entity_id": {"type": "string"}},
+                "required": ["entity_id"],
+            },
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["home_assistant", "light"],
+        ),
+        dict(
+            name="http.request",
+            display_name="HTTP Request",
+            description=(
+                "Makes an HTTP GET or POST request to any URL. "
+                "Returns status code and response body (truncated to 2KB)."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "enum": ["GET", "POST"]},
+                    "url": {"type": "string"},
+                    "headers": {"type": "object"},
+                    "body": {"type": "object"},
+                    "timeout_seconds": {"type": "integer", "default": 30},
+                },
+                "required": ["method", "url"],
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "status_code": {"type": "integer"},
+                    "body": {"type": "string"},
+                },
+            },
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=35,
+            enabled=True,
+            tags=["http", "web"],
+        ),
+        dict(
             name="devops.summarize_ci_failure",
             display_name="DevOps: Summarize CI Failure",
             description="Uses the LLM to summarize a CI failure from a URL and log snippet.",
