@@ -2,16 +2,10 @@ import { create } from "zustand"
 import { persist } from "zustand/middleware"
 
 type Theme = "light" | "dark" | "system"
-type LayoutMode = "split" | "tabbed"
-type ChatSide = "left" | "right"
 
 interface SettingsState {
   theme: Theme
-  layoutMode: LayoutMode
-  chatSide: ChatSide
   setTheme: (theme: Theme) => void
-  setLayoutMode: (mode: LayoutMode) => void
-  setChatSide: (side: ChatSide) => void
 }
 
 function applyTheme(theme: Theme) {
@@ -26,14 +20,10 @@ export const useSettingsStore = create<SettingsState>()(
   persist(
     (set) => ({
       theme: "system",
-      layoutMode: "split",
-      chatSide: "left",
       setTheme: (theme) => {
         applyTheme(theme)
         set({ theme })
       },
-      setLayoutMode: (layoutMode) => set({ layoutMode }),
-      setChatSide: (chatSide) => set({ chatSide }),
     }),
     { name: "nova-settings" }
   )

@@ -12,39 +12,24 @@ function makeWrapper() {
 
 beforeEach(() => {
   localStorage.clear()
-  useSettingsStore.setState({ theme: "system", layoutMode: "split", chatSide: "left" })
+  useSettingsStore.setState({ theme: "system" })
 })
 
-it("renders all three setting rows", () => {
+it("renders the theme setting row", () => {
   render(<Settings />, { wrapper: makeWrapper() })
   expect(screen.getByText("Theme")).toBeInTheDocument()
-  expect(screen.getByText("Mode")).toBeInTheDocument()
-  expect(screen.getByText("Chat side")).toBeInTheDocument()
 })
 
-it("clicking Dark theme button updates settingsStore", () => {
+it("clicking Dark updates settingsStore", () => {
   render(<Settings />, { wrapper: makeWrapper() })
   fireEvent.click(screen.getByRole("button", { name: /^dark$/i }))
   expect(useSettingsStore.getState().theme).toBe("dark")
 })
 
-it("clicking Tabbed mode button updates settingsStore", () => {
+it("clicking Light updates settingsStore", () => {
   render(<Settings />, { wrapper: makeWrapper() })
-  fireEvent.click(screen.getByRole("button", { name: /^tabbed$/i }))
-  expect(useSettingsStore.getState().layoutMode).toBe("tabbed")
-})
-
-it("clicking Right chat side button updates settingsStore", () => {
-  render(<Settings />, { wrapper: makeWrapper() })
-  fireEvent.click(screen.getByRole("button", { name: /^right$/i }))
-  expect(useSettingsStore.getState().chatSide).toBe("right")
-})
-
-it("chat side row is dimmed when mode is tabbed", () => {
-  useSettingsStore.setState({ theme: "system", layoutMode: "tabbed", chatSide: "left" })
-  render(<Settings />, { wrapper: makeWrapper() })
-  const chatSideRow = screen.getByText("Chat side").closest(".settings-row")
-  expect(chatSideRow).toHaveClass("settings-row--dimmed")
+  fireEvent.click(screen.getByRole("button", { name: /^light$/i }))
+  expect(useSettingsStore.getState().theme).toBe("light")
 })
 
 it("back link points to /", () => {

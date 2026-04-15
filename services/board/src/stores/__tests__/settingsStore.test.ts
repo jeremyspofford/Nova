@@ -3,11 +3,7 @@ import { useSettingsStore } from "../settingsStore"
 
 function resetStore() {
   localStorage.clear()
-  useSettingsStore.setState({
-    theme: "system",
-    layoutMode: "split",
-    chatSide: "left",
-  })
+  useSettingsStore.setState({ theme: "system" })
   document.documentElement.removeAttribute("data-theme")
 }
 
@@ -17,8 +13,6 @@ afterEach(resetStore)
 it("has correct defaults", () => {
   const s = useSettingsStore.getState()
   expect(s.theme).toBe("system")
-  expect(s.layoutMode).toBe("split")
-  expect(s.chatSide).toBe("left")
 })
 
 it("setTheme('dark') applies data-theme=dark to <html>", () => {
@@ -35,14 +29,4 @@ it("setTheme('system') removes data-theme attribute", () => {
   document.documentElement.dataset.theme = "dark"
   useSettingsStore.getState().setTheme("system")
   expect(document.documentElement.dataset.theme).toBeUndefined()
-})
-
-it("setLayoutMode updates layoutMode", () => {
-  useSettingsStore.getState().setLayoutMode("tabbed")
-  expect(useSettingsStore.getState().layoutMode).toBe("tabbed")
-})
-
-it("setChatSide updates chatSide", () => {
-  useSettingsStore.getState().setChatSide("right")
-  expect(useSettingsStore.getState().chatSide).toBe("right")
 })
