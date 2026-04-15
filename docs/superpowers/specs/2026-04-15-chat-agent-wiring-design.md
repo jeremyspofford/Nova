@@ -56,10 +56,23 @@ If unsure, return intent="conversation". If intent="action", confidence must be 
 User: <message>
 ```
 
+**`_parse_json_safe` helper** (add to `conversations.py`):
+
+```python
+def _parse_json_safe(text: str) -> dict | None:
+    """Strip markdown fences and parse JSON. Returns None on any failure."""
+    try:
+        from app.logic.utils import _extract_json  # reuse existing util
+        return json.loads(_extract_json(text))
+    except Exception:
+        return None
+```
+
 **Decision logic (Python):**
 
 ```python
-result = llm_client.route_internal(db, "classify", classify_messages)
+# route_internal returns a str (raw LLM output)
+result: str = llm_client.route_internal(db, "classify", classify_messages)
 classification = _parse_json_safe(result)  # returns None on parse failure
 
 if (
@@ -91,19 +104,51 @@ tool_context = f"You just ran `{tool_name}`. Result: {json.dumps(run_output)}. S
 # Prepend this to the system prompt for the response LLM call.
 ```
 
-**Chat-triggered Run record:**
+**`_build_system_prompt` change:**
+
+The existing function includes the line `"You cannot execute tools directly from chat."` — remove this line. When a tool was executed, prepend tool context before the rest of the system prompt:
 
 ```python
-Run(
+tool_context = f"You just ran `{tool_name}`. Result: {json.dumps(run_output)}. Status: {run_status}."
+# If failed: f"You tried to run `{tool_name}` but it failed: {error}."
+system_prompt = tool_context + "\n\n" + _build_system_prompt(db)
+```
+
+**Chat-triggered Run record — DB transaction sequence:**
+
+The chat path in `conversations.py` owns Run record creation directly (does not call `dispatch()` from `handlers.py`, which is nova-lite's path). Sequence:
+
+```python
+# 1. Create Run before tool executes
+run = Run(
+    id=str(uuid4()),
     tool_name=tool_name,
     task_id=None,
     executor_type="chat",
     trigger_type="chat",
     input=tool_input,
-    status="running",  # then updated to succeeded/failed
-    summary=f"{tool_name} → succeeded",  # template, written at completion
+    status="running",
+    started_at=datetime.now(UTC),
 )
+db.add(run)
+db.commit()
+
+# 2. Execute tool
+try:
+    output = tool_handlers.dispatch(tool_name, tool_input, db, cfg)
+    run.status = "succeeded"
+    run.output = output
+    run.summary = f"{tool_name} → succeeded"
+except Exception as exc:
+    run.status = "failed"
+    run.error = str(exc)
+    run.summary = f"{tool_name} → failed"
+finally:
+    run.finished_at = datetime.now(UTC)
+    db.commit()  # second commit updates status/output/summary
 ```
+
+`tool_handlers.dispatch()` is called here (same as nova-lite's path) — `conversations.py` uses it directly. The difference from nova-lite is that `conversations.py` owns the Run record lifecycle instead of `routers/tools.py`.
 
 ---
 
@@ -126,6 +171,7 @@ def handle_ha_light_turn_off(inp, db, cfg):
 
 Input schema: `{entity_id: string}`
 Output schema: `{status: string, entity_id: string}`
+Registry entry: `"ha.light.turn_off": (handle_ha_light_turn_off, ["settings"])`
 
 #### `http.request`
 
@@ -144,6 +190,7 @@ def handle_http_request(inp, db, cfg):
 
 Input schema: `{method: "GET"|"POST", url: string, headers?: object, body?: object, timeout_seconds?: number}`
 Output schema: `{status_code: number, body: string}`
+Registry entry: `"http.request": (handle_http_request, [])` — no DB or settings dependency.
 Raises on network error (caller marks run as failed).
 
 ---
@@ -157,11 +204,19 @@ Two new columns, both additive (non-breaking):
 | `trigger_type` | VARCHAR | No | `"agent_loop"` |
 | `summary` | TEXT | Yes | null |
 
-**Alembic migration:**
+**Alembic migration** — create `services/api/alembic/versions/0003_add_run_trigger_type_and_summary.py`:
 
 ```python
-op.add_column("runs", sa.Column("trigger_type", sa.String(), nullable=False, server_default="agent_loop"))
-op.add_column("runs", sa.Column("summary", sa.Text(), nullable=True))
+revision = "0003"
+down_revision = "0002"
+
+def upgrade():
+    op.add_column("runs", sa.Column("trigger_type", sa.String(), nullable=False, server_default="agent_loop"))
+    op.add_column("runs", sa.Column("summary", sa.Text(), nullable=True))
+
+def downgrade():
+    op.drop_column("runs", "summary")
+    op.drop_column("runs", "trigger_type")
 ```
 
 `trigger_type` values: `"chat"` | `"agent_loop"`
@@ -182,19 +237,23 @@ Query params:
 - `limit` (int, default 50, max 200)
 - `offset` (int, default 0)
 
-Returns runs with status in `["succeeded", "failed", "running"]`, ordered by `started_at` DESC. Excludes `queued` and `cancelled`.
+Returns runs where `status IN ('succeeded', 'failed', 'running')` AND `tool_name IS NOT NULL`, ordered by `started_at` DESC. Excludes `queued` and `cancelled`.
+
+`total` is the full filtered count (for pagination), computed as a separate `SELECT COUNT(*)` query with the same filters before applying `limit`/`offset`.
+
+Add to `main.py`: `app.include_router(activity.router, prefix="/activity", tags=["activity"])`
 
 Response schema:
 
 ```python
 class ActivityEntryRead(BaseModel):
     id: str
-    tool_name: str
+    tool_name: str             # non-null (filtered at query level)
     trigger_type: str          # "chat" | "agent_loop"
     status: str                # "succeeded" | "failed" | "running"
     summary: str | None
     input: dict
-    output: dict | None
+    output: str | None         # json.dumps(raw_output)[:2000] — API owns truncation
     error: str | None
     started_at: datetime
     finished_at: datetime | None
@@ -204,7 +263,7 @@ class ActivityResponse(BaseModel):
     total: int
 ```
 
-Output field in response is truncated to 2000 chars for display (separate from the 2KB storage truncation on `http.request`).
+`output` is serialized to a JSON string and truncated to 2000 chars server-side before returning. The frontend displays it as a pre-formatted string. If `len(json.dumps(raw_output)) > 2000`, append `" ... [truncated]"` to the truncated string. The frontend shows a "Show full" disclosure only when the response string ends with `" ... [truncated]"`.
 
 ---
 
@@ -244,6 +303,19 @@ Error:  —
 ```
 
 Output truncated at 2000 chars. "Show full" disclosure if truncated.
+
+**Component local state:**
+
+```typescript
+const [entries, setEntries] = useState<ActivityEntry[]>([])
+const [offset, setOffset] = useState(0)
+const [total, setTotal] = useState(0)
+const [loading, setLoading] = useState(false)
+
+// On mount and refresh: reset offset=0, replace entries
+// On "Load more": offset += 50, append to entries
+// "Load more" button hidden when entries.length >= total
+```
 
 **State:** fetched on mount and on manual refresh. No polling — static history view.
 
