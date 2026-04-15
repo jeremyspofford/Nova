@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { useChatStore } from "../chatStore"
 
 beforeEach(() => {
+  localStorage.clear()
   useChatStore.setState({
     conversationId: null,
     streamingContent: "",
