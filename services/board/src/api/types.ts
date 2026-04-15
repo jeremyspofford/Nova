@@ -62,3 +62,32 @@ export interface ApprovalRead {
   decision: string | null
   reason: string | null
 }
+
+export interface Conversation {
+  id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count: number
+}
+
+export interface ConversationListResponse {
+  conversations: Conversation[]
+}
+
+export interface Message {
+  id: string
+  conversation_id: string
+  role: "user" | "assistant"
+  content: string
+  created_at: string
+}
+
+export interface MessageListResponse {
+  messages: Message[]
+}
+
+export type SSEEvent =
+  | { delta: string }
+  | { complete: true }
+  | { error: string }
