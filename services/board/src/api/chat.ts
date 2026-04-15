@@ -2,7 +2,6 @@ import { apiFetch } from "./client"
 import type {
   Conversation,
   ConversationListResponse,
-  Message,
   MessageListResponse,
   SSEEvent,
 } from "./types"

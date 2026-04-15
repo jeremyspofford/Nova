@@ -15,19 +15,22 @@ Nova Board is the human control surface for Nova Suite. It is an 8-column Kanban
 ## Scope
 
 ### New service
+
 - `services/board/` — React 18 + Vite 5 frontend, served by nginx in production
 
 ### API completions (services/api)
+
 Four currently-stubbed endpoints are promoted to full implementations:
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `GET /board` | Return 8 board columns and tasks grouped by column |
 | `PATCH /board/tasks/{id}` | Move a task to a different board column |
 | `GET /approvals/{id}` | Fetch a single approval request |
 | `POST /approvals/{id}/respond` | Submit an approve/deny decision |
 
 ### Startup seeding
+
 `services/api/app/tools/seed.py` gains a `seed_board_columns()` function that upserts the 8 canonical columns on every API startup.
 
 ---
@@ -62,20 +65,25 @@ Status, priority, and risk are always communicated with both color and text — 
 ## Service Architecture
 
 ### Production
-```
+
+```txt
 browser → board container (nginx:80, host:5173) → static files
 browser → api container (:8000) → FastAPI
 ```
+
 No reverse proxy required for local use. The browser talks directly to both services.
 
 ### Development
-```
+
+```txt
 npm run dev → Vite dev server (:5173)
 Vite proxy: /api/* → http://localhost:8000
 ```
+
 Run `docker compose up db api` + `npm run dev` in `services/board/`. No CORS configuration needed.
 
 ### Environment variables
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `VITE_API_URL` | `""` (empty) | API base URL. Empty = same-origin. Set to `http://localhost:8000` in dev. |
@@ -84,7 +92,7 @@ Run `docker compose up db api` + `npm run dev` in `services/board/`. No CORS con
 
 ## File Structure
 
-```
+```txt
 services/board/
   Dockerfile
   nginx.conf
@@ -129,6 +137,7 @@ services/board/
 ## Data Flow
 
 ### Board render cycle
+
 1. `useBoard` fires `GET /board` on mount and every 5 000 ms
 2. Response: `{ columns: BoardColumn[], tasks_by_column: { [columnId]: Task[] } }`
 3. `Board.tsx` maps columns → `Column.tsx` → `TaskCard.tsx` per task
@@ -136,6 +145,7 @@ services/board/
 5. Changing a filter invalidates the board query → immediate refetch
 
 ### Task detail
+
 1. Click TaskCard → `uiStore.setSelectedTask(id)`
 2. `TaskDetail.tsx` becomes visible (CSS `transform` / `opacity`, not mount/unmount)
 3. `useTask(id)` fetches `GET /tasks/{id}` and `GET /tasks/{id}/runs` (returns `{ runs: Run[] }` with `id`, `tool_name`, `status`, `started_at`, `finished_at`, `error` fields)
@@ -143,6 +153,7 @@ services/board/
 5. `ApprovalBanner` renders with summary, consequence, and option buttons
 
 ### Approval flow
+
 1. User clicks Approve or Deny in `ApprovalBanner`
 2. Optimistic: Zustand sets a `pendingDecision` flag, buttons disabled
 3. `POST /approvals/{id}/respond` fires with `{ decision, decided_by: "user" }`
@@ -150,6 +161,7 @@ services/board/
 5. On failure: clear `pendingDecision`, show inline error in banner with retry button
 
 ### Task column move
+
 1. User drags or uses a "Move to…" menu on a TaskCard
 2. Optimistic: update `tasks_by_column` in query cache immediately
 3. `PATCH /board/tasks/{id}` fires with `{ board_column_id }`
@@ -161,9 +173,11 @@ services/board/
 ## API Implementation Details
 
 ### GET /board
+
 Returns columns in `order` ascending. Each column includes tasks whose `board_column_id` matches. Tasks without a `board_column_id` appear in the Inbox column (order = 1).
 
 Response shape:
+
 ```json
 {
   "columns": [
@@ -185,15 +199,19 @@ Response shape:
 Supports the same query filters as `GET /tasks`: `status`, `risk_class`, `labels`, `priority`.
 
 ### PATCH /board/tasks/{id}
+
 Accepts `{ "board_column_id": "<id>" }`. Updates `task.board_column_id`. Returns the updated `TaskResponse`. 404 if task or column not found.
 
 This endpoint exists for semantic clarity as a dedicated "move" action. It does not replace `PATCH /tasks/{id}`, which remains the general-purpose task update endpoint. Both can update `board_column_id`; the board UI uses this endpoint for drag/move operations.
 
 ### GET /approvals/{id}
+
 Returns the full `ApprovalRead` schema. 404 if not found.
 
 ### POST /approvals/{id}/respond
+
 Accepts `{ "decision": "approve"|"deny"|<custom>, "decided_by": string, "reason": string|null }`.
+
 - Sets `approval.status` to `"approved"` or `"denied"` — always one of these two enum values regardless of the custom option string chosen. The raw custom string is stored in `approval.decision` only. (Full status enum: `pending | approved | denied | cancelled`; `cancelled` is set by task cancellation, not this endpoint — the 409 guard fires on any non-`pending` status including `cancelled`.)
 - Sets `approval.decided_by`, `approval.decided_at`, `approval.decision`, `approval.reason`
 - Updates `task.status`: approve → `"ready"`, deny → `"cancelled"`
@@ -202,6 +220,7 @@ Accepts `{ "decision": "approve"|"deny"|<custom>, "decided_by": string, "reason"
 - 404 if approval not found
 
 ### Board column seeding
+
 `seed_board_columns(db)` upserts 8 columns on startup:
 
 | Order | Name | Description |
@@ -222,17 +241,24 @@ Called from `main.py` lifespan alongside existing `seed_tools` and `seed_llm_pro
 ## Docker + Build
 
 ### Dockerfile (multi-stage)
-```
+
+- Note: VITE_API_URL is a *build arg*, not runtime env. Dev uses `npm run dev` + Vite proxy
+
+- Prod assumes same-origin (nginx → api via docker network) or reverse proxy
+
+```txt
 Stage 1 (build): node:20-alpine — npm ci, npm run build → /app/dist
 Stage 2 (serve): nginx:alpine — copy dist, copy nginx.conf
 ```
 
 ### nginx.conf
+
 - Serves static files from `/usr/share/nginx/html`
 - `try_files $uri $uri/ /index.html` for client-side routing
 - Listens on port 80 (mapped to host 5173 in docker-compose)
 
 ### docker-compose.yml additions
+
 ```yaml
 board:
   build:
@@ -250,6 +276,7 @@ board:
 ## Testing
 
 ### Frontend (Vitest + React Testing Library)
+
 - Mock `api/client.ts` at module boundary — no network calls in tests
 - **TaskCard:** renders title, correct badge for each status/priority/risk value, approval warning indicator when `approval_required` is true
 - **ApprovalBanner:** calls `respondToApproval` with correct args on button click, shows retry on error, disables buttons while pending
@@ -257,7 +284,9 @@ board:
 - **useBoard:** polling interval fires refetch, query key includes active filters
 
 ### API (pytest)
+
 New test files:
+
 - `test_board.py` — GET /board returns columns and grouped tasks; PATCH /board/tasks/{id} updates column; 404 on unknown task/column; tasks without board_column_id appear in Inbox column
 - `test_approvals_respond.py` — POST /approvals/{id}/respond sets decision fields, updates task status; 409 on non-pending approval; 404 on unknown approval
 
