@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useShallow } from "zustand/react/shallow"
 import { useUIStore } from "../../stores/uiStore"
 import { useChatStore } from "../../stores/chatStore"
 import { getMessages, sendMessageStream } from "../../api/chat"
@@ -7,10 +8,9 @@ import { ChatInput } from "./ChatInput"
 import { MessageBubble } from "./MessageBubble"
 
 export function ChatPanel() {
-  const { chatOpen, toggleChat } = useUIStore(s => ({
-    chatOpen: s.chatOpen,
-    toggleChat: s.toggleChat,
-  }))
+  const { chatOpen, toggleChat } = useUIStore(
+    useShallow(s => ({ chatOpen: s.chatOpen, toggleChat: s.toggleChat }))
+  )
   const { conversationId, streamingContent, isStreaming, startStreaming, appendDelta, finishStreaming } =
     useChatStore()
   const queryClient = useQueryClient()
@@ -36,16 +36,15 @@ export function ChatPanel() {
     try {
       for await (const event of sendMessageStream(conversationId, content)) {
         if ("delta" in event) appendDelta(event.delta)
-        if ("complete" in event) {
-          finishStreaming()
-          queryClient.invalidateQueries({ queryKey: ["messages", conversationId] })
-        }
         if ("error" in event) {
-          finishStreaming()
+          // error already sent by server in SSE stream — stream will end
         }
       }
     } catch {
+      // fetch error or parse error
+    } finally {
       finishStreaming()
+      queryClient.invalidateQueries({ queryKey: ["messages", conversationId] })
     }
   }
 
