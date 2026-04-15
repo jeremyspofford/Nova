@@ -688,3 +688,214 @@ body {
   background: var(--accent-blue);
   color: #fff;
 }
+
+/* ─── Activity Feed ──────────────────────────────────────────── */
+
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  gap: 8px;
+}
+
+.activity-feed__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.activity-feed__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.activity-feed__refresh {
+  background: none;
+  border: 1px solid var(--bg-card-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.activity-feed__refresh:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.activity-feed__empty {
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+  margin-top: 32px;
+}
+
+.activity-feed__error {
+  font-size: 13px;
+  padding: 8px;
+  border: 1px solid #e55;
+  border-radius: 6px;
+  color: #e55;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.activity-feed__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.activity-feed__load-more {
+  margin-top: 8px;
+  align-self: center;
+  padding: 6px 20px;
+  border: 1px solid var(--bg-card-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.activity-feed__load-more:hover:not(:disabled) {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+/* ─── Activity Entry ─────────────────────────────────────────── */
+
+.activity-entry {
+  border: 1px solid var(--bg-card-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activity-entry--failed { border-color: #e55; }
+
+.activity-entry__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.activity-entry__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+}
+
+.activity-entry--succeeded .activity-entry__dot { background: #22c55e; }
+.activity-entry--failed    .activity-entry__dot { background: #e55; }
+.activity-entry--running   .activity-entry__dot {
+  background: #f59e0b;
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.activity-entry__name {
+  font-size: 13px;
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--text);
+}
+
+.activity-entry__badge {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--bg);
+  border: 1px solid var(--bg-card-border);
+  color: var(--text-muted);
+}
+
+.activity-entry__status {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.activity-entry__time {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.activity-entry__summary {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding-left: 16px;
+}
+
+.activity-entry__details-toggle {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--accent-blue);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  margin-top: 2px;
+}
+
+.activity-entry__details {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--bg-card-border);
+  padding-top: 8px;
+}
+
+.activity-entry__detail-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-entry__detail-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.activity-entry__detail-value {
+  font-size: 12px;
+  font-family: monospace;
+  background: var(--bg);
+  border: 1px solid var(--bg-card-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.activity-entry__detail-value--error {
+  border-color: #e55;
+  color: #e55;
+}
+
+.activity-entry__truncated {
+  color: var(--text-muted);
+  font-style: italic;
+}
