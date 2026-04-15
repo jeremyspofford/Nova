@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { it, expect, beforeEach, afterEach } from "vitest"
 import { useSettingsStore } from "../settingsStore"
 
 function resetStore() {
