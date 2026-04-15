@@ -86,6 +86,33 @@ def route_internal(
     return result.output
 
 
+def route_streaming(
+    db: Session,
+    purpose: str,
+    messages: list[dict],
+    privacy_preference: str = "local_preferred",
+    _caller=None,
+):
+    """Generator: yields string chunks from the first available provider.
+
+    _caller(provider, messages) -> Iterator[str]  — injectable for tests.
+    Raises NoProvidersError / NoMatchingProvidersError before yielding if setup fails.
+    """
+    _caller = _caller or _call_provider_streaming_real
+
+    providers = db.query(LLMProviderProfile).filter(
+        LLMProviderProfile.enabled == True  # noqa: E712
+    ).all()
+    if not providers:
+        raise NoProvidersError()
+
+    candidates = _select_candidates(providers, privacy_preference)
+    if not candidates:
+        raise NoMatchingProvidersError()
+
+    yield from _caller(candidates[0], messages)
+
+
 def _select_candidates(providers: list, privacy_preference: str) -> list:
     local = [p for p in providers if p.provider_type == "local"]
     cloud = [p for p in providers if p.provider_type == "cloud"]
@@ -117,3 +144,29 @@ def _call_provider_real(provider, messages: list[dict]) -> str:
         messages=messages,
     )
     return response.choices[0].message.content
+
+
+def _call_provider_streaming_real(provider, messages: list[dict]):
+    """Call provider with stream=True, yield content chunks."""
+    import os
+    from openai import OpenAI
+
+    if provider.provider_type == "local":
+        api_key = "ollama"
+    else:
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Cloud provider selected but no OPENAI_API_KEY or ANTHROPIC_API_KEY is set"
+            )
+
+    client = OpenAI(base_url=provider.endpoint_ref, api_key=api_key)
+    stream = client.chat.completions.create(
+        model=provider.model_ref,
+        messages=messages,
+        stream=True,
+    )
+    for chunk in stream:
+        content = chunk.choices[0].delta.content
+        if content:
+            yield content

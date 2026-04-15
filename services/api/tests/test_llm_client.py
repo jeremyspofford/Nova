@@ -2,6 +2,7 @@ import pytest
 from app.llm_client import (
     route,
     route_internal,
+    route_streaming,
     NoProvidersError,
     NoMatchingProvidersError,
     AllProvidersFailed,
@@ -92,3 +93,41 @@ def test_route_internal_is_equivalent(db_session):
                             [{"role": "user", "content": "hello"}],
                             _caller=fake_caller)
     assert result == "internal result"
+
+
+def test_route_streaming_yields_chunks(db_session):
+    db_session.add(make_provider())
+    db_session.commit()
+
+    def fake_streaming(provider, messages):
+        yield "Hello"
+        yield " World"
+
+    chunks = list(
+        route_streaming(
+            db_session,
+            "chat",
+            [{"role": "user", "content": "hi"}],
+            _caller=fake_streaming,
+        )
+    )
+    assert chunks == ["Hello", " World"]
+
+
+def test_route_streaming_raises_no_providers(db_session):
+    with pytest.raises(NoProvidersError):
+        list(route_streaming(db_session, "chat", [{"role": "user", "content": "hi"}]))
+
+
+def test_route_streaming_raises_no_matching_providers(db_session):
+    db_session.add(make_provider(provider_type="cloud"))
+    db_session.commit()
+    with pytest.raises(NoMatchingProvidersError):
+        list(
+            route_streaming(
+                db_session,
+                "chat",
+                [{"role": "user", "content": "hi"}],
+                privacy_preference="local_required",
+            )
+        )
