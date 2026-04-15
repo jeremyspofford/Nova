@@ -17,6 +17,7 @@ def create_task(body: TaskCreate, db: Session = Depends(get_db)):
         title=body.title,
         description=body.description,
         goal=body.goal,
+        status=initial_status,
         origin_event_id=body.origin_event_id,
         owner_type=body.owner_type.value if body.owner_type else None,
         owner_id=body.owner_id,
