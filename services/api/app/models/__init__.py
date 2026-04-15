@@ -6,8 +6,10 @@ from app.models.board_column import BoardColumn
 from app.models.entity import Entity
 from app.models.tool import Tool
 from app.models.llm_provider import LLMProviderProfile
+from app.models.conversation import Conversation
+from app.models.message import Message
 
 __all__ = [
     "Task", "Event", "Run", "Approval", "BoardColumn",
-    "Entity", "Tool", "LLMProviderProfile",
+    "Entity", "Tool", "LLMProviderProfile", "Conversation", "Message",
 ]

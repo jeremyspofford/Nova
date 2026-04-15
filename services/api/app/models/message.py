@@ -1,5 +1,5 @@
 from uuid import uuid4
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -13,3 +13,5 @@ class Message(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     conversation = relationship("Conversation", back_populates="messages")
+
+    __table_args__ = (CheckConstraint("role IN ('user', 'assistant')", name="ck_messages_role"),)
