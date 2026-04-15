@@ -9,6 +9,8 @@ class ConversationRead(BaseModel):
     updated_at: datetime
     message_count: int
 
+    model_config = {"from_attributes": True}
+
 
 class ConversationListResponse(BaseModel):
     conversations: list[ConversationRead]
