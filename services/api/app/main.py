@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from app.routers import health, tasks, events, board, tools, runs, approvals, entities, llm
+from app.routers import health, tasks, events, board, tools, runs, approvals, entities, llm, conversations
 import app.database as _db
 from app.tools.seed import seed_tools, seed_llm_providers, seed_board_columns
 from app.config import settings
@@ -36,3 +36,4 @@ app.include_router(runs.router)
 app.include_router(approvals.router)
 app.include_router(entities.router)
 app.include_router(llm.router)
+app.include_router(conversations.router)
