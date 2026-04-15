@@ -4,7 +4,7 @@ def test_create_task_minimal(client):
     data = response.json()
     assert data["title"] == "test task"
     assert "id" in data
-    assert data["status"] == "inbox"
+    assert data["status"] == "pending"
     assert data["priority"] == "normal"
     assert data["risk_class"] == "low"
     assert data["approval_required"] is False
@@ -34,8 +34,8 @@ def test_list_tasks_returns_created(client):
 
 
 def test_list_tasks_filter_by_status(client):
-    client.post("/tasks", json={"title": "inbox task"})
-    response = client.get("/tasks?status=inbox")
+    client.post("/tasks", json={"title": "pending task"})
+    response = client.get("/tasks?status=pending")
     assert response.status_code == 200
     assert len(response.json()["tasks"]) == 1
 
