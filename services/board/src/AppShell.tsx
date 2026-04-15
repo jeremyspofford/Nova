@@ -12,7 +12,9 @@ import { ChatPanel } from "./components/Chat/ChatPanel"
 import { createConversation } from "./api/chat"
 
 function useIsNarrow(breakpoint = 900): boolean {
-  const [isNarrow, setIsNarrow] = useState(() => window.innerWidth < breakpoint)
+  const [isNarrow, setIsNarrow] = useState(
+    () => window.matchMedia(`(max-width: ${breakpoint - 1}px)`).matches
+  )
   useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`)
     const handler = (e: MediaQueryListEvent) => setIsNarrow(e.matches)
@@ -29,8 +31,6 @@ export function AppShell() {
   const { toast, setToast, activeTab, setActiveTab } = useUIStore(
     useShallow(s => ({ toast: s.toast, setToast: s.setToast, activeTab: s.activeTab, setActiveTab: s.setActiveTab }))
   )
-  const setConversation = useChatStore(s => s.setConversation)
-
   const isNarrow = useIsNarrow()
   const effectiveMode = isNarrow ? "tabbed" : layoutMode
 
@@ -39,7 +39,7 @@ export function AppShell() {
     // Zustand persist rehydrates synchronously from localStorage before first render,
     // so getState() here reflects the restored value.
     if (!useChatStore.getState().conversationId) {
-      createConversation().then(conv => setConversation(conv.id))
+      createConversation().then(conv => useChatStore.getState().setConversation(conv.id))
     }
   }, [])
 
