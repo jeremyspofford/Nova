@@ -1,5 +1,5 @@
 from uuid import uuid4
-from sqlalchemy import Column, DateTime, String, func
+from sqlalchemy import Column, DateTime, String, Text, func
 from sqlalchemy.types import JSON
 from app.database import Base
 
@@ -20,3 +20,5 @@ class Run(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     executor_type = Column(String, nullable=False, default="system")
     executor_id = Column(String, nullable=True)
+    trigger_type = Column(String, nullable=False, default="agent_loop")
+    summary = Column(Text, nullable=True)
