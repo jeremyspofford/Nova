@@ -59,14 +59,20 @@ User: <message>
 **`_parse_json_safe` helper** (add to `conversations.py`):
 
 ```python
+import re
+
 def _parse_json_safe(text: str) -> dict | None:
     """Strip markdown fences and parse JSON. Returns None on any failure."""
     try:
-        from app.logic.utils import _extract_json  # reuse existing util
-        return json.loads(_extract_json(text))
+        # Strip ```json ... ``` or ``` ... ``` fences if present
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+        cleaned = match.group(1).strip() if match else text.strip()
+        return json.loads(cleaned)
     except Exception:
         return None
 ```
+
+Note: `_extract_json` exists in `services/nova-lite/app/logic/utils.py` but NOT in `services/api`. Do not import across service boundaries — define the helper inline in `conversations.py` as above.
 
 **Decision logic (Python):**
 
@@ -173,6 +179,28 @@ Input schema: `{entity_id: string}`
 Output schema: `{status: string, entity_id: string}`
 Registry entry: `"ha.light.turn_off": (handle_ha_light_turn_off, ["settings"])`
 
+**Seed entry** (add to `tool_definitions` list in `tools/seed.py`):
+
+```python
+dict(
+    name="ha.light.turn_off",
+    display_name="HA: Turn Off Light",
+    description="Turns off a Home Assistant light entity. Requires HA_BASE_URL and HA_TOKEN.",
+    adapter_type="home_assistant",
+    input_schema={
+        "type": "object",
+        "properties": {"entity_id": {"type": "string"}},
+        "required": ["entity_id"],
+    },
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=10,
+    enabled=True,
+    tags=["home_assistant", "light"],
+),
+```
+
 #### `http.request`
 
 ```python
@@ -192,6 +220,40 @@ Input schema: `{method: "GET"|"POST", url: string, headers?: object, body?: obje
 Output schema: `{status_code: number, body: string}`
 Registry entry: `"http.request": (handle_http_request, [])` — no DB or settings dependency.
 Raises on network error (caller marks run as failed).
+
+**Seed entry** (add to `tool_definitions` list in `tools/seed.py`):
+
+```python
+dict(
+    name="http.request",
+    display_name="HTTP Request",
+    description="Makes an HTTP GET or POST request to any URL. Returns status code and response body (truncated to 2KB).",
+    adapter_type="internal",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "method": {"type": "string", "enum": ["GET", "POST"]},
+            "url": {"type": "string"},
+            "headers": {"type": "object"},
+            "body": {"type": "object"},
+            "timeout_seconds": {"type": "integer", "default": 30},
+        },
+        "required": ["method", "url"],
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "status_code": {"type": "integer"},
+            "body": {"type": "string"},
+        },
+    },
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=35,
+    enabled=True,
+    tags=["http", "web"],
+),
+```
 
 ---
 
@@ -220,6 +282,12 @@ def downgrade():
 ```
 
 `trigger_type` values: `"chat"` | `"agent_loop"`
+
+**Relationship to existing `executor_type` column:**
+
+`executor_type` (existing) records *who* executed the run: `"agent"` (nova-lite) or `"chat"` (chat router) or `"system"`. `trigger_type` (new) records *what triggered* it: `"chat"` (user message) or `"agent_loop"` (nova-lite autonomous loop).
+
+These are different concepts that happen to use overlapping values in this spec. The Activity tab uses `trigger_type` exclusively for its badge display. For chat-triggered runs, set both: `executor_type="chat"`, `trigger_type="chat"`. Nova-lite runs keep `executor_type="agent"` (unchanged) and get `trigger_type="agent_loop"` from the column default.
 
 `summary` population:
 - Chat-triggered: written at run completion as `"{tool_name} → {status}"`
