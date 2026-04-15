@@ -340,7 +340,7 @@ In `services/api/app/tools/seed.py`, add to `tool_definitions` after the `ha.lig
 cd /home/jeremy/workspace/nova-suite/services/api
 pytest tests/test_tool_handlers.py -v
 ```
-Expected: All 11 tests pass
+Expected: All 10 tests pass
 
 - [ ] **Step 10: Commit**
 
@@ -940,7 +940,7 @@ def send_message(
 cd /home/jeremy/workspace/nova-suite/services/api
 pytest tests/test_conversations.py -v
 ```
-Expected: All tests pass (existing 8 + 6 new = 14 total)
+Expected: All tests pass (existing 13 + 7 new = 20 total)
 
 - [ ] **Step 9: Run full backend test suite**
 
