@@ -116,18 +116,16 @@ def test_route_streaming_yields_chunks(db_session):
 
 def test_route_streaming_raises_no_providers(db_session):
     with pytest.raises(NoProvidersError):
-        list(route_streaming(db_session, "chat", [{"role": "user", "content": "hi"}]))
+        route_streaming(db_session, "chat", [{"role": "user", "content": "hi"}])
 
 
 def test_route_streaming_raises_no_matching_providers(db_session):
     db_session.add(make_provider(provider_type="cloud"))
     db_session.commit()
     with pytest.raises(NoMatchingProvidersError):
-        list(
-            route_streaming(
-                db_session,
-                "chat",
-                [{"role": "user", "content": "hi"}],
-                privacy_preference="local_required",
-            )
+        route_streaming(
+            db_session,
+            "chat",
+            [{"role": "user", "content": "hi"}],
+            privacy_preference="local_required",
         )

@@ -97,6 +97,7 @@ def route_streaming(
 
     Raises NoProvidersError / NoMatchingProvidersError immediately (before any
     yielding) so HTTP handlers can return a 4xx without opening the SSE stream.
+    Uses the first matching provider only — no fallback if the stream fails mid-way.
 
     _caller(provider, messages) -> Iterator[str]  — injectable for tests.
     """
