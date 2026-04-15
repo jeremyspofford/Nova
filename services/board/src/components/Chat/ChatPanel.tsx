@@ -57,16 +57,20 @@ export function ChatPanel() {
       </div>
 
       <div className="chat-panel__messages">
-        {messages.map(m => (
-          <MessageBubble key={m.id} role={m.role} content={m.content} />
-        ))}
-        {isStreaming && (
-          <MessageBubble role="assistant" content={streamingContent} streaming={true} />
-        )}
-        <div ref={bottomRef} />
+        <div className="chat-panel__messages-inner">
+          {messages.map(m => (
+            <MessageBubble key={m.id} role={m.role} content={m.content} />
+          ))}
+          {isStreaming && (
+            <MessageBubble role="assistant" content={streamingContent} streaming={true} />
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
-      <ChatInput onSend={handleSend} disabled={isStreaming} />
+      <div className="chat-panel__footer">
+        <ChatInput onSend={handleSend} disabled={isStreaming} />
+      </div>
     </section>
   )
 }
