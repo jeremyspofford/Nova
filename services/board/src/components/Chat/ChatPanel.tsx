@@ -1,16 +1,12 @@
 import { useEffect, useRef } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useShallow } from "zustand/react/shallow"
-import { useUIStore } from "../../stores/uiStore"
 import { useChatStore } from "../../stores/chatStore"
 import { getMessages, sendMessageStream } from "../../api/chat"
 import { ChatInput } from "./ChatInput"
 import { MessageBubble } from "./MessageBubble"
 
 export function ChatPanel() {
-  const { chatOpen, toggleChat } = useUIStore(
-    useShallow(s => ({ chatOpen: s.chatOpen, toggleChat: s.toggleChat }))
-  )
   const { conversationId, streamingContent, isStreaming, startStreaming, appendDelta, finishStreaming } =
     useChatStore(
       useShallow(s => ({
@@ -45,31 +41,19 @@ export function ChatPanel() {
     try {
       for await (const event of sendMessageStream(conversationId, content)) {
         if ("delta" in event) appendDelta(event.delta)
-        if ("error" in event) {
-          // error already sent by server in SSE stream — stream will end
-        }
       }
     } catch {
-      // fetch error or parse error
+      // fetch or parse error
     } finally {
       finishStreaming()
       queryClient.invalidateQueries({ queryKey: ["messages", conversationId] })
     }
   }
 
-  if (!chatOpen) return null
-
   return (
     <section className="chat-panel" aria-label="Chat">
       <div className="chat-panel__header">
         <span className="chat-panel__title">Nova</span>
-        <button
-          className="chat-panel__close"
-          onClick={toggleChat}
-          aria-label="Close chat"
-        >
-          &#x2715;
-        </button>
       </div>
 
       <div className="chat-panel__messages">

@@ -1,9 +1,8 @@
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen } from "@testing-library/react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
 import { ChatPanel } from "../ChatPanel"
-import { useUIStore } from "../../../stores/uiStore"
 import { useChatStore } from "../../../stores/chatStore"
 import * as chatApi from "../../../api/chat"
 
@@ -16,27 +15,26 @@ function makeWrapper() {
 }
 
 beforeEach(() => {
-  useUIStore.setState({ chatOpen: true, selectedTaskId: null, toast: null, activeFilters: {} })
+  localStorage.clear()
   useChatStore.setState({ conversationId: "c1", streamingContent: "", isStreaming: false })
   vi.mocked(chatApi.getMessages).mockResolvedValue({ messages: [] })
-  vi.mocked(chatApi.createConversation).mockResolvedValue({
-    id: "c1", title: "New Chat", created_at: "", updated_at: "", message_count: 0,
-  })
 })
 
-it("renders chat panel when chatOpen=true", () => {
+it("renders the chat region", () => {
   render(<ChatPanel />, { wrapper: makeWrapper() })
   expect(screen.getByRole("region", { name: /chat/i })).toBeInTheDocument()
 })
 
-it("does not render content when chatOpen=false", () => {
-  useUIStore.setState({ chatOpen: false, selectedTaskId: null, toast: null, activeFilters: {} })
+it("renders message bubbles from query data", async () => {
+  vi.mocked(chatApi.getMessages).mockResolvedValue({
+    messages: [{ id: "m1", role: "assistant", content: "Hello", created_at: "" }],
+  })
   render(<ChatPanel />, { wrapper: makeWrapper() })
-  expect(screen.queryByRole("region", { name: /chat/i })).not.toBeInTheDocument()
+  expect(await screen.findByText("Hello")).toBeInTheDocument()
 })
 
-it("close button toggles chatOpen off", () => {
+it("shows streaming bubble while isStreaming", () => {
+  useChatStore.setState({ conversationId: "c1", streamingContent: "typing...", isStreaming: true })
   render(<ChatPanel />, { wrapper: makeWrapper() })
-  fireEvent.click(screen.getByRole("button", { name: /close/i }))
-  expect(useUIStore.getState().chatOpen).toBe(false)
+  expect(screen.getByText("typing...")).toBeInTheDocument()
 })
