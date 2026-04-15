@@ -1,6 +1,6 @@
 import json
 import pytest
-from app.logic.triage import classify_and_create
+from app.logic.triage import classify_and_create, _parse_triage_response
 
 
 SAMPLE_EVENT = {
@@ -59,3 +59,19 @@ def test_dedup_skips_creation_if_task_exists(fake_client):
     result = classify_and_create(fake_client, SAMPLE_EVENT)
     assert result["id"] == existing["id"]
     assert len(fake_client.tasks) == 1
+
+
+def test_parse_triage_response_handles_markdown_wrapped_json():
+    """LLMs sometimes wrap JSON in code fences — parser must strip them."""
+    raw = '```json\n{"title": "Test task", "priority": "normal", "risk_class": "low", "labels": []}\n```'
+    result = _parse_triage_response(raw)
+    assert result is not None
+    assert result["title"] == "Test task"
+
+
+def test_parse_triage_response_handles_bare_code_fence():
+    """Code fence without language tag."""
+    raw = '```\n{"title": "Test task", "priority": "low", "risk_class": "low", "labels": []}\n```'
+    result = _parse_triage_response(raw)
+    assert result is not None
+    assert result["title"] == "Test task"

@@ -85,3 +85,20 @@ def test_plan_falls_back_to_empty_on_nova_client_error(fake_client):
     result = plan(fake_client, SAMPLE_TASK)
     assert isinstance(result, Plan)
     assert result.actions == []
+
+
+def test_parse_plan_response_handles_markdown_wrapped_json():
+    """Planner must handle LLM responses wrapped in code fences."""
+    from app.logic.planner import _parse_plan_response
+    raw = '```json\n{"actions": [{"tool_name": "debug.echo", "input": {}, "reason": "test"}], "reasoning": "ok"}\n```'
+    plan_result = _parse_plan_response(raw)
+    assert len(plan_result.actions) == 1
+    assert plan_result.actions[0].tool_name == "debug.echo"
+
+
+def test_parse_plan_response_handles_bare_code_fence():
+    from app.logic.planner import _parse_plan_response
+    raw = '```\n{"actions": [], "reasoning": "nothing to do"}\n```'
+    plan_result = _parse_plan_response(raw)
+    assert plan_result.actions == []
+    assert plan_result.reasoning == "nothing to do"

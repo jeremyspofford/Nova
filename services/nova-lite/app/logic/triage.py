@@ -2,6 +2,7 @@ import json
 import logging
 
 from app.client import NovaClientError
+from app.logic.utils import _extract_json
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ def _build_triage_prompt(event: dict) -> str:
 def _parse_triage_response(response: str) -> dict | None:
     """Parse LLM JSON response. Returns None if response is not valid JSON with a title."""
     try:
-        data = json.loads(response)
+        data = json.loads(_extract_json(response))
         if "title" not in data or not data["title"]:
             return None
         return data

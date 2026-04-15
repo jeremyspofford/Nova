@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass, field
 
 from app.client import NovaClientError
+from app.logic.utils import _extract_json
 
 log = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def _build_plan_prompt(task: dict, tools: list[dict]) -> str:
 
 def _parse_plan_response(response: str) -> Plan:
     try:
-        data = json.loads(response)
+        data = json.loads(_extract_json(response))
         raw_actions = data.get("actions", [])[:MAX_ACTIONS]
         actions = [
             Action(
