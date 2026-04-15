@@ -12,7 +12,7 @@ def test_process_task_posts_approval_for_high_risk(fake_client):
         "description": "risky op",
         "risk_class": "high",
         "approval_required": False,
-        "status": "inbox",
+        "status": "pending",
     }
     fake_client.tasks["task-1"] = task
     process_task(fake_client, task)
@@ -26,7 +26,7 @@ def test_process_task_posts_approval_when_approval_required(fake_client):
         "title": "Send email",
         "risk_class": "low",
         "approval_required": True,
-        "status": "inbox",
+        "status": "pending",
     }
     fake_client.tasks["task-2"] = task
     process_task(fake_client, task)
@@ -40,7 +40,7 @@ def test_process_task_marks_done_when_no_actions(fake_client):
         "title": "Check something",
         "risk_class": "low",
         "approval_required": False,
-        "status": "inbox",
+        "status": "pending",
     }
     fake_client.tasks["task-3"] = task
     fake_client._llm_response = json.dumps({"actions": [], "reasoning": "Nothing to do."})
@@ -57,7 +57,7 @@ def test_process_task_runs_to_done_on_success(fake_client):
         "title": "Echo something",
         "risk_class": "low",
         "approval_required": False,
-        "status": "inbox",
+        "status": "pending",
     }
     fake_client.tasks["task-4"] = task
     fake_client.tools = [{"name": "debug.echo", "description": "echo", "input_schema": {}}]
@@ -84,7 +84,7 @@ def test_process_task_marks_failed_when_tool_fails(fake_client):
         "title": "Broken tool",
         "risk_class": "low",
         "approval_required": False,
-        "status": "inbox",
+        "status": "pending",
     }
     fake_client.tasks["task-5"] = task
     fake_client.tools = [{"name": "debug.echo", "description": "echo", "input_schema": {}}]
@@ -111,7 +111,7 @@ def test_process_task_marks_failed_when_executor_raises(fake_client):
         "title": "Failing tool",
         "risk_class": "low",
         "approval_required": False,
-        "status": "inbox",
+        "status": "pending",
     }
     fake_client.tasks["task-6"] = task
     fake_client.tools = [{"name": "debug.echo", "description": "echo", "input_schema": {}}]

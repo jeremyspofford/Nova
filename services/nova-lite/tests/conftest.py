@@ -39,7 +39,7 @@ class FakeClient:
     def post_task(self, payload: dict) -> dict:
         task_id = f"task-{self._next_task_id}"
         self._next_task_id += 1
-        task = {"id": task_id, "status": "inbox", **payload}
+        task = {"id": task_id, "status": "pending", **payload}
         self.tasks[task_id] = task
         return task
 
