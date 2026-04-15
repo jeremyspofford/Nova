@@ -11,6 +11,7 @@ from app import llm_client
 from app.database import get_db
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.task import Task
 from app.models.tool import Tool
 from app.schemas.conversation import (
     ConversationListResponse,
@@ -31,7 +32,6 @@ def _make_title(content: str) -> str:
 
 
 def _build_system_prompt(db: Session) -> str:
-    from app.models.task import Task
     tasks = (
         db.query(Task)
         .filter(Task.status == "pending")
@@ -177,6 +177,8 @@ def send_message(
                 yield f"data: {json.dumps({'delta': chunk})}\n\n"
         except Exception as exc:
             yield f"data: {json.dumps({'error': str(exc)})}\n\n"
+            conv.updated_at = datetime.now(timezone.utc)
+            db.commit()
             return
 
         # Persist complete assistant message

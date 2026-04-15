@@ -172,6 +172,7 @@ def test_send_message_title_truncates_at_word_boundary(client, db_session):
     title = convs[0]["title"]
     assert len(title) <= 50
     assert not title.endswith(" ")  # no trailing space
+    assert title == "This is a very long message that definitely"
 
 
 def test_send_message_conversation_not_found(client):
