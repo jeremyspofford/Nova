@@ -1,5 +1,5 @@
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ConversationRead(BaseModel):
@@ -31,6 +31,5 @@ class MessageListResponse(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    role: str = "user"
-    content: str
+    content: str = Field(..., min_length=1)
     stream: bool = True
