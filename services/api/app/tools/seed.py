@@ -297,6 +297,36 @@ def seed_tools(db: Session) -> None:
             enabled=True,
             tags=["devops", "ci"],
         ),
+        dict(
+            name="nova.system_health",
+            display_name="Nova: System Health",
+            description="Check Nova's own health — disk, memory, stale tasks, recent run failures.",
+            adapter_type="internal",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["nova", "monitoring"],
+        ),
+        dict(
+            name="nova.daily_summary",
+            display_name="Nova: Daily Summary",
+            description="Summarize the last N hours of activity into a human-readable digest.",
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {"window_hours": {"type": "integer", "minimum": 1, "maximum": 168}},
+                "additionalProperties": False,
+            },
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=30,
+            enabled=True,
+            tags=["nova", "summary"],
+        ),
     ]
 
     for defn in tool_definitions:

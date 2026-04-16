@@ -8,7 +8,9 @@ def test_get_tools_returns_seeded_tools(client, db_session):
     assert response.status_code == 200
     tools = response.json()["tools"]
     names = {t["name"] for t in tools}
-    assert {"debug.echo", "ha.light.turn_on", "devops.summarize_ci_failure", "ha.light.turn_off", "http.request", "shell.run", "fs.list", "fs.read", "nova.query_activity"} == names
+    assert {"debug.echo", "ha.light.turn_on", "devops.summarize_ci_failure", "ha.light.turn_off",
+            "http.request", "shell.run", "fs.list", "fs.read", "nova.query_activity",
+            "nova.system_health", "nova.daily_summary"} == names
 
 
 def test_get_tools_default_only_enabled(client, db_session):

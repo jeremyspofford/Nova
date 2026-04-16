@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy.orm import Session
 from app import llm_client
 from app.config import settings as _settings
+from app.tools.nova_handlers import handle_system_health, handle_daily_summary
 
 
 def handle_debug_echo(input: dict) -> dict:
@@ -259,6 +260,8 @@ _REGISTRY: dict[str, tuple] = {
     "shell.run": (handle_shell_run, ["settings"]),
     "fs.list": (handle_fs_list, ["settings"]),
     "fs.read": (handle_fs_read, ["settings"]),
+    "nova.system_health": (handle_system_health, ["db"]),
+    "nova.daily_summary": (handle_daily_summary, ["db"]),
 }
 
 
