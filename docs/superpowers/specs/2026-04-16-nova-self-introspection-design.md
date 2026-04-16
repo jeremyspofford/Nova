@@ -133,7 +133,26 @@ def handle_describe_tools(input: dict, db: Session) -> dict:
     }
 ```
 
-Seed entry with `display_name="Nova: Describe Tools"`, risk_class=`low`, no input schema, tags=`["nova", "introspection"]`.
+**Seed entry** (matches the shape of existing entries in `seed_tools`):
+
+```python
+dict(
+    name="nova.describe_tools",
+    display_name="Nova: Describe Tools",
+    description=(
+        "List all tools Nova can use, grouped by category, with their descriptions. "
+        "Use when the user asks 'what tools do you have' or 'what can you do'."
+    ),
+    adapter_type="internal",
+    input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=5,
+    enabled=True,
+    tags=["nova", "introspection"],
+),
+```
 
 ### 3. New tool: `nova.describe_config`
 
@@ -142,20 +161,24 @@ New handler in `nova_handlers.py`:
 ```python
 def handle_describe_config(input: dict, db: Session) -> dict:
     """Return a snapshot of Nova's current configuration."""
-    from app.models.llm_provider import LLMProviderProfile
-    from app.models.llm_purpose_policy import LLMPurposePolicy  # new in purpose-routing spec
-    from app.models.scheduled_trigger import ScheduledTrigger
+    from datetime import datetime, timezone
     from sqlalchemy import func
+    from app.models.llm_provider import LLMProviderProfile
+    from app.models.scheduled_trigger import ScheduledTrigger
     from app.models.run import Run
-    from datetime import datetime, timedelta, timezone
 
     # Active LLM providers grouped by type
     providers = db.query(LLMProviderProfile).filter(LLMProviderProfile.enabled == True).all()  # noqa: E712
     providers_local = [{"id": p.id, "model_ref": p.model_ref} for p in providers if p.provider_type == "local"]
     providers_cloud = [{"id": p.id, "model_ref": p.model_ref} for p in providers if p.provider_type == "cloud"]
 
-    # Per-purpose policies (if purpose-routing spec has shipped; otherwise return empty list)
+    # Per-purpose policies — defensive for both pre-migration (model import fails)
+    # AND pre-seed (module exists, table empty). Keep both guards permanently so
+    # describe_config survives operational edge cases (e.g., a fresh clone with no
+    # migrations applied yet).
+    policy_list: list[dict] = []
     try:
+        from app.models.llm_purpose_policy import LLMPurposePolicy  # import inside try — module may not exist yet
         policies = db.query(LLMPurposePolicy).order_by(LLMPurposePolicy.purpose).all()
         policy_list = [
             {
@@ -166,23 +189,31 @@ def handle_describe_config(input: dict, db: Session) -> dict:
             }
             for p in policies
         ]
-    except Exception:
-        policy_list = []  # purpose-routing not yet shipped — graceful
+    except (ImportError, Exception):
+        # ImportError: purpose-routing spec not yet shipped → module absent.
+        # Exception (SQLAlchemy OperationalError, etc.): table missing at runtime.
+        # Either way, graceful [].
+        pass
 
-    # Scheduled trigger summary (count + names)
-    triggers = db.query(ScheduledTrigger).filter(ScheduledTrigger.enabled == True).order_by(ScheduledTrigger.id).all()  # noqa: E712
+    # Scheduled trigger count (detail via scheduler.list_triggers — avoid shape duplication)
+    trigger_count = (
+        db.query(func.count(ScheduledTrigger.id))
+        .filter(ScheduledTrigger.enabled == True)  # noqa: E712
+        .scalar()
+    ) or 0
 
-    # Monthly cloud spend (if cost tracking exists)
+    # Monthly cloud spend (defensive against pre-migration Run.llm_cost_usd column absence)
+    cloud_spend: float | None = None
     try:
         since = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        cloud_spend = (
+        cloud_spend = float(
             db.query(func.coalesce(func.sum(Run.llm_cost_usd), 0))
             .filter(Run.llm_cost_usd.isnot(None))
             .filter(Run.started_at >= since)
-            .scalar()
+            .scalar() or 0
         )
     except Exception:
-        cloud_spend = None
+        pass
 
     return {
         "providers": {
@@ -190,12 +221,36 @@ def handle_describe_config(input: dict, db: Session) -> dict:
             "cloud": providers_cloud,
         },
         "purpose_policies": policy_list,
-        "scheduled_triggers": [{"id": t.id, "name": t.name} for t in triggers],
+        "active_trigger_count": trigger_count,
         "cloud_spend_this_month_usd": cloud_spend,
     }
 ```
 
-Seed entry with `display_name="Nova: Describe Config"`, risk_class=`low`, no input schema, tags=`["nova", "introspection"]`.
+**Permanence:** the try/except guards stay permanently — describe_config is load-bearing for user trust ("Nova tells me what's going on"), so it must never crash due to a missing optional schema. The cost of the guards is trivial (~5 lines) vs the cost of the whole tool failing on a fresh deploy.
+
+**Why trigger count instead of full list:** avoids shape duplication with `scheduler.list_triggers`. If the user wants trigger detail, they say "what triggers do I have" and the LLM calls the dedicated tool. `describe_config` gives a one-paragraph snapshot.
+
+**Seed entry:**
+
+```python
+dict(
+    name="nova.describe_config",
+    display_name="Nova: Describe Config",
+    description=(
+        "Return Nova's current configuration: active LLM providers, per-purpose "
+        "policies, active scheduled trigger count, and month-to-date cloud spend. "
+        "Use when the user asks about Nova's setup, model, or configuration."
+    ),
+    adapter_type="internal",
+    input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=5,
+    enabled=True,
+    tags=["nova", "introspection"],
+),
+```
 
 ### Tool registry additions
 
@@ -237,9 +292,11 @@ None required. These are backend tools Nova invokes; the chat UI already renders
 - `test_describe_tools_groups_by_prefix` — seed tools, call handler, assert categories like `scheduler`, `nova`, `shell` are populated with expected names
 - `test_describe_tools_excludes_disabled` — disable one tool, confirm it's absent from response
 - `test_describe_config_returns_providers_and_policies` — seed one local + one cloud provider + one policy, assert all appear
-- `test_describe_config_survives_missing_purpose_policy_table` — simulate purpose-routing spec not yet shipped, confirm handler degrades gracefully (returns empty `purpose_policies`)
+- `test_describe_config_survives_missing_purpose_policy_module` — patch `sys.modules` so `from app.models.llm_purpose_policy import LLMPurposePolicy` raises `ImportError`; confirm handler still returns 200 with `purpose_policies=[]` and other fields populated
+- `test_describe_config_survives_missing_purpose_policy_table` — model imports fine but `db.query(LLMPurposePolicy).all()` raises `OperationalError` (table doesn't exist); confirm graceful `[]`
 - `test_describe_config_cloud_spend_computation` — seed Runs with costs, verify month-to-date sum
-- `test_list_triggers_returns_description_and_payload` — extend existing test to assert new fields
+- `test_describe_config_returns_trigger_count_not_list` — assert `active_trigger_count` is an int, not a list (prevents drift with `scheduler.list_triggers`)
+- `test_list_triggers_returns_description_and_payload` — extend existing test to assert new fields appear; assert `payload_kind` field is ABSENT
 
 **Integration test:**
 - Chat message *"what tools do you have?"* → mocked LLM calls `nova.describe_tools` → Phase 2 renders grouped list. Assert the tool call happened and the reply mentions at least 3 categories.
