@@ -12,6 +12,12 @@ from sqlalchemy.orm import Session
 from app import llm_client
 from app.config import settings as _settings
 from app.tools.nova_handlers import handle_system_health, handle_daily_summary
+from app.tools.scheduler_handlers import (
+    handle_scheduler_create_trigger,
+    handle_scheduler_list_triggers,
+    handle_scheduler_update_trigger,
+    handle_scheduler_delete_trigger,
+)
 
 
 def handle_debug_echo(input: dict) -> dict:
@@ -262,6 +268,10 @@ _REGISTRY: dict[str, tuple] = {
     "fs.read": (handle_fs_read, ["settings"]),
     "nova.system_health": (handle_system_health, ["db"]),
     "nova.daily_summary": (handle_daily_summary, ["db"]),
+    "scheduler.create_trigger": (handle_scheduler_create_trigger, ["db"]),
+    "scheduler.list_triggers": (handle_scheduler_list_triggers, ["db"]),
+    "scheduler.update_trigger": (handle_scheduler_update_trigger, ["db"]),
+    "scheduler.delete_trigger": (handle_scheduler_delete_trigger, ["db"]),
 }
 
 

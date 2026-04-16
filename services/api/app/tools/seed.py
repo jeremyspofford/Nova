@@ -328,6 +328,93 @@ def seed_tools(db: Session) -> None:
             enabled=True,
             tags=["nova", "summary"],
         ),
+        dict(
+            name="scheduler.create_trigger",
+            display_name="Scheduler: Create Trigger",
+            description=(
+                "Create a new scheduled trigger. For recurring tasks like 'check reddit daily' "
+                "or 'ping this URL every hour'. Use when the user asks to schedule, remind, or "
+                "automate something on an interval."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "required": ["id", "name", "cron_expression", "payload_template"],
+                "properties": {
+                    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                           "description": "kebab-case identifier"},
+                    "name": {"type": "string"},
+                    "description": {"type": "string"},
+                    "cron_expression": {"type": "string",
+                                        "description": "standard 5-field cron, UTC (e.g. '0 9 * * *')"},
+                    "payload_template": {
+                        "type": "object",
+                        "description": "Either {tool, input} or {goal: string}",
+                    },
+                    "active_hours_start": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+                    "active_hours_end":   {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+                },
+            },
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["scheduler"],
+        ),
+        dict(
+            name="scheduler.list_triggers",
+            display_name="Scheduler: List Triggers",
+            description="List all scheduled triggers and their state. Use when the user asks 'what triggers do I have?'",
+            adapter_type="internal",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=5,
+            enabled=True,
+            tags=["scheduler"],
+        ),
+        dict(
+            name="scheduler.update_trigger",
+            display_name="Scheduler: Update Trigger",
+            description=(
+                "Update an existing trigger (enable/disable, change schedule or payload). "
+                "Use when the user asks to pause, resume, or reschedule."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "required": ["id", "updates"],
+                "properties": {
+                    "id": {"type": "string"},
+                    "updates": {"type": "object"},
+                },
+            },
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=5,
+            enabled=True,
+            tags=["scheduler"],
+        ),
+        dict(
+            name="scheduler.delete_trigger",
+            display_name="Scheduler: Delete Trigger",
+            description="Permanently remove a scheduled trigger. Use when the user asks to delete or remove one.",
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "required": ["id"],
+                "properties": {"id": {"type": "string"}},
+            },
+            output_schema={"type": "object"},
+            risk_class="medium",
+            requires_approval=False,
+            timeout_seconds=5,
+            enabled=True,
+            tags=["scheduler"],
+        ),
     ]
 
     for defn in tool_definitions:
