@@ -5,6 +5,8 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ role, content, streaming }: MessageBubbleProps) {
+  const isThinking = streaming && !content
+
   if (role === "user") {
     return (
       <div className={`message-bubble message-bubble--user${streaming ? " message-bubble--streaming" : ""}`}>
@@ -16,7 +18,15 @@ export function MessageBubble({ role, content, streaming }: MessageBubbleProps) 
   return (
     <div className={`message-bubble message-bubble--assistant${streaming ? " message-bubble--streaming" : ""}`}>
       <div className="message-bubble__avatar">N</div>
-      <p className="message-bubble__content">{content}</p>
+      {isThinking ? (
+        <div className="message-bubble__typing" aria-label="Nova is thinking">
+          <span />
+          <span />
+          <span />
+        </div>
+      ) : (
+        <p className="message-bubble__content">{content}</p>
+      )}
     </div>
   )
 }

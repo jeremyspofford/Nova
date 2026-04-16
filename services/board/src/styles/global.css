@@ -354,10 +354,27 @@ body {
   margin: 0;
 }
 
-.message-bubble--user.message-bubble--streaming .message-bubble__content::after {
-  content: "▋";
-  animation: cursor-blink 1s step-end infinite;
-  color: rgba(255,255,255,0.7);
+.message-bubble__typing {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 2px;
+}
+
+.message-bubble__typing span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.message-bubble__typing span:nth-child(2) { animation-delay: 0.2s; }
+.message-bubble__typing span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-6px); opacity: 1; }
 }
 
 /* ── Assistant message — no bubble, avatar + flowing text ── */
@@ -399,15 +416,6 @@ body {
   min-width: 0;
 }
 
-.message-bubble--assistant.message-bubble--streaming .message-bubble__content::after {
-  content: "▋";
-  animation: cursor-blink 1s step-end infinite;
-  color: var(--accent-blue);
-}
-
-@keyframes cursor-blink {
-  50% { opacity: 0; }
-}
 
 /* ── Chat input — unified pill ── */
 .chat-input {
