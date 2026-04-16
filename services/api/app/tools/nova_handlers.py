@@ -23,6 +23,7 @@ DISK_THRESHOLD_PCT = 85
 MEMORY_THRESHOLD_PCT = 90
 STALE_TASK_HOURS = 24
 FAILED_RUN_RATE_THRESHOLD = 0.5
+FAILED_RUN_RATE_MIN_SAMPLE = 3  # don't page on a single transient failure
 
 
 def handle_system_health(input: dict, db: Session) -> dict:
@@ -55,7 +56,7 @@ def handle_system_health(input: dict, db: Session) -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(hours=STALE_TASK_HOURS)
     stale_count = (
         db.query(Task)
-        .filter(Task.status.in_(["pending", "running"]))
+        .filter(Task.status.in_(["inbox", "pending", "ready", "running"]))
         .filter(Task.created_at < cutoff)
         .count()
     )
@@ -72,18 +73,19 @@ def handle_system_health(input: dict, db: Session) -> dict:
 
     hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
     recent_runs = db.query(Run).filter(Run.started_at >= hour_ago).all()
-    if recent_runs:
-        failed = sum(1 for r in recent_runs if r.status == "failed")
-        rate = failed / len(recent_runs)
+    total_runs = len(recent_runs)
+    failed_runs = sum(1 for r in recent_runs if r.status == "failed")
+    if total_runs >= FAILED_RUN_RATE_MIN_SAMPLE:
+        rate = failed_runs / total_runs
         if rate > FAILED_RUN_RATE_THRESHOLD:
             return {
                 "status": "action_needed",
-                "title": f"{failed}/{len(recent_runs)} recent runs failed",
+                "title": f"{failed_runs}/{total_runs} recent runs failed",
                 "description": (
-                    f"{failed} of {len(recent_runs)} runs in the last hour failed "
+                    f"{failed_runs} of {total_runs} runs in the last hour failed "
                     f"({rate:.0%}). Investigate which tool(s) are breaking."
                 ),
-                "details": {"failed": failed, "total": len(recent_runs)},
+                "details": {"failed": failed_runs, "total": total_runs},
             }
 
     return {
@@ -91,7 +93,7 @@ def handle_system_health(input: dict, db: Session) -> dict:
         "message": (
             f"disk {disk_pct:.0f}%, mem {mem_pct:.0f}%, "
             f"{stale_count} stale, "
-            f"{sum(1 for r in recent_runs if r.status == 'failed')}/{len(recent_runs)} runs failed 1h"
+            f"{failed_runs}/{total_runs} runs failed 1h"
         ),
     }
 
