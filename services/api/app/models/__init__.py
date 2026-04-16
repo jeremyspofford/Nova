@@ -8,8 +8,10 @@ from app.models.tool import Tool
 from app.models.llm_provider import LLMProviderProfile
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.scheduled_trigger import ScheduledTrigger
 
 __all__ = [
     "Task", "Event", "Run", "Approval", "BoardColumn",
     "Entity", "Tool", "LLMProviderProfile", "Conversation", "Message",
+    "ScheduledTrigger",
 ]
