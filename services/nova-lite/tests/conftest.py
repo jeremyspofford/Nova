@@ -15,6 +15,7 @@ class FakeClient:
         self.approvals: dict[str, dict] = {}
         self._llm_response: str = ""
         self._invoke_result: dict = {"run_id": "run-1", "status": "succeeded"}
+        self._invoke_result_by_tool: dict[str, dict] = {}
         self._next_task_id: int = 1
         self.scheduled_triggers: list[dict] = []
         self.posted_events: list[dict] = []
@@ -66,6 +67,16 @@ class FakeClient:
     def invoke_tool(
         self, tool_name: str, input: dict, task_id: str | None = None
     ) -> dict:
+        # Tests can set _invoke_result_by_tool = {"nova.system_health": {<handler output>}}
+        # We wrap that output in the real envelope so triage code paths match production.
+        by_tool = getattr(self, "_invoke_result_by_tool", {})
+        if tool_name in by_tool:
+            return {
+                "run_id": f"run-{tool_name}",
+                "status": "succeeded",
+                "output": by_tool[tool_name],
+                "error": None,
+            }
         return self._invoke_result
 
     def get_scheduled_triggers(self) -> list[dict]:
