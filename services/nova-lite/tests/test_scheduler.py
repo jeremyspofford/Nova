@@ -8,33 +8,34 @@ from app.logic.scheduler import _in_active_hours, _is_due, fire_due_triggers
 # ── _is_due ────────────────────────────────────────────────────────────────
 
 def test_is_due_never_fired():
-    trigger = {"enabled": True, "interval_seconds": 1800, "last_fired_at": None}
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": None}
     assert _is_due(trigger, datetime.now(timezone.utc)) is True
 
 
 def test_is_due_recently_fired():
-    now = datetime.now(timezone.utc)
-    recent = (now - timedelta(seconds=60)).isoformat()
-    trigger = {"enabled": True, "interval_seconds": 1800, "last_fired_at": recent}
+    now = datetime(2026, 4, 16, 10, 5, tzinfo=timezone.utc)
+    recent = datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc).isoformat()
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": recent}
     assert _is_due(trigger, now) is False
 
 
-def test_is_due_interval_exactly_elapsed():
-    now = datetime.now(timezone.utc)
-    old = (now - timedelta(seconds=1800)).isoformat()
-    trigger = {"enabled": True, "interval_seconds": 1800, "last_fired_at": old}
+def test_is_due_cron_occurrence_reached():
+    now = datetime(2026, 4, 16, 10, 30, tzinfo=timezone.utc)
+    last = datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc).isoformat()
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": last}
     assert _is_due(trigger, now) is True
 
 
-def test_is_due_interval_overdue():
-    now = datetime.now(timezone.utc)
-    old = (now - timedelta(seconds=3600)).isoformat()
-    trigger = {"enabled": True, "interval_seconds": 1800, "last_fired_at": old}
+def test_is_due_catchup_once():
+    """If Nova was offline for multiple cron occurrences, fire exactly once on catch-up."""
+    now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+    last = datetime(2026, 4, 16, 9, 0, tzinfo=timezone.utc).isoformat()
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": last}
     assert _is_due(trigger, now) is True
 
 
 def test_is_due_disabled_trigger():
-    trigger = {"enabled": False, "interval_seconds": 1800, "last_fired_at": None}
+    trigger = {"enabled": False, "cron_expression": "* * * * *", "last_fired_at": None}
     assert _is_due(trigger, datetime.now(timezone.utc)) is False
 
 
@@ -84,11 +85,14 @@ def _make_trigger(trigger_id="system-heartbeat", last_fired_offset_seconds=None)
         "id": trigger_id,
         "name": "System Heartbeat",
         "enabled": True,
-        "interval_seconds": 1800,
+        # Every 30 minutes — mirrors the original `interval_seconds=1800` semantics
+        # used by existing `fire_due_triggers` tests. A 60s offset sits inside the
+        # 30-minute window so `test_fire_due_skips_recent_trigger` correctly returns 0.
+        "cron_expression": "*/30 * * * *",
         "last_fired_at": last_fired,
         "active_hours_start": None,
         "active_hours_end": None,
-        "payload_template": {"check": "system_health"},
+        "payload_template": {"tool": "nova.system_health", "input": {}},
     }
 
 

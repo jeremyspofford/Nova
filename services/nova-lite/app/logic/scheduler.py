@@ -1,5 +1,5 @@
 """
-Check which scheduled triggers are due and emit an event for each.
+Check which scheduled triggers are due (cron-based) and emit an event for each.
 
 Each fired trigger claims its interval first (PATCH last_fired_at), then emits
 the event. Patch-first ordering means a transient API failure during firing
@@ -9,25 +9,35 @@ subsequent tick until the patch eventually lands.
 import logging
 from datetime import datetime, timezone
 
+from croniter import croniter
+
 from app.client import NovaClientError
 
 log = logging.getLogger(__name__)
 
+_EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
+
+
+def _parse_last_fired(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    else:
+        dt = value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 def _is_due(trigger: dict, now: datetime) -> bool:
-    """Return True if the trigger should fire now."""
+    """Return True if the trigger's next cron occurrence has passed since last_fired."""
     if not trigger.get("enabled"):
         return False
-    last_fired = trigger.get("last_fired_at")
-    if last_fired is None:
-        return True
-    if isinstance(last_fired, str):
-        last_fired_dt = datetime.fromisoformat(last_fired.replace("Z", "+00:00"))
-    else:
-        last_fired_dt = last_fired
-    if last_fired_dt.tzinfo is None:
-        last_fired_dt = last_fired_dt.replace(tzinfo=timezone.utc)
-    return (now - last_fired_dt).total_seconds() >= trigger["interval_seconds"]
+    last_fired = _parse_last_fired(trigger.get("last_fired_at"))
+    base = last_fired or _EPOCH
+    next_fire = croniter(trigger["cron_expression"], base).get_next(datetime)
+    return now >= next_fire
 
 
 def _in_active_hours(trigger: dict, now: datetime) -> bool:
@@ -63,20 +73,14 @@ def fire_due_triggers(client) -> int:
     for trigger in triggers:
         if not _is_due(trigger, now) or not _in_active_hours(trigger, now):
             continue
-
         trigger_id = trigger["id"]
         try:
-            client.patch_scheduled_trigger(trigger_id, {
-                "last_fired_at": now.isoformat(),
-            })
+            client.patch_scheduled_trigger(trigger_id, {"last_fired_at": now.isoformat()})
             client.post_event({
                 "type": f"scheduled.{trigger_id}",
                 "source": "scheduler",
                 "subject": trigger["name"],
-                "payload": {
-                    **trigger.get("payload_template", {}),
-                    "trigger_id": trigger_id,
-                },
+                "payload": {**trigger.get("payload_template", {}), "trigger_id": trigger_id},
                 "correlation_id": trigger_id,
             })
             log.info("Fired scheduled trigger: %s", trigger_id)
