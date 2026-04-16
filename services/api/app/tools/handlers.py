@@ -88,7 +88,11 @@ def handle_shell_run(input: dict, cfg=None) -> dict:
     """
     cfg = cfg or _settings
     workspace = os.path.expanduser(cfg.nova_workspace_dir)
-    cwd = input.get("cwd") or workspace
+    workspace_real = os.path.realpath(workspace)
+    cwd_input = input.get("cwd") or workspace
+    cwd = os.path.realpath(cwd_input)
+    if not cwd.startswith(workspace_real + os.sep) and cwd != workspace_real:
+        raise ValueError(f"cwd escapes workspace: {cwd_input}")
     timeout = input.get("timeout_seconds", 30)
     timed_out = False
     try:

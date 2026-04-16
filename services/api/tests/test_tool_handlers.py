@@ -203,18 +203,29 @@ def test_shell_run_timeout():
     assert result["stderr"] == "Command timed out."
 
 
-def test_shell_run_custom_cwd():
+def test_shell_run_rejects_cwd_outside_workspace():
     from app.tools.handlers import handle_shell_run
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock
     mock_cfg = MagicMock()
     mock_cfg.nova_workspace_dir = "/tmp"
+    with pytest.raises(ValueError, match="escapes workspace"):
+        handle_shell_run({"command": "ls", "cwd": "/etc"}, mock_cfg)
+
+
+def test_shell_run_custom_cwd(tmp_path):
+    from app.tools.handlers import handle_shell_run
+    from unittest.mock import patch, MagicMock
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
     mock_proc = MagicMock()
     mock_proc.stdout = ""
     mock_proc.stderr = ""
     mock_proc.returncode = 0
     with patch("app.tools.handlers.subprocess.run", return_value=mock_proc) as mock_run:
-        handle_shell_run({"command": "ls", "cwd": "/var"}, mock_cfg)
-    assert mock_run.call_args.kwargs["cwd"] == "/var"
+        handle_shell_run({"command": "ls", "cwd": str(subdir)}, mock_cfg)
+    assert mock_run.call_args.kwargs["cwd"] == str(subdir)
 
 
 def test_shell_run_truncates_stdout():
