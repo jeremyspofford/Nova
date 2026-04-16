@@ -343,3 +343,47 @@ def test_fs_read_raises_on_missing_file(tmp_path):
     mock_cfg.nova_workspace_dir = str(tmp_path)
     with pytest.raises(FileNotFoundError):
         handle_fs_read({"path": "ghost.txt"}, mock_cfg)
+
+
+def test_fs_list_rejects_path_outside_workspace(tmp_path):
+    from app.tools.handlers import handle_fs_list
+    from unittest.mock import MagicMock
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(workspace)
+    with pytest.raises(ValueError, match="escapes workspace"):
+        handle_fs_list({"path": "/etc"}, mock_cfg)
+
+
+def test_fs_list_rejects_dotdot_traversal(tmp_path):
+    from app.tools.handlers import handle_fs_list
+    from unittest.mock import MagicMock
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(workspace)
+    with pytest.raises(ValueError):
+        handle_fs_list({"path": "../outside"}, mock_cfg)
+
+
+def test_fs_read_rejects_path_outside_workspace(tmp_path):
+    from app.tools.handlers import handle_fs_read
+    from unittest.mock import MagicMock
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(workspace)
+    with pytest.raises(ValueError, match="escapes workspace"):
+        handle_fs_read({"path": "/etc/passwd"}, mock_cfg)
+
+
+def test_fs_read_raises_on_directory(tmp_path):
+    from app.tools.handlers import handle_fs_read
+    from unittest.mock import MagicMock
+    subdir = tmp_path / "subdir"
+    subdir.mkdir()
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    with pytest.raises(ValueError, match="directory"):
+        handle_fs_read({"path": "subdir"}, mock_cfg)

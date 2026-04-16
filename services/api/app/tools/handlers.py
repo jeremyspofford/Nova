@@ -121,7 +121,12 @@ def handle_fs_list(input: dict, cfg=None) -> dict:
     path = input.get("path", ".")
     show_hidden = input.get("show_hidden", False)
 
-    resolved = path if os.path.isabs(path) else os.path.join(workspace, path)
+    workspace_real = os.path.realpath(workspace)
+    resolved = os.path.realpath(
+        path if os.path.isabs(path) else os.path.join(workspace, path)
+    )
+    if not resolved.startswith(workspace_real + os.sep) and resolved != workspace_real:
+        raise ValueError(f"Path escapes workspace: {path}")
 
     if not os.path.exists(resolved):
         raise ValueError(f"Path does not exist: {resolved}")
@@ -159,10 +164,17 @@ def handle_fs_read(input: dict, cfg=None) -> dict:
     path = input["path"]
     max_bytes = input.get("max_bytes", 8192)
 
-    resolved = path if os.path.isabs(path) else os.path.join(workspace, path)
+    workspace_real = os.path.realpath(workspace)
+    resolved = os.path.realpath(
+        path if os.path.isabs(path) else os.path.join(workspace, path)
+    )
+    if not resolved.startswith(workspace_real + os.sep) and resolved != workspace_real:
+        raise ValueError(f"Path escapes workspace: {path}")
 
     if not os.path.exists(resolved):
         raise FileNotFoundError(f"File not found: {resolved}")
+    if os.path.isdir(resolved):
+        raise ValueError(f"Path is a directory, not a file: {resolved}")
 
     size = os.path.getsize(resolved)
     with open(resolved, "rb") as f:
