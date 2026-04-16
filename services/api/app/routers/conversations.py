@@ -70,6 +70,12 @@ def _build_system_prompt(db: Session) -> str:
         f"You are powered by {model_line}. "
         "You can run shell commands, read files, manage scheduled triggers, and query your own activity history using your tools.\n\n"
         f"Current pending tasks:\n{task_lines}\n\n"
+        "When the user asks about your configuration, capabilities, scheduled "
+        "triggers, or what you can do, call the appropriate introspection tool "
+        "rather than speculating: `nova.describe_config` for your setup, "
+        "`nova.describe_tools` for your tool catalog, or `scheduler.list_triggers` "
+        "for what each trigger does. Never invent what a trigger or tool does — "
+        "read it from the DB.\n\n"
         "Respond conversationally. Be concise and helpful. "
         "When a user asks you to do something that maps to a tool, call the tool directly rather than describing what you would do."
     )
