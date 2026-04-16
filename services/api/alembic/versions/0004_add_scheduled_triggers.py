@@ -23,11 +23,11 @@ def upgrade() -> None:
         sa.Column("interval_seconds", sa.Integer(), nullable=False),
         sa.Column("active_hours_start", sa.String(), nullable=True),
         sa.Column("active_hours_end", sa.String(), nullable=True),
-        sa.Column("enabled", sa.Boolean(), nullable=False),
-        sa.Column("payload_template", JSON(), nullable=False),
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default="true"),
+        sa.Column("payload_template", JSON(), nullable=False, server_default="{}"),
         sa.Column("last_fired_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
 

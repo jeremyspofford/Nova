@@ -1,5 +1,4 @@
-from datetime import datetime, timezone
-from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, func
 from sqlalchemy.types import JSON
 from app.database import Base
 
@@ -18,12 +17,12 @@ class ScheduledTrigger(Base):
     last_fired_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
+        server_default=func.now(),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
     )
     updated_at = Column(
         DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
     )
