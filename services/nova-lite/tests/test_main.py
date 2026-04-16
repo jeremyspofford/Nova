@@ -132,3 +132,21 @@ def test_process_task_marks_failed_when_executor_raises(fake_client):
 
     process_task(fake_client, task)
     assert fake_client.tasks["task-6"]["status"] == "failed"
+
+
+def test_process_task_handles_ready_status(fake_client):
+    """Tasks with status='ready' (post-approval) are processed the same as pending."""
+    fake_client.tools = [{"name": "debug.echo", "description": "echo", "input_schema": {}}]
+    fake_client._llm_response = '{"actions": [], "reasoning": "nothing to do"}'
+    task = {
+        "id": "task-ready-1",
+        "title": "Approved task",
+        "status": "ready",
+        "risk_class": "low",
+        "approval_required": False,
+        "description": None,
+        "goal": None,
+    }
+    fake_client.tasks["task-ready-1"] = task  # required: FakeClient.patch_task looks up by id
+    process_task(fake_client, task)
+    assert fake_client.tasks["task-ready-1"]["status"] == "done"

@@ -4,7 +4,7 @@ import time
 
 from app.client import NovaClient, NovaClientError
 from app.config import settings
-from app.logic import executor, planner, summarizer, triage
+from app.logic import executor, planner, summarizer, triage, scheduler
 from app.state import CursorState
 
 logging.basicConfig(
@@ -61,6 +61,9 @@ def run_loop(client: NovaClient, state: CursorState) -> None:
         try:
             cursor = state.load_cursor()
 
+            # ── 0. Fire due scheduled triggers ──────────────────
+            scheduler.fire_due_triggers(client)
+
             # ── 1. Triage new events ──────────────────────────
             events = client.get_events(since=cursor, limit=10)
             for event in events:
@@ -71,9 +74,10 @@ def run_loop(client: NovaClient, state: CursorState) -> None:
                     log.warning("Triage failed for event %s: %s", event.get("id"), e)
             state.save_cursor(cursor)
 
-            # ── 2. Act on pending tasks ──────────────────────────
-            tasks = client.get_tasks(status="pending", limit=5)
-            for task in tasks:
+            # ── 2. Act on pending + ready tasks ──────────────────
+            pending = client.get_tasks(status="pending", limit=5)
+            ready = client.get_tasks(status="ready", limit=5)
+            for task in pending + ready:
                 try:
                     process_task(client, task)
                 except NovaClientError as e:
