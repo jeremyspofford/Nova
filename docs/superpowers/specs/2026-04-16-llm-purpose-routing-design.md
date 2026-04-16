@@ -54,7 +54,7 @@ CREATE TABLE llm_purpose_policies (
 );
 ```
 
-**Seeded defaults** (local-first, cloud opt-in; all cloud starts OFF):
+**Seeded defaults** (local-first, cloud opt-in; all cloud starts OFF at install):
 
 | purpose | preferred | allow_cloud | fallback_chain |
 |---|---|---|---|
@@ -65,6 +65,21 @@ CREATE TABLE llm_purpose_policies (
 | `summarize` | `ollama-local-fallback` | `false` | `["ollama-local"]` |
 | `summarize_daily` | `ollama-local` | `false` | `["ollama-local-fallback"]` |
 | `code_generate` | `ollama-local` | `false` | `["ollama-local-fallback"]` |
+
+**All seeded rows have `allow_cloud=false` at install.** User stories 2 and 4 and the Settings UI mockup below describe a *user-edited* state after enabling cloud for specific purposes — they are examples of end-user behavior, not seed values.
+
+**Valid purposes (code-enumerated, enforced at policy PATCH):**
+
+```python
+VALID_PURPOSES = frozenset({
+    "chat", "classify", "triage", "plan",
+    "summarize", "summarize_daily", "code_generate",
+})
+```
+
+A `PATCH /llm/policies/{purpose}` against an unknown purpose returns 404. This keeps the table bounded and prevents runaway policy fragmentation when modules invent purpose names.
+
+**Prompt/output retention in Run records:** v1 stores prompts and outputs unredacted in `runs.input` / `runs.output` (existing behavior). Data-retention / redaction policy is deferred to a follow-up spec.
 
 Migration `0007_llm_purpose_policies.py`.
 
@@ -82,18 +97,30 @@ Migration `0008_llm_provider_cost_fields.py`.
 
 ### New cloud providers (seeded if env keys present)
 
-`seed_llm_providers` extended to conditionally seed cloud rows when the corresponding API key env var is set:
+`seed_llm_providers` extended to conditionally seed cloud rows when the corresponding API key env var is set.
 
-| id | model_ref | provider_type | rate (input / output per 1M tok) |
-|---|---|---|---|
-| `anthropic-claude-haiku` | `claude-haiku-4-5` | cloud | $0.25 / $1.25 |
-| `anthropic-claude-sonnet` | `claude-sonnet-4-6` | cloud | $3.00 / $15.00 |
-| `anthropic-claude-opus` | `claude-opus-4-7` | cloud | $15.00 / $75.00 |
-| `openai-gpt-4o` | `gpt-4o` | cloud | $5.00 / $15.00 |
-| `openai-gpt-4o-mini` | `gpt-4o-mini` | cloud | $0.15 / $0.60 |
-| `openrouter-*` | dynamic | cloud | reported per-call |
+**Precise seed table** (all rows share `provider_type="cloud"`, `supports_tools=true`, `supports_streaming=true`, `privacy_class="cloud"`, `cost_class="medium"` except opus=`high`, `latency_class="low"`):
 
-Rows are created only when `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENROUTER_API_KEY` is set in the host env. Missing key → missing provider row → impossible to route to, even if configured in a policy (enforced at policy save).
+| id | endpoint_ref | model_ref | input $/1M | output $/1M | env key |
+|---|---|---|---|---|---|
+| `anthropic-claude-haiku` | `https://api.anthropic.com/v1/` | `claude-haiku-4-5` | 0.2500 | 1.2500 | `ANTHROPIC_API_KEY` |
+| `anthropic-claude-sonnet` | `https://api.anthropic.com/v1/` | `claude-sonnet-4-6` | 3.0000 | 15.0000 | `ANTHROPIC_API_KEY` |
+| `anthropic-claude-opus` | `https://api.anthropic.com/v1/` | `claude-opus-4-7` | 15.0000 | 75.0000 | `ANTHROPIC_API_KEY` |
+| `openai-gpt-4o` | `https://api.openai.com/v1` | `gpt-4o` | 5.0000 | 15.0000 | `OPENAI_API_KEY` |
+| `openai-gpt-4o-mini` | `https://api.openai.com/v1` | `gpt-4o-mini` | 0.1500 | 0.6000 | `OPENAI_API_KEY` |
+| `openrouter-auto` | `https://openrouter.ai/api/v1` | `openrouter/auto` | null | null | `OPENROUTER_API_KEY` |
+
+OpenRouter has null rate fields — cost is taken from the response's `usage.cost` field per call (always accurate across model choice).
+
+**Lifecycle (insert-only seed, never delete):**
+
+- On startup, for each row above, if the env key is set AND the row doesn't exist, INSERT it with `enabled=true`.
+- On startup, for each row above, if the env key is NOT set AND the row already exists, UPDATE `enabled=false` (disable, don't delete). Existing Runs and policies that reference the provider stay intact.
+- On startup, for each row, if the env key IS set and the row exists, UPDATE `enabled=true` (re-enable if previously disabled).
+- Never DELETE rows from seed — preserves Run FK integrity and policy references.
+- Policy save validates that the referenced provider row exists AND is enabled. Attempt to save a policy pointing at a disabled provider → 422.
+
+**Disabled-provider runtime behavior:** `_select_candidates` only returns enabled providers. A policy pointing at a disabled provider silently falls through to the first enabled fallback. If the entire chain is disabled, `NoMatchingProvidersError`.
 
 ### Extensions to `runs` table
 
@@ -111,33 +138,107 @@ Only populated for LLM-driven runs. Tool-only runs (e.g., `debug.echo`) leave th
 
 ### Routing pipeline
 
-`llm_client.route(db, purpose, messages, privacy_preference=None, _caller=None)`:
+**Key decision: refactor `route()` in place.** The existing `route(db, purpose, messages, privacy_preference, _caller)` signature stays. Internals change to consult policies. The `privacy_preference` parameter becomes a per-call override: when explicit, it takes precedence over the policy's `allow_cloud`; when omitted (new default `None`), the policy decides. No new `route_by_policy` function — that avoids forcing ~8 call sites to change import shape.
 
-1. Fetch policy for `purpose`. If missing, fall back to `privacy_preference=local_preferred` and use `ollama-local` (graceful degradation).
-2. Build candidate list: `[preferred_provider_id] + fallback_chain`, deduplicated.
-3. **Privacy gate:** if `policy.allow_cloud == false`, filter out any candidate where `provider_type == "cloud"`. If the resulting list is empty, raise `NoMatchingProvidersError`.
-4. Try each candidate in order. On exception, try next. Record a failed Run for each attempt that exceptions out.
-5. Return `LLMResult(provider_id, model_ref, output, tokens, cost_usd)`.
+New signature:
 
-The `privacy_preference` parameter stays as a **per-call override** — passing `local_required` forces `allow_cloud=false` regardless of policy (for paranoid callers like Nova-lite).
+```python
+def route(
+    db: Session,
+    purpose: str,
+    messages: list[dict],
+    privacy_preference: str | None = None,  # None → use policy; else override
+    _caller=None,
+) -> LLMResult:
+```
+
+Algorithm:
+
+1. Fetch policy row for `purpose`. If missing, synthesize a default policy: `preferred_provider_id="ollama-local"`, `allow_cloud=False`, `fallback_chain=["ollama-local-fallback"]`. Log a warning (unknown-purpose fallback).
+2. Determine `allow_cloud`:
+   - If `privacy_preference == "local_required"` → `allow_cloud = False` (override).
+   - If `privacy_preference == "cloud_allowed"` → `allow_cloud = True` (override).
+   - If `privacy_preference is None` or `"local_preferred"` → `allow_cloud = policy.allow_cloud`.
+3. Build candidate list: `[preferred_provider_id] + fallback_chain`, deduplicated, preserving order.
+4. Resolve each id to a `LLMProviderProfile` row; drop ids that don't resolve OR resolve to a disabled provider.
+5. **Privacy gate:** if `allow_cloud == False`, drop any provider where `provider_type == "cloud"`.
+6. If the resulting list is empty, raise `NoMatchingProvidersError("purpose={purpose} privacy_gate=eliminated_all")`.
+7. Try each candidate in order. On exception, try next; record a failed Run for each attempt.
+8. Return `LLMResult` (see shape below).
+
+Same three changes for `route_with_tools()`. `route_streaming()` follows steps 1-6 identically but uses only the first surviving candidate (no mid-stream fallback), matching today's behavior.
+
+### `LLMResult` shape
+
+```python
+@dataclass
+class TokenUsage:
+    prompt: int | None = None       # None when the engine didn't report usage
+    completion: int | None = None
+
+@dataclass
+class LLMResult:
+    provider_id: str
+    model_ref: str
+    output: str
+    usage: TokenUsage                # empty tokens if local/unreported
+    cost_usd: float | None = None    # None for local or when usage is missing
+```
+
+`route_with_tools()` returns a `ToolCallResult` that extends the same `provider_id` / `usage` / `cost_usd` fields, with a `content` OR `tool_calls` payload.
+
+### Streaming cost story (v1)
+
+`route_streaming()` does NOT accumulate token usage; cost stays null on the Run for streamed calls. Rationale: the OpenAI streaming protocol doesn't emit `usage` in most delta chunks; only the final chunk of certain providers includes it, and support is inconsistent. v1 accepts null-cost on streamed calls and documents this in the Run audit trail. v2 can add a final-chunk usage extractor when more providers support it reliably.
+
+**Practical impact:** Phase 2 streaming (user-visible chat reply) is uncosted in v1. Phase 1 non-streaming tool-call resolution IS costed. This captures 80%+ of cloud cost already (tool-call Phase 1 is where expensive reasoning usually happens).
 
 ### Cost accounting
 
-Per provider rates stored in `llm_provider_profiles.cost_per_million_*_tokens_usd`. Cost computed at response-time:
+Per-provider rates stored in `llm_provider_profiles.cost_per_million_*_tokens_usd`. Cost computed at response-time from the OpenAI-compat `response.usage` object — `prompt_tokens` and `completion_tokens` are standard OpenAI field names and all three targets (Anthropic OpenAI-compat, OpenAI, OpenRouter) emit them via the OpenAI client library's `response.usage` attribute.
 
 ```python
-def _compute_cost(provider, usage) -> float | None:
-    if provider.provider_type != "cloud" or not provider.cost_per_million_input_tokens_usd:
-        return None
-    return (
-        usage.prompt_tokens * provider.cost_per_million_input_tokens_usd / 1_000_000
-        + usage.completion_tokens * provider.cost_per_million_output_tokens_usd / 1_000_000
+def _compute_cost(provider, usage_obj, openrouter_cost: float | None = None) -> tuple[TokenUsage, float | None]:
+    usage = TokenUsage(
+        prompt=getattr(usage_obj, "prompt_tokens", None) if usage_obj else None,
+        completion=getattr(usage_obj, "completion_tokens", None) if usage_obj else None,
     )
+    # OpenRouter returns its own cost — use verbatim, skip rate-table math.
+    if openrouter_cost is not None:
+        return usage, openrouter_cost
+    # Local provider OR missing rate OR missing usage → null cost.
+    if (provider.provider_type != "cloud"
+        or provider.cost_per_million_input_tokens_usd is None
+        or usage.prompt is None
+        or usage.completion is None):
+        return usage, None
+    cost = (
+        usage.prompt * float(provider.cost_per_million_input_tokens_usd) / 1_000_000
+        + usage.completion * float(provider.cost_per_million_output_tokens_usd) / 1_000_000
+    )
+    return usage, cost
 ```
 
-OpenRouter returns `usage.cost` directly in the response — use that value when present, ignore the rate table for OpenRouter rows.
+**Applied to all three `_call_provider_*_real` functions:**
 
-Token counts come from the OpenAI `response.usage` field. Anthropic's shim via OpenAI-compat endpoint also populates this.
+- **`_call_provider_real(provider, messages)`** — synchronous, returns `LLMResult`. After `response = client.chat.completions.create(...)`, compute `usage, cost = _compute_cost(provider, response.usage, openrouter_cost=getattr(response, "cost", None))`. Return `LLMResult(..., usage=usage, cost_usd=cost)`.
+- **`_call_provider_with_tools_real(provider, messages, tools)`** — synchronous, returns `ToolCallResult`. Same extraction pattern. Usage and cost attributed regardless of whether the response is text or tool_calls.
+- **`_call_provider_streaming_real(provider, messages)`** — yields strings. No cost tracking (see "Streaming cost story" above). The streaming function's caller populates `llm_provider_id` on the Run; `llm_input_tokens`, `llm_output_tokens`, and `llm_cost_usd` stay null.
+
+**Anthropic field-name verification:** Anthropic's OpenAI-compat endpoint (`https://api.anthropic.com/v1/`) emits `usage.prompt_tokens` and `usage.completion_tokens` (OpenAI-shaped) when called via the `openai` Python client. This is documented in Anthropic's OpenAI compatibility announcement and verified by the openai SDK v1.75+ against Claude 4.x models. Test assertion `test_anthropic_usage_fields_match_openai_shape` in the plan pins this contract.
+
+### Write-to-Run attribution
+
+All three `_call_*_real` functions are pure (return data, no DB writes). The calling layer (the Run-creating code in `_dispatch_tool_call`, `llm_handlers.py`, etc.) populates the new Run columns from the returned `LLMResult`:
+
+```python
+run.llm_provider_id = result.provider_id
+run.llm_input_tokens = result.usage.prompt
+run.llm_output_tokens = result.usage.completion
+run.llm_cost_usd = result.cost_usd
+```
+
+This preserves the current separation between "LLM routing" (stateless) and "Run persistence" (caller's job).
 
 ### Settings UI additions
 
@@ -178,7 +279,28 @@ PATCH  /llm/policies/{purpose}           → update one policy
 GET    /llm/spend?window=month           → { total_usd, by_provider: [...], call_count }
 ```
 
-No POST — policies are seeded; users can't add arbitrary new ones (purposes are code-defined).
+No POST — policies are seeded; users can't add arbitrary new ones (purposes are code-defined via `VALID_PURPOSES`).
+
+**`PATCH /llm/policies/{purpose}` request body (all fields optional):**
+
+```json
+{
+  "preferred_provider_id": "string",
+  "allow_cloud": true,
+  "fallback_chain": ["string", ...]
+}
+```
+
+v1 UI sends only `preferred_provider_id` and `allow_cloud`. `fallback_chain` is PATCHable via API (for power users) but not yet editable in the v1 Settings UI (read-only drag-handle shown; editability in v2).
+
+**Response codes:**
+- `200` on success
+- `404` if `{purpose}` is not in `VALID_PURPOSES`
+- `422` on validation errors:
+  - `preferred_provider_id` doesn't exist or is disabled
+  - `allow_cloud=false` with cloud entries in `fallback_chain` or `preferred_provider_id`
+  - `preferred_provider_id` appears in `fallback_chain` (loop)
+  - Any `fallback_chain` entry doesn't exist or is disabled
 
 ### Cost aggregation query
 
@@ -315,15 +437,19 @@ These are tracked as future specs, not bundled. Build when the trigger fires (Op
 
 ## Implementation Order (for the follow-on plan)
 
-1. Migrations 0007 + 0008 + 0009, model updates, seeds
-2. `llm_purpose_policies` API router (GET/PATCH)
-3. `llm_client.route_by_policy()` — new entry point that replaces direct `route()` calls; privacy gate; cost computation
-4. Update all internal callers (`triage.py`, `planner.py`, `summarizer.py`, `conversations.py`, `nova_handlers.py`) to pass explicit purpose
-5. Update `_call_provider_*_real` functions to populate `usage.prompt_tokens`/`usage.completion_tokens`/cost on LLMResult
-6. Seed cloud provider rows when env keys present; cost rates in seed
-7. `GET /llm/spend` endpoint + Settings widget
-8. LLM Policies UI panel (`<LLMPoliciesPanel />`)
-9. Set `OLLAMA_KEEP_ALIVE=30m` in Ollama host config + docker-compose env
-10. Integration smoke test + push
+1. Migrations 0007 (policies) + 0008 (provider rates) + 0009 (Run cost fields), model updates, `VALID_PURPOSES` constant, `seed_llm_purpose_policies()` with defaults above.
+2. Update `seed_llm_providers` to seed cloud rows conditionally (insert on key-present, disable on key-absent, never delete) with the exact values from the seed table.
+3. Refactor `LLMResult` → add `usage: TokenUsage` and `cost_usd` fields. Add `TokenUsage` dataclass. Update the existing `_call_provider_real` to populate both.
+4. Update `_call_provider_with_tools_real` to populate `usage` and `cost_usd` on the returned dict (matches the new shape). Leave `_call_provider_streaming_real` unchanged (streaming stays uncosted in v1).
+5. Refactor `route()` and `route_with_tools()` to consult policies (Algorithm above). `route_streaming()` adapts steps 1-6 but keeps first-candidate-only.
+6. Audit callers (`triage.py`, `planner.py`, `summarizer.py`, `conversations.py`, `nova_handlers.py`). Grep shows they all already pass a `purpose` string — verify each purpose is in `VALID_PURPOSES` and adjust strings if mismatched. This is a ~30-minute audit, not a rewrite.
+7. Update Run-creating call sites (`_dispatch_tool_call` in `conversations.py`, `_record_run` for tool runs, `handle_daily_summary` for its LLM call) to populate new Run columns from `LLMResult`.
+8. `llm_purpose_policies` API router (GET/PATCH) + validation per the 422 rules above.
+9. `GET /llm/spend?window=month` endpoint + tests.
+10. Settings UI — new `<LLMPoliciesPanel />` + `<LLMSpendWidget />`. Fetch policies on mount, show table with Preferred/AllowCloud controls, spend summary below.
+11. Integration smoke test — mock LLM calls across multiple providers, verify correct routing, privacy gates, and cost attribution end-to-end.
+12. Push.
+
+`OLLAMA_KEEP_ALIVE=30m` is **orthogonal** — it's an Ollama host env var change, independent of all the above. Land it separately in a micro-commit (docker-compose env entry) to avoid blocking anything on it.
 
 Each step self-contained; each ends with a green test suite.
