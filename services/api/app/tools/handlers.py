@@ -184,6 +184,48 @@ def handle_fs_read(input: dict, cfg=None) -> dict:
     return {"path": resolved, "content": content, "truncated": size > max_bytes, "size_bytes": size}
 
 
+def handle_nova_query_activity(input: dict, db: Session) -> dict:
+    """Queries Nova's own run history from the Run table.
+
+    input: {"limit"?: int (default 10), "since_hours"?: int (default 24),
+            "status"?: str|null, "tool_name"?: str|null}
+    Returns {"runs": list, "total": int} where total is the count before limit is applied.
+    """
+    from app.models.run import Run
+
+    limit = input.get("limit", 10)
+    since_hours = input.get("since_hours", 24)
+    status = input.get("status")
+    tool_name = input.get("tool_name")
+
+    # Use naive UTC to avoid SQLite timezone comparison issues (production uses PostgreSQL)
+    since = datetime.datetime.utcnow() - datetime.timedelta(hours=since_hours)
+
+    query = db.query(Run).filter(Run.started_at >= since)
+    if status:
+        query = query.filter(Run.status == status)
+    if tool_name:
+        query = query.filter(Run.tool_name == tool_name)
+
+    total = query.count()
+    runs = query.order_by(Run.started_at.desc()).limit(limit).all()
+
+    return {
+        "runs": [
+            {
+                "id": str(r.id),
+                "tool_name": r.tool_name,
+                "status": r.status,
+                "summary": r.summary,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "finished_at": r.finished_at.isoformat() if r.finished_at else None,
+            }
+            for r in runs
+        ],
+        "total": total,
+    }
+
+
 def handle_devops_summarize_ci_failure(input: dict, db: Session) -> dict:
     """Uses the LLM (via route_internal) to summarize a CI failure.
 
@@ -209,6 +251,7 @@ _REGISTRY: dict[str, tuple] = {
     "ha.light.turn_off": (handle_ha_light_turn_off, ["settings"]),
     "http.request": (handle_http_request, []),
     "devops.summarize_ci_failure": (handle_devops_summarize_ci_failure, ["db"]),
+    "nova.query_activity": (handle_nova_query_activity, ["db"]),
     "shell.run": (handle_shell_run, ["settings"]),
     "fs.list": (handle_fs_list, ["settings"]),
     "fs.read": (handle_fs_read, ["settings"]),

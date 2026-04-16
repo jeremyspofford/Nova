@@ -387,3 +387,83 @@ def test_fs_read_raises_on_directory(tmp_path):
     mock_cfg.nova_workspace_dir = str(tmp_path)
     with pytest.raises(ValueError, match="directory"):
         handle_fs_read({"path": "subdir"}, mock_cfg)
+
+
+# --- nova.query_activity ---
+
+def test_query_activity_returns_runs(db_session):
+    from app.tools.handlers import handle_nova_query_activity
+    from app.models.run import Run
+    from datetime import datetime, timezone
+    run = Run(
+        tool_name="debug.echo",
+        status="succeeded",
+        trigger_type="chat",
+        started_at=datetime.now(timezone.utc),
+    )
+    db_session.add(run)
+    db_session.commit()
+    result = handle_nova_query_activity({}, db_session)
+    assert result["total"] == 1
+    assert result["runs"][0]["tool_name"] == "debug.echo"
+    assert result["runs"][0]["status"] == "succeeded"
+
+
+def test_query_activity_since_hours_excludes_old_runs(db_session):
+    from app.tools.handlers import handle_nova_query_activity
+    from app.models.run import Run
+    from datetime import datetime, timezone, timedelta
+    recent = Run(
+        tool_name="debug.echo",
+        status="succeeded",
+        trigger_type="chat",
+        started_at=datetime.now(timezone.utc),
+    )
+    old = Run(
+        tool_name="debug.echo",
+        status="succeeded",
+        trigger_type="chat",
+        started_at=datetime.now(timezone.utc) - timedelta(hours=48),
+    )
+    db_session.add_all([recent, old])
+    db_session.commit()
+    result = handle_nova_query_activity({"since_hours": 1}, db_session)
+    assert result["total"] == 1
+
+
+def test_query_activity_status_filter(db_session):
+    from app.tools.handlers import handle_nova_query_activity
+    from app.models.run import Run
+    from datetime import datetime, timezone
+    db_session.add_all([
+        Run(tool_name="debug.echo", status="failed", trigger_type="chat",
+            started_at=datetime.now(timezone.utc)),
+        Run(tool_name="debug.echo", status="succeeded", trigger_type="chat",
+            started_at=datetime.now(timezone.utc)),
+    ])
+    db_session.commit()
+    result = handle_nova_query_activity({"status": "failed"}, db_session)
+    assert result["total"] == 1
+    assert result["runs"][0]["status"] == "failed"
+
+
+def test_query_activity_tool_name_filter(db_session):
+    from app.tools.handlers import handle_nova_query_activity
+    from app.models.run import Run
+    from datetime import datetime, timezone
+    db_session.add_all([
+        Run(tool_name="shell.run", status="succeeded", trigger_type="chat",
+            started_at=datetime.now(timezone.utc)),
+        Run(tool_name="debug.echo", status="succeeded", trigger_type="chat",
+            started_at=datetime.now(timezone.utc)),
+    ])
+    db_session.commit()
+    result = handle_nova_query_activity({"tool_name": "shell.run"}, db_session)
+    assert result["total"] == 1
+    assert result["runs"][0]["tool_name"] == "shell.run"
+
+
+def test_query_activity_empty_result(db_session):
+    from app.tools.handlers import handle_nova_query_activity
+    result = handle_nova_query_activity({"tool_name": "does.not.exist"}, db_session)
+    assert result == {"runs": [], "total": 0}

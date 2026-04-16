@@ -247,6 +247,36 @@ def seed_tools(db: Session) -> None:
             tags=["filesystem"],
         ),
         dict(
+            name="nova.query_activity",
+            display_name="Nova: Query Activity",
+            description=(
+                "Queries Nova's own run history. Filterable by status, tool name, "
+                "and time window. Returns runs ordered newest-first."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "default": 10},
+                    "since_hours": {"type": "integer", "default": 24},
+                    "status": {"type": "string", "nullable": True},
+                    "tool_name": {"type": "string", "nullable": True},
+                },
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "runs": {"type": "array", "items": {"type": "object"}},
+                    "total": {"type": "integer"},
+                },
+            },
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["nova", "activity"],
+        ),
+        dict(
             name="devops.summarize_ci_failure",
             display_name="DevOps: Summarize CI Failure",
             description="Uses the LLM to summarize a CI failure from a URL and log snippet.",
