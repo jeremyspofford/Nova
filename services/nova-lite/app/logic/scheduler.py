@@ -31,7 +31,13 @@ def _is_due(trigger: dict, now: datetime) -> bool:
 
 
 def _in_active_hours(trigger: dict, now: datetime) -> bool:
-    """Return True if current UTC time is within the trigger's active window."""
+    """Return True if current UTC time is within the trigger's active window.
+
+    If either bound is missing, the trigger is considered always active.
+    Midnight-wrapping windows (start > end, e.g. "22:00"–"06:00") are not
+    supported: that configuration makes the comparison impossible and the
+    trigger will never fire.
+    """
     start = trigger.get("active_hours_start")
     end = trigger.get("active_hours_end")
     if not start or not end:

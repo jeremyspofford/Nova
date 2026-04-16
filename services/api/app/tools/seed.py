@@ -311,7 +311,15 @@ def seed_tools(db: Session) -> None:
 
 
 def seed_scheduled_triggers(db: Session) -> None:
-    """Upsert default scheduled triggers. Preserves user-modified enabled/interval."""
+    """Upsert default scheduled triggers.
+
+    On existing rows only display fields (name, description) are refreshed;
+    all user-tunable runtime fields (enabled, interval_seconds, active_hours_*,
+    payload_template, last_fired_at) are preserved across restarts.
+
+    Note: this diverges deliberately from seed_tools / seed_board_columns,
+    which overwrite every defined field on every startup.
+    """
     from app.models.scheduled_trigger import ScheduledTrigger
 
     defaults = [

@@ -30,3 +30,43 @@ def test_patch_trigger_last_fired_at(client, db_session):
 def test_patch_trigger_not_found(client):
     resp = client.patch("/system/triggers/nonexistent", json={"enabled": False})
     assert resp.status_code == 404
+
+
+def test_patch_trigger_rejects_nonpositive_interval(client, db_session):
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    resp = client.patch("/system/triggers/system-heartbeat", json={"interval_seconds": 0})
+    assert resp.status_code == 422
+
+
+def test_patch_trigger_rejects_malformed_active_hours(client, db_session):
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    resp = client.patch("/system/triggers/system-heartbeat", json={"active_hours_start": "9am"})
+    assert resp.status_code == 422
+
+
+def test_seed_preserves_user_modifications(db_session):
+    from app.tools.seed import seed_scheduled_triggers
+    from app.models.scheduled_trigger import ScheduledTrigger
+
+    seed_scheduled_triggers(db_session)
+    row = db_session.query(ScheduledTrigger).filter_by(id="system-heartbeat").first()
+    row.enabled = False
+    row.interval_seconds = 9999
+    db_session.commit()
+
+    seed_scheduled_triggers(db_session)  # re-seed
+    db_session.refresh(row)
+    assert row.enabled is False
+    assert row.interval_seconds == 9999
+    assert row.name == "System Heartbeat"
+
+
+def test_system_info(client):
+    resp = client.get("/system/info")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["service"] == "nova-api"
+    assert "version" in data
+    assert "deployment_mode" in data

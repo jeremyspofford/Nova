@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.models.scheduled_trigger import ScheduledTrigger
 from app.schemas.scheduled_trigger import (
@@ -10,6 +11,15 @@ from app.schemas.scheduled_trigger import (
 )
 
 router = APIRouter(prefix="/system", tags=["system"])
+
+
+@router.get("/info")
+def system_info():
+    return {
+        "service": settings.service_name,
+        "version": settings.version,
+        "deployment_mode": settings.deployment_mode,
+    }
 
 
 @router.get("/triggers", response_model=ScheduledTriggerListResponse)

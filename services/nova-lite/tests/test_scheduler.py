@@ -63,6 +63,16 @@ def test_in_active_hours_boundary_start():
     assert _in_active_hours(trigger, now) is True
 
 
+def test_in_active_hours_start_only_is_always_active():
+    trigger = {"active_hours_start": "09:00", "active_hours_end": None}
+    assert _in_active_hours(trigger, datetime.now(timezone.utc)) is True
+
+
+def test_in_active_hours_end_only_is_always_active():
+    trigger = {"active_hours_start": None, "active_hours_end": "22:00"}
+    assert _in_active_hours(trigger, datetime.now(timezone.utc)) is True
+
+
 # ── fire_due_triggers ────────────────────────────────────────────────────────
 
 def _make_trigger(trigger_id="system-heartbeat", last_fired_offset_seconds=None):
