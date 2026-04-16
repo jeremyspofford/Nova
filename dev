@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Nova Suite — Local Development
+# Usage: ./dev [docker compose args]
+#   ./dev                  start all services (detached)
+#   ./dev --build          rebuild images before starting
+#   ./dev logs -f api      tail api logs
+#   ./dev down             stop and remove containers
+
+COMPOSE="docker compose -f infra/docker-compose.yml"
+
+# --- Prerequisites ---
+if ! command -v docker &>/dev/null; then
+  echo "error: docker is not installed. See https://docs.docker.com/get-docker/" >&2
+  exit 1
+fi
+if ! docker compose version &>/dev/null; then
+  echo "error: docker compose plugin not found. Update Docker Desktop or install the compose plugin." >&2
+  exit 1
+fi
+
+# --- Pass-through mode ---
+# If first arg is a flag (e.g. --build), treat as args to `up`
+# If first arg is a subcommand (e.g. logs, down), pass through as-is
+if [[ $# -gt 0 ]]; then
+  if [[ "$1" == -* ]]; then
+    exec $COMPOSE up "$@"
+  else
+    exec $COMPOSE "$@"
+  fi
+fi
+
+# --- Default: start dev environment ---
+echo "Starting Nova Suite..."
+exec $COMPOSE up --build --watch

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import llm_client
 from app.database import get_db
+from app.config import settings as _settings
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.run import Run
@@ -50,9 +51,12 @@ def _build_system_prompt(db: Session) -> str:
         f"- {t.name}: {t.description}" for t in tools
     ) or "None"
 
+    model_line = f"{_settings.ollama_model} via Ollama" if _settings.ollama_base_url else "unknown"
+
     return (
-        "You are Nova, an intelligent agent assistant. "
-        "Help the user understand their system, answer questions, and take actions.\n\n"
+        "You are Nova, an intelligent agent assistant running on a real host machine. "
+        f"You are powered by {model_line}. "
+        "You can run shell commands, read files, and query your own activity history using your tools.\n\n"
         f"Current pending tasks:\n{task_lines}\n\n"
         f"Available tools:\n{tool_lines}\n\n"
         "Respond conversationally. Be concise and helpful."
@@ -164,8 +168,12 @@ def send_message(
         {
             "role": "system",
             "content": (
-                "You are an intent classifier for Nova.\n"
+                "You are an intent classifier for Nova, an AI agent running on a real machine.\n"
                 f"Classify the user message. Available tools:\n{tool_list}\n\n"
+                "Use shell.run for ANY question about the system Nova runs on: "
+                "hostname, OS, disk space, running processes, environment variables, etc. "
+                "Use fs.read or fs.list for file/directory questions. "
+                "Use nova.query_activity for questions about Nova's own history or runs.\n\n"
                 'Respond ONLY with JSON:\n'
                 '{"intent": "action" | "conversation", '
                 '"tool_name": string | null, '
@@ -188,7 +196,7 @@ def send_message(
 
     if (
         c.get("intent") == "action"
-        and c.get("confidence", 0) >= 0.7
+        and c.get("confidence", 0) >= 0.5
         and c.get("tool_name") in tool_handlers._REGISTRY
     ):
         tool_name = c["tool_name"]

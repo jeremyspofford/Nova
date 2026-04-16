@@ -29,14 +29,27 @@ export function ChatPanel() {
 
   const messages = data?.messages ?? []
 
+  // Snap to bottom instantly when message history loads (tab switch or initial load)
   useEffect(() => {
-    if (bottomRef.current && typeof bottomRef.current.scrollIntoView === "function") {
-      bottomRef.current.scrollIntoView({ behavior: "smooth" })
-    }
-  }, [messages, streamingContent])
+    bottomRef.current?.scrollIntoView?.({ behavior: "instant" })
+  }, [messages])
+
+  // Follow streaming output smoothly
+  useEffect(() => {
+    if (isStreaming) bottomRef.current?.scrollIntoView?.({ behavior: "smooth" })
+  }, [streamingContent, isStreaming])
 
   async function handleSend(content: string) {
     if (!conversationId || isStreaming) return
+
+    // Optimistically add the user message so it appears immediately
+    queryClient.setQueryData(["messages", conversationId], (old: any) => ({
+      messages: [
+        ...(old?.messages ?? []),
+        { id: crypto.randomUUID(), role: "user", content },
+      ],
+    }))
+
     startStreaming()
     try {
       for await (const event of sendMessageStream(conversationId, content)) {
@@ -52,10 +65,6 @@ export function ChatPanel() {
 
   return (
     <section className="chat-panel" aria-label="Chat">
-      <div className="chat-panel__header">
-        <span className="chat-panel__title">Nova</span>
-      </div>
-
       <div className="chat-panel__messages">
         <div className="chat-panel__messages-inner">
           {messages.map(m => (

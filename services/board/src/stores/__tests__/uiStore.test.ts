@@ -2,23 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { useUIStore } from "../uiStore"
 
 beforeEach(() => {
-  useUIStore.setState({
-    selectedTaskId: null,
-    toast: null,
-    activeFilters: {},
-    activeTab: "chat",
-  })
-})
-
-it("setSelectedTask updates selectedTaskId", () => {
-  useUIStore.getState().setSelectedTask("t1")
-  expect(useUIStore.getState().selectedTaskId).toBe("t1")
-})
-
-it("setSelectedTask(null) clears selection", () => {
-  useUIStore.getState().setSelectedTask("t1")
-  useUIStore.getState().setSelectedTask(null)
-  expect(useUIStore.getState().selectedTaskId).toBeNull()
+  useUIStore.setState({ toast: null, activeTab: "chat" })
 })
 
 it("setToast updates toast message", () => {
@@ -26,9 +10,10 @@ it("setToast updates toast message", () => {
   expect(useUIStore.getState().toast).toBe("something went wrong")
 })
 
-it("setFilters updates activeFilters", () => {
-  useUIStore.getState().setFilters({ status: "running", labels: ["ci"] })
-  expect(useUIStore.getState().activeFilters).toEqual({ status: "running", labels: ["ci"] })
+it("setToast(null) clears toast", () => {
+  useUIStore.getState().setToast("msg")
+  useUIStore.getState().setToast(null)
+  expect(useUIStore.getState().toast).toBeNull()
 })
 
 it("setActiveTab updates activeTab", () => {

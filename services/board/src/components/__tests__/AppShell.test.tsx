@@ -10,8 +10,6 @@ import { useSettingsStore } from "../../stores/settingsStore"
 
 vi.mock("../../components/Activity/ActivityFeed", () => ({ ActivityFeed: () => <div data-testid="activity-feed" /> }))
 vi.mock("../../components/Chat/ChatPanel", () => ({ ChatPanel: () => <div data-testid="chat-panel" /> }))
-vi.mock("../../components/TaskDetail/TaskDetail", () => ({ TaskDetail: () => null }))
-vi.mock("../../components/shared/FilterBar", () => ({ FilterBar: () => <div data-testid="filter-bar" /> }))
 vi.mock("../../components/shared/Toast", () => ({ Toast: () => null }))
 vi.mock("../../api/chat", () => ({
   createConversation: vi.fn().mockResolvedValue({ id: "c1", title: "New Chat", created_at: "", updated_at: "", message_count: 0 }),
@@ -26,7 +24,7 @@ function makeWrapper() {
 beforeEach(() => {
   localStorage.clear()
   useSettingsStore.setState({ theme: "system" })
-  useUIStore.setState({ selectedTaskId: null, toast: null, activeFilters: {}, activeTab: "chat" })
+  useUIStore.setState({ toast: null, activeTab: "chat" })
   useChatStore.setState({ conversationId: null, streamingContent: "", isStreaming: false })
 })
 
