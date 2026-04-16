@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -14,6 +14,8 @@ def _validate_cron(v: str) -> str:
 
 
 def _validate_payload_shape(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("payload must be an object")
     has_tool = "tool" in payload
     has_goal = "goal" in payload
     if has_tool and has_goal:
