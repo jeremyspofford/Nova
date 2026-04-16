@@ -51,7 +51,12 @@ def _build_system_prompt(db: Session) -> str:
         f"- {t.name}: {t.description}" for t in tools
     ) or "None"
 
-    model_line = f"{_settings.ollama_model} via Ollama" if _settings.ollama_base_url else "unknown"
+    from app.models.llm_provider import LLMProviderProfile
+    provider = db.query(LLMProviderProfile).filter(
+        LLMProviderProfile.provider_type == "local",
+        LLMProviderProfile.enabled == True,  # noqa: E712
+    ).first()
+    model_line = f"{provider.model_ref} via Ollama" if provider else "unknown"
 
     return (
         "You are Nova, an intelligent agent assistant running on a real host machine. "

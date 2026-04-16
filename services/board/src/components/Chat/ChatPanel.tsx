@@ -20,6 +20,7 @@ export function ChatPanel() {
     )
   const queryClient = useQueryClient()
   const bottomRef = useRef<HTMLDivElement>(null)
+  const queueRef = useRef<string[]>([])
 
   const { data } = useQuery({
     queryKey: ["messages", conversationId],
@@ -39,20 +40,10 @@ export function ChatPanel() {
     if (isStreaming) bottomRef.current?.scrollIntoView?.({ behavior: "smooth" })
   }, [streamingContent, isStreaming])
 
-  async function handleSend(content: string) {
-    if (!conversationId || isStreaming) return
-
-    // Optimistically add the user message so it appears immediately
-    queryClient.setQueryData(["messages", conversationId], (old: any) => ({
-      messages: [
-        ...(old?.messages ?? []),
-        { id: crypto.randomUUID(), role: "user", content },
-      ],
-    }))
-
+  async function sendOne(content: string) {
     startStreaming()
     try {
-      for await (const event of sendMessageStream(conversationId, content)) {
+      for await (const event of sendMessageStream(conversationId!, content)) {
         if ("delta" in event) appendDelta(event.delta)
       }
     } catch {
@@ -60,7 +51,38 @@ export function ChatPanel() {
     } finally {
       finishStreaming()
       queryClient.invalidateQueries({ queryKey: ["messages", conversationId] })
+      const next = queueRef.current.shift()
+      if (next) {
+        // Re-add optimistic bubble — invalidateQueries replaced the cache with
+        // server data which doesn't include the queued message yet.
+        queryClient.setQueryData(["messages", conversationId], (old: any) => ({
+          messages: [
+            ...(old?.messages ?? []),
+            { id: crypto.randomUUID(), role: "user", content: next },
+          ],
+        }))
+        sendOne(next)
+      }
     }
+  }
+
+  async function handleSend(content: string) {
+    if (!conversationId) return
+
+    // Always show the user message immediately
+    queryClient.setQueryData(["messages", conversationId], (old: any) => ({
+      messages: [
+        ...(old?.messages ?? []),
+        { id: crypto.randomUUID(), role: "user", content },
+      ],
+    }))
+
+    if (isStreaming) {
+      queueRef.current.push(content)
+      return
+    }
+
+    sendOne(content)
   }
 
   return (
@@ -78,7 +100,7 @@ export function ChatPanel() {
       </div>
 
       <div className="chat-panel__footer">
-        <ChatInput onSend={handleSend} disabled={isStreaming} />
+        <ChatInput onSend={handleSend} disabled={!conversationId} />
       </div>
     </section>
   )

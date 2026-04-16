@@ -45,6 +45,20 @@ def update_local_model(body: ProviderModelUpdate, db: Session = Depends(get_db))
     return {"provider_id": provider.id, "model_ref": provider.model_ref}
 
 
+@router.get("/providers/local")
+def get_local_provider(db: Session = Depends(get_db)):
+    """Return the current local (Ollama) provider config."""
+    provider = (
+        db.query(LLMProviderProfile)
+        .filter(LLMProviderProfile.provider_type == "local", LLMProviderProfile.enabled == True)  # noqa: E712
+        .first()
+    )
+    if not provider:
+        raise HTTPException(404, detail="No enabled local provider found")
+    return {"id": provider.id, "name": provider.name, "provider_type": provider.provider_type,
+            "model_ref": provider.model_ref, "enabled": provider.enabled}
+
+
 @router.get("/providers")
 def list_providers(db: Session = Depends(get_db)):
     providers = db.query(LLMProviderProfile).all()

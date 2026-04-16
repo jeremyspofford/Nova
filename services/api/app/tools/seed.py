@@ -16,8 +16,9 @@ def seed_llm_providers(db: Session, settings) -> None:
     ).first()
 
     if provider:
+        # Update endpoint/enabled from env — but preserve model_ref so user's
+        # Settings choice survives container restarts.
         provider.endpoint_ref = settings.ollama_base_url + "/v1"
-        provider.model_ref = settings.ollama_model
         provider.enabled = True
     else:
         provider = LLMProviderProfile(

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { useSettingsStore } from "../../stores/settingsStore"
-import { getModels, setLocalModel } from "../../api/llm"
+import { getModels, getLocalProvider, setLocalModel } from "../../api/llm"
 
 type SegOption<T extends string> = { label: string; value: T }
 
@@ -39,6 +39,9 @@ export function Settings() {
     getModels()
       .then(data => setModels(data.models))
       .catch(() => setModels([]))
+    getLocalProvider()
+      .then(data => setActiveModel(data.model_ref))
+      .catch(() => {})
   }, [])
 
   async function handleModelChange(model: string) {

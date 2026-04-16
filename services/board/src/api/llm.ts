@@ -4,6 +4,10 @@ export function getModels(): Promise<{ models: string[] }> {
   return apiFetch<{ models: string[] }>("/llm/models")
 }
 
+export function getLocalProvider(): Promise<{ model_ref: string }> {
+  return apiFetch<{ model_ref: string }>("/llm/providers/local")
+}
+
 export function setLocalModel(model: string): Promise<{ provider_id: string; model_ref: string }> {
   return apiFetch("/llm/providers/local", {
     method: "PATCH",
