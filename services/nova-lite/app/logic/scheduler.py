@@ -1,9 +1,10 @@
 """
 Check which scheduled triggers are due and emit an event for each.
 
-Each fired trigger:
-  1. POSTs to /events with type "scheduled.{trigger_id}"
-  2. PATCHes the trigger's last_fired_at so it won't re-fire this interval
+Each fired trigger claims its interval first (PATCH last_fired_at), then emits
+the event. Patch-first ordering means a transient API failure during firing
+will cost at most one missed event rather than spam the event stream on every
+subsequent tick until the patch eventually lands.
 """
 import logging
 from datetime import datetime, timezone
@@ -24,6 +25,8 @@ def _is_due(trigger: dict, now: datetime) -> bool:
         last_fired_dt = datetime.fromisoformat(last_fired.replace("Z", "+00:00"))
     else:
         last_fired_dt = last_fired
+    if last_fired_dt.tzinfo is None:
+        last_fired_dt = last_fired_dt.replace(tzinfo=timezone.utc)
     return (now - last_fired_dt).total_seconds() >= trigger["interval_seconds"]
 
 
@@ -57,6 +60,9 @@ def fire_due_triggers(client) -> int:
 
         trigger_id = trigger["id"]
         try:
+            client.patch_scheduled_trigger(trigger_id, {
+                "last_fired_at": now.isoformat(),
+            })
             client.post_event({
                 "type": f"scheduled.{trigger_id}",
                 "source": "scheduler",
@@ -66,9 +72,6 @@ def fire_due_triggers(client) -> int:
                     "trigger_id": trigger_id,
                 },
                 "correlation_id": trigger_id,
-            })
-            client.patch_scheduled_trigger(trigger_id, {
-                "last_fired_at": now.isoformat(),
             })
             log.info("Fired scheduled trigger: %s", trigger_id)
             fired += 1
