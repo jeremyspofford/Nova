@@ -96,7 +96,7 @@ AFTER (tool-type trigger, escalation path):
 AFTER (goal-type trigger):
   scheduler tick → event {source: scheduler, payload: {goal: "check r/SideProject..."}}
     → triage sees scheduler+goal path, SKIPS classification LLM
-    → creates task (title = trigger name, description = goal text)
+    → creates task (title = f"{trigger.name} — {today_iso}", description = goal text)
     → planner (LLM) plans actions → executor → summarizer (LLM) → activity
 
 AFTER (chat-driven creation):
@@ -247,12 +247,12 @@ Runs four deterministic checks in-process:
 
 | Check | Threshold | Escalation message |
 |---|---|---|
-| Disk usage | `> 85%` | "Disk at X% ({mount})" |
+| Disk usage at `/` (container root) | `> 85%` | "Disk at X% (container `/`)" |
 | Memory usage | `> 90%` | "Memory at X%" |
 | Stale tasks (status in `pending`/`running` > 24h) | count > 0 | "X stale task(s) — review triage pipeline" |
 | Failed-run rate (last 1h) | `> 50%` | "X of Y recent runs failed — investigate" |
 
-Implementation — uses `shutil.disk_usage`, `psutil` (already a transitive dep, verify), DB queries for tasks/runs. Returns on first threshold breach with the escalation info — or `ok` with a one-line `message` summarizing the fleet ("disk 42%, mem 31%, 0 stale, 0/12 runs failed 1h").
+Implementation — uses `shutil.disk_usage("/")` (container-scoped, which is what matters for Nova's own log/DB volume — host disk is a separate concern outside Nova's observability), `psutil` for memory (add to requirements if not present), DB queries for tasks/runs. Returns on first threshold breach with the escalation info — or `ok` with a one-line `message` summarizing the fleet ("disk 42%, mem 31%, 0 stale, 0/12 runs failed 1h").
 
 ### Handler: `nova.daily_summary`
 
@@ -262,9 +262,9 @@ Flow:
 1. Query last N hours of events (via `get_events`), runs (via `get_runs`), task transitions (via DB query).
 2. Build a structured digest dict.
 3. LLM-summarize the digest with the local provider (`llm_client.route_internal("summarize_daily", messages)`).
-4. Always returns `action_needed` with `title="Daily summary — YYYY-MM-DD"` and the LLM summary as `description`. The handler writes the summary; the resulting task sits in activity as a read-me-once report. Task marked `done` immediately on creation via a follow-up PATCH (i.e., a summary is visible work product, not outstanding work).
+4. Returns `{"status": "ok", "message": <full summary text>}`. The Run record itself is the summary artifact — the existing activity feed surfaces Run summaries, so the digest is visible as activity without needing a task.
 
-**Design note:** `daily_summary` is the one place where a tool-type trigger always produces a task rather than silent activity. The task exists as the "here's your daily digest" artifact. This is a deliberate exception to the "ok = silent" rule.
+**Why not action_needed?** A daily summary is not outstanding work — it's a read-once artifact. The Run's output field holds the full summary; activity renders it. Escalating to a task would imply "something needs doing," which misrepresents the intent. If the summary itself *surfaces* an issue (e.g., "12 stalled tasks"), a follow-up task creation is the summary handler's job to emit as a SEPARATE escalation run, not a transformation of the summary artifact.
 
 ---
 
@@ -293,15 +293,22 @@ Flow:
 
 ```
 If conversation.pending_tool_call is set:
-    If user_message is a confirmation ("yes", "confirm", "do it", etc. — matched by a small allowlist regex):
+    If user_message matches confirmation regex (whole-word):
         dispatch the pending tool_call; clear pending; stream result summary.
-    Else if user_message is a denial ("no", "cancel", etc.):
+    Else if user_message matches denial regex (whole-word):
         clear pending; stream "Cancelled."
     Else:
         clear pending (new intent); proceed normally.
 ```
 
-Allowlist regex keeps the confirmation mechanism dumb-code, not LLM-mediated — avoids edge cases where the model "helpfully" decides a vague message means confirm.
+**Confirmation regex — whole-word match (not substring):**
+
+```python
+CONFIRM_RE = re.compile(r"\b(yes|yep|yeah|confirm|confirmed|do it|go ahead|proceed)\b", re.I)
+DENY_RE    = re.compile(r"\b(no|nope|cancel|stop|abort|nvm|never ?mind)\b", re.I)
+```
+
+Whole-word is essential — substring would match "yesterday" as "yes". Confirm takes precedence over deny if somehow both match (paranoia: "yes, cancel" reads as confirm-yes, scoring the first hit). Allowlist regex keeps the confirmation mechanism dumb-code, not LLM-mediated — avoids edge cases where the model "helpfully" decides a vague message means confirm.
 
 ### New database column
 
@@ -437,7 +444,7 @@ This is consistent with the "no unblock-now-finish-later" rule — we commit to 
 | `action_needed` task can't be created (DB failure) | Run still saved with the escalation payload; log warning; next scheduler tick re-checks (handler is idempotent by design) |
 | `post_event` succeeds but `patch_scheduled_trigger(last_fired_at)` fails | Won't happen in the new flow — scheduler still patches first, same as current code |
 | Goal-type trigger references missing tool | Existing behavior: planner fails, task marked `failed`, activity entry explains. Acceptable as noted in deferred work |
-| Chat pending confirmation never resolved | Cleared on next user message regardless of content if >30 minutes have elapsed (soft timeout) |
+| Chat pending confirmation never resolved | Cleared on next user message regardless of content if >30 minutes have elapsed (soft timeout). No background sweeper — state sits until user sends a new message. Acceptable because pending rows are harmless until consumed, and a user returning to a stale conversation will trip the timeout on their next message. If this proves annoying, a periodic sweeper is a small follow-up. |
 | Model swap → user lacks qwen2.5-coder:7b | API health endpoint includes a `model_ready: bool` field; Settings panel surfaces a "model unavailable" warning with `ollama pull` instructions |
 
 ---
