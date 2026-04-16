@@ -149,3 +149,10 @@ def test_dispatch_http_request():
     with patch("app.tools.handlers.httpx.request", return_value=mock_resp):
         result = dispatch("http.request", {"method": "GET", "url": "http://example.com"}, None, None)
     assert result == {"status_code": 200, "body": "ok"}
+
+
+def test_settings_has_nova_workspace_dir():
+    from app.config import settings
+    # Field exists and defaults to "~" when NOVA_WORKSPACE_DIR is not set
+    assert hasattr(settings, "nova_workspace_dir")
+    assert settings.nova_workspace_dir == "~"

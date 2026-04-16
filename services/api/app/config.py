@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
@@ -10,6 +11,7 @@ class Settings(BaseSettings):
     ollama_model: str = "gemma3:4b"
     ha_base_url: str = ""
     ha_token: str = ""
+    nova_workspace_dir: str = Field(default="~", validation_alias="NOVA_WORKSPACE_DIR")
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
