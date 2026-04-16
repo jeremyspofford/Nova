@@ -1,9 +1,3 @@
-def test_list_triggers_empty(client):
-    resp = client.get("/system/triggers")
-    assert resp.status_code == 200
-    assert resp.json()["triggers"] == []
-
-
 def test_list_triggers_after_seed(client, db_session):
     from app.tools.seed import seed_scheduled_triggers
     seed_scheduled_triggers(db_session)

@@ -3,7 +3,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from app.routers import health, tasks, events, board, tools, runs, approvals, entities, llm, conversations, activity, system
 import app.database as _db
-from app.tools.seed import seed_tools, seed_llm_providers, seed_board_columns
+from app.tools.seed import seed_tools, seed_llm_providers, seed_board_columns, seed_scheduled_triggers
 from app.config import settings
 
 
@@ -14,6 +14,7 @@ async def lifespan(app: FastAPI):
         seed_tools(db)
         seed_llm_providers(db, settings)
         seed_board_columns(db)
+        seed_scheduled_triggers(db)
     finally:
         db.close()
     yield

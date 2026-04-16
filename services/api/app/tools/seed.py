@@ -308,3 +308,48 @@ def seed_tools(db: Session) -> None:
             db.add(Tool(**defn))
 
     db.commit()
+
+
+def seed_scheduled_triggers(db: Session) -> None:
+    """Upsert default scheduled triggers. Preserves user-modified enabled/interval."""
+    from app.models.scheduled_trigger import ScheduledTrigger
+
+    defaults = [
+        dict(
+            id="system-heartbeat",
+            name="System Heartbeat",
+            description=(
+                "Periodic system health check: disk usage, memory, running processes, "
+                "and any pending work that needs attention."
+            ),
+            interval_seconds=1800,  # 30 minutes
+            enabled=True,
+            payload_template={"check": "system_health"},
+        ),
+        dict(
+            id="daily-summary",
+            name="Daily Summary",
+            description=(
+                "Review today's activity, surface unresolved tasks, "
+                "and summarise what Nova has done in the past 24 hours."
+            ),
+            interval_seconds=86400,  # 24 hours
+            enabled=True,
+            payload_template={"check": "daily_summary"},
+        ),
+    ]
+
+    for defn in defaults:
+        trigger = (
+            db.query(ScheduledTrigger)
+            .filter(ScheduledTrigger.id == defn["id"])
+            .first()
+        )
+        if trigger:
+            # Refresh display fields only — preserve user's enabled/interval choices
+            trigger.name = defn["name"]
+            trigger.description = defn["description"]
+        else:
+            db.add(ScheduledTrigger(**defn))
+
+    db.commit()
