@@ -26,6 +26,18 @@ from app.schemas.conversation import (
 from app.tools import handlers as tool_handlers
 
 
+CONFIRM_RE = re.compile(r"\b(yes|yep|yeah|confirm|confirmed|do it|go ahead|proceed)\b", re.I)
+DENY_RE = re.compile(r"\b(no|nope|cancel|stop|abort|nvm|never ?mind)\b", re.I)
+
+SENSITIVE_TOOLS = {
+    "scheduler.create_trigger",
+    "scheduler.update_trigger",
+    "scheduler.delete_trigger",
+}
+MAX_TOOL_TURNS = 3
+PENDING_TIMEOUT_MINUTES = 30
+
+
 def _make_title(content: str) -> str:
     """First 50 chars of content, truncated to nearest word boundary."""
     if len(content) <= 50:
@@ -46,11 +58,6 @@ def _build_system_prompt(db: Session) -> str:
         f"- [{t.id[:8]}] {t.title} ({t.priority})" for t in tasks
     ) or "None"
 
-    tools = db.query(Tool).filter(Tool.enabled == True).all()  # noqa: E712
-    tool_lines = "\n".join(
-        f"- {t.name}: {t.description}" for t in tools
-    ) or "None"
-
     from app.models.llm_provider import LLMProviderProfile
     provider = db.query(LLMProviderProfile).filter(
         LLMProviderProfile.provider_type == "local",
@@ -61,21 +68,119 @@ def _build_system_prompt(db: Session) -> str:
     return (
         "You are Nova, an intelligent agent assistant running on a real host machine. "
         f"You are powered by {model_line}. "
-        "You can run shell commands, read files, and query your own activity history using your tools.\n\n"
+        "You can run shell commands, read files, manage scheduled triggers, and query your own activity history using your tools.\n\n"
         f"Current pending tasks:\n{task_lines}\n\n"
-        f"Available tools:\n{tool_lines}\n\n"
-        "Respond conversationally. Be concise and helpful."
+        "Respond conversationally. Be concise and helpful. "
+        "When a user asks you to do something that maps to a tool, call the tool directly rather than describing what you would do."
     )
 
 
-def _parse_json_safe(text: str) -> dict | None:
-    """Strip markdown fences and parse JSON. Returns None on any failure."""
+def _tool_catalog(db: Session) -> list[dict]:
+    """Build OpenAI-format tool list from enabled tools."""
+    tools_list = db.query(Tool).filter(Tool.enabled == True).all()  # noqa: E712
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t.name,
+                "description": t.description,
+                "parameters": t.input_schema or {"type": "object"},
+            },
+        }
+        for t in tools_list
+    ]
+
+
+def _check_pending_confirmation(
+    conv: Conversation, user_msg: str
+) -> tuple[str, dict | None]:
+    """Returns ('confirm'|'deny'|'none', pending_call_or_None)."""
+    if not conv.pending_tool_call:
+        return "none", None
+    anchor = conv.pending_tool_call_at or datetime.now(timezone.utc)
+    # Normalize for SQLite which strips tzinfo
+    if anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - anchor
+    if age.total_seconds() > PENDING_TIMEOUT_MINUTES * 60:
+        return "none", None
+    if CONFIRM_RE.search(user_msg):
+        return "confirm", conv.pending_tool_call
+    if DENY_RE.search(user_msg):
+        return "deny", conv.pending_tool_call
+    return "none", None
+
+
+def _render_confirmation(tool_name: str, args: dict) -> str:
+    """Render a short markdown confirmation prompt for a sensitive tool call."""
+    parts = tool_name.split(".", 1)
+    action = parts[1] if len(parts) > 1 else tool_name
+    verb = {
+        "create": "create",
+        "update": "update",
+        "delete": "delete",
+    }.get(action.split("_", 1)[0], "run")
+    lines = [f"I'll {verb} this trigger:"]
+    if "name" in args:
+        lines.append(f"- **Name:** {args['name']}")
+    if "id" in args:
+        lines.append(f"- **ID:** {args['id']}")
+    if "cron_expression" in args:
+        lines.append(f"- **Schedule:** `{args['cron_expression']}`")
+    if "payload_template" in args:
+        p = args["payload_template"]
+        if isinstance(p, dict):
+            if "goal" in p:
+                lines.append(f"- **Goal:** {p['goal']}")
+            elif "tool" in p:
+                lines.append(f"- **Tool:** {p['tool']}")
+    lines.append("")
+    lines.append("Confirm?")
+    return "\n".join(lines)
+
+
+def _record_run(
+    db: Session,
+    tool_name: str,
+    tool_input: dict,
+    output: dict | None,
+    error: str | None = None,
+) -> None:
+    """Persist a Run row for tool-call audit."""
+    run = Run(
+        id=str(uuid4()),
+        tool_name=tool_name,
+        task_id=None,
+        executor_type="chat",
+        trigger_type="chat",
+        input=tool_input,
+        status="failed" if error else "succeeded",
+        output=output,
+        error=error,
+        summary=f"{tool_name} \u2192 {'failed' if error else 'succeeded'}",
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(run)
+    db.commit()
+
+
+def _dispatch_tool_call(db: Session, tc: dict) -> dict:
+    """Run a non-sensitive tool synchronously; record Run; return output."""
+    name = tc["name"]
+    args = tc.get("arguments") or {}
     try:
-        match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-        cleaned = match.group(1).strip() if match else text.strip()
-        return json.loads(cleaned)
-    except Exception:
-        return None
+        output = tool_handlers.dispatch(name, args, db, _settings)
+        _record_run(db, name, args, output, error=None)
+        return output
+    except Exception as exc:
+        _record_run(db, name, args, output=None, error=str(exc))
+        return {"error": str(exc)}
+
+
+def _synth_stream(text: str):
+    """Yield a string as a single chunk; mirrors route_streaming's generator shape."""
+    yield text
 
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -166,97 +271,115 @@ def send_message(
         .all()
     )
 
-    # --- Phase 1: Intent classification (MUST run before generator is defined) ---
-    tools = db.query(Tool).filter(Tool.enabled == True).all()  # noqa: E712
-    tool_list = "\n".join(f"  - {t.name}: {t.description}" for t in tools)
-    classify_messages = [
-        {
-            "role": "system",
-            "content": (
-                "You are an intent classifier for Nova, an AI agent running on a real machine.\n"
-                f"Classify the user message. Available tools:\n{tool_list}\n\n"
-                "Use shell.run for ANY question about the system Nova runs on: "
-                "hostname, OS, disk space, running processes, environment variables, etc. "
-                "Use fs.read or fs.list for file/directory questions. "
-                "Use nova.query_activity for questions about Nova's own history or runs.\n\n"
-                'Respond ONLY with JSON:\n'
-                '{"intent": "action" | "conversation", '
-                '"tool_name": string | null, '
-                '"tool_input": object | null, '
-                '"confidence": number}\n\n'
-                'If unsure, return intent="conversation".'
-            ),
-        },
-        {"role": "user", "content": body.content},
-    ]
+    # These are resolved below; captured by generate() closure.
+    final_stream = None  # iterable of text chunks for user-visible reply
+    final_text_override: str | None = None  # non-None ⇒ use this verbatim for persistence
+    final_messages: list[dict] | None = None  # set when Phase 2 will be used
 
-    tool_name = None    # captured by generator closure
-    tool_context = None  # captured by generator closure
-
-    try:
-        classify_result = llm_client.route_internal(db, "classify", classify_messages)
-        c = _parse_json_safe(classify_result) or {}
-    except Exception:
-        c = {}
-
-    if (
-        c.get("intent") == "action"
-        and c.get("confidence", 0) >= 0.5
-        and c.get("tool_name") in tool_handlers._REGISTRY
-    ):
-        tool_name = c["tool_name"]
-        tool_input = c.get("tool_input") or {}
-
-        run = Run(
-            id=str(uuid4()),
-            tool_name=tool_name,
-            task_id=None,
-            executor_type="chat",
-            trigger_type="chat",
-            input=tool_input,
-            status="running",
-            started_at=datetime.now(timezone.utc),
-        )
-        db.add(run)
+    # ----- Step A: pending confirmation, if any -----
+    verdict, pending = _check_pending_confirmation(conv, body.content)
+    if verdict == "confirm":
+        tool_output = _dispatch_tool_call(db, pending)
+        conv.pending_tool_call = None
+        conv.pending_tool_call_at = None
         db.commit()
+        reply_text = tool_output.get("summary") if isinstance(tool_output, dict) else None
+        if not reply_text:
+            reply_text = f"Done. {json.dumps(tool_output)}"
+        final_stream = _synth_stream(reply_text)
+        final_text_override = reply_text
 
-        try:
-            output = tool_handlers.dispatch(tool_name, tool_input, db)
-            run.status = "succeeded"
-            run.output = output
-            run.summary = f"{tool_name} \u2192 succeeded"
-            tool_context = (
-                f"You just ran `{tool_name}`. "
-                f"Result: {json.dumps(output)}. Status: succeeded."
+    elif verdict == "deny":
+        conv.pending_tool_call = None
+        conv.pending_tool_call_at = None
+        db.commit()
+        final_stream = _synth_stream("Cancelled.")
+        final_text_override = "Cancelled."
+
+    else:
+        # ----- Step B: Phase 1 — synchronous tool-calling loop -----
+        system_content = _build_system_prompt(db)
+        messages: list[dict] = [{"role": "system", "content": system_content}]
+        for m in history:
+            messages.append({"role": m.role, "content": m.content})
+
+        tools = _tool_catalog(db)
+        intercepted_confirmation: str | None = None
+
+        for _turn in range(MAX_TOOL_TURNS):
+            try:
+                result = llm_client.route_with_tools(
+                    db, purpose="chat", messages=messages, tools=tools
+                )
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
+
+            tool_calls = result.get("tool_calls") or []
+            if not tool_calls:
+                # LLM emitted text — drop to Phase 2 streaming.
+                break
+
+            sensitive = next(
+                (tc for tc in tool_calls if tc["name"] in SENSITIVE_TOOLS), None
             )
-        except Exception as exc:
-            run.status = "failed"
-            run.error = str(exc)
-            run.summary = f"{tool_name} \u2192 failed"
-            tool_context = f"You tried to run `{tool_name}` but it failed: {exc}."
-        finally:
-            run.finished_at = datetime.now(timezone.utc)
-            db.commit()
+            if sensitive:
+                conv.pending_tool_call = sensitive
+                conv.pending_tool_call_at = datetime.now(timezone.utc)
+                db.commit()
+                intercepted_confirmation = _render_confirmation(
+                    sensitive["name"], sensitive.get("arguments") or {}
+                )
+                break
 
-    # --- Phase 2: Build messages for response LLM call ---
-    base_prompt = _build_system_prompt(db)
-    system_prompt = (tool_context + "\n\n" + base_prompt) if tool_context else base_prompt
-    messages = [{"role": "system", "content": system_prompt}] + [
-        {"role": m.role, "content": m.content} for m in history
-    ]
+            for tc in tool_calls:
+                output = _dispatch_tool_call(db, tc)
+                # Append assistant tool_call message followed by tool result.
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "type": "function",
+                                "function": {
+                                    "name": tc["name"],
+                                    "arguments": json.dumps(tc.get("arguments") or {}),
+                                },
+                            }
+                        ],
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "tool",
+                        "name": tc["name"],
+                        "content": json.dumps(output),
+                    }
+                )
 
+        if intercepted_confirmation is not None:
+            final_stream = _synth_stream(intercepted_confirmation)
+            final_text_override = intercepted_confirmation
+        else:
+            # Phase 2: stream the final reply using existing streaming machinery.
+            final_messages = messages
+
+    # ----- Non-streaming fast path -----
     if not body.stream:
-        try:
-            result = llm_client.route(db, "chat", messages)
-            output = result.output
-        except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
+        if final_text_override is not None:
+            reply = final_text_override
+        else:
+            try:
+                result = llm_client.route(db, "chat", final_messages or [])
+                reply = result.output
+            except Exception as exc:
+                raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
 
         assistant_msg = Message(
             id=str(uuid4()),
             conversation_id=conversation_id,
             role="assistant",
-            content=output,
+            content=reply,
         )
         db.add(assistant_msg)
         conv.updated_at = datetime.now(timezone.utc)
@@ -264,14 +387,17 @@ def send_message(
         db.refresh(assistant_msg)
         return MessageRead.model_validate(assistant_msg)
 
-    # Streaming path — generator reads tool_name + tool_context from closure
+    # ----- Streaming (SSE) path -----
     def generate():
-        if tool_name:
-            yield f"data: {json.dumps({'delta': f'[Running {tool_name}...]\n'})}\n\n"
-
         full_content: list[str] = []
         try:
-            for chunk in llm_client.route_streaming(db, "chat", messages):
+            if final_stream is not None:
+                stream_iter = final_stream
+            else:
+                stream_iter = llm_client.route_streaming(
+                    db, "chat", final_messages or []
+                )
+            for chunk in stream_iter:
                 full_content.append(chunk)
                 yield f"data: {json.dumps({'delta': chunk})}\n\n"
         except Exception as exc:
@@ -280,11 +406,14 @@ def send_message(
             db.commit()
             return
 
+        persist_text = (
+            final_text_override if final_text_override is not None else "".join(full_content)
+        )
         assistant_msg = Message(
             id=str(uuid4()),
             conversation_id=conversation_id,
             role="assistant",
-            content="".join(full_content),
+            content=persist_text,
         )
         db.add(assistant_msg)
         conv.updated_at = datetime.now(timezone.utc)

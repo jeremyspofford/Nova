@@ -56,9 +56,9 @@ def make_provider_in_db(db_session):
     p.name = "test"
     p.provider_type = "local"
     p.endpoint_ref = "http://localhost:11434/v1"
-    p.model_ref = "gemma3:4b"
+    p.model_ref = "qwen2.5-coder:7b"
     p.enabled = True
-    p.supports_tools = False
+    p.supports_tools = True
     p.supports_streaming = True
     p.privacy_class = "local_only"
     p.cost_class = "low"
@@ -72,14 +72,18 @@ def fake_streaming_caller(provider, messages):
     yield " Nova"
 
 
+def text_only_route_with_tools(content: str):
+    """Helper: mock route_with_tools to return plain text (no tool_calls)."""
+    return {"content": content}
+
+
 def test_send_message_non_streaming(client, db_session):
     make_provider_in_db(db_session)
     conv = client.post("/conversations").json()
 
-    def fake_caller(provider, messages):
-        return "Non-streaming reply"
-
-    with patch("app.llm_client._call_provider_real", fake_caller):
+    # Phase 1 returns no tool_calls so Phase 2 runs via route() → _call_provider_real.
+    with patch("app.llm_client.route_with_tools", return_value={"content": ""}), \
+         patch("app.llm_client._call_provider_real", lambda p, m: "Non-streaming reply"):
         resp = client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "hello", "stream": False},
@@ -96,7 +100,8 @@ def test_send_message_persists_user_message(client, db_session):
     make_provider_in_db(db_session)
     conv = client.post("/conversations").json()
 
-    with patch("app.llm_client._call_provider_real", lambda p, m: "ok"):
+    with patch("app.llm_client.route_with_tools", return_value={"content": ""}), \
+         patch("app.llm_client._call_provider_real", lambda p, m: "ok"):
         client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "my question", "stream": False},
@@ -113,7 +118,8 @@ def test_send_message_sse_streams_chunks(client, db_session):
     make_provider_in_db(db_session)
     conv = client.post("/conversations").json()
 
-    with patch("app.llm_client._call_provider_streaming_real", fake_streaming_caller):
+    with patch("app.llm_client.route_with_tools", return_value={"content": ""}), \
+         patch("app.llm_client._call_provider_streaming_real", fake_streaming_caller):
         resp = client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "hi", "stream": True},
@@ -132,7 +138,8 @@ def test_send_message_sse_persists_assistant_message(client, db_session):
     make_provider_in_db(db_session)
     conv = client.post("/conversations").json()
 
-    with patch("app.llm_client._call_provider_streaming_real", fake_streaming_caller):
+    with patch("app.llm_client.route_with_tools", return_value={"content": ""}), \
+         patch("app.llm_client._call_provider_streaming_real", fake_streaming_caller):
         client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "hi", "stream": True},
@@ -147,7 +154,8 @@ def test_send_message_sets_title_from_first_message(client, db_session):
     conv = client.post("/conversations").json()
     assert conv["title"] == "New Chat"
 
-    with patch("app.llm_client._call_provider_real", lambda p, m: "reply"):
+    with patch("app.llm_client.route_with_tools", return_value={"content": ""}), \
+         patch("app.llm_client._call_provider_real", lambda p, m: "reply"):
         client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "Turn on the living room lights please", "stream": False},
@@ -162,7 +170,8 @@ def test_send_message_title_truncates_at_word_boundary(client, db_session):
     conv = client.post("/conversations").json()
     long_msg = "This is a very long message that definitely exceeds fifty characters total here"
 
-    with patch("app.llm_client._call_provider_real", lambda p, m: "ok"):
+    with patch("app.llm_client.route_with_tools", return_value={"content": ""}), \
+         patch("app.llm_client._call_provider_real", lambda p, m: "ok"):
         client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": long_msg, "stream": False},
@@ -183,33 +192,22 @@ def test_send_message_conversation_not_found(client):
     assert resp.status_code == 404
 
 
-def test_parse_json_safe_parses_plain_json():
-    from app.routers.conversations import _parse_json_safe
-    assert _parse_json_safe('{"intent": "action", "confidence": 0.9}') == {
-        "intent": "action", "confidence": 0.9
-    }
-
-
-def test_parse_json_safe_strips_markdown_fences():
-    from app.routers.conversations import _parse_json_safe
-    text = '```json\n{"intent": "conversation"}\n```'
-    assert _parse_json_safe(text) == {"intent": "conversation"}
-
-
-def test_parse_json_safe_returns_none_on_invalid():
-    from app.routers.conversations import _parse_json_safe
-    assert _parse_json_safe("not json") is None
-    assert _parse_json_safe("") is None
-
-
-def test_action_intent_executes_tool_and_creates_run(client, db_session):
-    """When classifier returns action intent, tool runs and a Run is created."""
+def test_tool_call_executes_and_creates_run(client, db_session):
+    """When route_with_tools emits a tool_call, the tool runs and a Run row is created."""
     make_provider_in_db(db_session)
+    from app.tools.seed import seed_tools
+    seed_tools(db_session)
     conv = client.post("/conversations").json()
 
-    classify_resp = '{"intent": "action", "tool_name": "debug.echo", "tool_input": {"message": "hi"}, "confidence": 0.95}'
-
-    with patch("app.llm_client._call_provider_real", side_effect=[classify_resp, "Done!"]):
+    # First turn returns a tool_call; second turn returns content (Phase 1 exits loop);
+    # Phase 2 then streams the final reply via _call_provider_real.
+    with patch(
+        "app.llm_client.route_with_tools",
+        side_effect=[
+            {"tool_calls": [{"name": "debug.echo", "arguments": {"message": "hi"}}]},
+            {"content": ""},  # unused; Phase 2 uses route()
+        ],
+    ), patch("app.llm_client._call_provider_real", lambda p, m: "Done!"):
         resp = client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "echo hi", "stream": False},
@@ -222,35 +220,23 @@ def test_action_intent_executes_tool_and_creates_run(client, db_session):
     assert runs[0].tool_name == "debug.echo"
     assert runs[0].trigger_type == "chat"
     assert runs[0].status == "succeeded"
-    assert runs[0].summary == "debug.echo → succeeded"
+    assert runs[0].summary == "debug.echo \u2192 succeeded"
 
 
-def test_low_confidence_falls_through_no_run(client, db_session):
-    """confidence < 0.7 → no Run created, normal reply."""
+def test_unknown_tool_call_records_failed_run(client, db_session):
+    """When route_with_tools emits a bogus tool name, Run is recorded as failed."""
     make_provider_in_db(db_session)
+    from app.tools.seed import seed_tools
+    seed_tools(db_session)
     conv = client.post("/conversations").json()
 
-    classify_resp = '{"intent": "action", "tool_name": "debug.echo", "tool_input": {}, "confidence": 0.5}'
-
-    with patch("app.llm_client._call_provider_real", side_effect=[classify_resp, "Not sure."]):
-        resp = client.post(
-            f"/conversations/{conv['id']}/messages",
-            json={"content": "maybe echo?", "stream": False},
-        )
-
-    assert resp.status_code == 201
-    from app.models.run import Run
-    assert db_session.query(Run).count() == 0
-
-
-def test_unknown_tool_falls_through_no_run(client, db_session):
-    """tool_name not in _REGISTRY → no Run created."""
-    make_provider_in_db(db_session)
-    conv = client.post("/conversations").json()
-
-    classify_resp = '{"intent": "action", "tool_name": "nonexistent.tool", "tool_input": {}, "confidence": 0.95}'
-
-    with patch("app.llm_client._call_provider_real", side_effect=[classify_resp, "Nope."]):
+    with patch(
+        "app.llm_client.route_with_tools",
+        side_effect=[
+            {"tool_calls": [{"name": "nonexistent.tool", "arguments": {}}]},
+            {"content": ""},
+        ],
+    ), patch("app.llm_client._call_provider_real", lambda p, m: "I couldn't find that tool."):
         resp = client.post(
             f"/conversations/{conv['id']}/messages",
             json={"content": "do the thing", "stream": False},
@@ -258,25 +244,8 @@ def test_unknown_tool_falls_through_no_run(client, db_session):
 
     assert resp.status_code == 201
     from app.models.run import Run
-    assert db_session.query(Run).count() == 0
-
-
-def test_action_sse_emits_running_acknowledgment(client, db_session):
-    """Streaming path emits [Running tool...] as first delta."""
-    make_provider_in_db(db_session)
-    conv = client.post("/conversations").json()
-
-    classify_resp = '{"intent": "action", "tool_name": "debug.echo", "tool_input": {"message": "t"}, "confidence": 0.9}'
-
-    with patch("app.llm_client._call_provider_real", return_value=classify_resp):
-        with patch("app.llm_client._call_provider_streaming_real", fake_streaming_caller):
-            resp = client.post(
-                f"/conversations/{conv['id']}/messages",
-                json={"content": "echo t", "stream": True},
-            )
-
-    import json as _json
-    lines = [l for l in resp.text.split("\n") if l.startswith("data: ")]
-    events = [_json.loads(l[6:]) for l in lines]
-    deltas = [e["delta"] for e in events if "delta" in e]
-    assert deltas[0].startswith("[Running debug.echo")
+    runs = db_session.query(Run).all()
+    assert len(runs) == 1
+    assert runs[0].tool_name == "nonexistent.tool"
+    assert runs[0].status == "failed"
+    assert runs[0].error is not None

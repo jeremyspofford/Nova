@@ -86,6 +86,44 @@ def route_internal(
     return result.output
 
 
+def route_with_tools(
+    db: Session,
+    purpose: str,
+    messages: list[dict],
+    tools: list[dict],
+    privacy_preference: str = "local_preferred",
+    _caller=None,
+) -> dict:
+    """Issue an LLM call with a tool catalog, returning either content or tool_calls.
+
+    Returns:
+        {"content": str} if the model replied with text only, or
+        {"tool_calls": [{"name": str, "arguments": dict}, ...]} if it requested calls.
+
+    _caller(provider, messages, tools) -> dict  — injectable for tests; omit in production.
+    """
+    _caller = _caller or _call_provider_with_tools_real
+
+    providers = db.query(LLMProviderProfile).filter(
+        LLMProviderProfile.enabled == True  # noqa: E712
+    ).all()
+    if not providers:
+        raise NoProvidersError()
+
+    candidates = _select_candidates(providers, privacy_preference)
+    if not candidates:
+        raise NoMatchingProvidersError()
+
+    last_error: Exception | None = None
+    for provider in candidates:
+        try:
+            return _caller(provider, messages, tools)
+        except Exception as exc:
+            last_error = exc
+
+    raise AllProvidersFailed(last_error)
+
+
 def route_streaming(
     db: Session,
     purpose: str,
@@ -152,6 +190,41 @@ def _call_provider_real(provider, messages: list[dict]) -> str:
         messages=messages,
     )
     return response.choices[0].message.content
+
+
+def _call_provider_with_tools_real(provider, messages: list[dict], tools: list[dict]) -> dict:
+    """Call provider with a tool catalog. Returns content-or-tool_calls dict."""
+    import json as _json
+    import os
+    from openai import OpenAI
+
+    if provider.provider_type == "local":
+        api_key = "ollama"
+    else:
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "Cloud provider selected but no OPENAI_API_KEY or ANTHROPIC_API_KEY is set"
+            )
+
+    client = OpenAI(base_url=provider.endpoint_ref, api_key=api_key)
+    kwargs = {"model": provider.model_ref, "messages": messages}
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
+    response = client.chat.completions.create(**kwargs)
+    choice = response.choices[0].message
+    if getattr(choice, "tool_calls", None):
+        return {
+            "tool_calls": [
+                {
+                    "name": tc.function.name,
+                    "arguments": _json.loads(tc.function.arguments or "{}"),
+                }
+                for tc in choice.tool_calls
+            ]
+        }
+    return {"content": choice.content or ""}
 
 
 def _call_provider_streaming_real(provider, messages: list[dict]):
