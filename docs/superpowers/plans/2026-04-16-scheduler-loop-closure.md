@@ -1,0 +1,2249 @@
+# Scheduler Loop Closure Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Close the scheduler loop by (A) making the two default triggers produce useful output via deterministic tool handlers with activity-first / task-on-escalation semantics, and (B) enabling chat-driven creation/management of user-defined triggers with natural-language → cron translation, via an LLM tool-calling upgrade.
+
+**Architecture:** Cron expressions replace intervals (`croniter`). Trigger payloads are a union (`{tool, input}` or `{goal}`). Triage branches on `source=="scheduler"`: tool-type bypasses the classification LLM and invokes the handler directly, reading `{status: ok|action_needed}` to route to activity-only vs. task-creation. The default Ollama model swaps to `qwen2.5-coder:7b` and `supports_tools` flips to `True`. Conversations gain a real tool-calling loop + `pending_tool_call` state for sensitive-op confirmation via a regex allowlist.
+
+**Tech Stack:** Python 3.12, SQLAlchemy 2.0, Alembic, FastAPI, Pydantic v2, httpx, pytest, React/TypeScript (board), Ollama (qwen2.5-coder:7b), croniter, psutil
+
+---
+
+## File Map
+
+**New files:**
+
+| File | Responsibility |
+|---|---|
+| `services/api/alembic/versions/0005_cron_schedules.py` | Replace `interval_seconds` with `cron_expression`, migrate the 2 seeds |
+| `services/api/alembic/versions/0006_conversation_pending_tool_call.py` | Add `pending_tool_call` JSONB column to `conversations` |
+| `services/api/app/tools/nova_handlers.py` | `nova.system_health` + `nova.daily_summary` handlers with typed `{status, ...}` return |
+| `services/api/app/tools/scheduler_handlers.py` | 4 scheduler-management handlers (create/list/update/delete) that operate in-process via SQLAlchemy session |
+| `services/api/tests/test_nova_handlers.py` | Tests for the two default handlers |
+| `services/api/tests/test_scheduler_handlers.py` | Tests for the four scheduler-management handlers |
+| `services/api/tests/test_tool_calling_loop.py` | Tests for the new conversations tool-calling path |
+| `services/board/src/components/Settings/ScheduledTriggersPanel.tsx` | Read-only triggers list in Settings |
+| `services/board/src/lib/cron-to-nl.ts` | Cron-expression → human-readable string helper |
+
+**Modified files:**
+
+| File | Change |
+|---|---|
+| `services/api/requirements.txt` | Add `croniter==2.0.7`, `psutil==6.1.0` |
+| `services/api/app/models/scheduled_trigger.py` | Drop `interval_seconds`, add `cron_expression` |
+| `services/api/app/schemas/scheduled_trigger.py` | New `ScheduledTriggerCreate`; update `ScheduledTriggerUpdate`; cron validator; payload union validator |
+| `services/api/app/routers/system.py` | Add `POST /system/triggers` and `DELETE /system/triggers/{id}`; PATCH validates cron |
+| `services/api/app/tools/seed.py` | Migrate `seed_scheduled_triggers` to cron; add 6 new tools to `seed_tools` |
+| `services/api/app/tools/handlers.py` | Register `nova.*` and `scheduler.*` in `_REGISTRY`; wire to DB/config where needed |
+| `services/api/app/models/conversation.py` | Add `pending_tool_call` column |
+| `services/api/app/routers/conversations.py` | Replace intent-classifier with tool-calling loop; add confirmation handling |
+| `services/api/app/routers/health.py` | Add `model_ready` boolean to `/health` |
+| `services/api/app/config.py` | Default `ollama_model` → `qwen2.5-coder:7b` |
+| `services/api/tests/test_system.py` | Add tests for POST/DELETE + cron + payload validation |
+| `services/api/tests/test_conversations.py` | Update existing tests for tool-calling path |
+| `services/nova-lite/requirements.txt` | Add `croniter==2.0.7` |
+| `services/nova-lite/app/logic/scheduler.py` | Rewrite `_is_due` using croniter |
+| `services/nova-lite/app/logic/triage.py` | Add scheduler-source branch before `llm_route` |
+| `services/nova-lite/tests/test_scheduler.py` | Update fixtures to use cron expressions |
+| `services/nova-lite/tests/test_triage.py` | Add scheduler-source routing tests |
+| `services/nova-lite/tests/conftest.py` | `FakeClient.invoke_tool` return-shape extension for handler contract |
+| `services/board/src/components/Settings/Settings.tsx` | Include `<ScheduledTriggersPanel />` |
+| `services/board/src/api/triggers.ts` (new) | `getTriggers()` fetch helper |
+
+---
+
+## Task 1: Cron Schema Migration + Model + Pydantic
+
+**Files:**
+- Modify: `services/api/requirements.txt`
+- Modify: `services/api/app/models/scheduled_trigger.py`
+- Modify: `services/api/app/schemas/scheduled_trigger.py`
+- Create: `services/api/alembic/versions/0005_cron_schedules.py`
+- Modify: `services/api/app/tools/seed.py`
+
+- [ ] **Step 1: Add croniter dependency**
+
+Append to `services/api/requirements.txt`:
+
+```
+croniter==2.0.7
+psutil==6.1.0
+```
+
+- [ ] **Step 2: Update the `ScheduledTrigger` model**
+
+In `services/api/app/models/scheduled_trigger.py`, replace `interval_seconds` column with `cron_expression`:
+
+```python
+from sqlalchemy import Boolean, Column, DateTime, String, func
+from sqlalchemy.types import JSON
+from app.database import Base
+
+
+class ScheduledTrigger(Base):
+    __tablename__ = "scheduled_triggers"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    cron_expression = Column(String, nullable=False)
+    active_hours_start = Column(String, nullable=True)
+    active_hours_end = Column(String, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+    payload_template = Column(JSON, nullable=False, default=dict)
+    last_fired_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+```
+
+(Note: `Integer` import removed.)
+
+- [ ] **Step 3: Update Pydantic schemas**
+
+Replace contents of `services/api/app/schemas/scheduled_trigger.py`:
+
+```python
+from datetime import datetime
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+HHMM_PATTERN = r"^([01]\d|2[0-3]):[0-5]\d$"
+
+
+def _validate_cron(v: str) -> str:
+    from croniter import croniter
+    if not croniter.is_valid(v):
+        raise ValueError(f"invalid cron expression: {v}")
+    return v
+
+
+def _validate_payload_shape(payload: dict) -> dict:
+    has_tool = "tool" in payload
+    has_goal = "goal" in payload
+    if has_tool and has_goal:
+        raise ValueError("payload cannot contain both 'tool' and 'goal'")
+    if not (has_tool or has_goal):
+        raise ValueError("payload must contain either 'tool' or 'goal'")
+    if has_goal:
+        goal = payload["goal"]
+        if not isinstance(goal, str) or not goal.strip():
+            raise ValueError("goal must be a non-empty string")
+    if has_tool:
+        tool = payload["tool"]
+        if not isinstance(tool, str) or not tool.strip():
+            raise ValueError("tool must be a non-empty string")
+    return payload
+
+
+class ScheduledTriggerRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    description: str | None
+    cron_expression: str
+    active_hours_start: str | None
+    active_hours_end: str | None
+    enabled: bool
+    payload_template: dict[str, Any]
+    last_fired_at: datetime | None
+
+
+class ScheduledTriggerCreate(BaseModel):
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    name: str
+    description: str | None = None
+    cron_expression: str
+    payload_template: dict[str, Any]
+    active_hours_start: str | None = Field(default=None, pattern=HHMM_PATTERN)
+    active_hours_end: str | None = Field(default=None, pattern=HHMM_PATTERN)
+    enabled: bool = True
+
+    @field_validator("cron_expression")
+    @classmethod
+    def _cron(cls, v): return _validate_cron(v)
+
+    @model_validator(mode="after")
+    def _payload(self):
+        _validate_payload_shape(self.payload_template)
+        return self
+
+
+class ScheduledTriggerUpdate(BaseModel):
+    enabled: bool | None = None
+    cron_expression: str | None = None
+    payload_template: dict[str, Any] | None = None
+    active_hours_start: str | None = Field(default=None, pattern=HHMM_PATTERN)
+    active_hours_end: str | None = Field(default=None, pattern=HHMM_PATTERN)
+    last_fired_at: datetime | None = None
+
+    @field_validator("cron_expression")
+    @classmethod
+    def _cron(cls, v):
+        return _validate_cron(v) if v is not None else v
+
+    @model_validator(mode="after")
+    def _payload(self):
+        if self.payload_template is not None:
+            _validate_payload_shape(self.payload_template)
+        return self
+
+
+class ScheduledTriggerListResponse(BaseModel):
+    triggers: list[ScheduledTriggerRead]
+```
+
+- [ ] **Step 4: Write the Alembic migration**
+
+Create `services/api/alembic/versions/0005_cron_schedules.py`:
+
+```python
+"""replace interval_seconds with cron_expression
+
+Revision ID: 0005
+Revises: 0004
+Create Date: 2026-04-16
+"""
+from alembic import op
+import sqlalchemy as sa
+
+revision = "0005"
+down_revision = "0004"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column("scheduled_triggers", sa.Column("cron_expression", sa.String(), nullable=True))
+    op.execute(
+        "UPDATE scheduled_triggers SET cron_expression = '*/30 * * * *' WHERE id = 'system-heartbeat'"
+    )
+    op.execute(
+        "UPDATE scheduled_triggers SET cron_expression = '0 0 * * *' WHERE id = 'daily-summary'"
+    )
+    op.alter_column("scheduled_triggers", "cron_expression", nullable=False)
+    op.drop_column("scheduled_triggers", "interval_seconds")
+
+
+def downgrade() -> None:
+    op.add_column("scheduled_triggers", sa.Column("interval_seconds", sa.Integer(), nullable=True))
+    op.execute(
+        "UPDATE scheduled_triggers SET interval_seconds = 1800 WHERE id = 'system-heartbeat'"
+    )
+    op.execute(
+        "UPDATE scheduled_triggers SET interval_seconds = 86400 WHERE id = 'daily-summary'"
+    )
+    op.alter_column("scheduled_triggers", "interval_seconds", nullable=False)
+    op.drop_column("scheduled_triggers", "cron_expression")
+```
+
+- [ ] **Step 5: Update `seed_scheduled_triggers`**
+
+In `services/api/app/tools/seed.py`, change the two default definitions so their payloads match the new `{tool, input}` shape and they use cron:
+
+```python
+defaults = [
+    dict(
+        id="system-heartbeat",
+        name="System Heartbeat",
+        description=(
+            "Periodic system health check: disk usage, memory, stale tasks, "
+            "and recent run failures."
+        ),
+        cron_expression="*/30 * * * *",
+        enabled=True,
+        payload_template={"tool": "nova.system_health", "input": {}},
+    ),
+    dict(
+        id="daily-summary",
+        name="Daily Summary",
+        description=(
+            "Summarise Nova's past 24h of activity — events, runs, and "
+            "completed/failed tasks — into a read-once digest."
+        ),
+        cron_expression="0 0 * * *",
+        enabled=True,
+        payload_template={"tool": "nova.daily_summary", "input": {"window_hours": 24}},
+    ),
+]
+```
+
+Remove the `interval_seconds=...` lines. Keep the upsert logic as-is (existing rows' `enabled`/`cron_expression`/etc. are preserved; only `name` and `description` refresh).
+
+- [ ] **Step 6: Apply migration against live DB and rebuild API image**
+
+```bash
+cd /home/jeremy/workspace/nova-suite
+./dev --build
+```
+
+Wait for API health to return `status: ok`, then verify:
+
+```bash
+docker compose -f infra/docker-compose.yml exec db \
+  psql -U nova -d nova -c "\d scheduled_triggers"
+```
+
+Expected: `cron_expression | character varying | not null`; no `interval_seconds` column.
+
+- [ ] **Step 7: Verify existing system tests still pass**
+
+```bash
+cd services/api
+pytest tests/test_system.py -v
+```
+
+Expected: all 7 existing system tests pass. One specific test to confirm: `test_seed_preserves_user_modifications` still locks in the preservation guarantee (name/description refresh; enabled/interval_seconds preserved — now interpret as `enabled/cron_expression preserved`). If that test referenced `interval_seconds`, update the assertion to `cron_expression`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add services/api/requirements.txt \
+        services/api/app/models/scheduled_trigger.py \
+        services/api/app/schemas/scheduled_trigger.py \
+        services/api/alembic/versions/0005_cron_schedules.py \
+        services/api/app/tools/seed.py \
+        services/api/tests/test_system.py
+git commit -m "feat(api): replace interval_seconds with cron_expression on scheduled_triggers"
+```
+
+---
+
+## Task 2: POST/DELETE Endpoints + Cron Validation
+
+**Files:**
+- Modify: `services/api/app/routers/system.py`
+- Modify: `services/api/tests/test_system.py`
+
+- [ ] **Step 1: Write failing tests for POST/DELETE**
+
+Append to `services/api/tests/test_system.py`:
+
+```python
+def test_create_trigger_valid_cron(client):
+    resp = client.post("/system/triggers", json={
+        "id": "test-trigger",
+        "name": "Test",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"tool": "debug.echo", "input": {}},
+    })
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "test-trigger"
+
+
+def test_create_trigger_invalid_cron(client):
+    resp = client.post("/system/triggers", json={
+        "id": "bad",
+        "name": "Bad",
+        "cron_expression": "not a cron",
+        "payload_template": {"tool": "debug.echo"},
+    })
+    assert resp.status_code == 422
+
+
+def test_create_trigger_conflicting_payload(client):
+    resp = client.post("/system/triggers", json={
+        "id": "conflict",
+        "name": "Conflict",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"tool": "x", "goal": "y"},
+    })
+    assert resp.status_code == 422
+
+
+def test_create_trigger_empty_goal(client):
+    resp = client.post("/system/triggers", json={
+        "id": "empty",
+        "name": "Empty",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"goal": ""},
+    })
+    assert resp.status_code == 422
+
+
+def test_create_trigger_bad_id_pattern(client):
+    resp = client.post("/system/triggers", json={
+        "id": "NotKebabCase",
+        "name": "X",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"goal": "x"},
+    })
+    assert resp.status_code == 422
+
+
+def test_delete_trigger(client, db_session):
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    resp = client.delete("/system/triggers/system-heartbeat")
+    assert resp.status_code == 200
+    follow = client.get("/system/triggers")
+    ids = {t["id"] for t in follow.json()["triggers"]}
+    assert "system-heartbeat" not in ids
+
+
+def test_delete_trigger_not_found(client):
+    resp = client.delete("/system/triggers/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_patch_rejects_invalid_cron(client, db_session):
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    resp = client.patch("/system/triggers/system-heartbeat",
+                        json={"cron_expression": "nope"})
+    assert resp.status_code == 422
+```
+
+Also update the existing `test_patch_trigger_rejects_nonpositive_interval` — it references a field that no longer exists. Remove it entirely, or replace with `test_patch_rejects_invalid_cron` which is already above.
+
+- [ ] **Step 2: Run tests — confirm failures**
+
+```bash
+cd services/api
+pytest tests/test_system.py -v
+```
+
+Expected: the new tests fail (405 Method Not Allowed for POST/DELETE; 404 for PATCH invalid cron).
+
+- [ ] **Step 3: Implement POST and DELETE**
+
+In `services/api/app/routers/system.py`, add after the existing PATCH handler:
+
+```python
+from app.schemas.scheduled_trigger import (
+    ScheduledTriggerCreate,
+    ScheduledTriggerListResponse,
+    ScheduledTriggerRead,
+    ScheduledTriggerUpdate,
+)
+
+
+@router.post("/triggers", response_model=ScheduledTriggerRead)
+def create_trigger(body: ScheduledTriggerCreate, db: Session = Depends(get_db)):
+    existing = db.query(ScheduledTrigger).filter(ScheduledTrigger.id == body.id).first()
+    if existing:
+        raise HTTPException(409, detail=f"Trigger '{body.id}' already exists")
+    trigger = ScheduledTrigger(**body.model_dump())
+    db.add(trigger)
+    db.commit()
+    db.refresh(trigger)
+    return ScheduledTriggerRead.model_validate(trigger)
+
+
+@router.delete("/triggers/{trigger_id}")
+def delete_trigger(trigger_id: str, db: Session = Depends(get_db)):
+    trigger = db.query(ScheduledTrigger).filter(ScheduledTrigger.id == trigger_id).first()
+    if not trigger:
+        raise HTTPException(404, detail="Trigger not found")
+    db.delete(trigger)
+    db.commit()
+    return {"status": "deleted", "id": trigger_id}
+```
+
+- [ ] **Step 4: Run tests — confirm all pass**
+
+```bash
+pytest tests/test_system.py -v
+```
+
+Expected: all system tests pass (existing + 7 new).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add services/api/app/routers/system.py services/api/tests/test_system.py
+git commit -m "feat(api): add POST and DELETE for /system/triggers with cron validation"
+```
+
+---
+
+## Task 3: Nova-Lite `_is_due` Cron Rewrite
+
+**Files:**
+- Modify: `services/nova-lite/requirements.txt`
+- Modify: `services/nova-lite/app/logic/scheduler.py`
+- Modify: `services/nova-lite/tests/test_scheduler.py`
+
+- [ ] **Step 1: Add croniter to nova-lite requirements**
+
+Append to `services/nova-lite/requirements.txt`:
+
+```
+croniter==2.0.7
+```
+
+- [ ] **Step 2: Update scheduler tests to use cron**
+
+Replace the `_is_due`-related tests in `services/nova-lite/tests/test_scheduler.py` (the first 5 tests in that file) with:
+
+```python
+def test_is_due_never_fired():
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": None}
+    assert _is_due(trigger, datetime.now(timezone.utc)) is True
+
+
+def test_is_due_recently_fired():
+    now = datetime(2026, 4, 16, 10, 5, tzinfo=timezone.utc)
+    recent = datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc).isoformat()
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": recent}
+    assert _is_due(trigger, now) is False
+
+
+def test_is_due_cron_occurrence_reached():
+    now = datetime(2026, 4, 16, 10, 30, tzinfo=timezone.utc)
+    last = datetime(2026, 4, 16, 10, 0, tzinfo=timezone.utc).isoformat()
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": last}
+    assert _is_due(trigger, now) is True
+
+
+def test_is_due_catchup_once():
+    """If Nova was offline for multiple cron occurrences, fire exactly once on catch-up."""
+    now = datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc)
+    last = datetime(2026, 4, 16, 9, 0, tzinfo=timezone.utc).isoformat()
+    trigger = {"enabled": True, "cron_expression": "*/30 * * * *", "last_fired_at": last}
+    assert _is_due(trigger, now) is True
+
+
+def test_is_due_disabled_trigger():
+    trigger = {"enabled": False, "cron_expression": "* * * * *", "last_fired_at": None}
+    assert _is_due(trigger, datetime.now(timezone.utc)) is False
+```
+
+Also update the `_make_trigger` helper (lines ~68-80) to emit `cron_expression` instead of `interval_seconds`:
+
+```python
+def _make_trigger(trigger_id="system-heartbeat", last_fired_offset_seconds=None):
+    now = datetime.now(timezone.utc)
+    last_fired = None
+    if last_fired_offset_seconds is not None:
+        last_fired = (now - timedelta(seconds=last_fired_offset_seconds)).isoformat()
+    return {
+        "id": trigger_id,
+        "name": "System Heartbeat",
+        "enabled": True,
+        "cron_expression": "* * * * *",  # every minute — always due if last fire is > 60s ago
+        "last_fired_at": last_fired,
+        "active_hours_start": None,
+        "active_hours_end": None,
+        "payload_template": {"tool": "nova.system_health", "input": {}},
+    }
+```
+
+- [ ] **Step 3: Run tests — confirm failures**
+
+```bash
+cd services/nova-lite
+pytest tests/test_scheduler.py -v
+```
+
+Expected: many tests fail because `_is_due` still uses `interval_seconds`.
+
+- [ ] **Step 4: Rewrite `_is_due` in scheduler module**
+
+In `services/nova-lite/app/logic/scheduler.py`:
+
+```python
+"""
+Check which scheduled triggers are due (cron-based) and emit an event for each.
+
+Each fired trigger claims its interval first (PATCH last_fired_at), then emits
+the event. Patch-first ordering means a transient API failure during firing
+will cost at most one missed event rather than spam the event stream on every
+subsequent tick until the patch eventually lands.
+"""
+import logging
+from datetime import datetime, timezone
+
+from croniter import croniter
+
+from app.client import NovaClientError
+
+log = logging.getLogger(__name__)
+
+_EPOCH = datetime.fromtimestamp(0, tz=timezone.utc)
+
+
+def _parse_last_fired(value) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    else:
+        dt = value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _is_due(trigger: dict, now: datetime) -> bool:
+    """Return True if the trigger's next cron occurrence has passed since last_fired."""
+    if not trigger.get("enabled"):
+        return False
+    last_fired = _parse_last_fired(trigger.get("last_fired_at"))
+    base = last_fired or _EPOCH
+    next_fire = croniter(trigger["cron_expression"], base).get_next(datetime)
+    return now >= next_fire
+
+
+def _in_active_hours(trigger: dict, now: datetime) -> bool:
+    """Return True if current UTC time is within the trigger's active window.
+
+    If either bound is missing, the trigger is considered always active.
+    Midnight-wrapping windows (start > end, e.g. "22:00"–"06:00") are not
+    supported: that configuration makes the comparison impossible and the
+    trigger will never fire.
+    """
+    start = trigger.get("active_hours_start")
+    end = trigger.get("active_hours_end")
+    if not start or not end:
+        return True
+    current = now.strftime("%H:%M")
+    return start <= current <= end
+
+
+def fire_due_triggers(client) -> int:
+    """
+    Fetch all triggers, fire those that are due, return the count fired.
+    Errors from individual trigger firing are logged and skipped — never raised.
+    """
+    try:
+        triggers = client.get_scheduled_triggers()
+    except NovaClientError as exc:
+        log.warning("Could not fetch scheduled triggers: %s", exc)
+        return 0
+
+    now = datetime.now(timezone.utc)
+    fired = 0
+
+    for trigger in triggers:
+        if not _is_due(trigger, now) or not _in_active_hours(trigger, now):
+            continue
+        trigger_id = trigger["id"]
+        try:
+            client.patch_scheduled_trigger(trigger_id, {"last_fired_at": now.isoformat()})
+            client.post_event({
+                "type": f"scheduled.{trigger_id}",
+                "source": "scheduler",
+                "subject": trigger["name"],
+                "payload": {**trigger.get("payload_template", {}), "trigger_id": trigger_id},
+                "correlation_id": trigger_id,
+            })
+            log.info("Fired scheduled trigger: %s", trigger_id)
+            fired += 1
+        except NovaClientError as exc:
+            log.warning("Failed to fire trigger %s: %s", trigger_id, exc)
+
+    return fired
+```
+
+- [ ] **Step 5: Run tests — confirm all pass**
+
+```bash
+pytest tests/test_scheduler.py -v
+```
+
+Expected: all 18 scheduler tests pass (the 4 new cron tests + 14 rewritten existing tests).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/nova-lite/requirements.txt \
+        services/nova-lite/app/logic/scheduler.py \
+        services/nova-lite/tests/test_scheduler.py
+git commit -m "feat(nova-lite): rewrite scheduler _is_due with croniter"
+```
+
+---
+
+## Task 4: Nova Tool Handlers (`system_health`, `daily_summary`)
+
+**Files:**
+- Create: `services/api/app/tools/nova_handlers.py`
+- Create: `services/api/tests/test_nova_handlers.py`
+- Modify: `services/api/app/tools/handlers.py`
+- Modify: `services/api/app/tools/seed.py`
+
+- [ ] **Step 1: Write failing tests**
+
+Create `services/api/tests/test_nova_handlers.py`:
+
+```python
+from unittest.mock import patch, MagicMock
+from datetime import datetime, timedelta, timezone
+
+
+def test_system_health_all_green(db_session):
+    from app.tools.nova_handlers import handle_system_health
+    with patch("shutil.disk_usage", return_value=(1000, 500, 500)):  # 50% used
+        with patch("psutil.virtual_memory", return_value=MagicMock(percent=40)):
+            result = handle_system_health({}, db_session)
+    assert result["status"] == "ok"
+    assert "disk" in result["message"].lower()
+
+
+def test_system_health_disk_threshold(db_session):
+    from app.tools.nova_handlers import handle_system_health
+    with patch("shutil.disk_usage", return_value=(1000, 50, 950)):  # 95% used
+        with patch("psutil.virtual_memory", return_value=MagicMock(percent=40)):
+            result = handle_system_health({}, db_session)
+    assert result["status"] == "action_needed"
+    assert "disk" in result["title"].lower()
+
+
+def test_system_health_memory_threshold(db_session):
+    from app.tools.nova_handlers import handle_system_health
+    with patch("shutil.disk_usage", return_value=(1000, 500, 500)):
+        with patch("psutil.virtual_memory", return_value=MagicMock(percent=95)):
+            result = handle_system_health({}, db_session)
+    assert result["status"] == "action_needed"
+    assert "memory" in result["title"].lower()
+
+
+def test_system_health_stale_tasks(db_session):
+    from app.tools.nova_handlers import handle_system_health
+    from app.models.task import Task
+    stale = Task(
+        id="stale-1",
+        title="old",
+        status="pending",
+        priority="normal",
+        risk_class="low",
+        created_at=datetime.now(timezone.utc) - timedelta(hours=48),
+    )
+    db_session.add(stale)
+    db_session.commit()
+    with patch("shutil.disk_usage", return_value=(1000, 500, 500)):
+        with patch("psutil.virtual_memory", return_value=MagicMock(percent=40)):
+            result = handle_system_health({}, db_session)
+    assert result["status"] == "action_needed"
+    assert "stale" in result["title"].lower()
+
+
+def test_daily_summary_returns_ok_with_message(db_session):
+    from app.tools.nova_handlers import handle_daily_summary
+    with patch("app.llm_client.route_internal", return_value="Summary text here."):
+        result = handle_daily_summary({"window_hours": 24}, db_session)
+    assert result["status"] == "ok"
+    assert "Summary text here." in result["message"]
+    assert "Daily summary" in result["message"]
+```
+
+- [ ] **Step 2: Run tests — confirm they fail**
+
+```bash
+cd services/api
+pytest tests/test_nova_handlers.py -v
+```
+
+Expected: ImportError (module doesn't exist yet).
+
+- [ ] **Step 3: Implement the handlers module**
+
+Create `services/api/app/tools/nova_handlers.py`:
+
+```python
+"""
+Handlers for the two default scheduled triggers: system health + daily summary.
+
+Both return the typed contract:
+    {"status": "ok", "message": str}
+    {"status": "action_needed", "title": str, "description": str, "details": dict | None}
+"""
+import logging
+import shutil
+from datetime import datetime, timedelta, timezone
+
+import psutil
+from sqlalchemy.orm import Session
+
+from app import llm_client
+from app.models.run import Run
+from app.models.task import Task
+from app.models.event import Event
+
+log = logging.getLogger(__name__)
+
+DISK_THRESHOLD_PCT = 85
+MEMORY_THRESHOLD_PCT = 90
+STALE_TASK_HOURS = 24
+FAILED_RUN_RATE_THRESHOLD = 0.5
+
+
+def handle_system_health(input: dict, db: Session) -> dict:
+    """Deterministic health check: disk, memory, stale tasks, recent failed runs."""
+    total, used, free = shutil.disk_usage("/")
+    disk_pct = (used / total) * 100 if total else 0
+    if disk_pct > DISK_THRESHOLD_PCT:
+        return {
+            "status": "action_needed",
+            "title": f"Disk at {disk_pct:.0f}% (container `/`)",
+            "description": (
+                f"Container root disk usage is {disk_pct:.0f}% "
+                f"(used {used // (1024**3)}GB of {total // (1024**3)}GB). "
+                "Free space or investigate what's filling the volume."
+            ),
+            "details": {"disk_pct": disk_pct, "used_bytes": used, "total_bytes": total},
+        }
+
+    mem_pct = psutil.virtual_memory().percent
+    if mem_pct > MEMORY_THRESHOLD_PCT:
+        return {
+            "status": "action_needed",
+            "title": f"Memory at {mem_pct:.0f}%",
+            "description": (
+                f"System memory at {mem_pct:.0f}% — investigate leaks or resize."
+            ),
+            "details": {"memory_pct": mem_pct},
+        }
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=STALE_TASK_HOURS)
+    stale_count = (
+        db.query(Task)
+        .filter(Task.status.in_(["pending", "running"]))
+        .filter(Task.created_at < cutoff)
+        .count()
+    )
+    if stale_count > 0:
+        return {
+            "status": "action_needed",
+            "title": f"{stale_count} stale task(s)",
+            "description": (
+                f"{stale_count} task(s) have been pending/running for > "
+                f"{STALE_TASK_HOURS}h — review triage pipeline."
+            ),
+            "details": {"stale_count": stale_count},
+        }
+
+    hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    recent_runs = db.query(Run).filter(Run.started_at >= hour_ago).all()
+    if recent_runs:
+        failed = sum(1 for r in recent_runs if r.status == "failed")
+        rate = failed / len(recent_runs)
+        if rate > FAILED_RUN_RATE_THRESHOLD:
+            return {
+                "status": "action_needed",
+                "title": f"{failed}/{len(recent_runs)} recent runs failed",
+                "description": (
+                    f"{failed} of {len(recent_runs)} runs in the last hour failed "
+                    f"({rate:.0%}). Investigate which tool(s) are breaking."
+                ),
+                "details": {"failed": failed, "total": len(recent_runs)},
+            }
+
+    return {
+        "status": "ok",
+        "message": (
+            f"disk {disk_pct:.0f}%, mem {mem_pct:.0f}%, "
+            f"{stale_count} stale, "
+            f"{sum(1 for r in recent_runs if r.status == 'failed')}/{len(recent_runs)} runs failed 1h"
+        ),
+    }
+
+
+def _build_summary_digest(db: Session, hours: int) -> str:
+    """Collect last N hours of events, runs, task transitions into a text digest."""
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    events = db.query(Event).filter(Event.timestamp >= since).order_by(Event.timestamp).all()
+    runs = db.query(Run).filter(Run.started_at >= since).order_by(Run.started_at).all()
+    tasks_completed = (
+        db.query(Task)
+        .filter(Task.status.in_(["done", "failed"]))
+        .filter(Task.updated_at >= since)
+        .order_by(Task.updated_at)
+        .all()
+    )
+
+    lines = [f"Activity digest for the last {hours} hours:", ""]
+    lines.append(f"Events: {len(events)}")
+    for e in events[:20]:
+        lines.append(f"  - [{e.type}] {e.subject or ''} (source={e.source})")
+    if len(events) > 20:
+        lines.append(f"  ... {len(events) - 20} more")
+
+    lines.append("")
+    lines.append(f"Tool runs: {len(runs)}")
+    by_tool: dict[str, dict] = {}
+    for r in runs:
+        by_tool.setdefault(r.tool_name, {"ok": 0, "failed": 0})
+        by_tool[r.tool_name]["ok" if r.status == "succeeded" else "failed"] += 1
+    for tool, counts in by_tool.items():
+        lines.append(f"  - {tool}: {counts['ok']} ok, {counts['failed']} failed")
+
+    lines.append("")
+    lines.append(f"Tasks completed/failed: {len(tasks_completed)}")
+    for t in tasks_completed[:20]:
+        lines.append(f"  - [{t.status}] {t.title}")
+    if len(tasks_completed) > 20:
+        lines.append(f"  ... {len(tasks_completed) - 20} more")
+
+    return "\n".join(lines)
+
+
+def handle_daily_summary(input: dict, db: Session) -> dict:
+    """LLM-summarize the last N hours of activity. Always returns ok — the Run record IS the artifact."""
+    hours = int(input.get("window_hours", 24))
+    digest = _build_summary_digest(db, hours)
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    system = (
+        "You are Nova's daily-digest summarizer. Given a raw activity digest, "
+        "produce a 4-8 sentence human-readable summary. Highlight anything unusual "
+        "(high failure rate, repeated errors, stalled tasks). Keep it concise."
+    )
+
+    try:
+        summary = llm_client.route_internal(
+            db,
+            purpose="summarize_daily",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": digest},
+            ],
+        )
+    except Exception as exc:
+        log.warning("daily_summary LLM failed, falling back to raw digest: %s", exc)
+        summary = digest
+
+    return {
+        "status": "ok",
+        "message": f"Daily summary — {today}\n\n{summary}",
+    }
+```
+
+- [ ] **Step 4: Register in tool registry**
+
+In `services/api/app/tools/handlers.py`, import and add to `_REGISTRY`:
+
+```python
+from app.tools.nova_handlers import handle_system_health, handle_daily_summary
+
+_REGISTRY = {
+    # ... existing entries ...
+    "nova.system_health": handle_system_health,
+    "nova.daily_summary": handle_daily_summary,
+}
+```
+
+These handlers take `(input, db)` — update the dispatch code in `handlers.py` if it routes by arity. If `dispatch()` already passes `db` and `cfg` to handlers that accept them, these fit the existing pattern.
+
+- [ ] **Step 5: Register in tool seed**
+
+In `services/api/app/tools/seed.py`, add to `seed_tools` definitions:
+
+```python
+{
+    "name": "nova.system_health",
+    "description": "Check Nova's own health — disk, memory, stale tasks, recent run failures.",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    "output_schema": {"type": "object"},
+    "enabled": True,
+    "risk_class": "low",
+},
+{
+    "name": "nova.daily_summary",
+    "description": "Summarize the last N hours of activity into a human-readable digest.",
+    "input_schema": {
+        "type": "object",
+        "properties": {"window_hours": {"type": "integer", "minimum": 1, "maximum": 168}},
+        "additionalProperties": False,
+    },
+    "output_schema": {"type": "object"},
+    "enabled": True,
+    "risk_class": "low",
+},
+```
+
+- [ ] **Step 6: Run tests — confirm pass**
+
+```bash
+pytest tests/test_nova_handlers.py tests/test_tools.py -v
+```
+
+Expected: all pass. `test_tools.py::test_get_tools_returns_seeded_tools` should now find 11 tools (was 9).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add services/api/app/tools/nova_handlers.py \
+        services/api/app/tools/handlers.py \
+        services/api/app/tools/seed.py \
+        services/api/tests/test_nova_handlers.py \
+        services/api/tests/test_tools.py
+git commit -m "feat(api): add nova.system_health and nova.daily_summary tool handlers"
+```
+
+---
+
+## Task 5: Triage Scheduler-Source Branching
+
+**Files:**
+- Modify: `services/nova-lite/app/logic/triage.py`
+- Modify: `services/nova-lite/tests/conftest.py`
+- Create: `services/nova-lite/tests/test_triage_scheduler.py`
+
+- [ ] **Step 1: Extend `FakeClient.invoke_tool` return shape**
+
+In `services/nova-lite/tests/conftest.py`, the current `invoke_tool` returns `self._invoke_result`. Tests need to control the response shape per call. Update to:
+
+```python
+def invoke_tool(self, tool_name: str, input: dict, task_id: str | None = None) -> dict:
+    # Tests can set _invoke_result_by_tool = {"nova.system_health": {"status": "ok", ...}}
+    by_tool = getattr(self, "_invoke_result_by_tool", {})
+    if tool_name in by_tool:
+        return by_tool[tool_name]
+    return self._invoke_result
+```
+
+And add `self._invoke_result_by_tool: dict[str, dict] = {}` to `__init__` after `_invoke_result`.
+
+- [ ] **Step 2: Write failing tests**
+
+Create `services/nova-lite/tests/test_triage_scheduler.py`:
+
+```python
+from app.logic import triage
+
+
+def test_scheduler_tool_event_bypasses_llm(fake_client):
+    event = {
+        "id": "evt-1",
+        "type": "scheduled.system-heartbeat",
+        "source": "scheduler",
+        "subject": "System Heartbeat",
+        "payload": {"tool": "nova.system_health", "input": {}, "trigger_id": "system-heartbeat"},
+    }
+    fake_client._invoke_result_by_tool = {
+        "nova.system_health": {"status": "ok", "message": "all clear"},
+    }
+
+    triage.classify_and_create(fake_client, event)
+
+    # No LLM call should have happened (fake_client._llm_response was never consumed)
+    # No task should have been created for ok status
+    assert len(fake_client.tasks) == 0
+
+
+def test_scheduler_tool_event_ok_creates_no_task(fake_client):
+    event = {
+        "id": "evt-1", "type": "scheduled.x", "source": "scheduler",
+        "subject": "X", "payload": {"tool": "nova.system_health", "input": {}, "trigger_id": "x"},
+    }
+    fake_client._invoke_result_by_tool = {
+        "nova.system_health": {"status": "ok", "message": "all clear"},
+    }
+    triage.classify_and_create(fake_client, event)
+    assert len(fake_client.tasks) == 0
+
+
+def test_scheduler_tool_event_action_needed_creates_task(fake_client):
+    event = {
+        "id": "evt-1", "type": "scheduled.x", "source": "scheduler",
+        "subject": "Heartbeat", "payload": {"tool": "nova.system_health", "input": {}, "trigger_id": "x"},
+    }
+    fake_client._invoke_result_by_tool = {
+        "nova.system_health": {
+            "status": "action_needed",
+            "title": "Disk at 95%",
+            "description": "Free space or investigate.",
+            "details": {"disk_pct": 95},
+        },
+    }
+    triage.classify_and_create(fake_client, event)
+    assert len(fake_client.tasks) == 1
+    task = list(fake_client.tasks.values())[0]
+    assert task["title"] == "Disk at 95%"
+    assert "Free space" in task["description"]
+    assert task["origin_event_id"] == "evt-1"
+
+
+def test_scheduler_goal_event_creates_task_with_goal_description(fake_client):
+    event = {
+        "id": "evt-2", "type": "scheduled.x", "source": "scheduler",
+        "subject": "SideProject daily digest",
+        "payload": {"goal": "Check r/SideProject and summarize top 5 posts", "trigger_id": "x"},
+    }
+    triage.classify_and_create(fake_client, event)
+    assert len(fake_client.tasks) == 1
+    task = list(fake_client.tasks.values())[0]
+    assert "SideProject daily digest" in task["title"]
+    assert task["description"] == "Check r/SideProject and summarize top 5 posts"
+
+
+def test_non_scheduler_event_still_uses_llm(fake_client):
+    """Regression: non-scheduler events still go through the LLM classify path."""
+    fake_client._llm_response = '{"title": "Classified Title", "description": "d", "priority": "normal", "risk_class": "low", "labels": []}'
+    event = {
+        "id": "evt-3", "type": "user.request", "source": "human",
+        "subject": "x", "payload": {"message": "do the thing"},
+    }
+    triage.classify_and_create(fake_client, event)
+    assert len(fake_client.tasks) == 1
+    task = list(fake_client.tasks.values())[0]
+    assert task["title"] == "Classified Title"
+```
+
+- [ ] **Step 3: Run tests — confirm failures**
+
+```bash
+cd services/nova-lite
+pytest tests/test_triage_scheduler.py -v
+```
+
+Expected: failures — triage still uses LLM for everything.
+
+- [ ] **Step 4: Add scheduler-source branch to triage**
+
+In `services/nova-lite/app/logic/triage.py`, add the branch near the top of `classify_and_create`:
+
+```python
+import datetime as _dt
+
+
+def _handle_scheduler_tool_event(client, event: dict, payload: dict) -> dict | None:
+    """Invoke the tool directly; return task-create dict if action_needed, else None."""
+    tool_name = payload["tool"]
+    tool_input = payload.get("input", {})
+    result = client.invoke_tool(tool_name, tool_input)
+    status = result.get("status")
+    if status == "ok":
+        return None
+    if status == "action_needed":
+        return {
+            "title": result.get("title") or event.get("subject") or tool_name,
+            "description": result.get("description"),
+            "priority": "normal",
+            "risk_class": "low",
+            "origin_event_id": event["id"],
+            "labels": ["scheduler", tool_name],
+        }
+    log.warning("scheduler tool %s returned unknown status %r; treating as action_needed", tool_name, status)
+    return {
+        "title": event.get("subject") or tool_name,
+        "description": str(result),
+        "priority": "normal",
+        "risk_class": "low",
+        "origin_event_id": event["id"],
+        "labels": ["scheduler", tool_name, "unexpected-shape"],
+    }
+
+
+def _handle_scheduler_goal_event(event: dict, payload: dict) -> dict:
+    today = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d")
+    trigger_name = event.get("subject") or payload.get("trigger_id") or "scheduled goal"
+    return {
+        "title": f"{trigger_name} — {today}",
+        "description": payload["goal"],
+        "priority": "normal",
+        "risk_class": "low",
+        "origin_event_id": event["id"],
+        "labels": ["scheduler", "goal"],
+    }
+
+
+def classify_and_create(client, event: dict) -> dict | None:
+    """Given an event, classify it and create a Task. Deduplicates by origin_event_id."""
+    existing = client.get_tasks(origin_event_id=event["id"], limit=1)
+    if existing:
+        log.debug("Task already exists for event %s, skipping", event["id"])
+        return existing[0]
+
+    # ── Scheduler-source fast path ──
+    if event.get("source") == "scheduler":
+        payload = event.get("payload") or {}
+        if "tool" in payload:
+            task_fields = _handle_scheduler_tool_event(client, event, payload)
+            if task_fields is None:
+                return None  # clean — no task, Run record is the activity
+            return client.post_task(task_fields)
+        if "goal" in payload:
+            return client.post_task(_handle_scheduler_goal_event(event, payload))
+        log.warning("scheduler event %s has neither tool nor goal in payload; falling through to LLM", event["id"])
+
+    # ── LLM classify path (existing behavior) ──
+    prompt = _build_triage_prompt(event)
+    try:
+        response = client.llm_route(
+            purpose="triage",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        fields = _parse_triage_response(response)
+    except NovaClientError as exc:
+        log.warning("LLM unavailable during triage for event %s: %s", event["id"], exc)
+        fields = None
+
+    if fields is None:
+        log.warning(
+            "Triage LLM response unparseable for event %s, using subject as title",
+            event["id"],
+        )
+        fields = {}
+
+    return client.post_task({
+        "title": fields.get("title") or event["subject"],
+        "description": fields.get("description"),
+        "priority": fields.get("priority", "normal"),
+        "risk_class": fields.get("risk_class", "low"),
+        "origin_event_id": event["id"],
+        "labels": fields.get("labels", []),
+    })
+```
+
+- [ ] **Step 5: Run tests — confirm all pass**
+
+```bash
+pytest tests/test_triage_scheduler.py tests/test_triage.py -v
+```
+
+Expected: all pass.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/nova-lite/app/logic/triage.py \
+        services/nova-lite/tests/conftest.py \
+        services/nova-lite/tests/test_triage_scheduler.py
+git commit -m "feat(nova-lite): route scheduler-source events via direct invoke / goal-task"
+```
+
+---
+
+## Task 6: Ollama Model Swap + Health `model_ready`
+
+**Files:**
+- Modify: `services/api/app/config.py`
+- Modify: `services/api/app/tools/seed.py`
+- Modify: `services/api/app/routers/health.py`
+- Modify: `services/api/tests/test_health.py`
+
+- [ ] **Step 1: Write failing test for `model_ready`**
+
+Append to `services/api/tests/test_health.py`:
+
+```python
+def test_health_includes_model_ready(client):
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "model_ready" in data
+    assert isinstance(data["model_ready"], bool)
+```
+
+- [ ] **Step 2: Run test — confirm failure**
+
+```bash
+cd services/api
+pytest tests/test_health.py::test_health_includes_model_ready -v
+```
+
+- [ ] **Step 3: Update config default**
+
+In `services/api/app/config.py`, change the `ollama_model` default from `llama3.2:3b` to `qwen2.5-coder:7b` (find the `Settings` class, locate the field, change the default literal).
+
+- [ ] **Step 4: Flip `supports_tools=True` in seed**
+
+In `services/api/app/tools/seed.py`, in `seed_llm_providers`, change the insert branch:
+
+```python
+provider = LLMProviderProfile(
+    id="ollama-local",
+    # ... existing fields ...
+    supports_tools=True,  # was False
+    # ... rest ...
+)
+```
+
+Also ensure existing rows flip: add to the update branch right after `provider.enabled = True`:
+
+```python
+provider.supports_tools = True
+```
+
+This ensures re-seed on restart picks up the flag even for existing installations.
+
+- [ ] **Step 5: Add `model_ready` to health**
+
+In `services/api/app/routers/health.py`, extend the health response:
+
+```python
+import httpx
+from app.config import settings
+
+def _check_model_ready() -> bool:
+    if not settings.ollama_base_url:
+        return False
+    try:
+        resp = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=2.0)
+        if not resp.is_success:
+            return False
+        tags = resp.json().get("models", [])
+        return any(m.get("name", "").startswith(settings.ollama_model.split(":")[0]) for m in tags)
+    except Exception:
+        return False
+
+
+@router.get("/health")
+def health():
+    db_ok = check_db()
+    return {
+        "status": "ok" if db_ok else "degraded",
+        "db": "ok" if db_ok else "error",
+        "model_ready": _check_model_ready(),
+    }
+```
+
+- [ ] **Step 6: Pull the model**
+
+On the host, ensure the model is available to Ollama:
+
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
+If this fails (model unavailable, disk full), abort and flag. The model is required.
+
+- [ ] **Step 7: Rebuild, run tests, verify health**
+
+```bash
+cd /home/jeremy/workspace/nova-suite
+./dev --build
+sleep 15
+curl -s http://localhost:8000/health | jq
+```
+
+Expected: `{"status": "ok", "db": "ok", "model_ready": true}`.
+
+Then:
+
+```bash
+cd services/api && pytest tests/test_health.py -v
+```
+
+Expected: all pass.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add services/api/app/config.py \
+        services/api/app/tools/seed.py \
+        services/api/app/routers/health.py \
+        services/api/tests/test_health.py
+git commit -m "feat(api): switch default LLM to qwen2.5-coder:7b with tool-calling enabled"
+```
+
+---
+
+## Task 7: Conversations — `pending_tool_call` State
+
+**Files:**
+- Create: `services/api/alembic/versions/0006_conversation_pending_tool_call.py`
+- Modify: `services/api/app/models/conversation.py`
+
+- [ ] **Step 1: Write the migration**
+
+Create `services/api/alembic/versions/0006_conversation_pending_tool_call.py`:
+
+```python
+"""add pending_tool_call to conversations
+
+Revision ID: 0006
+Revises: 0005
+Create Date: 2026-04-16
+"""
+from alembic import op
+import sqlalchemy as sa
+from sqlalchemy.types import JSON
+
+revision = "0006"
+down_revision = "0005"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    op.add_column("conversations", sa.Column("pending_tool_call", JSON(), nullable=True))
+    op.add_column("conversations", sa.Column("pending_tool_call_at", sa.DateTime(timezone=True), nullable=True))
+
+
+def downgrade() -> None:
+    op.drop_column("conversations", "pending_tool_call_at")
+    op.drop_column("conversations", "pending_tool_call")
+```
+
+- [ ] **Step 2: Update the `Conversation` model**
+
+In `services/api/app/models/conversation.py`, add the two columns:
+
+```python
+# imports if needed:
+from sqlalchemy.types import JSON
+
+# in the class:
+    pending_tool_call = Column(JSON, nullable=True)
+    pending_tool_call_at = Column(DateTime(timezone=True), nullable=True)
+```
+
+- [ ] **Step 3: Rebuild and verify migration applied**
+
+```bash
+cd /home/jeremy/workspace/nova-suite
+./dev --build
+docker compose -f infra/docker-compose.yml exec db \
+  psql -U nova -d nova -c "\d conversations" | grep pending_tool_call
+```
+
+Expected: both columns shown.
+
+- [ ] **Step 4: Existing conversation tests still pass**
+
+```bash
+cd services/api
+pytest tests/test_conversations.py -v --tb=short
+```
+
+Expected: no new failures. Pre-existing `test_low_confidence_falls_through_no_run` may still fail — that's unrelated to this task.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add services/api/alembic/versions/0006_conversation_pending_tool_call.py \
+        services/api/app/models/conversation.py
+git commit -m "feat(api): add pending_tool_call state to conversations"
+```
+
+---
+
+## Task 8: Conversations — Tool-Calling Loop
+
+**Files:**
+- Modify: `services/api/app/routers/conversations.py`
+- Modify: `services/api/app/llm_client.py` (or wherever `route_internal`/`route` lives)
+- Create: `services/api/tests/test_tool_calling_loop.py`
+
+This task replaces the one-shot intent classifier with a real tool-calling loop. Read `services/api/app/routers/conversations.py` in full before starting — the changes are significant but localized.
+
+- [ ] **Step 1: Write failing tests**
+
+Create `services/api/tests/test_tool_calling_loop.py`:
+
+```python
+from unittest.mock import patch
+
+
+def test_non_sensitive_tool_call_auto_executes(client, db_session):
+    """A list_triggers call runs immediately, no confirmation gate."""
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+
+    # Mock the LLM to emit a tool call for list_triggers, then a final text response
+    with patch("app.llm_client.route_with_tools") as mock_llm:
+        mock_llm.side_effect = [
+            {"tool_calls": [{"name": "scheduler.list_triggers", "arguments": {}}]},
+            {"content": "You have 2 triggers: system-heartbeat and daily-summary."},
+        ]
+
+        conv = client.post("/conversations").json()
+        resp = client.post(f"/conversations/{conv['id']}/messages", json={"content": "list my triggers"})
+
+        # Final streamed response contains text
+        text = resp.text
+        assert "2 triggers" in text or "list_triggers" in text
+
+
+def test_sensitive_tool_call_stores_pending(client, db_session):
+    """scheduler.create_trigger is intercepted and prompts for confirmation."""
+    with patch("app.llm_client.route_with_tools") as mock_llm:
+        mock_llm.return_value = {"tool_calls": [{
+            "name": "scheduler.create_trigger",
+            "arguments": {
+                "id": "sideproject-daily",
+                "name": "SideProject daily",
+                "cron_expression": "0 9 * * *",
+                "payload_template": {"goal": "Check r/SideProject"},
+            },
+        }]}
+
+        conv = client.post("/conversations").json()
+        resp = client.post(f"/conversations/{conv['id']}/messages",
+                           json={"content": "create a trigger: every day 9am check reddit"})
+        # Response should contain confirmation prompt
+        assert "Confirm" in resp.text
+
+        # DB should have pending_tool_call set
+        from app.models.conversation import Conversation
+        conv_row = db_session.query(Conversation).filter_by(id=conv["id"]).first()
+        assert conv_row.pending_tool_call is not None
+        assert conv_row.pending_tool_call["name"] == "scheduler.create_trigger"
+
+
+def test_confirmation_yes_commits_pending(client, db_session):
+    """User says 'yes' → pending dispatched, cleared."""
+    from app.models.conversation import Conversation
+    from datetime import datetime, timezone
+
+    # Seed a conversation with a pending tool call
+    conv = Conversation(
+        id="c-1",
+        title="test",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        pending_tool_call={
+            "name": "scheduler.create_trigger",
+            "arguments": {
+                "id": "test-t",
+                "name": "Test",
+                "cron_expression": "0 9 * * *",
+                "payload_template": {"goal": "test"},
+            },
+        },
+        pending_tool_call_at=datetime.now(timezone.utc),
+    )
+    db_session.add(conv)
+    db_session.commit()
+
+    resp = client.post("/conversations/c-1/messages", json={"content": "yes"})
+    # Pending should be cleared
+    db_session.expire_all()
+    conv = db_session.query(Conversation).filter_by(id="c-1").first()
+    assert conv.pending_tool_call is None
+
+
+def test_confirmation_no_clears_pending(client, db_session):
+    """User says 'no' → pending cleared, tool NOT dispatched."""
+    # ... similar setup, send "no", assert pending is None and no trigger was created
+    pass  # implement parallel to test_confirmation_yes_commits_pending
+
+
+def test_whole_word_confirm_yesterday_does_not_match(client, db_session):
+    """'yesterday' must NOT match the 'yes' confirmation pattern."""
+    from app.routers.conversations import CONFIRM_RE
+    assert CONFIRM_RE.search("yesterday") is None
+    assert CONFIRM_RE.search("yes") is not None
+    assert CONFIRM_RE.search("yes please") is not None
+```
+
+- [ ] **Step 2: Add `route_with_tools` to `llm_client`**
+
+`services/api/app/llm_client.py` needs a new function that issues an LLM call with tools. The OpenAI-compatible Ollama endpoint supports `tools` param in chat completions. Add:
+
+```python
+def route_with_tools(db, purpose: str, messages: list[dict], tools: list[dict]) -> dict:
+    """Issue an LLM call with tool catalog. Returns {content: str} or {tool_calls: [...]}."""
+    # Look up active provider as in route_internal
+    provider = _active_provider(db)
+    openai_client = _build_client(provider)
+    resp = openai_client.chat.completions.create(
+        model=provider.model_ref,
+        messages=messages,
+        tools=tools,
+        tool_choice="auto",
+    )
+    choice = resp.choices[0].message
+    if choice.tool_calls:
+        return {"tool_calls": [
+            {"name": tc.function.name, "arguments": json.loads(tc.function.arguments)}
+            for tc in choice.tool_calls
+        ]}
+    return {"content": choice.content or ""}
+```
+
+Adjust to match the existing pattern of `route_internal` in the same file.
+
+- [ ] **Step 3: Rewrite conversations tool path**
+
+In `services/api/app/routers/conversations.py`, replace the intent-classifier block (between the `_parse_json_safe` helper and the `generate()` definition) with a tool-calling loop. Sketch:
+
+```python
+import re
+
+CONFIRM_RE = re.compile(r"\b(yes|yep|yeah|confirm|confirmed|do it|go ahead|proceed)\b", re.I)
+DENY_RE    = re.compile(r"\b(no|nope|cancel|stop|abort|nvm|never ?mind)\b", re.I)
+
+SENSITIVE_TOOLS = {
+    "scheduler.create_trigger",
+    "scheduler.update_trigger",
+    "scheduler.delete_trigger",
+}
+MAX_TOOL_TURNS = 3
+PENDING_TIMEOUT_MINUTES = 30
+
+
+def _tool_catalog(db: Session) -> list[dict]:
+    """Build OpenAI-format tool list from enabled tools."""
+    tools = db.query(Tool).filter(Tool.enabled == True).all()  # noqa: E712
+    return [{
+        "type": "function",
+        "function": {
+            "name": t.name,
+            "description": t.description,
+            "parameters": t.input_schema or {"type": "object"},
+        },
+    } for t in tools]
+
+
+def _check_pending_confirmation(conv: Conversation, user_msg: str) -> tuple[str, dict | None]:
+    """Returns ("confirm"|"deny"|"none", pending_call_or_None)."""
+    if not conv.pending_tool_call:
+        return "none", None
+    age = datetime.now(timezone.utc) - (conv.pending_tool_call_at or datetime.now(timezone.utc))
+    if age.total_seconds() > PENDING_TIMEOUT_MINUTES * 60:
+        return "none", None
+    if CONFIRM_RE.search(user_msg):
+        return "confirm", conv.pending_tool_call
+    if DENY_RE.search(user_msg):
+        return "deny", conv.pending_tool_call
+    return "none", None
+
+
+def _render_confirmation(tool_name: str, args: dict) -> str:
+    verb = {"create": "create", "update": "update", "delete": "delete"}.get(
+        tool_name.split(".")[1].split("_")[0], "run"
+    )
+    lines = [f"I'll {verb} this trigger:"]
+    if "name" in args:
+        lines.append(f"- **Name:** {args['name']}")
+    if "cron_expression" in args:
+        lines.append(f"- **Schedule:** `{args['cron_expression']}`")
+    if "payload_template" in args:
+        p = args["payload_template"]
+        if "goal" in p:
+            lines.append(f"- **Goal:** {p['goal']}")
+        elif "tool" in p:
+            lines.append(f"- **Tool:** {p['tool']}")
+    lines.append("\nConfirm?")
+    return "\n".join(lines)
+```
+
+Main handler flow (pseudocode — adapt to existing `post_message` function):
+
+```python
+# 1. Save user message
+# 2. Check pending confirmation on conversation
+verdict, pending = _check_pending_confirmation(conv, user_content)
+if verdict == "confirm":
+    # Dispatch pending.tool_call via tool_handlers.dispatch, write assistant message with result summary
+    result = tool_handlers.dispatch(pending["name"], pending["arguments"], db, _settings)
+    conv.pending_tool_call = None
+    conv.pending_tool_call_at = None
+    db.commit()
+    # stream the result summary as assistant reply
+    ...
+    return
+if verdict == "deny":
+    conv.pending_tool_call = None
+    conv.pending_tool_call_at = None
+    db.commit()
+    # stream "Cancelled."
+    return
+
+# 3. New tool-calling loop
+messages = _build_chat_messages(conv, user_content, db)
+tools = _tool_catalog(db)
+
+for turn in range(MAX_TOOL_TURNS):
+    result = llm_client.route_with_tools(db, purpose="chat", messages=messages, tools=tools)
+    if "content" in result:
+        # Final text response — stream it
+        final_text = result["content"]
+        break
+    # tool_calls present
+    for tc in result["tool_calls"]:
+        if tc["name"] in SENSITIVE_TOOLS:
+            # Store pending; reply with confirmation; stop loop
+            conv.pending_tool_call = tc
+            conv.pending_tool_call_at = datetime.now(timezone.utc)
+            db.commit()
+            final_text = _render_confirmation(tc["name"], tc["arguments"])
+            break  # break inner
+        else:
+            # Auto-execute
+            tool_output = tool_handlers.dispatch(tc["name"], tc["arguments"], db, _settings)
+            # Also create a Run record (audit)
+            _record_run(db, tc["name"], tc["arguments"], tool_output)
+            # Inject back into messages
+            messages.append({"role": "assistant", "tool_calls": [tc]})
+            messages.append({"role": "tool", "name": tc["name"], "content": json.dumps(tool_output)})
+    else:
+        # All tool_calls were auto-executed, continue loop
+        continue
+    break  # sensitive or no-more-turns
+else:
+    # Loop exhausted — force final text
+    final_text = "I've reached the maximum tool-calling turns. Rephrasing needed."
+
+# Stream final_text as assistant message (reuse existing streaming mechanism)
+```
+
+Drop the old `_parse_json_safe` classify block. The `_render_confirmation` + `CONFIRM_RE`/`DENY_RE`/`SENSITIVE_TOOLS` constants live at module-top.
+
+- [ ] **Step 4: Run tests — iterate until all pass**
+
+```bash
+cd services/api
+pytest tests/test_tool_calling_loop.py tests/test_conversations.py -v --tb=short
+```
+
+Expected: all new tests pass; pre-existing conversation tests either pass or, where they referenced the classifier path explicitly, are updated to the tool-calling assertions.
+
+Specifically: `test_low_confidence_falls_through_no_run` tested the classifier's confidence threshold. With the new loop, "no tool call" just means the LLM returned `content` only. Update or delete this test. The equivalent regression test under the new model is: *"user message with no tool intent produces a conversational reply, no Run"* — keep that assertion, drop the confidence-threshold specifics.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add services/api/app/routers/conversations.py \
+        services/api/app/llm_client.py \
+        services/api/tests/test_tool_calling_loop.py \
+        services/api/tests/test_conversations.py
+git commit -m "feat(api): replace intent classifier with tool-calling loop + pending confirmation"
+```
+
+---
+
+## Task 9: Scheduler Management Tools
+
+**Files:**
+- Create: `services/api/app/tools/scheduler_handlers.py`
+- Modify: `services/api/app/tools/handlers.py`
+- Modify: `services/api/app/tools/seed.py`
+- Create: `services/api/tests/test_scheduler_handlers.py`
+
+- [ ] **Step 1: Write failing tests**
+
+Create `services/api/tests/test_scheduler_handlers.py`:
+
+```python
+def test_scheduler_create_trigger_handler(db_session):
+    from app.tools.scheduler_handlers import handle_scheduler_create_trigger
+    result = handle_scheduler_create_trigger({
+        "id": "my-trigger",
+        "name": "My Trigger",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"goal": "Check something"},
+    }, db_session)
+    assert "my-trigger" in result["summary"]
+
+    from app.models.scheduled_trigger import ScheduledTrigger
+    assert db_session.query(ScheduledTrigger).filter_by(id="my-trigger").first() is not None
+
+
+def test_scheduler_list_triggers_handler(db_session):
+    from app.tools.scheduler_handlers import handle_scheduler_list_triggers
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    result = handle_scheduler_list_triggers({}, db_session)
+    ids = {t["id"] for t in result["triggers"]}
+    assert "system-heartbeat" in ids
+    assert "daily-summary" in ids
+
+
+def test_scheduler_update_trigger_handler(db_session):
+    from app.tools.scheduler_handlers import handle_scheduler_update_trigger
+    from app.tools.seed import seed_scheduled_triggers
+    from app.models.scheduled_trigger import ScheduledTrigger
+    seed_scheduled_triggers(db_session)
+    result = handle_scheduler_update_trigger({
+        "id": "system-heartbeat",
+        "updates": {"enabled": False},
+    }, db_session)
+    db_session.expire_all()
+    trigger = db_session.query(ScheduledTrigger).filter_by(id="system-heartbeat").first()
+    assert trigger.enabled is False
+
+
+def test_scheduler_delete_trigger_handler(db_session):
+    from app.tools.scheduler_handlers import handle_scheduler_delete_trigger
+    from app.tools.seed import seed_scheduled_triggers
+    from app.models.scheduled_trigger import ScheduledTrigger
+    seed_scheduled_triggers(db_session)
+    result = handle_scheduler_delete_trigger({"id": "daily-summary"}, db_session)
+    assert "daily-summary" in result["summary"]
+    assert db_session.query(ScheduledTrigger).filter_by(id="daily-summary").first() is None
+
+
+def test_scheduler_create_invalid_cron_raises(db_session):
+    from app.tools.scheduler_handlers import handle_scheduler_create_trigger
+    import pytest
+    with pytest.raises(Exception):  # Pydantic ValidationError wrapped
+        handle_scheduler_create_trigger({
+            "id": "bad",
+            "name": "Bad",
+            "cron_expression": "not a cron",
+            "payload_template": {"goal": "x"},
+        }, db_session)
+```
+
+- [ ] **Step 2: Run tests — confirm ImportError**
+
+```bash
+pytest tests/test_scheduler_handlers.py -v
+```
+
+- [ ] **Step 3: Implement the handlers**
+
+Create `services/api/app/tools/scheduler_handlers.py`:
+
+```python
+"""
+Tool handlers that manage scheduled triggers from chat.
+Operate in-process via SQLAlchemy session — no HTTP loop-back.
+"""
+from sqlalchemy.orm import Session
+
+from app.models.scheduled_trigger import ScheduledTrigger
+from app.schemas.scheduled_trigger import ScheduledTriggerCreate, ScheduledTriggerUpdate
+
+
+def handle_scheduler_create_trigger(input: dict, db: Session) -> dict:
+    body = ScheduledTriggerCreate(**input)  # raises ValidationError if invalid
+    if db.query(ScheduledTrigger).filter_by(id=body.id).first():
+        raise ValueError(f"Trigger '{body.id}' already exists")
+    trigger = ScheduledTrigger(**body.model_dump())
+    db.add(trigger)
+    db.commit()
+    return {"id": body.id, "summary": f"Created trigger '{body.name}' ({body.cron_expression})"}
+
+
+def handle_scheduler_list_triggers(input: dict, db: Session) -> dict:
+    triggers = db.query(ScheduledTrigger).order_by(ScheduledTrigger.id).all()
+    return {
+        "triggers": [
+            {
+                "id": t.id,
+                "name": t.name,
+                "cron_expression": t.cron_expression,
+                "enabled": t.enabled,
+                "payload_kind": "tool" if "tool" in (t.payload_template or {}) else "goal",
+                "last_fired_at": t.last_fired_at.isoformat() if t.last_fired_at else None,
+            }
+            for t in triggers
+        ]
+    }
+
+
+def handle_scheduler_update_trigger(input: dict, db: Session) -> dict:
+    trigger_id = input["id"]
+    updates = input.get("updates") or {}
+    trigger = db.query(ScheduledTrigger).filter_by(id=trigger_id).first()
+    if not trigger:
+        raise ValueError(f"Trigger '{trigger_id}' not found")
+    body = ScheduledTriggerUpdate(**updates)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(trigger, field, value)
+    db.commit()
+    return {"summary": f"Updated trigger '{trigger_id}'", "applied": body.model_dump(exclude_unset=True)}
+
+
+def handle_scheduler_delete_trigger(input: dict, db: Session) -> dict:
+    trigger_id = input["id"]
+    trigger = db.query(ScheduledTrigger).filter_by(id=trigger_id).first()
+    if not trigger:
+        raise ValueError(f"Trigger '{trigger_id}' not found")
+    db.delete(trigger)
+    db.commit()
+    return {"summary": f"Deleted trigger '{trigger_id}'"}
+```
+
+- [ ] **Step 4: Register in tool registry + seed**
+
+In `services/api/app/tools/handlers.py`, extend `_REGISTRY`:
+
+```python
+from app.tools.scheduler_handlers import (
+    handle_scheduler_create_trigger,
+    handle_scheduler_list_triggers,
+    handle_scheduler_update_trigger,
+    handle_scheduler_delete_trigger,
+)
+
+_REGISTRY = {
+    # ... existing ...
+    "scheduler.create_trigger": handle_scheduler_create_trigger,
+    "scheduler.list_triggers": handle_scheduler_list_triggers,
+    "scheduler.update_trigger": handle_scheduler_update_trigger,
+    "scheduler.delete_trigger": handle_scheduler_delete_trigger,
+}
+```
+
+In `services/api/app/tools/seed.py`, add to `seed_tools`:
+
+```python
+{
+    "name": "scheduler.create_trigger",
+    "description": (
+        "Create a new scheduled trigger. For recurring tasks like 'check reddit daily' "
+        "or 'ping this URL every hour'. Use when the user asks to schedule, remind, or "
+        "automate something on an interval."
+    ),
+    "input_schema": {
+        "type": "object",
+        "required": ["id", "name", "cron_expression", "payload_template"],
+        "properties": {
+            "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$",
+                   "description": "kebab-case identifier"},
+            "name": {"type": "string"},
+            "description": {"type": "string"},
+            "cron_expression": {"type": "string",
+                                "description": "standard 5-field cron, UTC (e.g. '0 9 * * *')"},
+            "payload_template": {
+                "type": "object",
+                "description": "Either {tool, input} or {goal: string}",
+            },
+            "active_hours_start": {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+            "active_hours_end":   {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
+        },
+    },
+    "output_schema": {"type": "object"},
+    "enabled": True,
+    "risk_class": "low",
+},
+{
+    "name": "scheduler.list_triggers",
+    "description": "List all scheduled triggers and their state. Use when the user asks 'what triggers do I have?'",
+    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
+    "output_schema": {"type": "object"},
+    "enabled": True,
+    "risk_class": "low",
+},
+{
+    "name": "scheduler.update_trigger",
+    "description": "Update an existing trigger (enable/disable, change schedule or payload). Use when the user asks to pause, resume, or reschedule.",
+    "input_schema": {
+        "type": "object",
+        "required": ["id", "updates"],
+        "properties": {
+            "id": {"type": "string"},
+            "updates": {"type": "object"},
+        },
+    },
+    "output_schema": {"type": "object"},
+    "enabled": True,
+    "risk_class": "low",
+},
+{
+    "name": "scheduler.delete_trigger",
+    "description": "Permanently remove a scheduled trigger. Use when the user asks to delete or remove one.",
+    "input_schema": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {"id": {"type": "string"}},
+    },
+    "output_schema": {"type": "object"},
+    "enabled": True,
+    "risk_class": "medium",
+},
+```
+
+- [ ] **Step 5: Run tests — confirm all pass**
+
+```bash
+pytest tests/test_scheduler_handlers.py tests/test_tools.py -v
+```
+
+Expected: all pass. `test_tools.py::test_get_tools_returns_seeded_tools` now finds 15 tools (was 11).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/api/app/tools/scheduler_handlers.py \
+        services/api/app/tools/handlers.py \
+        services/api/app/tools/seed.py \
+        services/api/tests/test_scheduler_handlers.py \
+        services/api/tests/test_tools.py
+git commit -m "feat(api): add scheduler.* management tools (create/list/update/delete)"
+```
+
+---
+
+## Task 10: Settings — Read-Only Trigger Panel
+
+**Files:**
+- Create: `services/board/src/lib/cron-to-nl.ts`
+- Create: `services/board/src/api/triggers.ts`
+- Create: `services/board/src/components/Settings/ScheduledTriggersPanel.tsx`
+- Modify: `services/board/src/components/Settings/Settings.tsx`
+
+- [ ] **Step 1: Cron → human-readable helper**
+
+Create `services/board/src/lib/cron-to-nl.ts`:
+
+```typescript
+/**
+ * Convert common cron expressions to human-readable English.
+ * Covers the 80% case; returns raw expression for anything else.
+ */
+export function cronToHuman(cron: string): string {
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length !== 5) return cron
+  const [minute, hour, dom, month, dow] = parts
+
+  // every minute
+  if (cron === "* * * * *") return "every minute"
+  // every N minutes
+  const everyNMin = minute.match(/^\*\/(\d+)$/)
+  if (everyNMin && hour === "*" && dom === "*" && month === "*" && dow === "*") {
+    return `every ${everyNMin[1]} minutes`
+  }
+  // daily at HH:MM
+  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dom === "*" && month === "*" && dow === "*") {
+    const hh = hour.padStart(2, "0")
+    const mm = minute.padStart(2, "0")
+    return `every day at ${hh}:${mm} UTC`
+  }
+  // weekdays at HH:MM
+  if (/^\d+$/.test(minute) && /^\d+$/.test(hour) && dom === "*" && month === "*" && dow === "1-5") {
+    return `every weekday at ${hour.padStart(2, "0")}:${minute.padStart(2, "0")} UTC`
+  }
+  // hourly at :MM
+  if (/^\d+$/.test(minute) && hour === "*" && dom === "*" && month === "*" && dow === "*") {
+    return `every hour at :${minute.padStart(2, "0")}`
+  }
+  return cron
+}
+```
+
+- [ ] **Step 2: API fetch helper**
+
+Create `services/board/src/api/triggers.ts`:
+
+```typescript
+import { apiFetch } from "./base"
+
+export interface Trigger {
+  id: string
+  name: string
+  description: string | null
+  cron_expression: string
+  active_hours_start: string | null
+  active_hours_end: string | null
+  enabled: boolean
+  payload_template: Record<string, unknown>
+  last_fired_at: string | null
+}
+
+export function getTriggers(): Promise<{ triggers: Trigger[] }> {
+  return apiFetch("/system/triggers")
+}
+```
+
+(Adjust import path of `apiFetch` to match existing `base.ts`/`llm.ts` convention.)
+
+- [ ] **Step 3: Panel component**
+
+Create `services/board/src/components/Settings/ScheduledTriggersPanel.tsx`:
+
+```tsx
+import { useQuery } from "@tanstack/react-query"
+import { getTriggers } from "../../api/triggers"
+import { cronToHuman } from "../../lib/cron-to-nl"
+
+export function ScheduledTriggersPanel() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["triggers"],
+    queryFn: getTriggers,
+    refetchOnWindowFocus: true,
+  })
+
+  if (isLoading) return <div>Loading triggers...</div>
+  if (error) return <div>Failed to load triggers.</div>
+
+  const triggers = data?.triggers ?? []
+
+  return (
+    <section>
+      <h3>Scheduled Triggers</h3>
+      {triggers.length === 0 ? (
+        <p>No triggers configured.</p>
+      ) : (
+        <ul>
+          {triggers.map(t => {
+            const kind = "tool" in (t.payload_template as object) ? "tool" : "goal"
+            const payloadLabel = kind === "tool"
+              ? `runs: ${(t.payload_template as any).tool}`
+              : `goal: ${(t.payload_template as any).goal}`
+            return (
+              <li key={t.id}>
+                <strong>{t.name}</strong>
+                <div>{cronToHuman(t.cron_expression)} • {t.enabled ? "enabled" : "disabled"}</div>
+                <div>{payloadLabel}</div>
+                {t.last_fired_at && <div>last fired: {new Date(t.last_fired_at).toLocaleString()}</div>}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      <p><em>To add, edit, or remove triggers, ask Nova in chat.</em></p>
+    </section>
+  )
+}
+```
+
+- [ ] **Step 4: Wire into Settings**
+
+In `services/board/src/components/Settings/Settings.tsx`, import and render `<ScheduledTriggersPanel />` after the existing LLM provider section. Match the existing section styling.
+
+- [ ] **Step 5: Manual UI smoke check**
+
+```bash
+cd /home/jeremy/workspace/nova-suite
+./dev --build
+```
+
+Open `http://localhost:5173`, navigate to Settings, confirm the Scheduled Triggers section renders both seeded triggers with human-readable schedules ("every 30 minutes" and "every day at 00:00 UTC").
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add services/board/src/lib/cron-to-nl.ts \
+        services/board/src/api/triggers.ts \
+        services/board/src/components/Settings/ScheduledTriggersPanel.tsx \
+        services/board/src/components/Settings/Settings.tsx
+git commit -m "feat(board): read-only scheduled triggers panel in Settings"
+```
+
+---
+
+## Task 11: End-to-End Smoke Test
+
+No code changes — validation only.
+
+- [ ] **Step 1: Fresh rebuild**
+
+```bash
+cd /home/jeremy/workspace/nova-suite
+./dev --build
+sleep 20
+```
+
+- [ ] **Step 2: Verify health**
+
+```bash
+curl -s http://localhost:8000/health | jq
+```
+
+Expected: `{"status": "ok", "db": "ok", "model_ready": true}`.
+
+- [ ] **Step 3: Verify triggers seeded with cron**
+
+```bash
+curl -s http://localhost:8000/system/triggers | jq '.triggers[] | {id, cron_expression, payload_template}'
+```
+
+Expected: both triggers show `cron_expression` and `{tool: "nova.system_health"|"nova.daily_summary", input: {...}}`.
+
+- [ ] **Step 4: Manually fire heartbeat by clearing last_fired_at**
+
+```bash
+curl -s -X PATCH http://localhost:8000/system/triggers/system-heartbeat \
+  -H "Content-Type: application/json" \
+  -d '{"last_fired_at": null}' | jq
+```
+
+- [ ] **Step 5: Wait one scheduler tick (≤15s) and observe**
+
+```bash
+sleep 20
+curl -s "http://localhost:8000/events?limit=5" | jq '.events[] | {type, source}'
+curl -s "http://localhost:8000/runs?limit=5" | jq '.runs[] | {tool_name, status, output}'
+curl -s "http://localhost:8000/tasks?limit=5" | jq '.tasks[] | {title, status}'
+```
+
+Expected:
+- Events shows `scheduled.system-heartbeat` with `source=scheduler`.
+- Runs shows a `nova.system_health` run with status `succeeded` and an output dict containing `status: "ok"` + a message.
+- Tasks: no new task created for the clean heartbeat.
+
+- [ ] **Step 6: Force an escalation and confirm task creation**
+
+Run the API container with a patched high-disk value temporarily, or just insert a stale task to trip the stale-task check:
+
+```bash
+docker compose -f infra/docker-compose.yml exec db psql -U nova -d nova <<'SQL'
+INSERT INTO tasks (id, title, status, priority, risk_class, created_at, updated_at)
+VALUES ('stale-smoke-test', 'stale seed', 'pending', 'normal', 'low',
+        now() - interval '48 hours', now() - interval '48 hours');
+SQL
+```
+
+Clear last_fired_at again (Step 4 command) and wait:
+
+```bash
+sleep 20
+curl -s "http://localhost:8000/tasks?limit=5" | jq '.tasks[] | {title, status, origin_event_id}'
+```
+
+Expected: a new task with title like "1 stale task(s)" linked to a scheduled event.
+
+Clean up the stale seed:
+
+```bash
+docker compose -f infra/docker-compose.yml exec db psql -U nova -d nova -c "DELETE FROM tasks WHERE id = 'stale-smoke-test'"
+```
+
+- [ ] **Step 7: Chat-driven trigger creation (manual)**
+
+Open http://localhost:5173 → Chat tab. Type:
+
+> every day at 9am UTC, run debug.echo with a hello message
+
+Nova's LLM should:
+- Recognize scheduling intent
+- Call `scheduler.create_trigger` with `cron="0 9 * * *"`, payload `{"tool": "debug.echo", "input": {"message": "hello"}}`
+- Reply with confirmation prompt
+- On "yes" → commit
+
+Verify via:
+
+```bash
+curl -s http://localhost:8000/system/triggers | jq '.triggers[] | select(.id | contains("debug") or contains("echo") or contains("hello"))'
+```
+
+Expected: the new trigger appears.
+
+Open Settings panel in the board, confirm the new trigger shows.
+
+Delete via chat ("remove the debug echo trigger"). Confirm it's gone.
+
+- [ ] **Step 8: Full test suite pass**
+
+```bash
+cd /home/jeremy/workspace/nova-suite/services/api && pytest tests/ --tb=short
+cd /home/jeremy/workspace/nova-suite/services/nova-lite && pytest tests/ --tb=short
+```
+
+Expected:
+- API: all pass except previously-known unrelated failures (document final counts).
+- Nova-lite: all pass (should be 54+ now).
+
+- [ ] **Step 9: Push**
+
+```bash
+cd /home/jeremy/workspace/nova-suite
+git push origin main
+```
+
+No commit for Task 11 itself (no code changes).
+
+---
+
+## Rollback Plan
+
+If anything in Task 7 or 8 goes wrong in production:
+
+- Revert Task 7's conversations rewrite by pointing HEAD at the pre-Task-7 SHA; the intent-classifier path still lives in git history and restores cleanly.
+- Migrations `0005` and `0006` have working `downgrade()` functions. Run `alembic downgrade -2` in the API container to roll back both if needed.
+- The Ollama model swap (Task 6) is settings-only — Settings panel lets the user switch back to `llama3.2:3b` without touching code.
+
+## Dependencies Between Tasks
+
+- Tasks 1-2 are API foundation, no dependencies.
+- Task 3 (nova-lite cron) depends on Task 1's seed format.
+- Task 4 (handlers) is independent but must land before Task 5 (triage uses them via invoke_tool contract).
+- Task 5 (triage) depends on Tasks 1, 3, 4.
+- Task 6 (model swap) is independent; must land before Task 8 uses tool-calling.
+- Task 7 (pending_tool_call migration) is independent.
+- Task 8 (tool-calling loop) depends on Tasks 6 + 7.
+- Task 9 (scheduler.* tools) depends on Task 8 (wrapped in tool-calling) but handlers can be written + unit-tested before Task 8 ships.
+- Task 10 (Settings UI) depends on Tasks 1-2 for the API shape.
+- Task 11 integration test depends on all prior tasks.
