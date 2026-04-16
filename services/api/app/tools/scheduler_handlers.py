@@ -28,9 +28,12 @@ def handle_scheduler_list_triggers(input: dict, db: Session) -> dict:
             {
                 "id": t.id,
                 "name": t.name,
+                "description": t.description,
                 "cron_expression": t.cron_expression,
                 "enabled": t.enabled,
-                "payload_kind": "tool" if "tool" in (t.payload_template or {}) else "goal",
+                "payload": t.payload_template,
+                "active_hours_start": t.active_hours_start,
+                "active_hours_end": t.active_hours_end,
                 "last_fired_at": t.last_fired_at.isoformat() if t.last_fired_at else None,
             }
             for t in triggers

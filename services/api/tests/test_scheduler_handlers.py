@@ -20,9 +20,18 @@ def test_scheduler_list_triggers_handler(db_session):
     from app.tools.seed import seed_scheduled_triggers
     seed_scheduled_triggers(db_session)
     result = handle_scheduler_list_triggers({}, db_session)
-    ids = {t["id"] for t in result["triggers"]}
+    triggers = result["triggers"]
+    ids = {t["id"] for t in triggers}
     assert "system-heartbeat" in ids
     assert "daily-summary" in ids
+
+    # New shape: description + full payload + active_hours_*; no payload_kind
+    sh = next(t for t in triggers if t["id"] == "system-heartbeat")
+    assert sh["description"] and "Periodic system health check" in sh["description"]
+    assert sh["payload"] == {"tool": "nova.system_health", "input": {}}
+    assert sh["active_hours_start"] is None
+    assert sh["active_hours_end"] is None
+    assert "payload_kind" not in sh  # dropped — LLM infers from payload shape
 
 
 def test_scheduler_update_trigger_handler(db_session):
