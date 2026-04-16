@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     service_name: str = "nova-api"
     version: str = "0.1.0"
     ollama_base_url: str = ""
-    ollama_model: str = "gemma3:4b"
+    ollama_model: str = "qwen2.5-coder:7b"
     ha_base_url: str = ""
     ha_token: str = ""
     nova_workspace_dir: str = Field(default="~", validation_alias="NOVA_WORKSPACE_DIR")

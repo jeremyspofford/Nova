@@ -20,6 +20,7 @@ def seed_llm_providers(db: Session, settings) -> None:
         # Settings choice survives container restarts.
         provider.endpoint_ref = settings.ollama_base_url + "/v1"
         provider.enabled = True
+        provider.supports_tools = True
     else:
         provider = LLMProviderProfile(
             id="ollama-local",
@@ -28,7 +29,7 @@ def seed_llm_providers(db: Session, settings) -> None:
             endpoint_ref=settings.ollama_base_url + "/v1",
             model_ref=settings.ollama_model,
             enabled=True,
-            supports_tools=False,
+            supports_tools=True,
             supports_streaming=False,
             privacy_class="local_only",
             cost_class="low",
