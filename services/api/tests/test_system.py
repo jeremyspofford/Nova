@@ -70,3 +70,69 @@ def test_system_info(client):
     assert data["service"] == "nova-api"
     assert "version" in data
     assert "deployment_mode" in data
+
+
+def test_create_trigger_valid_cron(client):
+    resp = client.post("/system/triggers", json={
+        "id": "test-trigger",
+        "name": "Test",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"tool": "debug.echo", "input": {}},
+    })
+    assert resp.status_code == 200
+    assert resp.json()["id"] == "test-trigger"
+
+
+def test_create_trigger_invalid_cron(client):
+    resp = client.post("/system/triggers", json={
+        "id": "bad",
+        "name": "Bad",
+        "cron_expression": "not a cron",
+        "payload_template": {"tool": "debug.echo"},
+    })
+    assert resp.status_code == 422
+
+
+def test_create_trigger_conflicting_payload(client):
+    resp = client.post("/system/triggers", json={
+        "id": "conflict",
+        "name": "Conflict",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"tool": "x", "goal": "y"},
+    })
+    assert resp.status_code == 422
+
+
+def test_create_trigger_empty_goal(client):
+    resp = client.post("/system/triggers", json={
+        "id": "empty",
+        "name": "Empty",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"goal": ""},
+    })
+    assert resp.status_code == 422
+
+
+def test_create_trigger_bad_id_pattern(client):
+    resp = client.post("/system/triggers", json={
+        "id": "NotKebabCase",
+        "name": "X",
+        "cron_expression": "0 9 * * *",
+        "payload_template": {"goal": "x"},
+    })
+    assert resp.status_code == 422
+
+
+def test_delete_trigger(client, db_session):
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    resp = client.delete("/system/triggers/system-heartbeat")
+    assert resp.status_code == 200
+    follow = client.get("/system/triggers")
+    ids = {t["id"] for t in follow.json()["triggers"]}
+    assert "system-heartbeat" not in ids
+
+
+def test_delete_trigger_not_found(client):
+    resp = client.delete("/system/triggers/nonexistent")
+    assert resp.status_code == 404

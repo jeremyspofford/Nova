@@ -5,6 +5,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.scheduled_trigger import ScheduledTrigger
 from app.schemas.scheduled_trigger import (
+    ScheduledTriggerCreate,
     ScheduledTriggerListResponse,
     ScheduledTriggerRead,
     ScheduledTriggerUpdate,
@@ -44,3 +45,25 @@ def update_trigger(
     db.commit()
     db.refresh(trigger)
     return ScheduledTriggerRead.model_validate(trigger)
+
+
+@router.post("/triggers", response_model=ScheduledTriggerRead)
+def create_trigger(body: ScheduledTriggerCreate, db: Session = Depends(get_db)):
+    existing = db.query(ScheduledTrigger).filter(ScheduledTrigger.id == body.id).first()
+    if existing:
+        raise HTTPException(409, detail=f"Trigger '{body.id}' already exists")
+    trigger = ScheduledTrigger(**body.model_dump())
+    db.add(trigger)
+    db.commit()
+    db.refresh(trigger)
+    return ScheduledTriggerRead.model_validate(trigger)
+
+
+@router.delete("/triggers/{trigger_id}")
+def delete_trigger(trigger_id: str, db: Session = Depends(get_db)):
+    trigger = db.query(ScheduledTrigger).filter(ScheduledTrigger.id == trigger_id).first()
+    if not trigger:
+        raise HTTPException(404, detail="Trigger not found")
+    db.delete(trigger)
+    db.commit()
+    return {"status": "deleted", "id": trigger_id}
