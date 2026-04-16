@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, func
+from sqlalchemy import Boolean, Column, DateTime, String, func
 from sqlalchemy.types import JSON
 from app.database import Base
 
@@ -6,23 +6,14 @@ from app.database import Base
 class ScheduledTrigger(Base):
     __tablename__ = "scheduled_triggers"
 
-    id = Column(String, primary_key=True)        # e.g. "system-heartbeat"
-    name = Column(String, nullable=False)         # display name
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
     description = Column(String, nullable=True)
-    interval_seconds = Column(Integer, nullable=False)
-    active_hours_start = Column(String, nullable=True)  # "09:00" UTC, or None = always
-    active_hours_end = Column(String, nullable=True)    # "22:00" UTC, or None = always
+    cron_expression = Column(String, nullable=False)
+    active_hours_start = Column(String, nullable=True)
+    active_hours_end = Column(String, nullable=True)
     enabled = Column(Boolean, nullable=False, default=True)
     payload_template = Column(JSON, nullable=False, default=dict)
     last_fired_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        nullable=False,
-    )
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

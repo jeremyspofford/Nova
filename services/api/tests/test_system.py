@@ -32,10 +32,10 @@ def test_patch_trigger_not_found(client):
     assert resp.status_code == 404
 
 
-def test_patch_trigger_rejects_nonpositive_interval(client, db_session):
+def test_patch_trigger_rejects_invalid_cron(client, db_session):
     from app.tools.seed import seed_scheduled_triggers
     seed_scheduled_triggers(db_session)
-    resp = client.patch("/system/triggers/system-heartbeat", json={"interval_seconds": 0})
+    resp = client.patch("/system/triggers/system-heartbeat", json={"cron_expression": "not a cron"})
     assert resp.status_code == 422
 
 
@@ -53,13 +53,13 @@ def test_seed_preserves_user_modifications(db_session):
     seed_scheduled_triggers(db_session)
     row = db_session.query(ScheduledTrigger).filter_by(id="system-heartbeat").first()
     row.enabled = False
-    row.interval_seconds = 9999
+    row.cron_expression = "0 12 * * *"
     db_session.commit()
 
     seed_scheduled_triggers(db_session)  # re-seed
     db_session.refresh(row)
     assert row.enabled is False
-    assert row.interval_seconds == 9999
+    assert row.cron_expression == "0 12 * * *"
     assert row.name == "System Heartbeat"
 
 

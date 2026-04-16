@@ -314,7 +314,7 @@ def seed_scheduled_triggers(db: Session) -> None:
     """Upsert default scheduled triggers.
 
     On existing rows only display fields (name, description) are refreshed;
-    all user-tunable runtime fields (enabled, interval_seconds, active_hours_*,
+    all user-tunable runtime fields (enabled, cron_expression, active_hours_*,
     payload_template, last_fired_at) are preserved across restarts.
 
     Note: this diverges deliberately from seed_tools / seed_board_columns,
@@ -327,23 +327,23 @@ def seed_scheduled_triggers(db: Session) -> None:
             id="system-heartbeat",
             name="System Heartbeat",
             description=(
-                "Periodic system health check: disk usage, memory, running processes, "
-                "and any pending work that needs attention."
+                "Periodic system health check: disk usage, memory, stale tasks, "
+                "and recent run failures."
             ),
-            interval_seconds=1800,  # 30 minutes
+            cron_expression="*/30 * * * *",
             enabled=True,
-            payload_template={"check": "system_health"},
+            payload_template={"tool": "nova.system_health", "input": {}},
         ),
         dict(
             id="daily-summary",
             name="Daily Summary",
             description=(
-                "Review today's activity, surface unresolved tasks, "
-                "and summarise what Nova has done in the past 24 hours."
+                "Summarise Nova's past 24h of activity — events, runs, and "
+                "completed/failed tasks — into a read-once digest."
             ),
-            interval_seconds=86400,  # 24 hours
+            cron_expression="0 0 * * *",
             enabled=True,
-            payload_template={"check": "daily_summary"},
+            payload_template={"tool": "nova.daily_summary", "input": {"window_hours": 24}},
         ),
     ]
 
