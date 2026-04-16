@@ -27,6 +27,8 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-gemma3:4b}
       HA_BASE_URL: ${HA_BASE_URL:-}
       HA_TOKEN: ${HA_TOKEN:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
