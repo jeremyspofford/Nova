@@ -11,7 +11,12 @@ import httpx
 from sqlalchemy.orm import Session
 from app import llm_client
 from app.config import settings as _settings
-from app.tools.nova_handlers import handle_system_health, handle_daily_summary, handle_describe_tools
+from app.tools.nova_handlers import (
+    handle_system_health,
+    handle_daily_summary,
+    handle_describe_tools,
+    handle_describe_config,
+)
 from app.tools.scheduler_handlers import (
     handle_scheduler_create_trigger,
     handle_scheduler_list_triggers,
@@ -269,6 +274,7 @@ _REGISTRY: dict[str, tuple] = {
     "nova.system_health": (handle_system_health, ["db"]),
     "nova.daily_summary": (handle_daily_summary, ["db"]),
     "nova.describe_tools": (handle_describe_tools, ["db"]),
+    "nova.describe_config": (handle_describe_config, ["db"]),
     "scheduler.create_trigger": (handle_scheduler_create_trigger, ["db"]),
     "scheduler.list_triggers": (handle_scheduler_list_triggers, ["db"]),
     "scheduler.update_trigger": (handle_scheduler_update_trigger, ["db"]),

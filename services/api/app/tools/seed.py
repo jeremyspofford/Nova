@@ -375,6 +375,23 @@ def seed_tools(db: Session) -> None:
             tags=["nova", "introspection"],
         ),
         dict(
+            name="nova.describe_config",
+            display_name="Nova: Describe Config",
+            description=(
+                "Return Nova's current configuration: active LLM providers, per-purpose "
+                "policies, active scheduled trigger count, and month-to-date cloud spend. "
+                "Use when the user asks about Nova's setup, model, or configuration."
+            ),
+            adapter_type="internal",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=5,
+            enabled=True,
+            tags=["nova", "introspection"],
+        ),
+        dict(
             name="scheduler.create_trigger",
             display_name="Scheduler: Create Trigger",
             description=(

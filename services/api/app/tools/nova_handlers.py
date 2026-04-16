@@ -188,3 +188,77 @@ def handle_describe_tools(input: dict, db: Session) -> dict:
         "categories": grouped,
         "total_count": sum(len(v) for v in grouped.values()),
     }
+
+
+def handle_describe_config(input: dict, db: Session) -> dict:
+    """Return a snapshot of Nova's current configuration.
+
+    Defensive: survives both pre-migration (module absent) and pre-seed (table
+    empty) states for the LLM purpose-policy system. Guards stay permanent so
+    the tool works on fresh clones and after rollbacks.
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy import func
+    from app.models.llm_provider import LLMProviderProfile
+    from app.models.scheduled_trigger import ScheduledTrigger
+    from app.models.run import Run
+
+    providers = db.query(LLMProviderProfile).filter(LLMProviderProfile.enabled == True).all()  # noqa: E712
+    providers_local = [
+        {"id": p.id, "model_ref": p.model_ref}
+        for p in providers if p.provider_type == "local"
+    ]
+    providers_cloud = [
+        {"id": p.id, "model_ref": p.model_ref}
+        for p in providers if p.provider_type == "cloud"
+    ]
+
+    # Purpose policies — defensive against module-missing AND table-missing.
+    policy_list: list[dict] = []
+    try:
+        from app.models.llm_purpose_policy import LLMPurposePolicy  # import inside try
+        policies = db.query(LLMPurposePolicy).order_by(LLMPurposePolicy.purpose).all()
+        policy_list = [
+            {
+                "purpose": p.purpose,
+                "preferred": p.preferred_provider_id,
+                "allow_cloud": p.allow_cloud,
+                "fallback_chain": p.fallback_chain,
+            }
+            for p in policies
+        ]
+    except Exception:
+        # Covers both ImportError (purpose-routing spec not shipped → module absent)
+        # and SQLAlchemy OperationalError (table absent pre-migration).
+        pass
+
+    # Trigger count (not full list — scheduler.list_triggers owns the detail shape).
+    trigger_count = (
+        db.query(func.count(ScheduledTrigger.id))
+        .filter(ScheduledTrigger.enabled == True)  # noqa: E712
+        .scalar()
+    ) or 0
+
+    # Monthly cloud spend — defensive against pre-migration column absence.
+    cloud_spend: float | None = None
+    try:
+        since = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        total = (
+            db.query(func.coalesce(func.sum(Run.llm_cost_usd), 0))
+            .filter(Run.llm_cost_usd.isnot(None))
+            .filter(Run.started_at >= since)
+            .scalar()
+        )
+        cloud_spend = float(total or 0)
+    except Exception:
+        pass
+
+    return {
+        "providers": {
+            "local": providers_local,
+            "cloud": providers_cloud,
+        },
+        "purpose_policies": policy_list,
+        "active_trigger_count": trigger_count,
+        "cloud_spend_this_month_usd": cloud_spend,
+    }

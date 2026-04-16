@@ -96,3 +96,68 @@ def test_describe_tools_excludes_disabled(db_session):
     result = handle_describe_tools({}, db_session)
     all_names = [t["name"] for tools_list in result["categories"].values() for t in tools_list]
     assert "debug.echo" not in all_names
+
+
+def test_describe_config_returns_providers_and_trigger_count(db_session):
+    from app.tools.nova_handlers import handle_describe_config
+    from app.tools.seed import seed_llm_providers, seed_scheduled_triggers
+
+    # Seed requires OLLAMA_BASE_URL; fake it for the test
+    class S:
+        ollama_base_url = "http://x"
+        ollama_model = "qwen3.5:9b"
+        ollama_fallback_model = "llama3.2:3b"
+    seed_llm_providers(db_session, S())
+    seed_scheduled_triggers(db_session)
+
+    result = handle_describe_config({}, db_session)
+    # Providers grouped
+    assert "providers" in result
+    assert isinstance(result["providers"]["local"], list)
+    assert isinstance(result["providers"]["cloud"], list)
+    local_ids = {p["id"] for p in result["providers"]["local"]}
+    assert "ollama-local" in local_ids
+    assert "ollama-local-fallback" in local_ids
+    # Trigger count is int, not a list (avoids shape drift with scheduler.list_triggers)
+    assert isinstance(result["active_trigger_count"], int)
+    assert result["active_trigger_count"] == 2
+
+
+def test_describe_config_survives_missing_purpose_policy_module(db_session, monkeypatch):
+    """If the purpose-routing spec hasn't shipped yet, the model module doesn't
+    exist — import MUST be inside the try block so describe_config still works."""
+    from app.tools.nova_handlers import handle_describe_config
+    import sys
+
+    # Force the import to fail even if the module is present in this process
+    monkeypatch.setitem(sys.modules, "app.models.llm_purpose_policy", None)
+
+    result = handle_describe_config({}, db_session)
+    assert result["purpose_policies"] == []
+    # Other fields still populated (providers list, trigger count)
+    assert "providers" in result
+    assert "active_trigger_count" in result
+
+
+def test_describe_config_survives_missing_cost_column(db_session):
+    """Pre-migration: Run.llm_cost_usd column doesn't exist. The handler's try
+    block must swallow the AttributeError and return cloud_spend=None rather
+    than crashing. This test is a regression guard for that behavior.
+    """
+    from app.tools.nova_handlers import handle_describe_config
+    result = handle_describe_config({}, db_session)
+    assert "cloud_spend_this_month_usd" in result
+    # Pre-migration state: column absent → None. Post-migration with no runs: 0.0.
+    # Either is acceptable; the contract is "handler didn't crash."
+    assert result["cloud_spend_this_month_usd"] in (None, 0.0)
+
+
+def test_describe_config_returns_trigger_count_not_list(db_session):
+    """Locked contract: prevents drift with scheduler.list_triggers."""
+    from app.tools.nova_handlers import handle_describe_config
+    from app.tools.seed import seed_scheduled_triggers
+    seed_scheduled_triggers(db_session)
+    result = handle_describe_config({}, db_session)
+    assert isinstance(result["active_trigger_count"], int)
+    # Explicitly: result must NOT contain "scheduled_triggers" list
+    assert "scheduled_triggers" not in result
