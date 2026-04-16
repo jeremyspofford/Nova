@@ -1,8 +1,12 @@
 from datetime import datetime
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 
 class ScheduledTriggerRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     name: str
     description: str | None
@@ -10,10 +14,8 @@ class ScheduledTriggerRead(BaseModel):
     active_hours_start: str | None
     active_hours_end: str | None
     enabled: bool
-    payload_template: dict
+    payload_template: dict[str, Any]
     last_fired_at: datetime | None
-
-    model_config = {"from_attributes": True}
 
 
 class ScheduledTriggerUpdate(BaseModel):

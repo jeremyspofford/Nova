@@ -1,6 +1,3 @@
-import pytest
-
-
 def test_list_triggers_empty(client):
     resp = client.get("/system/triggers")
     assert resp.status_code == 200
