@@ -198,8 +198,8 @@ def handle_nova_query_activity(input: dict, db: Session) -> dict:
     status = input.get("status")
     tool_name = input.get("tool_name")
 
-    # Use naive UTC to avoid SQLite timezone comparison issues (production uses PostgreSQL)
-    since = datetime.datetime.utcnow() - datetime.timedelta(hours=since_hours)
+    # Use timezone-aware UTC to avoid SQLite timezone comparison issues (production uses PostgreSQL)
+    since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=since_hours)
 
     query = db.query(Run).filter(Run.started_at >= since)
     if status:
