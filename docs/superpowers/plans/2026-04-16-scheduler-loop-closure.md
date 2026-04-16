@@ -548,7 +548,10 @@ def _make_trigger(trigger_id="system-heartbeat", last_fired_offset_seconds=None)
         "id": trigger_id,
         "name": "System Heartbeat",
         "enabled": True,
-        "cron_expression": "* * * * *",  # every minute — always due if last fire is > 60s ago
+        # Every 30 minutes — mirrors the original `interval_seconds=1800` semantics
+        # used by existing `fire_due_triggers` tests. A 60s offset sits inside the
+        # 30-minute window so `test_fire_due_skips_recent_trigger` correctly returns 0.
+        "cron_expression": "*/30 * * * *",
         "last_fired_at": last_fired,
         "active_hours_start": None,
         "active_hours_end": None,
@@ -1767,62 +1770,102 @@ def _dispatch_tool_call(db: Session, tc: dict) -> dict:
         return {"error": str(exc)}
 ```
 
-**Send-message body skeleton** (replace everything from the current `# --- Phase 1: Intent classification ---` comment down to where `generate()` is defined, keeping the `generate()` + `StreamingResponse` skeleton intact — only the inputs to `generate()` change):
+**Architecture — two-phase flow to preserve streaming UX:**
+
+The existing `send_message` streams the LLM's reply token-by-token via `llm_client.route_streaming` (that call is what existing tests `test_send_message_sse_streams_chunks` / `test_send_message_sse_persists_assistant_message` patch). Keep that streaming call as the final user-visible reply. Tool calls happen synchronously before the streaming reply starts.
+
+**Phase 1: synchronous tool-calling loop** — drive `route_with_tools` until either the LLM emits no tool_calls, a sensitive tool triggers pending confirmation, or MAX_TOOL_TURNS is reached. Do not persist any of the non-streaming responses to the DB — the user sees only Phase 2 output.
+
+**Phase 2: streaming final reply** — build the final messages array (system prompt + conversation history + resolved tool messages), call `route_streaming` with it. `generate()` yields those chunks exactly like today's code.
+
+**Short-circuit paths** that skip Phase 1:
+- **Pending confirmation "yes"** → dispatch the pending tool, produce a short result text, stream it as synthetic chunks (single emit is fine).
+- **Pending confirmation "no"** → emit "Cancelled." as a synthetic stream.
+- **Sensitive tool intercepted in Phase 1** → emit the rendered confirmation message as a synthetic stream; no Phase 2.
+
+**Synthesized streaming helper** (add to the module):
+
+```python
+def _synth_stream(text: str):
+    """Yield a string as a single chunk; mirrors the shape of route_streaming's generator."""
+    yield text
+```
+
+**Send-message body skeleton** (replace everything from the current `# --- Phase 1: Intent classification ---` comment down to where `generate()` is defined, keeping the `StreamingResponse` wrapper intact — only the inputs to `generate()` change):
 
 ```python
 # Resolution order at the top of the synchronous work (before `generate()` is defined):
 
+final_stream = None                 # iterator that generate() consumes
+final_text_for_persist = None       # str captured after streaming ends (for DB write)
+
 # --- Step A: Handle pending confirmation if present ---
 verdict, pending = _check_pending_confirmation(conv, body.content)
 if verdict == "confirm":
-    # Dispatch and produce the assistant reply text
     tool_output = _dispatch_tool_call(db, pending)
     conv.pending_tool_call = None
     conv.pending_tool_call_at = None
     db.commit()
-    final_text = tool_output.get("summary") or f"Done. {json.dumps(tool_output)}"
+    reply_text = tool_output.get("summary") or f"Done. {json.dumps(tool_output)}"
+    final_stream = _synth_stream(reply_text)
+    final_text_for_persist = reply_text
+
 elif verdict == "deny":
     conv.pending_tool_call = None
     conv.pending_tool_call_at = None
     db.commit()
-    final_text = "Cancelled."
+    final_stream = _synth_stream("Cancelled.")
+    final_text_for_persist = "Cancelled."
+
 else:
-    # --- Step B: Regular tool-calling loop ---
-    system_content = _build_system_prompt(db)  # now tool-catalog-free
+    # --- Step B: Phase 1 — synchronous tool-calling loop ---
+    system_content = _build_system_prompt(db)  # NOTE: no longer includes tool catalog (structured)
     messages = [{"role": "system", "content": system_content}]
     for m in history:
         messages.append({"role": m.role, "content": m.content})
 
     tools = _tool_catalog(db)
-    final_text = None
+    intercepted_confirmation = None
+
     for turn in range(MAX_TOOL_TURNS):
         result = llm_client.route_with_tools(db, purpose="chat", messages=messages, tools=tools)
-        if result.get("content") and not result.get("tool_calls"):
-            final_text = result["content"]
-            break
         tool_calls = result.get("tool_calls") or []
-        # Check for a sensitive call — if any, store pending + break
+        if not tool_calls:
+            # No more tool intents — drop to Phase 2 with current messages
+            break
         sensitive = next((tc for tc in tool_calls if tc["name"] in SENSITIVE_TOOLS), None)
         if sensitive:
             conv.pending_tool_call = sensitive
             conv.pending_tool_call_at = datetime.now(timezone.utc)
             db.commit()
-            final_text = _render_confirmation(sensitive["name"], sensitive.get("arguments") or {})
+            intercepted_confirmation = _render_confirmation(
+                sensitive["name"], sensitive.get("arguments") or {}
+            )
             break
-        # Auto-execute all tool_calls and continue the loop
+        # Auto-execute every non-sensitive tool_call and continue
         for tc in tool_calls:
             output = _dispatch_tool_call(db, tc)
             messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
             messages.append({"role": "tool", "name": tc["name"], "content": json.dumps(output)})
-    if final_text is None:
-        final_text = "I reached the maximum tool-calling turns. Please rephrase."
 
-# --- Step C: define generate() that streams final_text (same pattern as existing code) ---
+    if intercepted_confirmation is not None:
+        final_stream = _synth_stream(intercepted_confirmation)
+        final_text_for_persist = intercepted_confirmation
+    else:
+        # --- Phase 2: stream the final reply using existing streaming machinery ---
+        # route_streaming is what the existing test fixtures patch — preserves SSE contract
+        final_stream = llm_client.route_streaming(db, purpose="chat", messages=messages)
+        final_text_for_persist = None  # will be accumulated inside generate()
+
+# `generate()` iterates final_stream, yields chunks, and captures the
+# full assistant text into final_text_for_persist (unless already set) for
+# post-stream DB persistence — same pattern as today's code.
 ```
 
-**Streaming contract:** keep the SSE streaming skeleton exactly as today — `generate()` yields chunks of `final_text`, the response sets `media_type="text/event-stream"`. The non-streaming branch (if one exists based on a header) just returns `{"content": final_text}` after persistence.
-
-**Assistant message persistence:** the existing code persists the assistant message after `generate()` drains. Preserve that — `final_text` is what gets persisted, as before.
+**Implementer notes:**
+- The `generate()` closure + SSE envelope + post-stream `Message(role="assistant", content=...)` persistence all stay the same as the existing code. The only changes are what gets assigned to the stream source and how the final text is captured.
+- If `final_text_for_persist` is set synchronously (confirm/deny/intercept paths), `generate()` just uses that directly for persistence. If it's None (Phase 2 path), `generate()` accumulates chunks as they're streamed (same pattern the existing code already uses).
+- Route `route_streaming` must receive the accumulated `messages` (including any tool-message results from Phase 1) so the LLM's final reply is informed by tool outputs.
 
 - [ ] **Step 4: Update pre-existing classifier-era tests in `test_conversations.py`**
 
@@ -1839,8 +1882,10 @@ The existing test file has a bundle of tests tied to the intent-classifier path.
 - `test_unknown_tool_falls_through_no_run` (line ~246) — keep the assertion that unknown tool names don't create Runs; update setup to have `route_with_tools` return a tool_call with a bogus name → `tool_handlers.dispatch` raises KeyError → `_dispatch_tool_call` records a failed Run (or skips; decide based on the new `_dispatch_tool_call` contract. Spec above records a failed Run; reflect that in the updated assertion.)
 - `test_action_sse_emits_running_acknowledgment` (line ~264) — rewrite to assert the new streaming shape. If the new implementation doesn't emit a `[Running tool...]` acknowledgment, either add one (nice UX, keeps the existing contract) OR delete this test and document the UX loss.
 
-**Keep unchanged (should still pass):**
-- `test_create_conversation_returns_id_and_title`, `test_list_conversations_*`, `test_get_messages_*`, `test_send_message_non_streaming`, `test_send_message_persists_user_message`, `test_send_message_sse_streams_chunks`, `test_send_message_sse_persists_assistant_message`, `test_send_message_sets_title_*`, `test_send_message_conversation_not_found` — these test the conversation/message plumbing which is unchanged.
+**Keep unchanged (should still pass under the two-phase architecture):**
+- `test_create_conversation_returns_id_and_title`, `test_list_conversations_*`, `test_get_messages_*`, `test_send_message_persists_user_message`, `test_send_message_sets_title_*`, `test_send_message_conversation_not_found` — these test conversation/message plumbing which is unchanged.
+- `test_send_message_non_streaming` — if the no-stream branch still returns `{"content": final_text}`, should still pass. Inspect the test to confirm it doesn't assert against the classifier shape.
+- `test_send_message_sse_streams_chunks` and `test_send_message_sse_persists_assistant_message` — these patch `llm_client.route_streaming` (or `_call_provider_streaming_real`) and assert on chunk shape. Should still pass because the two-phase architecture preserves the streaming call for the final reply. Verify the patch target in the tests matches whatever function the new Phase 2 calls; if the existing tests patch `_call_provider_streaming_real` and the new code uses `route_streaming`, update the patch target in the tests (mechanical `patch("app.llm_client._call_provider_streaming_real")` → `patch("app.llm_client.route_streaming")`).
 
 - [ ] **Step 5: Run tests — iterate until all pass**
 
