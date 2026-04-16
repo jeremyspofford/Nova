@@ -82,3 +82,12 @@ class NovaClient:
             "privacy_preference": privacy_preference,
         }
         return self._request("POST", "/llm/route", json=body)["output"]
+
+    def get_scheduled_triggers(self) -> list[dict]:
+        return self._request("GET", "/system/triggers")["triggers"]
+
+    def patch_scheduled_trigger(self, trigger_id: str, updates: dict) -> dict:
+        return self._request("PATCH", f"/system/triggers/{trigger_id}", json=updates)
+
+    def post_event(self, payload: dict) -> dict:
+        return self._request("POST", "/events", json=payload)

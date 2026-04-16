@@ -16,6 +16,9 @@ class FakeClient:
         self._llm_response: str = ""
         self._invoke_result: dict = {"run_id": "run-1", "status": "succeeded"}
         self._next_task_id: int = 1
+        self.scheduled_triggers: list[dict] = []
+        self.posted_events: list[dict] = []
+        self.patched_triggers: dict[str, dict] = {}
 
     def get_events(self, since: str, limit: int = 10) -> list[dict]:
         return self.events[:limit]
@@ -64,6 +67,17 @@ class FakeClient:
         self, tool_name: str, input: dict, task_id: str | None = None
     ) -> dict:
         return self._invoke_result
+
+    def get_scheduled_triggers(self) -> list[dict]:
+        return self.scheduled_triggers
+
+    def patch_scheduled_trigger(self, trigger_id: str, updates: dict) -> dict:
+        self.patched_triggers[trigger_id] = updates
+        return updates
+
+    def post_event(self, payload: dict) -> dict:
+        self.posted_events.append(payload)
+        return {"id": f"evt-{len(self.posted_events)}", **payload}
 
 
 @pytest.fixture
