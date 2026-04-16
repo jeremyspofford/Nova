@@ -160,8 +160,11 @@ def _stream_chunks(provider, messages: list[dict], caller):
 
 
 def _select_candidates(providers: list, privacy_preference: str) -> list:
-    local = [p for p in providers if p.provider_type == "local"]
-    cloud = [p for p in providers if p.provider_type == "cloud"]
+    # Sort by id so ordering is deterministic — primary `ollama-local` comes
+    # before `ollama-local-fallback` alphabetically, so the primary is always
+    # tried first and fallback only runs on exception.
+    local = sorted([p for p in providers if p.provider_type == "local"], key=lambda p: p.id)
+    cloud = sorted([p for p in providers if p.provider_type == "cloud"], key=lambda p: p.id)
     if privacy_preference == "local_required":
         return local
     elif privacy_preference == "local_preferred":

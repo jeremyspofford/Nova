@@ -7,26 +7,32 @@ from app.models.llm_provider import LLMProviderProfile
 
 
 def seed_llm_providers(db: Session, settings) -> None:
-    """Upsert the Ollama local provider if OLLAMA_BASE_URL is set."""
+    """Upsert the Ollama local providers (primary + fallback).
+
+    Primary (`ollama-local`) is what the Settings UI manages. Fallback
+    (`ollama-local-fallback`) kicks in automatically via `route_with_tools`'s
+    multi-provider iteration if the primary fails (timeout, OOM, bad response).
+    """
     if not settings.ollama_base_url:
         return
 
-    provider = db.query(LLMProviderProfile).filter(
+    endpoint = settings.ollama_base_url + "/v1"
+
+    # ── Primary ──
+    primary = db.query(LLMProviderProfile).filter(
         LLMProviderProfile.id == "ollama-local"
     ).first()
-
-    if provider:
-        # Update endpoint/enabled from env — but preserve model_ref so user's
-        # Settings choice survives container restarts.
-        provider.endpoint_ref = settings.ollama_base_url + "/v1"
-        provider.enabled = True
-        provider.supports_tools = True
+    if primary:
+        # Preserve user's Settings choice on `model_ref` across restarts.
+        primary.endpoint_ref = endpoint
+        primary.enabled = True
+        primary.supports_tools = True
     else:
-        provider = LLMProviderProfile(
+        primary = LLMProviderProfile(
             id="ollama-local",
             name="Ollama Local",
             provider_type="local",
-            endpoint_ref=settings.ollama_base_url + "/v1",
+            endpoint_ref=endpoint,
             model_ref=settings.ollama_model,
             enabled=True,
             supports_tools=True,
@@ -35,7 +41,31 @@ def seed_llm_providers(db: Session, settings) -> None:
             cost_class="low",
             latency_class="medium",
         )
-        db.add(provider)
+        db.add(primary)
+
+    # ── Fallback ──
+    fallback = db.query(LLMProviderProfile).filter(
+        LLMProviderProfile.id == "ollama-local-fallback"
+    ).first()
+    if fallback:
+        fallback.endpoint_ref = endpoint
+        fallback.enabled = True
+        fallback.supports_tools = True
+    else:
+        fallback = LLMProviderProfile(
+            id="ollama-local-fallback",
+            name="Ollama Local (fallback)",
+            provider_type="local",
+            endpoint_ref=endpoint,
+            model_ref=settings.ollama_fallback_model,
+            enabled=True,
+            supports_tools=True,
+            supports_streaming=False,
+            privacy_class="local_only",
+            cost_class="low",
+            latency_class="low",
+        )
+        db.add(fallback)
 
     db.commit()
 

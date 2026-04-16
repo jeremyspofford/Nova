@@ -35,7 +35,7 @@ def update_local_model(body: ProviderModelUpdate, db: Session = Depends(get_db))
     """Update the model_ref for the local (Ollama) provider."""
     provider = (
         db.query(LLMProviderProfile)
-        .filter(LLMProviderProfile.provider_type == "local", LLMProviderProfile.enabled == True)  # noqa: E712
+        .filter(LLMProviderProfile.id == "ollama-local", LLMProviderProfile.enabled == True)  # noqa: E712
         .first()
     )
     if not provider:
@@ -50,7 +50,7 @@ def get_local_provider(db: Session = Depends(get_db)):
     """Return the current local (Ollama) provider config."""
     provider = (
         db.query(LLMProviderProfile)
-        .filter(LLMProviderProfile.provider_type == "local", LLMProviderProfile.enabled == True)  # noqa: E712
+        .filter(LLMProviderProfile.id == "ollama-local", LLMProviderProfile.enabled == True)  # noqa: E712
         .first()
     )
     if not provider:
