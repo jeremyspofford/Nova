@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { useSettingsStore } from "../../stores/settingsStore"
 import { getModels, getLocalProvider, setLocalModel } from "../../api/llm"
+import { ScheduledTriggersPanel } from "./ScheduledTriggersPanel"
 
 type SegOption<T extends string> = { label: string; value: T }
 
@@ -116,6 +117,13 @@ export function Settings() {
               </select>
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="settings-section">
+        <div className="settings-section__label">Scheduled Triggers</div>
+        <div className="settings-group">
+          <ScheduledTriggersPanel />
         </div>
       </section>
     </div>
