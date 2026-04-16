@@ -359,6 +359,22 @@ def seed_tools(db: Session) -> None:
             tags=["nova", "summary"],
         ),
         dict(
+            name="nova.describe_tools",
+            display_name="Nova: Describe Tools",
+            description=(
+                "List all tools Nova can use, grouped by category, with their descriptions. "
+                "Use when the user asks 'what tools do you have' or 'what can you do'."
+            ),
+            adapter_type="internal",
+            input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+            output_schema={"type": "object"},
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=5,
+            enabled=True,
+            tags=["nova", "introspection"],
+        ),
+        dict(
             name="scheduler.create_trigger",
             display_name="Scheduler: Create Trigger",
             description=(

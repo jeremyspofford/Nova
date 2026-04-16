@@ -56,3 +56,43 @@ def test_daily_summary_returns_ok_with_message(db_session):
     assert result["status"] == "ok"
     assert "Summary text here." in result["message"]
     assert "Daily summary" in result["message"]
+
+
+def test_describe_tools_groups_by_prefix(db_session):
+    from app.tools.nova_handlers import handle_describe_tools
+    from app.tools.seed import seed_tools
+    seed_tools(db_session)
+
+    result = handle_describe_tools({}, db_session)
+    categories = result["categories"]
+    assert result["total_count"] >= 11  # at least the currently seeded tools
+    # Grouping by first dotted segment
+    assert "scheduler" in categories
+    assert "nova" in categories
+    assert "shell" in categories
+    assert "fs" in categories
+
+    # Each entry has the keys the LLM needs
+    first_cat = next(iter(categories.values()))
+    first_tool = first_cat[0]
+    assert "name" in first_tool
+    assert "display_name" in first_tool
+    assert "description" in first_tool
+    assert "risk_class" in first_tool
+    assert "input_schema" in first_tool
+
+
+def test_describe_tools_excludes_disabled(db_session):
+    from app.tools.nova_handlers import handle_describe_tools
+    from app.tools.seed import seed_tools
+    from app.models.tool import Tool
+    seed_tools(db_session)
+
+    # Disable one tool and verify it's absent
+    tool = db_session.query(Tool).filter_by(name="debug.echo").first()
+    tool.enabled = False
+    db_session.commit()
+
+    result = handle_describe_tools({}, db_session)
+    all_names = [t["name"] for tools_list in result["categories"].values() for t in tools_list]
+    assert "debug.echo" not in all_names

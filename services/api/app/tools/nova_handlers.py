@@ -167,3 +167,24 @@ def handle_daily_summary(input: dict, db: Session) -> dict:
         "status": "ok",
         "message": f"Daily summary — {today}\n\n{summary}",
     }
+
+
+def handle_describe_tools(input: dict, db: Session) -> dict:
+    """Return the catalog of available (enabled) tools, grouped by dotted prefix."""
+    from app.models.tool import Tool
+
+    tools = db.query(Tool).filter(Tool.enabled == True).order_by(Tool.name).all()  # noqa: E712
+    grouped: dict[str, list[dict]] = {}
+    for t in tools:
+        category = t.name.split(".", 1)[0] if "." in t.name else "other"
+        grouped.setdefault(category, []).append({
+            "name": t.name,
+            "display_name": t.display_name,
+            "description": t.description,
+            "risk_class": t.risk_class,
+            "input_schema": t.input_schema,
+        })
+    return {
+        "categories": grouped,
+        "total_count": sum(len(v) for v in grouped.values()),
+    }

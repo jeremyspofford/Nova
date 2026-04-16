@@ -10,7 +10,7 @@ def test_get_tools_returns_seeded_tools(client, db_session):
     names = {t["name"] for t in tools}
     assert {"debug.echo", "ha.light.turn_on", "devops.summarize_ci_failure", "ha.light.turn_off",
             "http.request", "shell.run", "fs.list", "fs.read", "nova.query_activity",
-            "nova.system_health", "nova.daily_summary",
+            "nova.system_health", "nova.daily_summary", "nova.describe_tools",
             "scheduler.create_trigger", "scheduler.list_triggers",
             "scheduler.update_trigger", "scheduler.delete_trigger"} == names
 
