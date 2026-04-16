@@ -217,12 +217,28 @@ depends_on = None
 
 def upgrade() -> None:
     op.add_column("scheduled_triggers", sa.Column("cron_expression", sa.String(), nullable=True))
+
+    # Backfill cron_expression for the two seeded triggers.
     op.execute(
         "UPDATE scheduled_triggers SET cron_expression = '*/30 * * * *' WHERE id = 'system-heartbeat'"
     )
     op.execute(
         "UPDATE scheduled_triggers SET cron_expression = '0 0 * * *' WHERE id = 'daily-summary'"
     )
+
+    # Rewrite the two seeded triggers' payload_template to the new {tool, input} shape.
+    # seed_scheduled_triggers preserves existing payload_template on restart (user data is
+    # sacred), so without this data migration the stale {"check": "system_health"} payload
+    # would persist and bypass the triage scheduler-source branch's tool-routing.
+    op.execute(
+        "UPDATE scheduled_triggers SET payload_template = '{\"tool\": \"nova.system_health\", \"input\": {}}'::json "
+        "WHERE id = 'system-heartbeat'"
+    )
+    op.execute(
+        "UPDATE scheduled_triggers SET payload_template = '{\"tool\": \"nova.daily_summary\", \"input\": {\"window_hours\": 24}}'::json "
+        "WHERE id = 'daily-summary'"
+    )
+
     op.alter_column("scheduled_triggers", "cron_expression", nullable=False)
     op.drop_column("scheduled_triggers", "interval_seconds")
 
@@ -234,6 +250,15 @@ def downgrade() -> None:
     )
     op.execute(
         "UPDATE scheduled_triggers SET interval_seconds = 86400 WHERE id = 'daily-summary'"
+    )
+    # Restore the old payload shape for the two seeded triggers.
+    op.execute(
+        "UPDATE scheduled_triggers SET payload_template = '{\"check\": \"system_health\"}'::json "
+        "WHERE id = 'system-heartbeat'"
+    )
+    op.execute(
+        "UPDATE scheduled_triggers SET payload_template = '{\"check\": \"daily_summary\"}'::json "
+        "WHERE id = 'daily-summary'"
     )
     op.alter_column("scheduled_triggers", "interval_seconds", nullable=False)
     op.drop_column("scheduled_triggers", "cron_expression")
@@ -915,6 +940,8 @@ def handle_daily_summary(input: dict, db: Session) -> dict:
 
 - [ ] **Step 4: Register in tool registry**
 
+The existing `_REGISTRY` in `services/api/app/tools/handlers.py` stores tuples of `(handler_fn, deps)` where `deps` is a list of dep names (`"db"` or `"settings"`) that `dispatch()` passes as positional args. Both new handlers need `db`.
+
 In `services/api/app/tools/handlers.py`, import and add to `_REGISTRY`:
 
 ```python
@@ -922,49 +949,76 @@ from app.tools.nova_handlers import handle_system_health, handle_daily_summary
 
 _REGISTRY = {
     # ... existing entries ...
-    "nova.system_health": handle_system_health,
-    "nova.daily_summary": handle_daily_summary,
+    "nova.system_health": (handle_system_health, ["db"]),
+    "nova.daily_summary": (handle_daily_summary, ["db"]),
 }
 ```
 
-These handlers take `(input, db)` — update the dispatch code in `handlers.py` if it routes by arity. If `dispatch()` already passes `db` and `cfg` to handlers that accept them, these fit the existing pattern.
+Do NOT change the dispatch function — it already handles the `["db"]` dep pattern correctly.
 
 - [ ] **Step 5: Register in tool seed**
 
-In `services/api/app/tools/seed.py`, add to `seed_tools` definitions:
+In `services/api/app/tools/seed.py`, add to the `tool_definitions` list in `seed_tools`. The `Tool` model requires `display_name` and `adapter_type` as NOT NULL — the entries MUST include them (and match the style of the existing entries at lines 72-85):
 
 ```python
-{
-    "name": "nova.system_health",
-    "description": "Check Nova's own health — disk, memory, stale tasks, recent run failures.",
-    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
-    "output_schema": {"type": "object"},
-    "enabled": True,
-    "risk_class": "low",
-},
-{
-    "name": "nova.daily_summary",
-    "description": "Summarize the last N hours of activity into a human-readable digest.",
-    "input_schema": {
+dict(
+    name="nova.system_health",
+    display_name="Nova: System Health",
+    description="Check Nova's own health — disk, memory, stale tasks, recent run failures.",
+    adapter_type="internal",
+    input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=10,
+    enabled=True,
+    tags=["nova", "monitoring"],
+),
+dict(
+    name="nova.daily_summary",
+    display_name="Nova: Daily Summary",
+    description="Summarize the last N hours of activity into a human-readable digest.",
+    adapter_type="internal",
+    input_schema={
         "type": "object",
         "properties": {"window_hours": {"type": "integer", "minimum": 1, "maximum": 168}},
         "additionalProperties": False,
     },
-    "output_schema": {"type": "object"},
-    "enabled": True,
-    "risk_class": "low",
-},
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=30,
+    enabled=True,
+    tags=["nova", "summary"],
+),
 ```
 
-- [ ] **Step 6: Run tests — confirm pass**
+- [ ] **Step 6: Update `test_tools.py::test_get_tools_returns_seeded_tools`**
+
+The test asserts **set equality** on the exact name set (not just a count). In `services/api/tests/test_tools.py` line 11, add `"nova.system_health"` and `"nova.daily_summary"` to the expected set. The assertion currently reads something like:
+
+```python
+assert {"debug.echo", "ha.light.turn_on", "devops.summarize_ci_failure", "ha.light.turn_off",
+        "http.request", "shell.run", "fs.list", "fs.read", "nova.query_activity"} == names
+```
+
+Update to:
+
+```python
+assert {"debug.echo", "ha.light.turn_on", "devops.summarize_ci_failure", "ha.light.turn_off",
+        "http.request", "shell.run", "fs.list", "fs.read", "nova.query_activity",
+        "nova.system_health", "nova.daily_summary"} == names
+```
+
+- [ ] **Step 7: Run tests — confirm pass**
 
 ```bash
 pytest tests/test_nova_handlers.py tests/test_tools.py -v
 ```
 
-Expected: all pass. `test_tools.py::test_get_tools_returns_seeded_tools` should now find 11 tools (was 9).
+Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add services/api/app/tools/nova_handlers.py \
@@ -986,14 +1040,30 @@ git commit -m "feat(api): add nova.system_health and nova.daily_summary tool han
 
 - [ ] **Step 1: Extend `FakeClient.invoke_tool` return shape**
 
-In `services/nova-lite/tests/conftest.py`, the current `invoke_tool` returns `self._invoke_result`. Tests need to control the response shape per call. Update to:
+In `services/nova-lite/tests/conftest.py`, the current `invoke_tool` returns `self._invoke_result`. Tests need to control the response shape per tool.
+
+**Important:** the real `NovaClient.invoke_tool` returns the API's `/tools/{name}/invoke` response envelope:
+
+```python
+{"run_id": "r-1", "status": "succeeded", "output": {<handler return>}, "error": None}
+```
+
+The handler's `{status: "ok"|"action_needed", ...}` lives in `output`, NOT at the top level. Tests MUST mirror that envelope, or they'll paper over a real bug in the scheduler triage path.
+
+Update `invoke_tool` to:
 
 ```python
 def invoke_tool(self, tool_name: str, input: dict, task_id: str | None = None) -> dict:
-    # Tests can set _invoke_result_by_tool = {"nova.system_health": {"status": "ok", ...}}
+    # Tests can set _invoke_result_by_tool = {"nova.system_health": {<handler output>}}
+    # We wrap that output in the real envelope so triage code paths match production.
     by_tool = getattr(self, "_invoke_result_by_tool", {})
     if tool_name in by_tool:
-        return by_tool[tool_name]
+        return {
+            "run_id": f"run-{tool_name}",
+            "status": "succeeded",
+            "output": by_tool[tool_name],
+            "error": None,
+        }
     return self._invoke_result
 ```
 
@@ -1103,26 +1173,47 @@ import datetime as _dt
 
 
 def _handle_scheduler_tool_event(client, event: dict, payload: dict) -> dict | None:
-    """Invoke the tool directly; return task-create dict if action_needed, else None."""
+    """Invoke the tool directly; return task-create dict if action_needed, else None.
+
+    `client.invoke_tool` returns the /tools/{name}/invoke envelope:
+        {"run_id", "status": "succeeded|failed", "output": {<handler output>}, "error"}
+    The handler's escalation status lives in `output.status`.
+    """
     tool_name = payload["tool"]
     tool_input = payload.get("input", {})
-    result = client.invoke_tool(tool_name, tool_input)
-    status = result.get("status")
-    if status == "ok":
-        return None
-    if status == "action_needed":
+    envelope = client.invoke_tool(tool_name, tool_input)
+
+    if envelope.get("status") == "failed":
+        log.warning("scheduler tool %s failed: %s", tool_name, envelope.get("error"))
         return {
-            "title": result.get("title") or event.get("subject") or tool_name,
-            "description": result.get("description"),
+            "title": f"{tool_name} failed",
+            "description": envelope.get("error") or "tool invocation failed",
+            "priority": "normal",
+            "risk_class": "low",
+            "origin_event_id": event["id"],
+            "labels": ["scheduler", tool_name, "tool-failure"],
+        }
+
+    output = envelope.get("output") or {}
+    handler_status = output.get("status")
+    if handler_status == "ok":
+        return None
+    if handler_status == "action_needed":
+        return {
+            "title": output.get("title") or event.get("subject") or tool_name,
+            "description": output.get("description"),
             "priority": "normal",
             "risk_class": "low",
             "origin_event_id": event["id"],
             "labels": ["scheduler", tool_name],
         }
-    log.warning("scheduler tool %s returned unknown status %r; treating as action_needed", tool_name, status)
+    log.warning(
+        "scheduler tool %s returned unknown handler status %r; treating as action_needed",
+        tool_name, handler_status,
+    )
     return {
         "title": event.get("subject") or tool_name,
-        "description": str(result),
+        "description": str(output),
         "priority": "normal",
         "risk_class": "low",
         "origin_event_id": event["id"],
@@ -1240,7 +1331,17 @@ pytest tests/test_health.py::test_health_includes_model_ready -v
 
 - [ ] **Step 3: Update config default**
 
-In `services/api/app/config.py`, change the `ollama_model` default from `llama3.2:3b` to `qwen2.5-coder:7b` (find the `Settings` class, locate the field, change the default literal).
+In `services/api/app/config.py` line 11, change:
+
+```python
+ollama_model: str = "gemma3:4b"
+```
+
+to:
+
+```python
+ollama_model: str = "qwen2.5-coder:7b"
+```
 
 - [ ] **Step 4: Flip `supports_tools=True` in seed**
 
@@ -1424,6 +1525,12 @@ git commit -m "feat(api): add pending_tool_call state to conversations"
 
 This task replaces the one-shot intent classifier with a real tool-calling loop. Read `services/api/app/routers/conversations.py` in full before starting — the changes are significant but localized.
 
+**Pre-read (required before Step 1):**
+1. Full `services/api/app/routers/conversations.py` — understand current `send_message` flow, especially the closure trick with `generate()` and the streaming/non-streaming branches
+2. `services/api/tests/test_conversations.py` — note which tests exercise the classifier path (listed in Step 5 below)
+3. `services/api/app/llm_client.py` — understand how `route_internal` currently works (the new `route_with_tools` follows the same pattern)
+4. How `_build_system_prompt(db)` constructs the system message today (lines 38-68) — after this change, the `Available tools:` section should be removed (the tool catalog is passed as a structured `tools` param now, not prose in the prompt)
+
 - [ ] **Step 1: Write failing tests**
 
 Create `services/api/tests/test_tool_calling_loop.py`:
@@ -1553,7 +1660,18 @@ Adjust to match the existing pattern of `route_internal` in the same file.
 
 - [ ] **Step 3: Rewrite conversations tool path**
 
-In `services/api/app/routers/conversations.py`, replace the intent-classifier block (between the `_parse_json_safe` helper and the `generate()` definition) with a tool-calling loop. Sketch:
+In `services/api/app/routers/conversations.py`, replace the intent-classifier block (between the `_parse_json_safe` helper and the `generate()` definition) with a tool-calling loop.
+
+**Structural changes to make, in order:**
+
+1. Delete the `_parse_json_safe` helper (no longer needed — structured `tools` param is authoritative).
+2. Delete the classify-messages block, the classify call, and the post-classify Run creation / dispatch block (everything from `tool_list = ...` through `tool_context = ...`).
+3. Simplify `_build_system_prompt` — remove the `Available tools:` block (lines in the range of the current prompt that include `tool_lines`). The new system prompt should be focused on: Nova's identity, model, and current pending tasks. The tool catalog is now passed as structured `tools` on the LLM call, not as prose.
+4. Add the module-level constants (SENSITIVE_TOOLS, CONFIRM_RE, DENY_RE, MAX_TOOL_TURNS, PENDING_TIMEOUT_MINUTES).
+5. Add the helpers below (`_tool_catalog`, `_check_pending_confirmation`, `_render_confirmation`, `_record_run`, `_dispatch_tool_call`).
+6. Rewrite the body of `send_message` per the skeleton below.
+
+**Module-level additions:**
 
 ```python
 import re
@@ -1614,82 +1732,130 @@ def _render_confirmation(tool_name: str, args: dict) -> str:
             lines.append(f"- **Tool:** {p['tool']}")
     lines.append("\nConfirm?")
     return "\n".join(lines)
+
+
+def _record_run(db: Session, tool_name: str, tool_input: dict, output: dict | None, error: str | None = None) -> None:
+    """Persist a Run row for tool-call audit. Matches the existing chat path's Run creation."""
+    run = Run(
+        id=str(uuid4()),
+        tool_name=tool_name,
+        task_id=None,
+        executor_type="chat",
+        trigger_type="chat",
+        input=tool_input,
+        status="failed" if error else "succeeded",
+        output=output,
+        error=error,
+        summary=f"{tool_name} → {'failed' if error else 'succeeded'}",
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+    )
+    db.add(run)
+    db.commit()
+
+
+def _dispatch_tool_call(db: Session, tc: dict) -> dict:
+    """Run a non-sensitive tool synchronously; record Run; return the output for LLM context."""
+    name = tc["name"]
+    args = tc.get("arguments") or {}
+    try:
+        output = tool_handlers.dispatch(name, args, db, _settings)
+        _record_run(db, name, args, output, error=None)
+        return output
+    except Exception as exc:
+        _record_run(db, name, args, output=None, error=str(exc))
+        return {"error": str(exc)}
 ```
 
-Main handler flow (pseudocode — adapt to existing `post_message` function):
+**Send-message body skeleton** (replace everything from the current `# --- Phase 1: Intent classification ---` comment down to where `generate()` is defined, keeping the `generate()` + `StreamingResponse` skeleton intact — only the inputs to `generate()` change):
 
 ```python
-# 1. Save user message
-# 2. Check pending confirmation on conversation
-verdict, pending = _check_pending_confirmation(conv, user_content)
+# Resolution order at the top of the synchronous work (before `generate()` is defined):
+
+# --- Step A: Handle pending confirmation if present ---
+verdict, pending = _check_pending_confirmation(conv, body.content)
 if verdict == "confirm":
-    # Dispatch pending.tool_call via tool_handlers.dispatch, write assistant message with result summary
-    result = tool_handlers.dispatch(pending["name"], pending["arguments"], db, _settings)
+    # Dispatch and produce the assistant reply text
+    tool_output = _dispatch_tool_call(db, pending)
     conv.pending_tool_call = None
     conv.pending_tool_call_at = None
     db.commit()
-    # stream the result summary as assistant reply
-    ...
-    return
-if verdict == "deny":
+    final_text = tool_output.get("summary") or f"Done. {json.dumps(tool_output)}"
+elif verdict == "deny":
     conv.pending_tool_call = None
     conv.pending_tool_call_at = None
     db.commit()
-    # stream "Cancelled."
-    return
+    final_text = "Cancelled."
+else:
+    # --- Step B: Regular tool-calling loop ---
+    system_content = _build_system_prompt(db)  # now tool-catalog-free
+    messages = [{"role": "system", "content": system_content}]
+    for m in history:
+        messages.append({"role": m.role, "content": m.content})
 
-# 3. New tool-calling loop
-messages = _build_chat_messages(conv, user_content, db)
-tools = _tool_catalog(db)
-
-for turn in range(MAX_TOOL_TURNS):
-    result = llm_client.route_with_tools(db, purpose="chat", messages=messages, tools=tools)
-    if "content" in result:
-        # Final text response — stream it
-        final_text = result["content"]
-        break
-    # tool_calls present
-    for tc in result["tool_calls"]:
-        if tc["name"] in SENSITIVE_TOOLS:
-            # Store pending; reply with confirmation; stop loop
-            conv.pending_tool_call = tc
+    tools = _tool_catalog(db)
+    final_text = None
+    for turn in range(MAX_TOOL_TURNS):
+        result = llm_client.route_with_tools(db, purpose="chat", messages=messages, tools=tools)
+        if result.get("content") and not result.get("tool_calls"):
+            final_text = result["content"]
+            break
+        tool_calls = result.get("tool_calls") or []
+        # Check for a sensitive call — if any, store pending + break
+        sensitive = next((tc for tc in tool_calls if tc["name"] in SENSITIVE_TOOLS), None)
+        if sensitive:
+            conv.pending_tool_call = sensitive
             conv.pending_tool_call_at = datetime.now(timezone.utc)
             db.commit()
-            final_text = _render_confirmation(tc["name"], tc["arguments"])
-            break  # break inner
-        else:
-            # Auto-execute
-            tool_output = tool_handlers.dispatch(tc["name"], tc["arguments"], db, _settings)
-            # Also create a Run record (audit)
-            _record_run(db, tc["name"], tc["arguments"], tool_output)
-            # Inject back into messages
-            messages.append({"role": "assistant", "tool_calls": [tc]})
-            messages.append({"role": "tool", "name": tc["name"], "content": json.dumps(tool_output)})
-    else:
-        # All tool_calls were auto-executed, continue loop
-        continue
-    break  # sensitive or no-more-turns
-else:
-    # Loop exhausted — force final text
-    final_text = "I've reached the maximum tool-calling turns. Rephrasing needed."
+            final_text = _render_confirmation(sensitive["name"], sensitive.get("arguments") or {})
+            break
+        # Auto-execute all tool_calls and continue the loop
+        for tc in tool_calls:
+            output = _dispatch_tool_call(db, tc)
+            messages.append({"role": "assistant", "content": None, "tool_calls": [tc]})
+            messages.append({"role": "tool", "name": tc["name"], "content": json.dumps(output)})
+    if final_text is None:
+        final_text = "I reached the maximum tool-calling turns. Please rephrase."
 
-# Stream final_text as assistant message (reuse existing streaming mechanism)
+# --- Step C: define generate() that streams final_text (same pattern as existing code) ---
 ```
 
-Drop the old `_parse_json_safe` classify block. The `_render_confirmation` + `CONFIRM_RE`/`DENY_RE`/`SENSITIVE_TOOLS` constants live at module-top.
+**Streaming contract:** keep the SSE streaming skeleton exactly as today — `generate()` yields chunks of `final_text`, the response sets `media_type="text/event-stream"`. The non-streaming branch (if one exists based on a header) just returns `{"content": final_text}` after persistence.
 
-- [ ] **Step 4: Run tests — iterate until all pass**
+**Assistant message persistence:** the existing code persists the assistant message after `generate()` drains. Preserve that — `final_text` is what gets persisted, as before.
+
+- [ ] **Step 4: Update pre-existing classifier-era tests in `test_conversations.py`**
+
+The existing test file has a bundle of tests tied to the intent-classifier path. After the rewrite, they MUST be updated or deleted — a subagent that runs the full suite without handling these will see a regression wall. Specifically:
+
+**Delete outright (the mechanism no longer exists):**
+- `test_parse_json_safe_parses_plain_json` (line ~186)
+- `test_parse_json_safe_strips_markdown_fences` (line ~193)
+- `test_parse_json_safe_returns_none_on_invalid` (line ~199)
+- `test_low_confidence_falls_through_no_run` (line ~228) — the "confidence threshold" concept doesn't exist in the tool-calling loop
+
+**Rewrite to the new mechanism:**
+- `test_action_intent_executes_tool_and_creates_run` (line ~205) — keep the assertion that a tool call produces a Run; change the setup to mock `llm_client.route_with_tools` returning a tool_call dict instead of classifier JSON
+- `test_unknown_tool_falls_through_no_run` (line ~246) — keep the assertion that unknown tool names don't create Runs; update setup to have `route_with_tools` return a tool_call with a bogus name → `tool_handlers.dispatch` raises KeyError → `_dispatch_tool_call` records a failed Run (or skips; decide based on the new `_dispatch_tool_call` contract. Spec above records a failed Run; reflect that in the updated assertion.)
+- `test_action_sse_emits_running_acknowledgment` (line ~264) — rewrite to assert the new streaming shape. If the new implementation doesn't emit a `[Running tool...]` acknowledgment, either add one (nice UX, keeps the existing contract) OR delete this test and document the UX loss.
+
+**Keep unchanged (should still pass):**
+- `test_create_conversation_returns_id_and_title`, `test_list_conversations_*`, `test_get_messages_*`, `test_send_message_non_streaming`, `test_send_message_persists_user_message`, `test_send_message_sse_streams_chunks`, `test_send_message_sse_persists_assistant_message`, `test_send_message_sets_title_*`, `test_send_message_conversation_not_found` — these test the conversation/message plumbing which is unchanged.
+
+- [ ] **Step 5: Run tests — iterate until all pass**
 
 ```bash
 cd services/api
 pytest tests/test_tool_calling_loop.py tests/test_conversations.py -v --tb=short
 ```
 
-Expected: all new tests pass; pre-existing conversation tests either pass or, where they referenced the classifier path explicitly, are updated to the tool-calling assertions.
+Expected: all new tests pass; the rewrites above pass; the deletions are gone. Run the full api suite to confirm no wider regression:
 
-Specifically: `test_low_confidence_falls_through_no_run` tested the classifier's confidence threshold. With the new loop, "no tool call" just means the LLM returned `content` only. Update or delete this test. The equivalent regression test under the new model is: *"user message with no tool intent produces a conversational reply, no Run"* — keep that assertion, drop the confidence-threshold specifics.
+```bash
+pytest tests/ -v --tb=short
+```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add services/api/app/routers/conversations.py \
@@ -1845,7 +2011,9 @@ def handle_scheduler_delete_trigger(input: dict, db: Session) -> dict:
     return {"summary": f"Deleted trigger '{trigger_id}'"}
 ```
 
-- [ ] **Step 4: Register in tool registry + seed**
+- [ ] **Step 4: Register in tool registry**
+
+All four scheduler handlers take `(input, db)`, so register as `(handler, ["db"])` tuples.
 
 In `services/api/app/tools/handlers.py`, extend `_REGISTRY`:
 
@@ -1859,24 +2027,28 @@ from app.tools.scheduler_handlers import (
 
 _REGISTRY = {
     # ... existing ...
-    "scheduler.create_trigger": handle_scheduler_create_trigger,
-    "scheduler.list_triggers": handle_scheduler_list_triggers,
-    "scheduler.update_trigger": handle_scheduler_update_trigger,
-    "scheduler.delete_trigger": handle_scheduler_delete_trigger,
+    "scheduler.create_trigger": (handle_scheduler_create_trigger, ["db"]),
+    "scheduler.list_triggers": (handle_scheduler_list_triggers, ["db"]),
+    "scheduler.update_trigger": (handle_scheduler_update_trigger, ["db"]),
+    "scheduler.delete_trigger": (handle_scheduler_delete_trigger, ["db"]),
 }
 ```
 
-In `services/api/app/tools/seed.py`, add to `seed_tools`:
+- [ ] **Step 5: Register in tool seed**
+
+In `services/api/app/tools/seed.py`, add to `tool_definitions`. The `Tool` model requires `display_name` and `adapter_type`; each entry MUST include them:
 
 ```python
-{
-    "name": "scheduler.create_trigger",
-    "description": (
+dict(
+    name="scheduler.create_trigger",
+    display_name="Scheduler: Create Trigger",
+    description=(
         "Create a new scheduled trigger. For recurring tasks like 'check reddit daily' "
         "or 'ping this URL every hour'. Use when the user asks to schedule, remind, or "
         "automate something on an interval."
     ),
-    "input_schema": {
+    adapter_type="internal",
+    input_schema={
         "type": "object",
         "required": ["id", "name", "cron_expression", "payload_template"],
         "properties": {
@@ -1894,22 +2066,35 @@ In `services/api/app/tools/seed.py`, add to `seed_tools`:
             "active_hours_end":   {"type": "string", "pattern": "^[0-2][0-9]:[0-5][0-9]$"},
         },
     },
-    "output_schema": {"type": "object"},
-    "enabled": True,
-    "risk_class": "low",
-},
-{
-    "name": "scheduler.list_triggers",
-    "description": "List all scheduled triggers and their state. Use when the user asks 'what triggers do I have?'",
-    "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
-    "output_schema": {"type": "object"},
-    "enabled": True,
-    "risk_class": "low",
-},
-{
-    "name": "scheduler.update_trigger",
-    "description": "Update an existing trigger (enable/disable, change schedule or payload). Use when the user asks to pause, resume, or reschedule.",
-    "input_schema": {
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=10,
+    enabled=True,
+    tags=["scheduler"],
+),
+dict(
+    name="scheduler.list_triggers",
+    display_name="Scheduler: List Triggers",
+    description="List all scheduled triggers and their state. Use when the user asks 'what triggers do I have?'",
+    adapter_type="internal",
+    input_schema={"type": "object", "properties": {}, "additionalProperties": False},
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=5,
+    enabled=True,
+    tags=["scheduler"],
+),
+dict(
+    name="scheduler.update_trigger",
+    display_name="Scheduler: Update Trigger",
+    description=(
+        "Update an existing trigger (enable/disable, change schedule or payload). "
+        "Use when the user asks to pause, resume, or reschedule."
+    ),
+    adapter_type="internal",
+    input_schema={
         "type": "object",
         "required": ["id", "updates"],
         "properties": {
@@ -1917,33 +2102,51 @@ In `services/api/app/tools/seed.py`, add to `seed_tools`:
             "updates": {"type": "object"},
         },
     },
-    "output_schema": {"type": "object"},
-    "enabled": True,
-    "risk_class": "low",
-},
-{
-    "name": "scheduler.delete_trigger",
-    "description": "Permanently remove a scheduled trigger. Use when the user asks to delete or remove one.",
-    "input_schema": {
+    output_schema={"type": "object"},
+    risk_class="low",
+    requires_approval=False,
+    timeout_seconds=5,
+    enabled=True,
+    tags=["scheduler"],
+),
+dict(
+    name="scheduler.delete_trigger",
+    display_name="Scheduler: Delete Trigger",
+    description="Permanently remove a scheduled trigger. Use when the user asks to delete or remove one.",
+    adapter_type="internal",
+    input_schema={
         "type": "object",
         "required": ["id"],
         "properties": {"id": {"type": "string"}},
     },
-    "output_schema": {"type": "object"},
-    "enabled": True,
-    "risk_class": "medium",
-},
+    output_schema={"type": "object"},
+    risk_class="medium",
+    requires_approval=False,
+    timeout_seconds=5,
+    enabled=True,
+    tags=["scheduler"],
+),
 ```
 
-- [ ] **Step 5: Run tests — confirm all pass**
+- [ ] **Step 6: Update `test_tools.py::test_get_tools_returns_seeded_tools`**
+
+Extend the expected set (the one already updated in Task 4) with the four new scheduler tool names:
+
+```python
+assert {..., "nova.system_health", "nova.daily_summary",
+        "scheduler.create_trigger", "scheduler.list_triggers",
+        "scheduler.update_trigger", "scheduler.delete_trigger"} == names
+```
+
+- [ ] **Step 7: Run tests — confirm all pass**
 
 ```bash
 pytest tests/test_scheduler_handlers.py tests/test_tools.py -v
 ```
 
-Expected: all pass. `test_tools.py::test_get_tools_returns_seeded_tools` now finds 15 tools (was 11).
+Expected: all pass.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add services/api/app/tools/scheduler_handlers.py \
@@ -2233,7 +2436,7 @@ If anything in Task 7 or 8 goes wrong in production:
 
 - Revert Task 7's conversations rewrite by pointing HEAD at the pre-Task-7 SHA; the intent-classifier path still lives in git history and restores cleanly.
 - Migrations `0005` and `0006` have working `downgrade()` functions. Run `alembic downgrade -2` in the API container to roll back both if needed.
-- The Ollama model swap (Task 6) is settings-only — Settings panel lets the user switch back to `llama3.2:3b` without touching code.
+- The Ollama model swap (Task 6) is settings-only — Settings panel lets the user switch back to the previous default (`gemma3:4b`) without touching code.
 
 ## Dependencies Between Tasks
 
