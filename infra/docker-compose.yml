@@ -28,7 +28,10 @@ services:
       HA_BASE_URL: ${HA_BASE_URL:-}
       HA_TOKEN: ${HA_TOKEN:-}
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      # On Linux/WSL2, host.docker.internal doesn't auto-resolve.
+      # Set DOCKER_HOST_IP in .env to your machine's LAN IP (e.g. 192.168.0.140)
+      # so containers can reach Ollama when it's bound to 0.0.0.0 on the host.
+      - "host.docker.internal:${DOCKER_HOST_IP:-host-gateway}"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
