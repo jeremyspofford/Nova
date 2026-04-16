@@ -156,3 +156,91 @@ def test_settings_has_nova_workspace_dir():
     # Field exists and defaults to "~" when NOVA_WORKSPACE_DIR is not set
     assert hasattr(settings, "nova_workspace_dir")
     assert settings.nova_workspace_dir == "~"
+
+
+def test_shell_run_happy_path():
+    from app.tools.handlers import handle_shell_run
+    from unittest.mock import patch, MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = "/tmp"
+    mock_proc = MagicMock()
+    mock_proc.stdout = "hello\n"
+    mock_proc.stderr = ""
+    mock_proc.returncode = 0
+    with patch("app.tools.handlers.subprocess.run", return_value=mock_proc):
+        result = handle_shell_run({"command": "echo hello"}, mock_cfg)
+    assert result == {"exit_code": 0, "stdout": "hello\n", "stderr": "", "timed_out": False}
+
+
+def test_shell_run_nonzero_exit():
+    from app.tools.handlers import handle_shell_run
+    from unittest.mock import patch, MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = "/tmp"
+    mock_proc = MagicMock()
+    mock_proc.stdout = ""
+    mock_proc.stderr = "command not found"
+    mock_proc.returncode = 127
+    with patch("app.tools.handlers.subprocess.run", return_value=mock_proc):
+        result = handle_shell_run({"command": "badcommand"}, mock_cfg)
+    assert result["exit_code"] == 127
+    assert result["timed_out"] is False
+
+
+def test_shell_run_timeout():
+    import subprocess as _subprocess
+    from app.tools.handlers import handle_shell_run
+    from unittest.mock import patch, MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = "/tmp"
+    with patch(
+        "app.tools.handlers.subprocess.run",
+        side_effect=_subprocess.TimeoutExpired("cmd", 1),
+    ):
+        result = handle_shell_run({"command": "sleep 100", "timeout_seconds": 1}, mock_cfg)
+    assert result["timed_out"] is True
+    assert result["exit_code"] == -1
+    assert result["stderr"] == "Command timed out."
+
+
+def test_shell_run_custom_cwd():
+    from app.tools.handlers import handle_shell_run
+    from unittest.mock import patch, MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = "/tmp"
+    mock_proc = MagicMock()
+    mock_proc.stdout = ""
+    mock_proc.stderr = ""
+    mock_proc.returncode = 0
+    with patch("app.tools.handlers.subprocess.run", return_value=mock_proc) as mock_run:
+        handle_shell_run({"command": "ls", "cwd": "/var"}, mock_cfg)
+    assert mock_run.call_args.kwargs["cwd"] == "/var"
+
+
+def test_shell_run_truncates_stdout():
+    from app.tools.handlers import handle_shell_run
+    from unittest.mock import patch, MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = "/tmp"
+    mock_proc = MagicMock()
+    mock_proc.stdout = "x" * 6000
+    mock_proc.stderr = "e" * 6000
+    mock_proc.returncode = 0
+    with patch("app.tools.handlers.subprocess.run", return_value=mock_proc):
+        result = handle_shell_run({"command": "cat bigfile"}, mock_cfg)
+    assert len(result["stdout"]) == 4096
+    assert len(result["stderr"]) == 4096
+
+
+def test_dispatch_shell_run():
+    """Smoke test: dispatch routes shell.run to correct handler."""
+    from app.tools.handlers import dispatch
+    from unittest.mock import patch, MagicMock
+    mock_proc = MagicMock()
+    mock_proc.stdout = "hi"
+    mock_proc.stderr = ""
+    mock_proc.returncode = 0
+    with patch("app.tools.handlers.subprocess.run", return_value=mock_proc):
+        result = dispatch("shell.run", {"command": "echo hi"}, None, None)
+    assert result["exit_code"] == 0
+    assert result["stdout"] == "hi"

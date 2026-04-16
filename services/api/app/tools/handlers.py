@@ -4,6 +4,8 @@ Tool handler implementations for Phase 2 tools.
 Each handler takes (input: dict, *deps) and returns a dict output.
 The dispatch() function routes by tool name.
 """
+import os
+import subprocess
 import httpx
 from sqlalchemy.orm import Session
 from app import llm_client
@@ -76,6 +78,35 @@ def handle_http_request(input: dict, db=None, cfg=None) -> dict:
     return {"status_code": resp.status_code, "body": resp.text[:2048]}
 
 
+def handle_shell_run(input: dict, cfg=None) -> dict:
+    """Runs an arbitrary shell command and returns its output.
+
+    input: {"command": str, "cwd"?: str, "timeout_seconds"?: int}
+    Returns {"exit_code": int, "stdout": str, "stderr": str, "timed_out": bool}.
+    stdout and stderr are each capped at 4096 chars.
+    """
+    cfg = cfg or _settings
+    workspace = os.path.expanduser(cfg.nova_workspace_dir)
+    cwd = input.get("cwd") or workspace
+    timeout = input.get("timeout_seconds", 30)
+    timed_out = False
+    try:
+        # sandbox boundary — replace subprocess with container exec for Docker isolation
+        proc = subprocess.run(
+            ["sh", "-c", input["command"]],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        stdout = proc.stdout[:4096]
+        stderr = proc.stderr[:4096]
+        exit_code = proc.returncode
+    except subprocess.TimeoutExpired:
+        stdout, stderr, exit_code, timed_out = "", "Command timed out.", -1, True
+    return {"exit_code": exit_code, "stdout": stdout, "stderr": stderr, "timed_out": timed_out}
+
+
 def handle_devops_summarize_ci_failure(input: dict, db: Session) -> dict:
     """Uses the LLM (via route_internal) to summarize a CI failure.
 
@@ -101,6 +132,7 @@ _REGISTRY: dict[str, tuple] = {
     "ha.light.turn_off": (handle_ha_light_turn_off, ["settings"]),
     "http.request": (handle_http_request, []),
     "devops.summarize_ci_failure": (handle_devops_summarize_ci_failure, ["db"]),
+    "shell.run": (handle_shell_run, ["settings"]),
 }
 
 

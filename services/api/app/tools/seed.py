@@ -155,6 +155,38 @@ def seed_tools(db: Session) -> None:
             tags=["http", "web"],
         ),
         dict(
+            name="shell.run",
+            display_name="Shell: Run Command",
+            description=(
+                "Runs an arbitrary shell command and returns its output. "
+                "Uses NOVA_WORKSPACE_DIR as the default working directory."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string"},
+                    "cwd": {"type": "string"},
+                    "timeout_seconds": {"type": "integer", "default": 30},
+                },
+                "required": ["command"],
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "exit_code": {"type": "integer"},
+                    "stdout": {"type": "string"},
+                    "stderr": {"type": "string"},
+                    "timed_out": {"type": "boolean"},
+                },
+            },
+            risk_class="high",
+            requires_approval=False,
+            timeout_seconds=35,
+            enabled=True,
+            tags=["shell", "system"],
+        ),
+        dict(
             name="devops.summarize_ci_failure",
             display_name="DevOps: Summarize CI Failure",
             description="Uses the LLM to summarize a CI failure from a URL and log snippet.",
