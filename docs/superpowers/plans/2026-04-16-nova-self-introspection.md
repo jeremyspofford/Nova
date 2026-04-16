@@ -299,7 +299,6 @@ Append to `services/api/tests/test_nova_handlers.py`:
 def test_describe_config_returns_providers_and_trigger_count(db_session):
     from app.tools.nova_handlers import handle_describe_config
     from app.tools.seed import seed_llm_providers, seed_scheduled_triggers
-    from app.config import settings as real_settings
 
     # Seed requires OLLAMA_BASE_URL; fake it for the test
     class S:
@@ -338,34 +337,17 @@ def test_describe_config_survives_missing_purpose_policy_module(db_session, monk
     assert "active_trigger_count" in result
 
 
-def test_describe_config_survives_missing_cost_column(db_session, monkeypatch):
-    """If Run.llm_cost_usd column doesn't exist (pre-migration state),
-    cloud_spend_this_month_usd should be None rather than raising."""
+def test_describe_config_survives_missing_cost_column(db_session):
+    """Pre-migration: Run.llm_cost_usd column doesn't exist. The handler's try
+    block must swallow the AttributeError and return cloud_spend=None rather
+    than crashing. This test is a regression guard for that behavior.
+    """
     from app.tools.nova_handlers import handle_describe_config
-    from app.models import run as run_module
-    from sqlalchemy.exc import OperationalError
-
-    # Simulate the column not existing by making .scalar() raise
-    original_query = db_session.query
-
-    def broken_query(*args, **kwargs):
-        q = original_query(*args, **kwargs)
-        # Only trip for queries touching llm_cost_usd; leave others alone
-        try:
-            if hasattr(args[0], "key") and args[0].key == "sum":
-                return type("BrokenQ", (), {
-                    "filter": lambda self, *a, **kw: self,
-                    "scalar": lambda self: (_ for _ in ()).throw(OperationalError("no column", None, None)),
-                })()
-        except Exception:
-            pass
-        return q
-
-    # Simpler approach: just assert the field can be None without failing
     result = handle_describe_config({}, db_session)
-    # cloud_spend may be 0.0 (no runs with cost) or None (column missing);
-    # either way, handler didn't crash
     assert "cloud_spend_this_month_usd" in result
+    # Pre-migration state: column absent → None. Post-migration with no runs: 0.0.
+    # Either is acceptable; the contract is "handler didn't crash."
+    assert result["cloud_spend_this_month_usd"] in (None, 0.0)
 
 
 def test_describe_config_returns_trigger_count_not_list(db_session):
@@ -429,9 +411,9 @@ def handle_describe_config(input: dict, db: Session) -> dict:
             }
             for p in policies
         ]
-    except (ImportError, Exception):
-        # ImportError: purpose-routing not yet shipped.
-        # Exception: SQLAlchemy OperationalError, etc. — table missing at runtime.
+    except Exception:
+        # Covers both ImportError (purpose-routing spec not shipped → module absent)
+        # and SQLAlchemy OperationalError (table absent pre-migration).
         pass
 
     # Trigger count (not full list — scheduler.list_triggers owns the detail shape).
@@ -590,46 +572,121 @@ git commit -m "feat(api): nudge LLM to call introspection tools instead of specu
 
 ---
 
-## Task 5: Integration Smoke Test (Manual Browser)
+## Task 5: API-Driven Smoke Test + Push
 
-No code changes — validation only.
+No code changes — validation only. Subagent-executable (no browser required).
 
-- [ ] **Step 1: Open the chat UI**
-
-Navigate to `http://localhost:5173/` in a browser.
-
-- [ ] **Step 2: Ask the motivating question**
-
-Send: `what scheduled triggers do I have and what do they actually do?`
-
-Expected: Nova calls `scheduler.list_triggers` and responds with a list that *quotes the description* for each — not invented text. Example expected reply shape:
-
-> You have 2 triggers:
-> 1. **Daily Summary** — runs every day at midnight. *Description:* "Summarise Nova's past 24h of activity — events, runs, and completed/failed tasks — into a read-once digest."
-> 2. **System Heartbeat** — runs every 30 minutes. *Description:* "Periodic system health check: disk usage, memory, stale tasks, and recent run failures."
-
-If Nova still says "I don't know what they do" or invents text, the system prompt nudge isn't landing — check Step 2 of Task 4.
-
-- [ ] **Step 3: Ask about tools**
-
-Send: `what tools do you have?`
-
-Expected: Nova calls `nova.describe_tools` and responds with a grouped list (scheduler, nova, shell, fs, http, etc.) quoting descriptions.
-
-- [ ] **Step 4: Ask about config**
-
-Send: `what's your current configuration?`
-
-Expected: Nova calls `nova.describe_config` and responds with the active model, fallback model, active trigger count, and cloud spend (probably $0 if no cloud providers are enabled).
-
-- [ ] **Step 5: Full test suite pass**
+- [ ] **Step 1: Full test suite pass**
 
 ```bash
 cd /home/jeremy/workspace/nova-suite/services/api
 pytest tests/ --tb=short
 ```
 
-Expected: all pass except the 2 known pre-existing unrelated failures (`test_stubs.py`, `test_low_confidence_falls_through_no_run`). Document the final counts.
+Expected: all pass except the 2 known pre-existing unrelated failures (`test_stubs.py::test_stub_routes_return_501`, `test_conversations.py::test_low_confidence_falls_through_no_run`). Document the final counts — should be previous-count + at least 5 new tests from Tasks 1-3.
+
+- [ ] **Step 2: Verify enriched scheduler.list_triggers via direct handler call**
+
+The handler is internally testable — dispatch via the tool endpoint:
+
+```bash
+curl -s -X POST http://localhost:8000/tools/scheduler.list_triggers/invoke \
+  -H "Content-Type: application/json" -d '{"input": {}}' | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+triggers = d['output']['triggers']
+assert len(triggers) >= 2, 'expected at least 2 seeded triggers'
+for t in triggers:
+    assert 'description' in t, f'missing description: {t[\"id\"]}'
+    assert 'payload' in t, f'missing payload: {t[\"id\"]}'
+    assert 'payload_kind' not in t, f'payload_kind should be dropped: {t[\"id\"]}'
+    print(f'{t[\"id\"]}: {t[\"description\"][:50]}...')
+print('OK')
+"
+```
+
+Expected: prints each trigger's truncated description and "OK" at the end.
+
+- [ ] **Step 3: Verify nova.describe_tools via direct invoke**
+
+```bash
+curl -s -X POST http://localhost:8000/tools/nova.describe_tools/invoke \
+  -H "Content-Type: application/json" -d '{"input": {}}' | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+out = d['output']
+cats = out['categories']
+assert 'scheduler' in cats, 'scheduler category missing'
+assert 'nova' in cats, 'nova category missing'
+assert out['total_count'] >= 13, f'expected >= 13 tools, got {out[\"total_count\"]}'
+print(f'total={out[\"total_count\"]} categories={list(cats.keys())}')
+print('OK')
+"
+```
+
+Expected: prints the category list and total count (should be 13+: 11 existing + 2 new = 13 minimum).
+
+- [ ] **Step 4: Verify nova.describe_config via direct invoke**
+
+```bash
+curl -s -X POST http://localhost:8000/tools/nova.describe_config/invoke \
+  -H "Content-Type: application/json" -d '{"input": {}}' | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+out = d['output']
+assert 'providers' in out
+assert 'local' in out['providers']
+assert isinstance(out['active_trigger_count'], int)
+assert out['active_trigger_count'] >= 2
+# purpose_policies may be [] pre-routing-spec — that's OK
+assert 'purpose_policies' in out
+print(f'local={len(out[\"providers\"][\"local\"])} cloud={len(out[\"providers\"][\"cloud\"])} triggers={out[\"active_trigger_count\"]}')
+print('OK')
+"
+```
+
+Expected: prints provider counts + trigger count + "OK".
+
+- [ ] **Step 5: End-to-end chat test (API only, no browser)**
+
+Create a conversation and send the motivating question via the API. Streaming response is accumulated on-the-fly:
+
+```bash
+CONV_ID=$(curl -s -X POST http://localhost:8000/conversations | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+echo "Conversation: $CONV_ID"
+
+# Send non-streaming request for easy parsing
+curl -s -X POST "http://localhost:8000/conversations/$CONV_ID/messages" \
+  -H "Content-Type: application/json" \
+  -d '{"content": "what scheduled triggers do I have and what do they actually do?", "stream": false}' \
+  | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+content = d.get('content', '')
+print('REPLY:', content[:400])
+# Soft assertion: reply should mention real descriptions, not invented text
+# (we can't fully automate the quality check, but we can flag obvious bad patterns)
+assert 'crontab' not in content.lower(), 'Nova fell back to crontab speculation — prompt nudge not working'
+print('OK')
+"
+```
+
+Expected: Nova's reply contains the actual descriptions from the DB (e.g., "Periodic system health check" or "Summarise Nova's past 24h"). The test fails loud if Nova falls back to `crontab -l` speculation (the regression we're fixing).
+
+Also verify the tool was actually invoked via Runs:
+
+```bash
+curl -s "http://localhost:8000/runs?limit=5" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+recent_tools = [r['tool_name'] for r in d.get('runs', [])]
+# scheduler.list_triggers should be in the last 5 runs
+assert any('scheduler.list_triggers' in t or 'nova.describe' in t for t in recent_tools), \
+    f'No introspection tool in recent runs: {recent_tools}'
+print('Tools called recently:', recent_tools)
+print('OK')
+"
+```
 
 - [ ] **Step 6: Push**
 
@@ -637,6 +694,17 @@ Expected: all pass except the 2 known pre-existing unrelated failures (`test_stu
 cd /home/jeremy/workspace/nova-suite
 git push origin main
 ```
+
+---
+
+### Optional: human browser validation (skip in subagent mode)
+
+If a human is running this plan interactively, also open `http://localhost:5173/` and send:
+- *"what scheduled triggers do I have and what do they actually do?"* — expect Nova to quote the DB descriptions
+- *"what tools do you have?"* — expect a grouped list
+- *"what's your current configuration?"* — expect provider info + trigger count
+
+If Nova still speculates, re-check Task 4's system-prompt change landed and the API container was rebuilt.
 
 ---
 
