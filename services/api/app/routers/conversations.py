@@ -104,9 +104,13 @@ def _check_pending_confirmation(
     age = datetime.now(timezone.utc) - anchor
     if age.total_seconds() > PENDING_TIMEOUT_MINUTES * 60:
         return "none", None
-    if CONFIRM_RE.search(user_msg):
+    confirm_hit = CONFIRM_RE.search(user_msg) is not None
+    deny_hit = DENY_RE.search(user_msg) is not None
+    # Ambiguous input ("yes, cancel" / "no, proceed") routes to deny — safer default
+    # for sensitive ops. Only an unambiguous confirm counts as confirm.
+    if confirm_hit and not deny_hit:
         return "confirm", conv.pending_tool_call
-    if DENY_RE.search(user_msg):
+    if deny_hit:
         return "deny", conv.pending_tool_call
     return "none", None
 
@@ -166,7 +170,13 @@ def _record_run(
 
 
 def _dispatch_tool_call(db: Session, tc: dict) -> dict:
-    """Run a non-sensitive tool synchronously; record Run; return output."""
+    """Run a non-sensitive tool synchronously; record Run; return output.
+
+    On exception: the full error is persisted to the Run's `error` column for
+    audit, but only a sanitized payload is returned to the LLM context — raw
+    Python exception strings can leak file paths, credentials, or DB constraint
+    details that the model would then echo to the user.
+    """
     name = tc["name"]
     args = tc.get("arguments") or {}
     try:
@@ -175,7 +185,7 @@ def _dispatch_tool_call(db: Session, tc: dict) -> dict:
         return output
     except Exception as exc:
         _record_run(db, name, args, output=None, error=str(exc))
-        return {"error": str(exc)}
+        return {"error": "tool invocation failed", "tool_name": name}
 
 
 def _synth_stream(text: str):
@@ -331,28 +341,39 @@ def send_message(
                 )
                 break
 
+            # Assign a call_id to each tool_call and emit ONE assistant message
+            # containing all of them — OpenAI protocol requires paired
+            # tool_call_id values on the tool-result messages that follow.
+            assistant_tool_calls = []
+            outputs: list[tuple[str, dict]] = []
             for tc in tool_calls:
+                call_id = f"call_{uuid4().hex[:12]}"
+                tc["_call_id"] = call_id  # keep in-memory only; not sent to API
                 output = _dispatch_tool_call(db, tc)
-                # Append assistant tool_call message followed by tool result.
-                messages.append(
+                outputs.append((call_id, tc["name"], output))
+                assistant_tool_calls.append(
                     {
-                        "role": "assistant",
-                        "content": None,
-                        "tool_calls": [
-                            {
-                                "type": "function",
-                                "function": {
-                                    "name": tc["name"],
-                                    "arguments": json.dumps(tc.get("arguments") or {}),
-                                },
-                            }
-                        ],
+                        "id": call_id,
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc.get("arguments") or {}),
+                        },
                     }
                 )
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": assistant_tool_calls,
+                }
+            )
+            for call_id, tool_name, output in outputs:
                 messages.append(
                     {
                         "role": "tool",
-                        "name": tc["name"],
+                        "tool_call_id": call_id,
+                        "name": tool_name,
                         "content": json.dumps(output),
                     }
                 )
