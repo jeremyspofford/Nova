@@ -4,6 +4,7 @@ Tool handler implementations for Phase 2 tools.
 Each handler takes (input: dict, *deps) and returns a dict output.
 The dispatch() function routes by tool name.
 """
+import datetime
 import os
 import subprocess
 import httpx
@@ -107,6 +108,70 @@ def handle_shell_run(input: dict, cfg=None) -> dict:
     return {"exit_code": exit_code, "stdout": stdout, "stderr": stderr, "timed_out": timed_out}
 
 
+def handle_fs_list(input: dict, cfg=None) -> dict:
+    """Lists the contents of a directory.
+
+    input: {"path"?: str (default "."), "show_hidden"?: bool (default false)}
+    Resolves relative paths against NOVA_WORKSPACE_DIR.
+    Returns {"path": str, "entries": list} — dirs first (alpha), then files (alpha).
+    Raises ValueError if path does not exist or is not a directory.
+    """
+    cfg = cfg or _settings
+    workspace = os.path.expanduser(cfg.nova_workspace_dir)
+    path = input.get("path", ".")
+    show_hidden = input.get("show_hidden", False)
+
+    resolved = path if os.path.isabs(path) else os.path.join(workspace, path)
+
+    if not os.path.exists(resolved):
+        raise ValueError(f"Path does not exist: {resolved}")
+    if not os.path.isdir(resolved):
+        raise ValueError(f"Path is not a directory: {resolved}")
+
+    entries = []
+    for entry in os.scandir(resolved):
+        if not show_hidden and entry.name.startswith("."):
+            continue
+        stat = entry.stat()
+        mtime = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc).isoformat()
+        entries.append({
+            "name": entry.name,
+            "type": "dir" if entry.is_dir() else "file",
+            "size_bytes": stat.st_size,
+            "modified": mtime,
+        })
+
+    dirs = sorted([e for e in entries if e["type"] == "dir"], key=lambda e: e["name"])
+    files = sorted([e for e in entries if e["type"] == "file"], key=lambda e: e["name"])
+    return {"path": resolved, "entries": dirs + files}
+
+
+def handle_fs_read(input: dict, cfg=None) -> dict:
+    """Reads the contents of a file.
+
+    input: {"path": str, "max_bytes"?: int (default 8192)}
+    Resolves relative paths against NOVA_WORKSPACE_DIR.
+    Returns {"path": str, "content": str, "truncated": bool, "size_bytes": int}.
+    Raises FileNotFoundError if path does not exist.
+    """
+    cfg = cfg or _settings
+    workspace = os.path.expanduser(cfg.nova_workspace_dir)
+    path = input["path"]
+    max_bytes = input.get("max_bytes", 8192)
+
+    resolved = path if os.path.isabs(path) else os.path.join(workspace, path)
+
+    if not os.path.exists(resolved):
+        raise FileNotFoundError(f"File not found: {resolved}")
+
+    size = os.path.getsize(resolved)
+    with open(resolved, "rb") as f:
+        raw = f.read(max_bytes)
+
+    content = raw.decode("utf-8", errors="replace")
+    return {"path": resolved, "content": content, "truncated": size > max_bytes, "size_bytes": size}
+
+
 def handle_devops_summarize_ci_failure(input: dict, db: Session) -> dict:
     """Uses the LLM (via route_internal) to summarize a CI failure.
 
@@ -133,6 +198,8 @@ _REGISTRY: dict[str, tuple] = {
     "http.request": (handle_http_request, []),
     "devops.summarize_ci_failure": (handle_devops_summarize_ci_failure, ["db"]),
     "shell.run": (handle_shell_run, ["settings"]),
+    "fs.list": (handle_fs_list, ["settings"]),
+    "fs.read": (handle_fs_read, ["settings"]),
 }
 
 

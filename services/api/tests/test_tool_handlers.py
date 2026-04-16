@@ -244,3 +244,102 @@ def test_dispatch_shell_run():
         result = dispatch("shell.run", {"command": "echo hi"}, None, None)
     assert result["exit_code"] == 0
     assert result["stdout"] == "hi"
+
+
+# --- fs.list ---
+
+def test_fs_list_entries_dirs_first(tmp_path):
+    from app.tools.handlers import handle_fs_list
+    from unittest.mock import MagicMock
+    (tmp_path / "subdir").mkdir()
+    (tmp_path / "aaa.txt").write_text("hi")
+    (tmp_path / "zzz.txt").write_text("bye")
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    result = handle_fs_list({}, mock_cfg)
+    assert result["entries"][0]["type"] == "dir"
+    assert result["entries"][0]["name"] == "subdir"
+    file_names = [e["name"] for e in result["entries"] if e["type"] == "file"]
+    assert file_names == sorted(file_names)
+
+
+def test_fs_list_hides_dotfiles_by_default(tmp_path):
+    from app.tools.handlers import handle_fs_list
+    from unittest.mock import MagicMock
+    (tmp_path / ".hidden").write_text("x")
+    (tmp_path / "visible.txt").write_text("y")
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    result = handle_fs_list({}, mock_cfg)
+    names = [e["name"] for e in result["entries"]]
+    assert ".hidden" not in names
+    assert "visible.txt" in names
+
+
+def test_fs_list_shows_dotfiles_when_requested(tmp_path):
+    from app.tools.handlers import handle_fs_list
+    from unittest.mock import MagicMock
+    (tmp_path / ".hidden").write_text("x")
+    (tmp_path / "visible.txt").write_text("y")
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    result = handle_fs_list({"show_hidden": True}, mock_cfg)
+    names = [e["name"] for e in result["entries"]]
+    assert ".hidden" in names
+
+
+def test_fs_list_raises_on_missing_path(tmp_path):
+    from app.tools.handlers import handle_fs_list
+    from unittest.mock import MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    with pytest.raises(ValueError):
+        handle_fs_list({"path": "does_not_exist"}, mock_cfg)
+
+
+# --- fs.read ---
+
+def test_fs_read_returns_content(tmp_path):
+    from app.tools.handlers import handle_fs_read
+    from unittest.mock import MagicMock
+    f = tmp_path / "hello.txt"
+    f.write_text("hello world")
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    result = handle_fs_read({"path": "hello.txt"}, mock_cfg)
+    assert result["content"] == "hello world"
+    assert result["truncated"] is False
+    assert result["size_bytes"] == len(b"hello world")
+
+
+def test_fs_read_truncates_large_file(tmp_path):
+    from app.tools.handlers import handle_fs_read
+    from unittest.mock import MagicMock
+    f = tmp_path / "big.txt"
+    f.write_bytes(b"x" * 10000)
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    result = handle_fs_read({"path": "big.txt", "max_bytes": 8192}, mock_cfg)
+    assert result["truncated"] is True
+    assert len(result["content"]) == 8192
+
+
+def test_fs_read_resolves_relative_path(tmp_path):
+    from app.tools.handlers import handle_fs_read
+    from unittest.mock import MagicMock
+    f = tmp_path / "notes.txt"
+    f.write_text("note content")
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    result = handle_fs_read({"path": "notes.txt"}, mock_cfg)
+    assert result["path"] == str(tmp_path / "notes.txt")
+    assert result["content"] == "note content"
+
+
+def test_fs_read_raises_on_missing_file(tmp_path):
+    from app.tools.handlers import handle_fs_read
+    from unittest.mock import MagicMock
+    mock_cfg = MagicMock()
+    mock_cfg.nova_workspace_dir = str(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        handle_fs_read({"path": "ghost.txt"}, mock_cfg)

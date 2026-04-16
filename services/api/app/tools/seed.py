@@ -187,6 +187,66 @@ def seed_tools(db: Session) -> None:
             tags=["shell", "system"],
         ),
         dict(
+            name="fs.list",
+            display_name="FS: List Directory",
+            description=(
+                "Lists the contents of a directory. Resolves relative paths against "
+                "NOVA_WORKSPACE_DIR. Returns entries sorted: directories first (alphabetical), "
+                "then files (alphabetical)."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "default": "."},
+                    "show_hidden": {"type": "boolean", "default": False},
+                },
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "entries": {"type": "array", "items": {"type": "object"}},
+                },
+            },
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["filesystem"],
+        ),
+        dict(
+            name="fs.read",
+            display_name="FS: Read File",
+            description=(
+                "Reads the contents of a file. Resolves relative paths against "
+                "NOVA_WORKSPACE_DIR. Returns up to max_bytes (default 8192) bytes decoded as UTF-8."
+            ),
+            adapter_type="internal",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "max_bytes": {"type": "integer", "default": 8192},
+                },
+                "required": ["path"],
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                    "truncated": {"type": "boolean"},
+                    "size_bytes": {"type": "integer"},
+                },
+            },
+            risk_class="low",
+            requires_approval=False,
+            timeout_seconds=10,
+            enabled=True,
+            tags=["filesystem"],
+        ),
+        dict(
             name="devops.summarize_ci_failure",
             display_name="DevOps: Summarize CI Failure",
             description="Uses the LLM to summarize a CI failure from a URL and log snippet.",
