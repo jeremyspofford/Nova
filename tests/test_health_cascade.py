@@ -11,11 +11,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-
-CHAT_API = "http://localhost:8080"
-ORCHESTRATOR = "http://localhost:8000"
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
+from conftest import CHAT_API_URL, ORCHESTRATOR_URL
 
 
 @pytest.fixture
@@ -34,8 +30,10 @@ def save_restore_ollama_url(redis_db1):
 
 def test_chat_api_ready_when_ollama_unreachable(save_restore_ollama_url):
     """chat-api /health/ready must stay 'ready' when Ollama is unreachable."""
+    # 5s outer envelope: the downstream Ollama probe inside /health/ready times
+    # out at 3s, so we need headroom above that for the full round-trip.
     with httpx.Client(timeout=5.0) as client:
-        resp = client.get(f"{CHAT_API}/health/ready")
+        resp = client.get(f"{CHAT_API_URL}/health/ready")
     assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
     body = resp.json()
     assert body.get("status") == "ready", (
@@ -45,9 +43,11 @@ def test_chat_api_ready_when_ollama_unreachable(save_restore_ollama_url):
 
 def test_orchestrator_ready_when_ollama_unreachable(save_restore_ollama_url):
     """orchestrator /health/ready must stay 'ready' when Ollama is unreachable."""
+    # 5s outer envelope: the downstream Ollama probe inside /health/ready times
+    # out at 3s, so we need headroom above that for the full round-trip.
     with httpx.Client(timeout=5.0) as client:
-        resp = client.get(f"{ORCHESTRATOR}/health/ready")
-    assert resp.status_code == 200
+        resp = client.get(f"{ORCHESTRATOR_URL}/health/ready")
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code}"
     body = resp.json()
     assert body.get("status") == "ready", (
         f"Expected status=ready, got {body.get('status')}. Full body: {body}"
