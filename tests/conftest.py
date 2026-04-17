@@ -8,6 +8,7 @@ from pathlib import Path
 import httpx
 import pytest
 import pytest_asyncio
+import redis as redis_lib
 from dotenv import load_dotenv
 
 # Load .env from repo root
@@ -93,6 +94,17 @@ async def knowledge_worker():
 async def cortex():
     async with httpx.AsyncClient(base_url=CORTEX_URL, timeout=30) as client:
         yield client
+
+
+# ---------------------------------------------------------------------------
+# Redis sync clients (for fixtures that need to set config before HTTP calls)
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def redis_db1():
+    """Sync Redis client on db=1 (llm-gateway runtime config). Closes on teardown."""
+    client = redis_lib.Redis(host="localhost", port=6379, db=1, decode_responses=True)
+    yield client
+    client.close()
 
 
 # ---------------------------------------------------------------------------

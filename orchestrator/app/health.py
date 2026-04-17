@@ -28,7 +28,7 @@ async def readiness():
     ]:
         try:
             async with httpx.AsyncClient(timeout=3.0) as c:
-                r = await c.get(f"{url}/health/ready")
+                r = await c.get(f"{url}/health/live")
                 checks[svc] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
         except Exception as e:
             checks[svc] = f"error: {e}"

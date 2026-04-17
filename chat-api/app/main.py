@@ -66,7 +66,7 @@ async def readiness():
     checks = {}
     try:
         async with httpx.AsyncClient(base_url=settings.orchestrator_url, timeout=3.0) as c:
-            r = await c.get("/health/ready")
+            r = await c.get("/health/live")
             checks["orchestrator"] = "ok" if r.status_code == 200 else f"http_{r.status_code}"
     except Exception as e:
         checks["orchestrator"] = f"error: {e}"
