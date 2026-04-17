@@ -91,7 +91,7 @@ Jeremy: *"summarize https://some-spa.example/blog/post"* (page won't render serv
 
 ### Data model
 
-New migration `0010_mcp_servers.py`. Single new table:
+New migration `0007_mcp_servers.py`. Single new table:
 
 ```python
 class MCPServer(Base):
@@ -130,7 +130,8 @@ class MCPServer(Base):
 - If `transport == "stdio"`: `command` required, `url` must be null
 - If `transport == "http"`: `url` required, `command` must be null, URL must be `http(s)://...`
 - All `env` values match `^\$\{[A-Z_][A-Z0-9_]*\}$` — bare secrets rejected
-- `sensitive_tools` entries are bare tool names (no dots)
+- `sensitive_tools` entries must each match `^[a-z_][a-z0-9_]*$` — **bare tool names only, no dots**. A value like `"reddit.create_post"` would silently never match at dispatch-time because the splitter compares against the bare name only. Validator rejects any entry containing a `.` with message `"sensitive_tools entries must be bare tool names (no server-id prefix)"`.
+- `transport` is a `Literal["stdio", "http"]` enum.
 
 **MCP tools are NOT persisted as rows in the existing `tools` table.** They're discovered dynamically at MCP startup from the live connection. `tools` table stays native-only. The tool catalog visible to the LLM is built at runtime from `_REGISTRY ∪ MCPRegistry.tools()`.
 
@@ -151,6 +152,8 @@ class MCPServer(Base):
 }
 ```
 
+`mode` is a `Literal["append", "overwrite"]` enum validated at the Pydantic layer.
+
 **Safety:**
 - All paths resolved relative to `NOVA_WORKSPACE_DIR`; attempts to escape via `..` or absolute paths → 400.
 - 10 MB max content size; larger → 413.
@@ -170,13 +173,40 @@ class MCPServer(Base):
 }
 ```
 
-**Safety:**
-- SQL parsed with `sqlparse`; reject unless first token is `SELECT` AND no `INSERT`/`UPDATE`/`DELETE`/`DROP`/`CREATE`/`ALTER`/`TRUNCATE`/`GRANT` tokens present anywhere in the statement.
-- Uses the existing `nova` DB role (already read-mostly — writes happen via ORM with different connection).
-- Result truncated to `limit` rows.
-- Timeout: 30s via `statement_timeout` SET LOCAL.
+**Safety — defense in depth at the transaction level (not a parser):**
 
-**Seed:** `risk_class="low"`, `requires_approval=False`, `adapter_type="internal"`, `timeout_seconds=30`.
+The security boundary is the database transaction, not a Python regex. Parser-based SQL safety is notoriously leaky (multi-statements with `;`, writable CTEs with `WITH foo AS (INSERT ...)`, server-side procedures, `COPY ... TO`). We use Postgres' native read-only transaction mode instead:
+
+```python
+def handle_sql_query(input: dict, db: Session) -> dict:
+    sql = input["sql"]
+    limit = min(int(input.get("limit", 100)), 1000)
+
+    # Quick syntactic sanity: single statement, starts with SELECT/WITH.
+    # This is NOT the security boundary — it's a user-friendly rejection for
+    # obvious misuse. Real enforcement is the READ ONLY transaction below.
+    sql_stripped = sql.strip().rstrip(";").strip()
+    if ";" in sql_stripped:
+        raise ValueError("only single statements supported")
+    first_word = sql_stripped.split(None, 1)[0].upper()
+    if first_word not in ("SELECT", "WITH"):
+        raise ValueError("only SELECT or WITH ... SELECT statements allowed")
+
+    # Hard enforcement: run in a READ ONLY transaction. Any write attempt
+    # (including writable CTEs or functions that write) raises a Postgres error.
+    with db.connection().execution_options(isolation_level="SERIALIZABLE") as conn:
+        conn.execute(text("SET TRANSACTION READ ONLY"))
+        conn.execute(text("SET LOCAL statement_timeout = '30s'"))
+        result = conn.execute(text(sql)).mappings().fetchmany(limit)
+    return {"rows": [dict(r) for r in result], "row_count": len(result)}
+```
+
+**Why this is the right boundary:**
+- `SET TRANSACTION READ ONLY` rejects writes at the Postgres level — regardless of what clever SQL syntax the LLM produces. A writable CTE inside a SELECT fails with `ERROR: cannot execute INSERT in a read-only transaction`.
+- `statement_timeout` bounds long-running queries.
+- The `;` rejection prevents trivial `SELECT 1; DROP TABLE users;` stacking (though READ ONLY would catch the DROP anyway — layered defense).
+
+**Seed:** `risk_class="low"`, `requires_approval=False`, `adapter_type="internal"`, `timeout_seconds=35` (transaction timeout is 30s; handler adds 5s buffer).
 
 ### `browser.fetch`
 
@@ -196,7 +226,19 @@ class MCPServer(Base):
 - Returns `{"url": "final after redirects", "title": "...", "text": "rendered body text", "status": 200}`.
 - Max response: 2MB text; truncate if larger.
 
-**Dockerfile impact:** `playwright install chromium` during nova-api image build. Adds ~300MB to image. Acceptable.
+**SSRF defense — host/IP denylist:**
+
+Before Playwright launches, resolve the URL's host and reject if it maps to any of:
+- Loopback: `127.0.0.0/8`, `::1`
+- Private: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (link-local incl. AWS metadata `169.254.169.254`), `fc00::/7`
+- Docker internal: `host.docker.internal`, service names defined in `infra/docker-compose.yml` (`db`, `api`, `nova-lite`, `ollama`, `board` — resolve these via `socket.gethostbyname` and deny if they answer)
+- Schemes other than `http`/`https` rejected outright
+
+On denial, return `{"error": "blocked: URL resolves to a restricted address", "url": <url>}` — do NOT launch the browser. Log to activity.
+
+This prevents prompt-injection attacks where the LLM is tricked into fetching `http://host.docker.internal:11434/api/tags` (leaking Ollama model list) or `http://db:5432/...` (port-probing internal services).
+
+**Dockerfile impact:** base image stays `python:3.12-slim`, but Dockerfile adds `playwright install --with-deps chromium` which pulls the required OS packages (libnss3, libatk1.0-0, libdrm2, libxcomposite1, libasound2, libpango-1.0-0, libcairo2, etc.) automatically. Adds ~450MB to image. Acceptable on a dev host; if image size becomes painful, switch base to `mcr.microsoft.com/playwright/python:v1.48.0-jammy` which is pre-baked.
 
 **Seed:** `risk_class="low"`, `requires_approval=False`, `adapter_type="internal"`, `timeout_seconds=65`.
 
@@ -221,7 +263,12 @@ These cover ~95% of stdio MCPs. ~200MB image growth. Alternative base image (`py
 
 ### Client library
 
-Use the official `mcp` Python package (`pip install mcp`) where possible. Falls back to a hand-rolled JSON-RPC 2.0 client if the package doesn't cover a transport cleanly. (Initial survey: the `mcp` package covers stdio well; HTTP support is newer and may need our own layer.)
+- **Pin `mcp==1.12.0`** (Python SDK, Anthropic/MCP-official). Targets MCP spec revision **2025-03** (the current stable at ship time). Add `mcp==1.12.0` to `services/api/requirements.txt`.
+- Use the SDK's built-in stdio client (`mcp.client.stdio`) — full support, no hand-rolling.
+- Use the SDK's HTTP/SSE client (`mcp.client.sse`) for the HTTP transport — also covered as of 1.12.
+- No hand-rolled fallback in Phase 1. If a transport the SDK doesn't cover becomes necessary later (e.g., WebSocket), spec it separately.
+
+Protocol version compatibility: the Nova client advertises MCP spec revision `2025-03`. Servers advertising older revisions (`2024-11`, etc.) are accepted if the SDK's negotiation succeeds; otherwise the connection fails and the server is marked unhealthy with a clear version-mismatch error.
 
 ### Tool namespace
 
@@ -340,23 +387,65 @@ Four new native tools, seeded alongside the scheduler management tools. All take
 When the chat tool-calling loop inspects a tool call's sensitivity:
 
 ```python
-def _is_sensitive(tool_name: str, db: Session) -> bool:
+def _is_sensitive_or_unknown(tool_name: str, db: Session) -> tuple[bool, bool]:
+    """Returns (is_sensitive, is_unknown).
+    - is_sensitive=True → pending-confirmation flow
+    - is_unknown=True → refuse dispatch outright (security)
+    """
+    # Native tools
     if tool_name in SENSITIVE_TOOLS:
-        return True
+        return True, False
+    if tool_name in _REGISTRY:  # native and non-sensitive
+        return False, False
 
-    # New: MCP per-server policy
+    # MCP tools: server-id prefix required
     if "." in tool_name:
         server_id, bare_name = tool_name.split(".", 1)
-        server = db.query(MCPServer).filter_by(id=server_id).first()
-        if server:
-            if not server.auto_approve:
-                return True
-            if bare_name in (server.sensitive_tools or []):
-                return True
-    return False
+        server = db.query(MCPServer).filter_by(id=server_id, enabled=True).first()
+        if not server:
+            # Server doesn't exist (or is disabled) — tool name is either stale or hallucinated.
+            # Refuse to dispatch. Do NOT treat as "sensitive and await confirmation" because
+            # that would still surface unknown tool names to the user as legitimate options.
+            return True, True
+        # Verify the tool is actually in the live registry (server is connected, tool exists).
+        from app.mcp.registry import MCPRegistry
+        if not MCPRegistry.has_tool(tool_name):
+            # Server exists but tool name isn't live — hallucination.
+            return True, True
+        # Real MCP tool. Apply policy.
+        if not server.auto_approve:
+            return True, False
+        if bare_name in (server.sensitive_tools or []):
+            return True, False
+        return False, False
+
+    # No dot, not in native registry → unknown tool, refuse.
+    return True, True
+```
+
+**Dispatch caller logic:**
+
+```python
+is_sensitive, is_unknown = _is_sensitive_or_unknown(tc["name"], db)
+if is_unknown:
+    # Never dispatch. Record as a failed run with a clear error.
+    _record_run(db, tc["name"], tc.get("arguments") or {}, output=None,
+                error="tool not available (unknown or disconnected)")
+    # Return an error payload to the LLM so it can try something else.
+    return {"error": "that tool is not available right now", "tool_name": tc["name"]}
+if is_sensitive:
+    # Pending-confirmation flow (existing)
+    ...
+else:
+    # Auto-execute (existing)
+    ...
 ```
 
 Existing `_render_confirmation` is extended to handle MCP tool calls — pulls server name + tool name + args summary from the runtime catalog.
+
+**MCPRegistry.current_tools() contract:**
+- Synchronous, non-blocking — in-memory dict lookup only, no network round-trip on every chat
+- Returns `[]` when no MCPs are configured OR all are disconnected (graceful catalog merge no-op)
 
 ---
 
@@ -438,7 +527,7 @@ React Query refetches on tab focus and every 30s for live-ish health.
 
 ## Rollout / Migration
 
-- **Migration 0010** — creates `mcp_servers` table. Downgrade drops it.
+- **Migration 0007** — creates `mcp_servers` table. Downgrade drops it.
 - **No data migration needed** — starts empty.
 - **Dockerfile change** — adds node + uv + playwright. Image rebuild required (expected for any code change).
 - **Backward compatibility:** all existing tool calls continue to work unchanged. MCP is purely additive.
@@ -489,22 +578,22 @@ Periodically refresh tool catalogs from connected servers (in case an MCP adds t
 
 ## Implementation Order (for the follow-on plan)
 
-1. **Migration 0010** + `MCPServer` model + Pydantic schemas with validators.
+1. **Migration 0007** + `MCPServer` model + Pydantic schemas with validators (incl. `sensitive_tools` bare-name regex).
 2. **Environment variable resolver** (`app/mcp/env_resolver.py`) + unit tests.
-3. **Native primitive: `fs.write`** — handler + workspace-relative-path safety + tests + seed + registry entry.
-4. **Native primitive: `sql.query`** — handler + SELECT-only parser + tests + seed + registry entry.
-5. **Native primitive: `browser.fetch`** — Playwright dependency + handler + timeout handling + tests + seed + registry entry.
-6. **Dockerfile** — add node 20, uv, Playwright chromium.
-7. **MCP protocol client** (`app/mcp/client.py`) — stdio transport first, then HTTP.
-8. **MCPRegistry singleton** — server lifecycle, tool catalog, invocation routing.
+3. **Dockerfile update** — add node 20, uv, and `playwright install --with-deps chromium` (done early so primitives that depend on Playwright can be tested in the built image).
+4. **Native primitive: `fs.write`** — handler + workspace-relative-path safety + mode enum + tests + seed + registry entry.
+5. **Native primitive: `sql.query`** — handler with `SET TRANSACTION READ ONLY` (not parser-based) + tests + seed + registry entry.
+6. **Native primitive: `browser.fetch`** — SSRF denylist + Playwright launcher + timeout handling + tests + seed + registry entry.
+7. **MCP protocol client** (`app/mcp/client.py`) — wraps the pinned `mcp==1.12.0` SDK; stdio transport first, then HTTP.
+8. **MCPRegistry singleton** — server lifecycle, tool catalog (`current_tools()` returns `[]` when empty), invocation routing.
 9. **Lifespan integration** — start all enabled servers on nova-api startup, stop on shutdown.
 10. **Tool catalog + dispatch extension** — merge MCP tools into `_tool_catalog`, add MCP branch to `tool_handlers.dispatch`.
-11. **MCP management tools** — four handlers + registry entries + seed + tests.
-12. **Approval flow integration** — `_is_sensitive` helper + `_render_confirmation` updates for MCP.
+11. **MCP management tools** — four handlers + registry entries + seed + tests, plus pending-confirmation flow test for a sensitive MCP tool end-to-end.
+12. **Approval flow integration** — `_is_sensitive_or_unknown` helper (refuses unknown/disconnected MCP tools) + `_render_confirmation` updates for MCP.
 13. **`/mcp/servers` read-only router** + tests.
 14. **Settings UI: `<MCPServersPanel />`** + fetch helper + CSS.
 15. **Integration smoke test** — tiny echo MCP fixture + full dispatch test.
-16. **End-to-end smoke** — install Reddit MCP, restart, ask a question, assert expected tool call.
+16. **End-to-end smoke** — install Reddit MCP via chat, show Nova's "run `docker compose restart api` to bring it online" suggestion, restart, ask a question, assert expected tool call.
 17. **Push.**
 
 Each step self-contained. Typical TDD cycle per step. Frequent commits.
