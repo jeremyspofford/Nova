@@ -78,3 +78,23 @@ class DecisionOutput(BaseModel):
     reasoning: str = Field(default="")
     adr: str = Field(default="", description="Architecture Decision Record in markdown")
     escalation_message: str = Field(default="Requires human review.")
+
+
+# ── Critique-Direction (approval gate) ───────────────────────────────────────
+
+class CritiqueDirectionOutput(BaseModel):
+    verdict: str = Field(
+        default="needs_revision",
+        description="approved | needs_revision | needs_clarification",
+    )
+    feedback: str = Field(default="")
+    questions: list[str] = Field(default_factory=list)
+    reason: str = Field(default="")
+
+
+# ── Critique-Acceptance (final gate) ─────────────────────────────────────────
+
+class CritiqueAcceptanceOutput(BaseModel):
+    verdict: str = Field(default="fail", description="pass | fail")
+    feedback: str = Field(default="")
+    reason: str = Field(default="")

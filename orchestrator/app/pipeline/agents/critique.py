@@ -24,10 +24,13 @@ class CritiqueDirectionAgent(BaseAgent):
     )
 
     async def run(self, state: PipelineState, agent_cfg=None, task_id: str = "", **kwargs) -> dict[str, Any]:
-        task_output = state.completed.get("task", {})
-        user_content = f"## Original Request\n{state.task_input}\n\n## Task Agent Output\n{json.dumps(task_output, indent=2)}"
+        from ..schemas import CritiqueDirectionOutput
 
-        # Include prior clarification answers if available
+        task_output = state.completed.get("task", {})
+        user_content = (
+            f"## Original Request\n{state.task_input}\n\n"
+            f"## Task Agent Output\n{json.dumps(task_output, indent=2)}"
+        )
         critique_feedback = state.completed.get("_critique_feedback")
         if critique_feedback:
             user_content += f"\n\n## Previous Critique Feedback\n{critique_feedback}"
@@ -36,12 +39,28 @@ class CritiqueDirectionAgent(BaseAgent):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_content},
         ]
-        content, _model = await self._call_llm_full(messages)
         try:
-            return json.loads(content.strip())
-        except json.JSONDecodeError:
-            logger.warning("Critique-Direction returned non-JSON — defaulting to approved")
-            return {"verdict": "approved"}
+            return await self.think_json(
+                messages,
+                purpose="critique_direction",
+                output_schema=CritiqueDirectionOutput,
+            )
+        except (ValueError, RuntimeError) as exc:
+            # Fail-closed: LLM couldn't produce valid JSON even after retry.
+            # Default to needs_revision so the Task Agent is re-invoked with
+            # the feedback, rather than silently approving bad output.
+            logger.error(
+                "Critique-Direction failed to produce valid JSON — fail-closed to needs_revision: %s",
+                exc,
+            )
+            return {
+                "verdict": "needs_revision",
+                "feedback": (
+                    "Critique-Direction could not validate the Task Agent output "
+                    "(LLM formatting error). Re-attempting with the original request."
+                ),
+                "reason": f"fail_closed_on_llm_error: {exc}",
+            }
 
 
 class CritiqueAcceptanceAgent(BaseAgent):
@@ -58,9 +77,13 @@ class CritiqueAcceptanceAgent(BaseAgent):
     )
 
     async def run(self, state: PipelineState, agent_cfg=None, task_id: str = "", **kwargs) -> dict[str, Any]:
-        task_output = state.completed.get("task", {})
-        user_content = f"## Original Request\n{state.task_input}\n\n## Final Output\n{json.dumps(task_output, indent=2)}"
+        from ..schemas import CritiqueAcceptanceOutput
 
+        task_output = state.completed.get("task", {})
+        user_content = (
+            f"## Original Request\n{state.task_input}\n\n"
+            f"## Final Output\n{json.dumps(task_output, indent=2)}"
+        )
         acceptance_feedback = state.completed.get("_acceptance_feedback")
         if acceptance_feedback:
             user_content += f"\n\n## Previous Acceptance Feedback\n{acceptance_feedback}"
@@ -69,9 +92,25 @@ class CritiqueAcceptanceAgent(BaseAgent):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": user_content},
         ]
-        content, _model = await self._call_llm_full(messages)
         try:
-            return json.loads(content.strip())
-        except json.JSONDecodeError:
-            logger.warning("Critique-Acceptance returned non-JSON — defaulting to pass")
-            return {"verdict": "pass"}
+            return await self.think_json(
+                messages,
+                purpose="critique_acceptance",
+                output_schema=CritiqueAcceptanceOutput,
+            )
+        except (ValueError, RuntimeError) as exc:
+            # Fail-closed: LLM couldn't produce valid JSON even after retry.
+            # Default to fail so the task requires re-attempt or human review,
+            # rather than silently passing an unvalidated output.
+            logger.error(
+                "Critique-Acceptance failed to produce valid JSON — fail-closed to fail: %s",
+                exc,
+            )
+            return {
+                "verdict": "fail",
+                "feedback": (
+                    "Critique-Acceptance could not validate the final output "
+                    "(LLM formatting error). Task requires re-attempt or human review."
+                ),
+                "reason": f"fail_closed_on_llm_error: {exc}",
+            }
