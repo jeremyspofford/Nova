@@ -210,3 +210,36 @@ async def transition_task_status(
         "Task %s: %s -> %s", task_id, current_status, new_status
     )
     return True
+
+
+async def force_fail_task(task_id: str, reason: str) -> bool:
+    """
+    Recovery-path helper: transition a stuck task to 'failed' without going
+    through the CAS state machine. Used by the reaper and startup cleanup
+    when a task has gone silent for longer than task_stale_seconds.
+
+    Writes the given reason to tasks.error as an audit trail. Returns True
+    if the row was updated, False if the task did not exist or was already
+    in a terminal state (failed/complete/cancelled).
+    """
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE tasks
+               SET status = 'failed',
+                   error = $2,
+                   completed_at = now(),
+                   last_heartbeat_at = now()
+             WHERE id = $1::uuid
+               AND status NOT IN ('failed', 'complete', 'cancelled')
+            """,
+            task_id, reason,
+        )
+    # asyncpg returns "UPDATE <rowcount>" — "UPDATE 1" means a row was changed
+    updated = result.endswith(" 1")
+    if updated:
+        logger.warning(
+            "force_fail_task: %s -> failed (reason: %s)", task_id, reason,
+        )
+    return updated

@@ -20,7 +20,7 @@ from app.intel_router import intel_router
 from app.knowledge_router import knowledge_router
 from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
-from app.reaper import reaper_loop
+from app.reaper import cleanup_stale_running_on_startup, reaper_loop
 from app.router import router
 from app.store import close_redis, ensure_primary_agent, recover_stale_agents
 from app.stimulus import close_redis as close_stimulus_redis
@@ -120,6 +120,9 @@ async def lifespan(app: FastAPI):
     from app.pipeline.tools import load_mcp_servers
     mcp_count = await load_mcp_servers()
     log.info("MCP servers loaded: %d connected", mcp_count)
+
+    # Force-fail any tasks still in *_running state from a previous crashed process
+    await cleanup_stale_running_on_startup()
 
     # Start background tasks — stored so we can cancel on shutdown
     _queue_task   = asyncio.create_task(queue_worker(),             name="queue-worker")
