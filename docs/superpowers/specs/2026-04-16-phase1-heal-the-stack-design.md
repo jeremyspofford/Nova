@@ -146,7 +146,7 @@ Phase 1.0 is complete when all of the following are true:
 2. `curl -sf localhost:8000/health/ready && curl -sf localhost:8080/health/ready` both return `status=ready` regardless of whether Ollama is running.
 3. `docker compose exec redis redis-cli client list | wc -l` returns a stable value across a full stack restart (no climbing).
 4. Memory-service log emits zero "fallback embedding model" lines after the PERF-002 flip.
-5. A chat turn end-to-end latency measured at `<1s` on a warm stack (vs. 6–14s before).
+5. A chat turn end-to-end latency measured at `<2s` on a warm stack (vs. 6–14s before). `<1s` is the stretch target — adjust in the plan if early measurement shows it's unreachable with tool-calls + memory activation on the critical path.
 6. Fresh `./scripts/setup.sh` run on a blank `.env` produces randomly-generated `NOVA_ADMIN_SECRET` and `POSTGRES_PASSWORD`.
 7. The BACKLOG.md entries REL-001, OPS-001, OPS-002, PERF-002, SEC-005 all flip from `Open` to `Done`.
 
