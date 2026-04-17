@@ -54,6 +54,10 @@ async def lifespan(app: FastAPI):
     await close_response_cache()
     from app.editor_tracker import close as close_editor_tracker
     await close_editor_tracker()
+    from app.discovery import close_redis as close_discovery_redis
+    from app.registry import close_strategy_redis
+    await close_discovery_redis()
+    await close_strategy_redis()
 
 
 app = FastAPI(

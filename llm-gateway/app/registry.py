@@ -220,6 +220,14 @@ async def _get_strategy_redis() -> aioredis.Redis:
     return _strategy_redis
 
 
+async def close_strategy_redis() -> None:
+    """Close the strategy/config Redis singleton. Call at shutdown."""
+    global _strategy_redis
+    if _strategy_redis is not None:
+        await _strategy_redis.aclose()
+        _strategy_redis = None
+
+
 async def get_routing_strategy() -> str:
     """Read llm.routing_strategy from Redis (synced from platform_config). Cached for 5s."""
     global _cached_strategy, _strategy_fetched_at

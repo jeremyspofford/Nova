@@ -9,6 +9,7 @@ from .clients import init_clients, close_clients
 from .config import settings
 from .db import init_pool, close_pool
 from .stimulus import close_redis
+from .budget import close_redis as close_budget_redis
 from .health import health_router
 from .router import cortex_router
 from . import loop
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI):
     await loop.stop()
     await close_clients()
     await close_redis()
+    await close_budget_redis()
     await close_pool()
 
 

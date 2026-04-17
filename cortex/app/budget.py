@@ -23,6 +23,14 @@ async def _get_redis() -> aioredis.Redis:
     return _redis
 
 
+async def close_redis() -> None:
+    """Close the module-level Redis connection. Call at shutdown."""
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None
+
+
 async def get_daily_spend() -> float:
     """Sum cost_usd from usage_events for today (UTC)."""
     pool = get_pool()

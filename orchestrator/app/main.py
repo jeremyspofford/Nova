@@ -23,6 +23,7 @@ from app.queue import queue_worker
 from app.reaper import reaper_loop
 from app.router import router
 from app.store import close_redis, ensure_primary_agent, recover_stale_agents
+from app.stimulus import close_redis as close_stimulus_redis
 
 configure_logging("orchestrator", settings.log_level)
 log = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ async def lifespan(app: FastAPI):
 
     await close_clients()
     await close_redis()
+    await close_stimulus_redis()
     from app.knowledge_router import close_engram_redis
     await close_engram_redis()
     await close_db()

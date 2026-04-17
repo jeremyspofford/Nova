@@ -39,6 +39,14 @@ async def _get_redis() -> aioredis.Redis:
     return _redis
 
 
+async def close_redis() -> None:
+    """Close the module-level Redis connection. Call at shutdown."""
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None
+
+
 async def emit_stimulus(type: str, payload: dict | None = None, priority: int = 0) -> None:
     """Push a stimulus to Cortex's queue. Fire-and-forget (never raises)."""
     stimulus = {

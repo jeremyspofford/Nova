@@ -12,7 +12,7 @@ from nova_contracts.logging import configure_logging
 
 from app.config import settings
 from app.db.database import AsyncSessionLocal, run_schema_migrations
-from app.embedding import get_embedding
+from app.embedding import close_redis as close_embedding_redis, get_embedding
 from app.engram.consolidation import bootstrap_self_model, consolidation_loop
 from app.engram.ingestion import ingestion_loop
 from app.engram.router import engram_router
@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
         )
     except asyncio.TimeoutError:
         log.warning("Shutdown grace period expired — some tasks may not have completed")
+    await close_embedding_redis()
     log.info("Memory Service shutdown complete")
 
 

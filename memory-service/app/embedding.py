@@ -27,6 +27,14 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
+async def close_redis() -> None:
+    """Close the module-level Redis connection. Call at shutdown."""
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None
+
+
 def _cache_key(text_hash: str) -> str:
     return f"nova:embed:{text_hash}"
 
