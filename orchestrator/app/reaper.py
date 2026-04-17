@@ -23,6 +23,17 @@ from .config import settings
 
 logger = logging.getLogger(__name__)
 
+# Pipeline running states monitored by the reaper.
+# These are the states where a live heartbeat is expected.
+# Post-pipeline stages (documentation_running, diagramming_running, etc.)
+# are intentionally excluded — they have different heartbeat expectations.
+_ACTIVE_RUNNING_STATES = (
+    "context_running", "task_running",
+    "critique_direction_running", "guardrail_running",
+    "code_review_running", "critique_acceptance_running",
+    "decision_running", "completing",
+)
+
 
 # ── Main loop ──────────────────────────────────────────────────────────────────
 
@@ -68,13 +79,6 @@ async def _reap_stale_running_tasks() -> None:
     from .queue import move_to_dead_letter
     from .db import get_pool
 
-    ACTIVE_STATES = (
-        "context_running", "task_running",
-        "critique_direction_running", "guardrail_running",
-        "code_review_running", "critique_acceptance_running",
-        "decision_running", "completing",
-    )
-
     pool = get_pool()
     async with pool.acquire() as conn:
         stale_tasks = await conn.fetch(
@@ -87,7 +91,7 @@ async def _reap_stale_running_tasks() -> None:
                 OR last_heartbeat_at < now() - ($2 || ' seconds')::interval
               )
             """,
-            list(ACTIVE_STATES),
+            list(_ACTIVE_RUNNING_STATES),
             str(settings.task_stale_seconds),
         )
 
@@ -120,13 +124,6 @@ async def cleanup_stale_running_on_startup() -> int:
     from .pipeline.state_machine import force_fail_task
     from .db import get_pool
 
-    ACTIVE_STATES = (
-        "context_running", "task_running",
-        "critique_direction_running", "guardrail_running",
-        "code_review_running", "critique_acceptance_running",
-        "decision_running", "completing",
-    )
-
     pool = get_pool()
     async with pool.acquire() as conn:
         stale = await conn.fetch(
@@ -139,7 +136,7 @@ async def cleanup_stale_running_on_startup() -> int:
                  OR last_heartbeat_at < now() - ($2 || ' seconds')::interval
                )
             """,
-            list(ACTIVE_STATES),
+            list(_ACTIVE_RUNNING_STATES),
             str(settings.task_stale_seconds),
         )
 

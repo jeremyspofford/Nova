@@ -1405,16 +1405,6 @@ async def selfmod_list_prs(
     return [dict(r) for r in rows]
 
 
-# ── Reaper admin ─────────────────────────────────────────────────────────────
-
-@router.post("/api/v1/admin/reaper/tick")
-async def reaper_tick(_admin: AdminDep):
-    """Run one reaper cycle on demand (admin/test use)."""
-    from .reaper import _reap_stale_running_tasks
-    await _reap_stale_running_tasks()
-    return {"status": "ok"}
-
-
 @router.get("/api/v1/selfmod/prs/{pr_id}")
 async def selfmod_pr_detail(request: Request, pr_id: str):
     """Get PR detail with fresh GitHub status."""
@@ -1429,3 +1419,13 @@ async def selfmod_pr_detail(request: Request, pr_id: str):
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="PR not found")
     return dict(row)
+
+
+# ── Reaper admin ─────────────────────────────────────────────────────────────
+
+@router.post("/api/v1/admin/reaper/tick")
+async def reaper_tick(_admin: AdminDep):
+    """Run one reaper cycle on demand (admin/test use)."""
+    from .reaper import _reap_stale_running_tasks
+    await _reap_stale_running_tasks()
+    return {"status": "ok"}
