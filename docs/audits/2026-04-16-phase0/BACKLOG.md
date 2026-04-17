@@ -104,10 +104,10 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| AQ-001 | agent-quality | Critique agents fail-open on JSON parse errors (weaker models = more permissive pipeline) | P0 | H | S | Open |
+| AQ-001 | agent-quality | Critique agents fail-open on JSON parse errors (weaker models = more permissive pipeline) | P0 | H | S | Done |
 | AQ-002 | agent-quality | Outcome feedback only reinforces positive; bad engrams never lose activation | P0 | H | S | Open |
-| AQ-003 | agent-quality | Guardrail findings not actionable — no `guardrail_refactor` loop, medium-severity tainted output ships | P0 | H | M | Open |
-| AQ-004 | agent-quality | `think_json` schema-validation failure returns raw dict; executor defaults (`.get("verdict","pass")`) are all permissive | P0 | H | S | Open |
+| AQ-003 | agent-quality | Guardrail findings not actionable — no `guardrail_refactor` loop, medium-severity tainted output ships | P0 | H | M | Done |
+| AQ-004 | agent-quality | `think_json` schema-validation failure returns raw dict; executor defaults (`.get("verdict","pass")`) are all permissive | P0 | H | S | Done |
 | AQ-005 | agent-quality | Self-Model Update (consolidation Phase 6) is a stub — only counts engrams, never updates self-model | P1 | M | M | Open |
 | AQ-006 | agent-quality | `what_do_i_know` tool schema advertises `query` param that is ignored | P1 | M | S | Open |
 | AQ-007 | agent-quality | Cortex goal-skip detection uses fragile substring `"skip" in plan.lower()[:20]` | P1 | M | S | Open |
