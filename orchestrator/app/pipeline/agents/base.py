@@ -296,7 +296,13 @@ class BaseAgent:
 
         1. Try model_validate (non-strict — allows coercion).
         2. On failure, retry the LLM once with the schema definition appended.
-        3. If the retry also fails validation, return best-effort parsed dict.
+        3. If the retry also fails validation, raise ValueError so the upstream
+           _run_agent exception handler can route to the pod's on_failure policy.
+
+        Fail-closed: returning a best-effort dict here lets downstream agents
+        (especially Code Review) silently ship on permissive .get() defaults —
+        e.g. a Code Review result that should have been "reject" but didn't
+        match the schema would leak out as verdict="pass" via .get("verdict", "pass").
         """
         from pydantic import ValidationError
 
@@ -328,6 +334,7 @@ class BaseAgent:
             },
         ]
 
+        retry_raw: str | None = None
         try:
             retry_raw = await self._call_llm(retry_messages)
             retry_cleaned = retry_raw.strip()
@@ -342,15 +349,24 @@ class BaseAgent:
             validated = output_schema.model_validate(retry_parsed)
             return validated.model_dump()
         except (json.JSONDecodeError, ValidationError) as exc:
-            logger.warning(
-                "[%s] Schema validation retry also failed%s: %s — returning raw parsed dict",
+            logger.error(
+                "[%s] Schema validation retry also failed%s: %s — raising",
                 self.ROLE,
                 f" ({purpose})" if purpose else "",
                 exc,
             )
-            # Best-effort: return the original parsed dict so the pipeline
-            # doesn't crash. The data is valid JSON, just not schema-conformant.
-            return parsed
+            # Store raw LLM output for post-mortem debugging — the executor's
+            # exception handler reads this and persists it to agent_sessions.output.
+            self._last_raw_output = retry_raw if retry_raw is not None else raw_response
+            # Fail-closed: raise so _run_agent's exception handler can route to
+            # the pod's on_failure policy (abort / skip / escalate). Matches the
+            # contract think_json already uses on JSON parse exhaustion above.
+            raise ValueError(
+                f"Agent {self.ROLE} could not produce schema-valid output "
+                f"after retry"
+                + (f" ({purpose})" if purpose else "")
+                + f": {exc}"
+            ) from exc
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
