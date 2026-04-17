@@ -33,6 +33,67 @@ log = logging.getLogger(__name__)
 _AUTH_CACHE_TTL = 30  # seconds
 _auth_cache: dict[str, Any] = {"require_auth": None, "ts": 0.0}
 
+# ── Dynamic admin secret from Redis (30s cache) ──────────────────────────────
+#
+# The admin secret can be rotated at runtime via the dashboard, which writes a
+# new value to `nova:config:auth.admin_secret` in Redis db 1 (the shared config
+# db used by all services). Each validator re-reads on a 30s cadence so a
+# rotated secret becomes valid across the platform within one cache window.
+#
+# Escape hatch: if a bad value ever gets stored, operators can clear the Redis
+# key with `redis-cli -n 1 DEL nova:config:auth.admin_secret` to fall back to
+# the env value (settings.nova_admin_secret). The env value is bootstrap-only
+# and is never written back.
+
+_ADMIN_SECRET_CACHE_TTL = 30  # seconds
+_admin_secret_cache: dict[str, Any] = {"value": None, "ts": 0.0}
+
+_config_redis = None  # lazy aioredis.Redis connection to db 1
+
+
+def _config_redis_url() -> str:
+    """Redis URL targeting db1 (shared nova:config:* namespace)."""
+    return settings.redis_url.rsplit("/", 1)[0] + "/1"
+
+
+async def get_admin_secret() -> str:
+    """Return the current admin secret — Redis-backed, env fallback.
+
+    Reads `nova:config:auth.admin_secret` from Redis db 1 with a 30s cache.
+    Falls back to `settings.nova_admin_secret` (from .env) if Redis is down
+    or the key is unset. Always returns a non-empty string.
+    """
+    now = _time.monotonic()
+    if (
+        now - _admin_secret_cache["ts"] < _ADMIN_SECRET_CACHE_TTL
+        and _admin_secret_cache["value"] is not None
+    ):
+        return _admin_secret_cache["value"]
+
+    value: str | None = None
+    try:
+        global _config_redis
+        if _config_redis is None:
+            import redis.asyncio as aioredis
+            _config_redis = aioredis.from_url(_config_redis_url(), decode_responses=True)
+        raw = await _config_redis.get("nova:config:auth.admin_secret")
+        if raw:
+            # May be stored as a raw string or as JSON-encoded string
+            try:
+                parsed = json.loads(raw)
+                value = parsed if isinstance(parsed, str) and parsed else raw
+            except (json.JSONDecodeError, TypeError):
+                value = raw
+    except Exception:
+        log.debug("Failed to read admin secret from Redis, using .env fallback")
+
+    if not value:
+        value = settings.nova_admin_secret
+
+    _admin_secret_cache["value"] = value
+    _admin_secret_cache["ts"] = now
+    return value
+
 
 async def _get_require_auth() -> bool:
     """Read auth.require_auth from platform_config with 30s cache.
@@ -170,8 +231,8 @@ async def require_admin(
     if getattr(request.state, "is_trusted_network", False):
         return
 
-    # Check admin secret first
-    if x_admin_secret and x_admin_secret == settings.nova_admin_secret:
+    # Check admin secret first (Redis-backed with env fallback for zero-downtime rotation)
+    if x_admin_secret and x_admin_secret == await get_admin_secret():
         return
 
     # Check JWT from admin user
@@ -329,7 +390,7 @@ async def require_user(
             pass  # Fall through to admin secret check
 
     # Fallback: admin secret (backward compat for existing dashboard sessions)
-    if x_admin_secret and x_admin_secret == settings.nova_admin_secret:
+    if x_admin_secret and x_admin_secret == await get_admin_secret():
         return _SYNTHETIC_ADMIN
 
     raise HTTPException(status_code=401, detail="Authentication required")

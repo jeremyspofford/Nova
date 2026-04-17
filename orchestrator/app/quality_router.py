@@ -198,7 +198,9 @@ async def _run_benchmark_background(run_id: str, category: str | None = None):
     # Use container-internal URLs
     orch_base = "http://localhost:8000"
     memory_base = "http://memory-service:8002"
-    admin_headers = {"X-Admin-Secret": settings.nova_admin_secret}
+    # Use the current (possibly rotated) admin secret rather than the env fallback
+    from app.auth import get_admin_secret
+    admin_headers = {"X-Admin-Secret": await get_admin_secret()}
 
     # Inline benchmark cases (benchmarks package isn't in the container)
     cases = [

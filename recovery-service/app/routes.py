@@ -1,7 +1,9 @@
 """Recovery service API routes."""
 
+import json
 import logging
 import time
+from typing import Any
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -13,6 +15,7 @@ from .config import settings
 from .docker_client import check_container_status, get_container_logs, list_all_service_status, list_service_status, restart_all_services, restart_service
 from .env_manager import add_compose_profile, patch_env, read_env, remove_compose_profile
 from .factory_reset import factory_reset, get_categories
+from .redis_client import read_config
 
 logger = logging.getLogger("nova.recovery")
 
@@ -24,6 +27,38 @@ router = APIRouter()
 _jwt_secret: str | None = None
 _jwt_secret_fetched_at: float = 0
 _JWT_SECRET_TTL = 300  # re-fetch from DB every 5 minutes
+
+
+# Admin secret cache — reads nova:config:auth.admin_secret from Redis db 1
+# (where orchestrator writes it after rotation). Falls back to the env value.
+# Escape hatch: `redis-cli -n 1 DEL nova:config:auth.admin_secret` reverts to env.
+_ADMIN_SECRET_CACHE_TTL = 30  # seconds
+_admin_secret_cache: dict[str, Any] = {"value": None, "ts": 0.0}
+
+
+async def _get_admin_secret() -> str:
+    """Current admin secret — Redis-backed, env fallback, 30s cache."""
+    now = time.monotonic()
+    if (
+        now - _admin_secret_cache["ts"] < _ADMIN_SECRET_CACHE_TTL
+        and _admin_secret_cache["value"] is not None
+    ):
+        return _admin_secret_cache["value"]
+
+    value: str = ""
+    try:
+        raw = await read_config("auth.admin_secret", default="")
+        if raw:
+            value = raw
+    except Exception:
+        logger.debug("Failed to read admin secret from Redis, using env fallback")
+
+    if not value:
+        value = settings.admin_secret
+
+    _admin_secret_cache["value"] = value
+    _admin_secret_cache["ts"] = now
+    return value
 
 
 async def _get_jwt_secret() -> str | None:
@@ -63,8 +98,8 @@ async def _check_admin(
     x_admin_secret: str = Header(default=""),
 ):
     """Validate admin access. Accepts JWT Bearer or X-Admin-Secret."""
-    # Check admin secret (backward compat)
-    if x_admin_secret and x_admin_secret == settings.admin_secret:
+    # Check admin secret (Redis-backed for runtime rotation, env fallback)
+    if x_admin_secret and x_admin_secret == await _get_admin_secret():
         return
 
     # Check JWT Bearer token

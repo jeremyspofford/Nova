@@ -158,6 +158,13 @@ async def lifespan(app: FastAPI):
     await close_stimulus_redis()
     from app.knowledge_router import close_engram_redis
     await close_engram_redis()
+    # Close the admin-secret config Redis connection (lazy-opened in app.auth)
+    from app import auth as _auth
+    if _auth._config_redis is not None:
+        try:
+            await _auth._config_redis.aclose()
+        finally:
+            _auth._config_redis = None
     await close_db()
 
 

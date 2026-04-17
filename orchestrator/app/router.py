@@ -1429,3 +1429,40 @@ async def reaper_tick(_admin: AdminDep):
     from .reaper import _reap_stale_running_tasks
     await _reap_stale_running_tasks()
     return {"status": "ok"}
+
+
+# ── Admin secret rotation ────────────────────────────────────────────────────
+
+@router.post("/api/v1/admin/rotate-secret")
+async def rotate_admin_secret(request: Request, _admin: AdminDep):
+    """Rotate the platform admin secret. Returns the new value once.
+
+    Writes a fresh 32-byte hex string to `nova:config:auth.admin_secret` in
+    Redis db 1. All validator services read that key with a 30s cache, so the
+    new secret becomes valid cluster-wide within one cache window.
+
+    Recovery: if the stored value ever becomes unusable, operators can run
+    `redis-cli -n 1 DEL nova:config:auth.admin_secret` to fall back to the
+    bootstrap env value in `NOVA_ADMIN_SECRET`.
+    """
+    import secrets as _secrets
+    import redis.asyncio as aioredis
+
+    from app.auth import _config_redis_url, _admin_secret_cache
+
+    new_secret = _secrets.token_hex(32)  # 64-char hex
+    r = aioredis.from_url(_config_redis_url(), decode_responses=True)
+    try:
+        await r.set("nova:config:auth.admin_secret", new_secret)
+    finally:
+        await r.aclose()
+
+    # Invalidate local cache so this orchestrator picks up the new value
+    # immediately rather than waiting up to 30s.
+    _admin_secret_cache["value"] = new_secret
+    _admin_secret_cache["ts"] = _time.monotonic()
+
+    client_ip = request.client.host if request.client else "unknown"
+    log.warning("Admin secret rotated (ip=%s)", client_ip)
+
+    return {"secret": new_secret}

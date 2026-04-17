@@ -1,8 +1,11 @@
 """Nova Chat Bridge — multi-platform chat integration."""
 from __future__ import annotations
 
+import json
 import logging
+import time as _time
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from nova_contracts.logging import configure_logging
@@ -13,6 +16,52 @@ from app.config import settings
 
 configure_logging("chat-bridge", settings.log_level)
 log = logging.getLogger(__name__)
+
+# ── Admin secret resolver (Redis-backed, env fallback, 30s cache) ────────────
+# The admin secret can be rotated at runtime via the orchestrator. This service
+# re-reads `nova:config:auth.admin_secret` from Redis db 1 every 30s. If the
+# value is unusable, operators can clear it with:
+#   redis-cli -n 1 DEL nova:config:auth.admin_secret
+# to revert to the bootstrap env value.
+
+_ADMIN_SECRET_CACHE_TTL = 30  # seconds
+_admin_secret_cache: dict[str, Any] = {"value": None, "ts": 0.0}
+_config_redis = None
+
+
+async def _get_admin_secret() -> str:
+    now = _time.monotonic()
+    if (
+        now - _admin_secret_cache["ts"] < _ADMIN_SECRET_CACHE_TTL
+        and _admin_secret_cache["value"] is not None
+    ):
+        return _admin_secret_cache["value"]
+
+    value: str | None = None
+    try:
+        global _config_redis
+        if _config_redis is None:
+            import redis.asyncio as aioredis
+            _config_redis = aioredis.from_url(
+                settings.redis_url.rsplit("/", 1)[0] + "/1",
+                decode_responses=True,
+            )
+        raw = await _config_redis.get("nova:config:auth.admin_secret")
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                value = parsed if isinstance(parsed, str) and parsed else raw
+            except (json.JSONDecodeError, TypeError):
+                value = raw
+    except Exception:
+        log.debug("Failed to read admin secret from Redis, using env fallback")
+
+    if not value:
+        value = settings.nova_admin_secret
+
+    _admin_secret_cache["value"] = value
+    _admin_secret_cache["ts"] = now
+    return value
 
 # Registry of all platform adapters
 ADAPTERS: list[PlatformAdapter] = [
@@ -45,6 +94,13 @@ async def lifespan(app: FastAPI):
                 await adapter.shutdown()
             except Exception as e:
                 log.error("Error shutting down adapter %s: %s", adapter.platform_name, e)
+    # Close the admin-secret config Redis connection (lazy-opened)
+    global _config_redis
+    if _config_redis is not None:
+        try:
+            await _config_redis.aclose()
+        finally:
+            _config_redis = None
     log.info("Chat bridge shut down")
 
 
@@ -102,7 +158,7 @@ async def adapter_status():
 async def reload_telegram(request: Request):
     """Reload Telegram adapter with new config. Called by dashboard after saving bot token."""
     admin_secret = request.headers.get("X-Admin-Secret", "")
-    if admin_secret != settings.nova_admin_secret:
+    if admin_secret != await _get_admin_secret():
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # Read new token from Redis runtime config (DB 1 = nova:config:* store)

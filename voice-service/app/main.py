@@ -41,6 +41,13 @@ async def lifespan(app: FastAPI):
     yield
     log.info("Voice service shutting down")
     await close_redis()
+    # Close the admin-secret config Redis connection (opened lazily in routes.py)
+    from app import routes as _routes
+    if _routes._config_redis is not None:
+        try:
+            await _routes._config_redis.aclose()
+        finally:
+            _routes._config_redis = None
 
 
 app = FastAPI(

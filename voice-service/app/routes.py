@@ -1,7 +1,10 @@
 """Voice API endpoints — transcribe audio, synthesize speech, list voices."""
 from __future__ import annotations
 
+import json
 import logging
+import time as _time
+from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, HTTPException, Response
 from pydantic import BaseModel
@@ -14,6 +17,60 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/voice")
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25MB Whisper API limit
+
+
+# ── Admin secret resolver (Redis-backed, env fallback) ───────────────────────
+#
+# The admin secret is rotatable at runtime via the orchestrator's
+# /api/v1/admin/rotate-secret endpoint, which stores the current value in
+# `nova:config:auth.admin_secret` on Redis db 1. This service re-reads that
+# key on a 30s cadence. If Redis is unavailable or the key is unset we fall
+# back to `settings.nova_admin_secret` (from .env).
+#
+# Escape hatch: `redis-cli -n 1 DEL nova:config:auth.admin_secret` forces
+# every service to revert to the env fallback.
+
+_ADMIN_SECRET_CACHE_TTL = 30  # seconds
+_admin_secret_cache: dict[str, Any] = {"value": None, "ts": 0.0}
+_config_redis = None
+
+
+def _config_redis_url() -> str:
+    """Redis URL targeting db1 (shared nova:config:* namespace)."""
+    return settings.redis_url.rsplit("/", 1)[0] + "/1"
+
+
+async def get_admin_secret() -> str:
+    """Return the current admin secret — Redis-backed, env fallback."""
+    now = _time.monotonic()
+    if (
+        now - _admin_secret_cache["ts"] < _ADMIN_SECRET_CACHE_TTL
+        and _admin_secret_cache["value"] is not None
+    ):
+        return _admin_secret_cache["value"]
+
+    value: str | None = None
+    try:
+        global _config_redis
+        if _config_redis is None:
+            import redis.asyncio as aioredis
+            _config_redis = aioredis.from_url(_config_redis_url(), decode_responses=True)
+        raw = await _config_redis.get("nova:config:auth.admin_secret")
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                value = parsed if isinstance(parsed, str) and parsed else raw
+            except (json.JSONDecodeError, TypeError):
+                value = raw
+    except Exception:
+        log.debug("Failed to read admin secret from Redis, using .env fallback")
+
+    if not value:
+        value = settings.nova_admin_secret
+
+    _admin_secret_cache["value"] = value
+    _admin_secret_cache["ts"] = now
+    return value
 
 
 # ── Auth dependency ──────────────────────────────────────────────────────────
@@ -30,13 +87,14 @@ async def require_auth(request: Request):
     admin_secret = request.headers.get("X-Admin-Secret", "")
     auth_header = request.headers.get("Authorization", "")
 
-    if admin_secret and admin_secret == settings.nova_admin_secret:
+    current_secret = await get_admin_secret()
+    if admin_secret and admin_secret == current_secret:
         return
 
     if auth_header.startswith("Bearer sk-nova-"):
         # In production, validate against orchestrator. For v1, accept any sk-nova- token
         # when admin secret is also set (trusted internal network).
-        if settings.nova_admin_secret:
+        if current_secret:
             return
 
     raise HTTPException(401, "Authentication required")
