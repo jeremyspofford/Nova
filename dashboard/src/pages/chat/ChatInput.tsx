@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Send, Plus, SlidersHorizontal, Mic, Loader2, Volume2, VolumeX, AudioLines, ALargeSmall } from 'lucide-react'
+import { Paperclip, SlidersHorizontal, Mic, Loader2, Volume2, VolumeX, ALargeSmall, Globe, BookOpen, Settings2 } from 'lucide-react'
 import clsx from 'clsx'
 import { useChatStore } from '../../stores/chat-store'
 import { useFileAttach } from '../../hooks/useFileAttach'
 import { useAudioLevel } from '../../hooks/useAudioLevel'
 import { useSpeechToText } from '../../hooks/useSpeechToText'
-import { InputDrawer } from './InputDrawer'
 import { FilePreviewBar } from './FilePreviewBar'
+import { OutputStylePicker } from './OutputStylePicker'
 import { AudioLevelIndicator } from '../../components/ui/AudioLevelIndicator'
 import { Tooltip } from '../../components/ui/Tooltip'
 import { ModelPicker } from '../../components/ui/ModelPicker'
@@ -48,10 +48,21 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
 
-  const { draftInput: input, setDraftInput: setInput, drawerOpen, setDrawerOpen, prefillInput, setPrefillInput } = useChatStore()
+  const {
+    draftInput: input,
+    setDraftInput: setInput,
+    drawerOpen,
+    setDrawerOpen,
+    prefillInput,
+    setPrefillInput,
+    webSearchEnabled,
+    setWebSearchEnabled,
+    deepResearchEnabled,
+    setDeepResearchEnabled,
+  } = useChatStore()
+
   const { pendingFiles, addFiles, removeFile, openFilePicker } = useFileAttach()
 
-  // Text size preference
   const TEXT_SIZES = ['small', 'medium', 'large'] as const
   const TEXT_LABELS: Record<string, string> = { small: 'S', medium: 'M', large: 'L' }
   const [textSize, setTextSize] = useState(() => localStorage.getItem('nova_text_size') || 'medium')
@@ -64,20 +75,15 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     })
   }, [])
 
-  // Audio level from voice recording stream (for visualizer bars)
   const audioLevel = useAudioLevel(voice?.mediaStream ?? null)
-
-  // Browser Web Speech API for live transcript display while server-side STT processes
   const { isListening: sttListening, transcript: liveTranscript, start: sttStart, stop: sttStop, isSupported: sttSupported } = useSpeechToText()
 
-  // Sync browser STT start/stop with server-side recording state
   useEffect(() => {
     if (!sttSupported || !voice) return
     if (voice.isRecording && !sttListening) sttStart()
     if (!voice.isRecording && sttListening) sttStop()
   }, [voice?.isRecording, sttListening, sttSupported, sttStart, sttStop])
 
-  // Consume prefilled input (e.g. from "Discuss" on Tasks page)
   useEffect(() => {
     if (prefillInput) {
       setInput(prefillInput)
@@ -112,7 +118,6 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     }
   }
 
-  // Clipboard paste for images
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -135,11 +140,9 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     return () => el.removeEventListener('paste', onPaste)
   }, [addFiles])
 
-  // Drag-and-drop
   useEffect(() => {
     const zone = dropZoneRef.current
     if (!zone) return
-
     const onDragOver = (e: DragEvent) => { e.preventDefault(); setIsDragging(true) }
     const onDragLeave = (e: DragEvent) => {
       if (!zone.contains(e.relatedTarget as Node)) setIsDragging(false)
@@ -149,7 +152,6 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
       setIsDragging(false)
       if (e.dataTransfer?.files.length) addFiles(e.dataTransfer.files)
     }
-
     zone.addEventListener('dragover', onDragOver)
     zone.addEventListener('dragleave', onDragLeave)
     zone.addEventListener('drop', onDrop)
@@ -160,7 +162,6 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     }
   }, [addFiles])
 
-  // Focus textarea on mount and after streaming; skip during conversation mode
   useEffect(() => {
     if (!isStreaming && !voice?.conversationMode) {
       textareaRef.current?.focus()
@@ -168,176 +169,92 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     }
   }, [isStreaming, voice?.conversationMode])
 
-  const modelPickerItems = models.map(m => ({ id: m.id, provider: m.provider }))
-
-  // Silence countdown percentage for conversation mode progress bar
   const silencePct = voice && voice.silenceCountdown > 0
     ? (voice.silenceCountdown / voice.silenceTimeoutMs) * 100
     : 0
 
+  const iconBtn = 'flex items-center justify-center rounded-full p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated/70 transition-colors duration-fast'
+  const iconBtnActive = 'flex items-center justify-center rounded-full p-1.5 text-accent hover:text-accent-hover hover:bg-accent-dim transition-colors duration-fast'
+
   return (
-    <div
-      ref={dropZoneRef}
-      className={clsx(
-        'relative transition-colors duration-fast',
-        // Desktop: card treatment with safe area. Mobile: clean, minimal
-        'md:bg-surface md:rounded-3xl md:border md:border-border-subtle md:p-3 md:shadow-sm md:safe-area-pb',
-        'px-2 py-1 md:p-3',
-        isDragging && 'bg-accent-dim border-accent',
-      )}
-    >
-      {/* Model selector + controls row — hidden on mobile */}
-      <div className="hidden md:flex items-center justify-between mb-2 gap-2">
-        <div className="flex items-center gap-1.5">
-          <ModelPicker
-            value={modelId}
-            onChange={onModelChange}
-            models={modelPickerItems}
-            className="w-44 md:w-72"
-            buttonClassName="flex items-center justify-between gap-2 w-full px-3 py-1.5 bg-stone-700 rounded-full text-[13px] font-mono text-stone-300 border-none cursor-pointer"
-          />
-          <Tooltip content="Manage models">
-            <button
-              type="button"
-              onClick={onManageModels}
-              className="flex items-center justify-center rounded-sm p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated transition-colors duration-fast"
-            >
-              <SlidersHorizontal size={14} />
-            </button>
-          </Tooltip>
-          <Tooltip content={`Text size: ${textSize}`}>
-            <button
-              type="button"
-              onClick={cycleTextSize}
-              className="flex items-center gap-1 rounded-sm p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated transition-colors duration-fast"
-            >
-              <ALargeSmall size={14} />
-              <span className="text-micro font-mono">{TEXT_LABELS[textSize]}</span>
-            </button>
-          </Tooltip>
-          {voice?.available && (
-            <Tooltip content={voice.muted ? 'Unmute voice responses' : 'Mute voice responses'}>
-              <button
-                type="button"
-                onClick={() => voice.setMuted(m => !m)}
-                className={clsx(
-                  'flex items-center justify-center rounded-sm p-1.5 transition-colors duration-fast',
-                  voice.muted
-                    ? 'text-content-tertiary hover:text-content-primary hover:bg-surface-elevated'
-                    : 'text-accent hover:text-accent-hover hover:bg-surface-elevated',
-                )}
-              >
-                {voice.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
-              </button>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+    <div ref={dropZoneRef} className="relative">
+      {/* Unified input pill */}
+      <div className={clsx(
+        'glass-card rounded-3xl border overflow-hidden transition-colors duration-fast',
+        isDragging ? 'border-accent' : 'border-border-subtle',
+      )}>
 
-      <InputDrawer
-        open={drawerOpen}
-        onAttach={openFilePicker}
-      />
-
-      {/* Conversation mode status bar */}
-      {voice?.conversationMode && (
+        {/* Output style panel — slides in above textarea */}
         <div
-          className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg border text-sm relative overflow-hidden"
-          style={{
-            backgroundColor: voice.conversationState === 'listening' ? 'rgba(127, 29, 29, 0.4)'
-              : voice.conversationState === 'speaking' ? 'rgba(20, 83, 45, 0.3)'
-              : 'rgba(41, 37, 36, 0.5)',
-            borderColor: voice.conversationState === 'listening' ? 'rgba(239, 68, 68, 0.2)'
-              : voice.conversationState === 'speaking' ? 'rgba(34, 197, 94, 0.2)'
-              : 'rgba(255, 255, 255, 0.06)',
-          }}
+          className="overflow-hidden transition-all duration-normal ease-out"
+          style={{ maxHeight: drawerOpen ? '320px' : '0px', opacity: drawerOpen ? 1 : 0 }}
         >
-          {silencePct > 0 && (
-            <div
-              className="absolute inset-y-0 left-0 bg-amber-500/10 transition-all duration-100"
-              style={{ width: `${100 - silencePct}%` }}
-            />
-          )}
-          <div className="relative flex items-center gap-2 w-full">
-            {voice.conversationState === 'listening' && (
-              <>
-                <Mic size={14} className="text-red-400 shrink-0 animate-pulse" />
-                <AudioLevelIndicator level={audioLevel} bars={4} className="h-3.5 shrink-0" />
-                <span className="text-content-secondary truncate">
-                  {liveTranscript || 'Listening...'}
-                </span>
-                <span className="text-content-tertiary shrink-0 ml-auto text-xs">
-                  {Math.floor(voice.recordingDuration / 1000)}s
-                </span>
-              </>
-            )}
-            {voice.conversationState === 'processing' && (
-              <>
-                <Loader2 size={14} className="text-content-tertiary shrink-0 animate-spin" />
-                <span className="text-content-secondary">Thinking...</span>
-              </>
-            )}
-            {voice.conversationState === 'speaking' && (
-              <>
-                <Volume2 size={14} className="text-green-400 shrink-0" />
-                <span className="text-content-secondary">Speaking... interrupt anytime</span>
-              </>
-            )}
-            {voice.conversationState === 'idle' && (
-              <span className="text-content-tertiary">Conversation mode — waiting...</span>
-            )}
+          <div className="px-4 pt-4 pb-3 border-b border-border-subtle/60">
+            <OutputStylePicker />
           </div>
         </div>
-      )}
 
-      {/* Non-conversation recording indicator */}
-      {voice && !voice.conversationMode && voice.isRecording && (
-        <div className="flex items-center gap-2 px-3 py-2 mb-2 rounded-lg bg-danger-dim/50 border border-danger/20 text-sm">
-          <Mic size={14} className="text-danger shrink-0 animate-pulse" />
-          <AudioLevelIndicator level={audioLevel} bars={4} className="h-3.5 shrink-0" />
-          <span className="text-content-secondary truncate">
-            {liveTranscript || 'Listening...'}
-          </span>
-          <span className="text-content-tertiary shrink-0 ml-auto text-xs">
-            {Math.floor(voice.recordingDuration / 1000)}s
-          </span>
-        </div>
-      )}
+        {/* File previews */}
+        <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
 
-      <FilePreviewBar files={pendingFiles} onRemove={removeFile} />
-
-      {/* Mobile controls row — model chip + text size (hidden for now, clean input like Claude) */}
-      {/* TODO: expose model/text-size selection via a settings sheet or long-press */}
-
-      <div className="flex items-end gap-2">
-        {/* Drawer toggle — hidden on mobile for cleaner input */}
-        <div className="hidden md:block shrink-0">
-          <Tooltip content={drawerOpen ? 'Close controls' : 'Open controls'}>
-            <button
-              type="button"
-              onClick={() => setDrawerOpen(o => !o)}
-              className={clsx(
-                'relative flex items-center justify-center rounded-full border p-2 transition-all duration-fast',
-                drawerOpen
-                  ? 'border-accent text-accent bg-accent-dim'
-                  : 'border-border text-content-tertiary hover:bg-surface-elevated hover:text-content-primary',
-              )}
-              style={{ height: '40px', width: '40px' }}
-            >
-              <Plus
-                size={18}
-                className="transition-transform duration-normal"
-                style={{ transform: drawerOpen ? 'rotate(45deg)' : 'rotate(0deg)' }}
+        {/* Conversation mode status bar */}
+        {voice?.conversationMode && (
+          <div
+            className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl border text-sm relative overflow-hidden"
+            style={{
+              backgroundColor: voice.conversationState === 'listening' ? 'rgba(127,29,29,0.4)'
+                : voice.conversationState === 'speaking' ? 'rgba(20,83,45,0.3)'
+                : 'rgba(41,37,36,0.5)',
+              borderColor: voice.conversationState === 'listening' ? 'rgba(239,68,68,0.2)'
+                : voice.conversationState === 'speaking' ? 'rgba(34,197,94,0.2)'
+                : 'rgba(255,255,255,0.06)',
+            }}
+          >
+            {silencePct > 0 && (
+              <div
+                className="absolute inset-y-0 left-0 bg-amber-500/10 transition-all duration-100"
+                style={{ width: `${100 - silencePct}%` }}
               />
-              {!drawerOpen && pendingFiles.length > 0 && (
-                <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-micro font-medium text-neutral-950">
-                  {pendingFiles.length}
-                </span>
+            )}
+            <div className="relative flex items-center gap-2 w-full">
+              {voice.conversationState === 'listening' && (
+                <>
+                  <Mic size={14} className="text-red-400 shrink-0 animate-pulse" />
+                  <AudioLevelIndicator level={audioLevel} bars={4} className="h-3.5 shrink-0" />
+                  <span className="text-content-secondary truncate">{liveTranscript || 'Listening...'}</span>
+                  <span className="text-content-tertiary shrink-0 ml-auto text-xs">{Math.floor(voice.recordingDuration / 1000)}s</span>
+                </>
               )}
-            </button>
-          </Tooltip>
-        </div>
+              {voice.conversationState === 'processing' && (
+                <>
+                  <Loader2 size={14} className="text-content-tertiary shrink-0 animate-spin" />
+                  <span className="text-content-secondary">Thinking...</span>
+                </>
+              )}
+              {voice.conversationState === 'speaking' && (
+                <>
+                  <Volume2 size={14} className="text-green-400 shrink-0" />
+                  <span className="text-content-secondary">Speaking... interrupt anytime</span>
+                </>
+              )}
+              {voice.conversationState === 'idle' && (
+                <span className="text-content-tertiary">Conversation mode — waiting...</span>
+              )}
+            </div>
+          </div>
+        )}
 
+        {/* Non-conversation recording indicator */}
+        {voice && !voice.conversationMode && voice.isRecording && (
+          <div className="mx-3 mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-danger-dim/50 border border-danger/20 text-sm">
+            <Mic size={14} className="text-danger shrink-0 animate-pulse" />
+            <AudioLevelIndicator level={audioLevel} bars={4} className="h-3.5 shrink-0" />
+            <span className="text-content-secondary truncate">{liveTranscript || 'Listening...'}</span>
+            <span className="text-content-tertiary shrink-0 ml-auto text-xs">{Math.floor(voice.recordingDuration / 1000)}s</span>
+          </div>
+        )}
+
+        {/* Textarea */}
         <textarea
           ref={textareaRef}
           value={input}
@@ -346,32 +263,104 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           placeholder={voice?.conversationMode ? 'Conversation mode active (Esc to exit)' : `Message ${aiName}...`}
           rows={1}
           disabled={voice?.conversationMode}
-          className={clsx(
-            'flex-1 resize-none overflow-y-auto text-content-primary placeholder:text-content-tertiary outline-none transition-colors duration-fast disabled:opacity-50',
-            // Desktop: bordered input. Mobile: borderless, clean like Claude
-            'md:rounded-sm md:border md:border-border md:bg-surface-input md:px-4 md:py-2.5 md:focus:border-border-focus md:focus:ring-2 md:focus:ring-accent-500/40',
-            'rounded-xl bg-surface-elevated/50 px-4 py-3 md:rounded-sm md:bg-surface-input',
-          )}
-          style={{ minHeight: '40px', maxHeight: '400px', fontSize: '16px' }}
+          className="w-full bg-transparent resize-none text-content-primary placeholder:text-content-tertiary outline-none px-4 pt-4 pb-2 disabled:opacity-50"
+          style={{ minHeight: '44px', maxHeight: '400px', fontSize: '16px' }}
         />
 
-        {/* Morph button: send / mic / stop */}
-        <MorphButton
-          hasText={!!input.trim()}
-          isRecording={voice?.isRecording ?? false}
-          isTranscribing={voice?.isTranscribing ?? false}
-          conversationMode={voice?.conversationMode ?? false}
-          voiceAvailable={!!voice?.available}
-          insecureContext={!voice?.available && typeof window !== 'undefined' && !window.isSecureContext}
-          onSend={handleSubmit}
-          onToggleRecording={voice?.toggleRecording ?? (() => {})}
-          onStartConversation={() => voice?.setConversationMode(true)}
-          onStopConversation={() => voice?.setConversationMode(false)}
-        />
+        {/* Action row */}
+        <div className="flex items-center justify-between px-3 pb-3 pt-1 gap-2">
+          {/* Left: attach + feature toggles + output style */}
+          <div className="flex items-center gap-0.5">
+            <Tooltip content="Attach file">
+              <button type="button" onClick={openFilePicker} className={iconBtn}>
+                <Paperclip size={15} />
+              </button>
+            </Tooltip>
+
+            <Tooltip content={webSearchEnabled ? 'Web search on' : 'Web search'}>
+              <button
+                type="button"
+                onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+                className={webSearchEnabled ? iconBtnActive : iconBtn}
+              >
+                <Globe size={15} />
+              </button>
+            </Tooltip>
+
+            <Tooltip content={deepResearchEnabled ? 'Deep research on' : 'Deep research'}>
+              <button
+                type="button"
+                onClick={() => setDeepResearchEnabled(!deepResearchEnabled)}
+                className={deepResearchEnabled ? iconBtnActive : iconBtn}
+              >
+                <BookOpen size={15} />
+              </button>
+            </Tooltip>
+
+            <Tooltip content="Output style & instructions">
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(o => !o)}
+                className={drawerOpen ? iconBtnActive : iconBtn}
+              >
+                <SlidersHorizontal size={15} />
+              </button>
+            </Tooltip>
+          </div>
+
+          {/* Right: text size + mute + model chip + manage + send/mic */}
+          <div className="flex items-center gap-1">
+            <Tooltip content={`Text size: ${textSize}`}>
+              <button type="button" onClick={cycleTextSize} className={`${iconBtn} gap-0.5`}>
+                <ALargeSmall size={14} />
+                <span className="text-[10px] font-mono">{TEXT_LABELS[textSize]}</span>
+              </button>
+            </Tooltip>
+
+            {voice?.available && (
+              <Tooltip content={voice.muted ? 'Unmute voice responses' : 'Mute voice responses'}>
+                <button
+                  type="button"
+                  onClick={() => voice.setMuted(m => !m)}
+                  className={voice.muted ? iconBtn : iconBtnActive}
+                >
+                  {voice.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                </button>
+              </Tooltip>
+            )}
+
+            <ModelPicker
+              value={modelId}
+              onChange={onModelChange}
+              models={models.map(m => ({ id: m.id, provider: m.provider }))}
+              className="max-w-[160px]"
+              buttonClassName="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-mono text-content-tertiary hover:text-content-primary hover:bg-surface-elevated/70 transition-colors duration-fast bg-transparent border-0 outline-none cursor-pointer truncate max-w-[160px]"
+            />
+
+            <Tooltip content="Manage models">
+              <button type="button" onClick={onManageModels} className={iconBtn}>
+                <Settings2 size={13} />
+              </button>
+            </Tooltip>
+
+            <MorphButton
+              hasText={!!input.trim()}
+              isRecording={voice?.isRecording ?? false}
+              isTranscribing={voice?.isTranscribing ?? false}
+              conversationMode={voice?.conversationMode ?? false}
+              voiceAvailable={!!voice?.available}
+              insecureContext={!voice?.available && typeof window !== 'undefined' && !window.isSecureContext}
+              onSend={handleSubmit}
+              onToggleRecording={voice?.toggleRecording ?? (() => {})}
+              onStartConversation={() => voice?.setConversationMode(true)}
+              onStopConversation={() => voice?.setConversationMode(false)}
+            />
+          </div>
+        </div>
       </div>
 
       {isDragging && (
-        <div className="absolute inset-0 flex items-center justify-center bg-accent-dim pointer-events-none">
+        <div className="absolute inset-0 flex items-center justify-center bg-accent-dim/60 rounded-3xl pointer-events-none">
           <p className="text-compact font-medium text-accent">Drop files here</p>
         </div>
       )}

@@ -8,8 +8,6 @@ import { useVoiceChat } from '../../hooks/useVoiceChat'
 import { ModelManagerModal, getHiddenModels } from '../../components/ModelManagerModal'
 import { MessageBubble } from './MessageBubble'
 import { ChatInput } from './ChatInput'
-import { ContextPanel } from '../../components/chat/ContextPanel'
-import { useLocalStorage } from '../../hooks/useLocalStorage'
 import { useMobileNav } from '../../hooks/useMobileNav'
 import { useIsMobile } from '../../hooks/useIsMobile'
 
@@ -45,8 +43,6 @@ export function Chat() {
   const [messageQueue, setMessageQueue] = useState<string[]>([])
   const [modelManagerOpen, setModelManagerOpen] = useState(false)
   const [hiddenModels, setHiddenModels] = useState<Set<string>>(() => getHiddenModels())
-  const [contextCollapsed, setContextCollapsed] = useLocalStorage('chat.contextCollapsed', false)
-
   const { setHidden: setNavHidden } = useMobileNav()
   const isMobile = useIsMobile()
   const keyboardOpenRef = useRef(false)
@@ -510,7 +506,7 @@ export function Chat() {
               </div>
             </div>
             <div className="shrink-0 w-full px-2 md:px-8 pb-[env(safe-area-inset-bottom)] md:pb-4">
-              <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
+              <div className="mx-auto max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>
@@ -561,7 +557,7 @@ export function Chat() {
             )}
 
             <div className="shrink-0 w-full px-2 md:px-8 pb-[env(safe-area-inset-bottom)] md:pb-4">
-              <div className="mx-auto pl-0 md:pl-9 max-w-none md:max-w-3xl xl:max-w-4xl">
+              <div className="mx-auto max-w-none md:max-w-3xl xl:max-w-4xl">
                 <ChatInput {...chatInputProps} />
               </div>
             </div>
@@ -575,15 +571,6 @@ export function Chat() {
         />
       </div>
 
-      {/* Context Panel - live activity (hidden below md) */}
-      <div className="hidden md:flex h-full">
-        <ContextPanel
-          messages={messages}
-          isStreaming={isStreaming}
-          collapsed={contextCollapsed}
-          onToggle={() => setContextCollapsed(c => !c)}
-        />
-      </div>
     </div>
   )
 }
