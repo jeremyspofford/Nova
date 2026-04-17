@@ -46,7 +46,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | SEC-002 | security | Shell-command blocklist is substring-match, trivially bypassed | P0 | H | S | Open |
 | SEC-003 | security | LLM-gateway `/v1/chat/completions` unauthenticated on all interfaces | P0 | H | M | Open |
 | SEC-004 | security | Memory-service and cortex expose all endpoints with no auth | P0 | H | S | Open |
-| SEC-005 | security | Default admin secret + Postgres password survive non-wizard install | P0 | H | S | Open |
+| SEC-005 | security | Default admin secret + Postgres password survive non-wizard install | P0 | H | S | Done |
 | SEC-006 | security | Recovery-service writable `.env` mount + docker socket (`:ro` is cosmetic) | P0 | M | M | Open |
 | SEC-007 | security | Google OAuth flow lacks CSRF `state` parameter | P1 | M | S | Open |
 | SEC-008 | security | Chat-api WebSocket has no Origin validation | P1 | H | S | Open |
@@ -85,7 +85,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| REL-001 | reliability | Reaper infinite-loops because `task_running → queued` rejected by state machine (9 live tasks stuck) | P0 | H | S | Open |
+| REL-001 | reliability | Reaper infinite-loops because `task_running → queued` rejected by state machine (9 live tasks stuck) | P0 | H | S | Done |
 | REL-002 | reliability | `make backup` / recovery backup exclude `/data/sources/` — restore produces broken memory | P0 | H | S | Open |
 | REL-003 | reliability | Engram ingestion `BRPOP` removes payload before decomposition — crash = lost memory | P0 | M | M | Open |
 | REL-004 | reliability | Memory-service + llm-gateway leak Redis connections on shutdown (violates CLAUDE.md rule) | P1 | M | S | Open |
@@ -159,7 +159,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
 | PERF-001 | performance | `/api/v1/engrams/context` takes 6–14s per call — blocks every chat message | P0 | H | M | Open |
-| PERF-002 | performance | Embeddings fall back to cloud Gemini on every call (Ollama stopped, routing `cloud-only`) | P0 | H | M | Open |
+| PERF-002 | performance | Embeddings fall back to cloud Gemini on every call (Ollama stopped, routing `cloud-only`) | P0 | H | M | Done |
 | PERF-003 | performance | Consolidation cycles run 65–110s, hold a single AsyncSession, starve chat | P0 | M | L | Open |
 | PERF-004 | performance | Spreading-activation recursive CTE missing tenant filter on recursive step; `OR` join won't scale | P1 | L | S | Open |
 | PERF-005 | performance | Dashboard main bundle 2.9 MB; only 2 of ~20 routes are `React.lazy()` | P1 | H | S | Open |
@@ -176,8 +176,8 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| OPS-001 | infra-ops | Health-check cascade: 3s inner timeout == 3s outer timeout → three services flip to "degraded" | P0 | H | S | Open |
-| OPS-002 | infra-ops | Redis connection leaks in 5+ modules (memory-service `embedding`, llm-gateway `discovery`/`registry`, cortex `budget`, orchestrator `stimulus`) | P0 | M | S | Open |
+| OPS-001 | infra-ops | Health-check cascade: 3s inner timeout == 3s outer timeout → three services flip to "degraded" | P0 | H | S | Done |
+| OPS-002 | infra-ops | Redis connection leaks in 5+ modules (memory-service `embedding`, llm-gateway `discovery`/`registry`, cortex `budget`, orchestrator `stimulus`) | P0 | M | S | Done |
 | OPS-003 | infra-ops | No pre-flight Docker network check in `setup.sh` (2026-03-28 incident class) | P1 | M | S | Open |
 | OPS-004 | infra-ops | 4 services (cortex, intel-worker, knowledge-worker, recovery) use `logging.basicConfig` — breaks cross-service tracing | P1 | M | S | Open |
 | OPS-005 | infra-ops | No metrics / tracing / request-duration observability anywhere | P1 | M | M | Open |
