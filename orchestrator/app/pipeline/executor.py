@@ -295,6 +295,7 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
 
     # ── Execute pipeline ───────────────────────────────────────────────────
     code_review_iterations = 0
+    guardrail_refactor_iterations = 0  # mirrors code_review_iterations for AQ-003
     direction_iterations = 0
     acceptance_iterations = 0
     task_agent_idx: int | None = None
@@ -354,11 +355,51 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
                 # saves checkpoints, but flag-setting, refactor loops, and
                 # human-review pauses must be handled here.
 
-                # Guardrail flags
+                # Guardrail flags + refactor loop (AQ-003)
                 guardrail_result = state.completed.get("guardrail")
                 if guardrail_result and guardrail_result.get("blocked"):
                     state.flags.add("guardrail_blocked")
                     logger.warning(f"Task {task_id}: Guardrail blocked output")
+
+                    gr_agent = next(
+                        (a for a in group_agents if a.role == "guardrail"), None,
+                    )
+                    findings = guardrail_result.get("findings", []) or []
+                    remediable = [
+                        f for f in findings
+                        if f.get("type") in REMEDIABLE_GUARDRAIL_FINDING_TYPES
+                    ]
+                    if remediable and task_agent_idx is not None:
+                        guardrail_refactor_iterations += 1
+                        max_refactor = gr_agent.max_retries if gr_agent else 1
+                        if guardrail_refactor_iterations < max_refactor:
+                            logger.info(
+                                f"Task {task_id}: Guardrail refactor "
+                                f"(iteration {guardrail_refactor_iterations}/{max_refactor}) "
+                                f"— re-running Task with redaction instructions"
+                            )
+                            state.completed["_guardrail_refactor_feedback"] = (
+                                _build_guardrail_refactor_feedback(remediable)
+                            )
+                            # Clear Task + downstream stages. Deliberate asymmetry:
+                            # critique_direction is NOT cleared — the Task Agent
+                            # isn't doing the wrong thing, it just included
+                            # content that needs redaction.
+                            for clear_role in ("task", "guardrail", "critique_acceptance"):
+                                checkpoint.pop(clear_role, None)
+                                state.completed.pop(clear_role, None)
+                            # Clear the blocked flag; the rerun will re-set it
+                            # if the redacted output is still flagged.
+                            state.flags.discard("guardrail_blocked")
+                            i = task_agent_idx
+                            continue
+                        else:
+                            logger.warning(
+                                f"Task {task_id}: Guardrail refactor exhausted after "
+                                f"{guardrail_refactor_iterations} iterations"
+                            )
+
+                    # Non-remediable findings OR refactor exhausted → pause-for-review check
                     if _should_pause_for_review(state, pod, guardrail_result, "guardrail"):
                         escalation_msg = guardrail_result.get(
                             "escalation_message", "Task requires human review."
@@ -448,6 +489,42 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
         if agent.role == "guardrail" and result.get("blocked"):
             state.flags.add("guardrail_blocked")
             logger.warning(f"Task {task_id}: Guardrail blocked output")
+
+            # AQ-003: Guardrail refactor loop for remediable findings.
+            # Mirrors the code_review needs_refactor shape below but with an
+            # asymmetric checkpoint-clear list (critique_direction preserved).
+            findings = result.get("findings", []) or []
+            remediable = [
+                f for f in findings
+                if f.get("type") in REMEDIABLE_GUARDRAIL_FINDING_TYPES
+            ]
+            if remediable and task_agent_idx is not None:
+                guardrail_refactor_iterations += 1
+                if guardrail_refactor_iterations < agent.max_retries:
+                    logger.info(
+                        f"Task {task_id}: Guardrail refactor "
+                        f"(iteration {guardrail_refactor_iterations}/{agent.max_retries}) "
+                        f"— re-running Task with redaction instructions"
+                    )
+                    state.completed["_guardrail_refactor_feedback"] = (
+                        _build_guardrail_refactor_feedback(remediable)
+                    )
+                    # Clear Task + downstream stages (deliberately omit
+                    # critique_direction — direction was already approved,
+                    # the agent isn't doing the wrong thing).
+                    for clear_role in ("task", "guardrail", "critique_acceptance"):
+                        checkpoint.pop(clear_role, None)
+                        state.completed.pop(clear_role, None)
+                    # Clear the blocked flag; the rerun will re-set it if
+                    # the redacted output is still flagged.
+                    state.flags.discard("guardrail_blocked")
+                    i = task_agent_idx
+                    continue
+                else:
+                    logger.warning(
+                        f"Task {task_id}: Guardrail refactor exhausted after "
+                        f"{guardrail_refactor_iterations} iterations"
+                    )
 
         if agent.role == "code_review":
             verdict = result.get("verdict", "pass")
@@ -552,22 +629,11 @@ async def _run_pipeline(task_id: str, heartbeat_cancel_event: asyncio.Event | No
     await _backfill_outcome_scores(task_id)
 
     # ── Pipeline complete ──────────────────────────────────────────────────
-    task_result = state.completed.get("task", {})
-    final_output = task_result.get("output", "Task completed.")
-
-    # Append the detailed explanation so users see what was actually done
-    explanation = task_result.get("explanation", "")
-    if explanation:
-        final_output = f"{final_output}\n\n---\n\n{explanation}"
-
-    # Include files changed and commands run if present
-    files_changed = task_result.get("files_changed", [])
-    commands_run = task_result.get("commands_run", [])
-    if files_changed:
-        final_output += f"\n\n**Files changed:** {', '.join(files_changed)}"
-    if commands_run:
-        final_output += f"\n\n**Commands run:**\n" + "\n".join(f"- {c}" for c in commands_run)
-
+    # Assembly (including guardrail-blocked safety-message suppression) lives
+    # in _build_final_output so the unit tests can lock the contract. If the
+    # guardrail refactor loop exhausted and guardrail_blocked is still set,
+    # the raw tainted Task output is NOT surfaced to the user.
+    final_output = _build_final_output(state)
     await _complete_task(task_id, final_output, state)
 
 
@@ -1493,9 +1559,106 @@ def _apply_adaptive_skips(
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+# ── Guardrail refactor (AQ-003) ────────────────────────────────────────────────
+
+# Finding types that the Task Agent can plausibly re-attempt by redacting the
+# flagged content. Non-remediable types (topic_drift, jailbreak_attempt, spec
+# violation) cannot be fixed by a content rewrite — those escalate instead.
+REMEDIABLE_GUARDRAIL_FINDING_TYPES: frozenset[str] = frozenset({
+    "prompt_injection",
+    "pii_exposure",
+    "credential_leak",
+})
+
+
+def _build_guardrail_refactor_feedback(findings: list[dict]) -> str:
+    """
+    Format guardrail findings into a redaction-instruction prompt for the Task Agent.
+
+    Module-level so unit tests can import and assert the shape directly without
+    spinning up the full pipeline. Mirrors the inline issue-formatting block
+    used by the code_review refactor loop.
+    """
+    lines = [
+        "IMPORTANT: Your previous output was blocked by Nova's safety checks.",
+        "Re-do the task, but remove or redact the following flagged content:",
+        "",
+    ]
+    for f in findings:
+        severity = str(f.get("severity", "unknown")).upper()
+        ftype = f.get("type", "unknown")
+        desc = f.get("description", "(no description)")
+        evidence = f.get("evidence", "")
+        line = f"- [{severity}] {ftype}: {desc}"
+        if evidence:
+            line += f" (evidence: {evidence})"
+        lines.append(line)
+    lines.append("")
+    lines.append(
+        "Redact sensitive values with <REDACTED>. If the request cannot be "
+        "fulfilled without the flagged content, say so explicitly."
+    )
+    return "\n".join(lines)
+
+
+def _build_final_output(state: PipelineState) -> str:
+    """
+    Assemble the final user-visible output string from pipeline state.
+
+    When guardrail_blocked remains set (the refactor loop exhausted its budget
+    without producing a clean rewrite), return a safety-message summary instead
+    of the raw Task output — the tainted content must not be surfaced to the
+    user. Otherwise assemble the normal output from Task output + explanation +
+    files_changed + commands_run, mirroring the previous inline behavior.
+    """
+    # Guardrail-blocked terminal state: suppress tainted output
+    if "guardrail_blocked" in state.flags:
+        guardrail = state.completed.get("guardrail") or {}
+        findings = guardrail.get("findings") or []
+        if findings:
+            finding_summary = "\n".join(
+                f"- [{str(f.get('severity', 'unknown')).upper()}] "
+                f"{f.get('type', 'unknown')}: {f.get('description', '')}"
+                for f in findings
+            )
+        else:
+            finding_summary = "(no finding details available)"
+        return (
+            "This task was blocked by Nova's safety checks after the maximum "
+            "number of redaction attempts. The task was not completed.\n\n"
+            f"Findings:\n{finding_summary}\n\n"
+            "If this is a false positive, adjust the pod's escalation threshold "
+            "or re-run with a narrower scope."
+        )
+
+    # Normal path — assemble from Task output + explanation + changed files
+    task_result = state.completed.get("task", {}) or {}
+    final_output = task_result.get("output", "Task completed.")
+
+    explanation = task_result.get("explanation", "")
+    if explanation:
+        final_output = f"{final_output}\n\n---\n\n{explanation}"
+
+    files_changed = task_result.get("files_changed", []) or []
+    commands_run = task_result.get("commands_run", []) or []
+    if files_changed:
+        final_output += f"\n\n**Files changed:** {', '.join(files_changed)}"
+    if commands_run:
+        final_output += "\n\n**Commands run:**\n" + "\n".join(
+            f"- {c}" for c in commands_run
+        )
+    return final_output
+
+
 def _needs_rerun(role: str, state: PipelineState) -> bool:
     """Return True if a checkpointed stage needs to run again (e.g. task after refactor)."""
     if role == "task" and "_refactor_feedback" in state.completed:
+        return True
+    # Guardrail refactor loop (AQ-003) — same rerun hint as code_review's.
+    # When the Guardrail blocked with remediable findings, we inject
+    # _guardrail_refactor_feedback so the Task agent reruns with redaction
+    # instructions.
+    if role == "task" and "_guardrail_refactor_feedback" in state.completed:
         return True
     return False
 
