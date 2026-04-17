@@ -51,3 +51,6 @@ website/node_modules/
 website/dist/
 website/.astro/
 .gstack/
+
+# Audit security reports stay local-only (public repo)
+docs/audits/*/security.md
