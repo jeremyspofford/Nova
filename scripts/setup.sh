@@ -44,6 +44,20 @@ if grep -q "^BRIDGE_SERVICE_SECRET=$" "${PROJECT_ROOT}/.env" 2>/dev/null; then
   echo "  Generated BRIDGE_SERVICE_SECRET"
 fi
 
+# ── Generate Postgres password if not set ──────────────────────────────────────
+if grep -q "^POSTGRES_PASSWORD=$" "${PROJECT_ROOT}/.env" 2>/dev/null; then
+  POSTGRES_PASSWORD=$(openssl rand -hex 24)
+  sed -i "s|^POSTGRES_PASSWORD=$|POSTGRES_PASSWORD=${POSTGRES_PASSWORD}|" "${PROJECT_ROOT}/.env"
+  echo "  Generated POSTGRES_PASSWORD"
+fi
+
+# ── Rotate admin secret if still the shipped placeholder ───────────────────────
+if grep -q '^NOVA_ADMIN_SECRET=nova-admin-secret-change-me$' "${PROJECT_ROOT}/.env" 2>/dev/null; then
+  NOVA_ADMIN_SECRET=$(openssl rand -hex 32)
+  sed -i "s|^NOVA_ADMIN_SECRET=nova-admin-secret-change-me$|NOVA_ADMIN_SECRET=${NOVA_ADMIN_SECRET}|" "${PROJECT_ROOT}/.env"
+  echo "  Generated NOVA_ADMIN_SECRET"
+fi
+
 # ── Create workspace directory ────────────────────────────────────────────────
 # Resolve ~ manually since Docker Compose doesn't expand it in all contexts
 NOVA_WORKSPACE="${NOVA_WORKSPACE:-${HOME}/.nova/workspace}"
