@@ -39,6 +39,13 @@ def test_chat_api_ready_when_ollama_unreachable(save_restore_ollama_url):
     assert body.get("status") == "ready", (
         f"Expected status=ready, got {body.get('status')}. Full body: {body}"
     )
+    # Stronger: the orchestrator sub-check must be "ok", not "error: ...".
+    # chat-api probes orchestrator's /health/live (self-only), so a slow Ollama
+    # probe inside orchestrator's /health/ready must not cascade here.
+    checks = body.get("checks", {})
+    assert checks.get("orchestrator") == "ok", (
+        f"Expected checks.orchestrator=ok, got {checks.get('orchestrator')}. Full body: {body}"
+    )
 
 
 def test_orchestrator_ready_when_ollama_unreachable(save_restore_ollama_url):
@@ -51,4 +58,11 @@ def test_orchestrator_ready_when_ollama_unreachable(save_restore_ollama_url):
     body = resp.json()
     assert body.get("status") == "ready", (
         f"Expected status=ready, got {body.get('status')}. Full body: {body}"
+    )
+    # Stronger: the llm_gateway sub-check must be "ok", not "error: ...".
+    # Orchestrator probes llm-gateway's /health/live (self-only), so a slow
+    # Ollama probe inside llm-gateway's /health/ready must not cascade here.
+    checks = body.get("checks", {})
+    assert checks.get("llm_gateway") == "ok", (
+        f"Expected checks.llm_gateway=ok, got {checks.get('llm_gateway')}. Full body: {body}"
     )
