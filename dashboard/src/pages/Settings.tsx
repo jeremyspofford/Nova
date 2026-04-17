@@ -33,6 +33,7 @@ import { UsersSection } from './settings/UsersSection'
 import { SkillsSection } from './settings/SkillsSection'
 import { RulesSection } from './settings/RulesSection'
 import { KeysSection } from './settings/KeysSection'
+import { AdminSecretSection } from './settings/AdminSecretSection'
 import { VaultwardenSection } from './settings/VaultwardenSection'
 import { SelfModSection } from './settings/SelfModSection'
 import { GoalCreationSection } from './settings/GoalCreationSection'
@@ -83,6 +84,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { id: 'guest-access', label: 'Guest Access', icon: Shield },
       { id: 'sandbox', label: 'Agent Sandbox', icon: Shield },
       { id: 'keys', label: 'API Keys', icon: Key },
+      { id: 'admin-secret', label: 'Admin Secret', icon: ShieldAlert },
       { id: 'vault', label: 'Secrets Manager', icon: Shield },
       { id: 'selfmod', label: 'Self-Modification', icon: GitPullRequest },
     ],
@@ -576,6 +578,12 @@ export function Settings() {
         {show('keys') && (
           <div id="keys">
             <KeysSection />
+          </div>
+        )}
+
+        {show('admin-secret') && (
+          <div id="admin-secret">
+            <AdminSecretSection />
           </div>
         )}
 

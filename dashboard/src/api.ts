@@ -1,9 +1,12 @@
 import type { AgentInfo, AgentSession, ApiKey, CodeReviewVerdict, EngramDetail, GuardrailFinding, OAIModel, PipelineTask, Pod, PodAgent, UsageEvent } from './types'
 
 // Admin secret is stored in localStorage so you can change it without
-// rebuilding the dashboard. Default matches the dev .env value.
+// rebuilding the dashboard. Falls back to empty string when unset — setup.sh
+// auto-rotates the deployed secret on first run, so the placeholder default
+// from previous versions is no longer valid. An empty header will 401 and the
+// existing auth flow (JWT login, trusted-network bypass) handles the rest.
 export const getAdminSecret = () =>
-  localStorage.getItem('nova_admin_secret') ?? 'nova-admin-secret-change-me'
+  localStorage.getItem('nova_admin_secret') ?? ''
 
 export const setAdminSecret = (s: string) =>
   localStorage.setItem('nova_admin_secret', s)
