@@ -75,7 +75,10 @@ def _build_system_prompt(db: Session) -> str:
         "rather than speculating: `nova.describe_config` for your setup, "
         "`nova.describe_tools` for your tool catalog, or `scheduler.list_triggers` "
         "for what each trigger does. Never invent what a trigger or tool does — "
-        "read it from the DB.\n\n"
+        "and NEVER claim you can't see what triggers do: the tool response includes "
+        "`description` (human-readable) AND `what_it_does` (the actual action, with "
+        "the target tool's description if applicable). Both fields are already "
+        "dereferenced for you. Quote them directly.\n\n"
         "Respond conversationally. Be concise and helpful. "
         "When a user asks you to do something that maps to a tool, call the tool directly rather than describing what you would do."
     )

@@ -5,7 +5,26 @@ Operate in-process via SQLAlchemy session — no HTTP loop-back.
 from sqlalchemy.orm import Session
 
 from app.models.scheduled_trigger import ScheduledTrigger
+from app.models.tool import Tool
 from app.schemas.scheduled_trigger import ScheduledTriggerCreate, ScheduledTriggerUpdate
+
+
+def _resolve_trigger_action(payload: dict, db: Session) -> str:
+    """Produce a one-sentence human-readable description of what this trigger does
+    when it fires, cross-referencing the tool catalog if the payload invokes a tool.
+    This removes any ambiguity for the LLM about 'what the trigger actually does.'"""
+    if not isinstance(payload, dict):
+        return "unknown action (malformed payload)"
+    if "goal" in payload:
+        goal = payload.get("goal") or ""
+        return f"Runs an LLM-planned goal: {goal}"
+    if "tool" in payload:
+        tool_name = payload["tool"]
+        tool = db.query(Tool).filter(Tool.name == tool_name).first()
+        if tool and tool.description:
+            return f"Invokes the `{tool_name}` tool — {tool.description}"
+        return f"Invokes the `{tool_name}` tool (description unavailable)"
+    return "unknown action (payload missing both 'tool' and 'goal')"
 
 
 def handle_scheduler_create_trigger(input: dict, db: Session) -> dict:
@@ -29,6 +48,7 @@ def handle_scheduler_list_triggers(input: dict, db: Session) -> dict:
                 "id": t.id,
                 "name": t.name,
                 "description": t.description,
+                "what_it_does": _resolve_trigger_action(t.payload_template, db),
                 "cron_expression": t.cron_expression,
                 "enabled": t.enabled,
                 "payload": t.payload_template,
