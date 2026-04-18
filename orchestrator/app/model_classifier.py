@@ -36,7 +36,7 @@ CLASSIFIER_MODEL_PREFERENCE = [
 
 DEFAULT_ROUTING_MAP: dict[str, list[str] | None] = {
     "general": None,
-    "code": ["claude-sonnet-4-6", "claude-max/claude-sonnet-4-6", "gpt-4o", "chatgpt/gpt-4o"],
+    "code": ["claude-sonnet-4-6", "gpt-4o", "chatgpt/gpt-4o"],
     "reasoning": ["chatgpt/o3", "chatgpt/o4-mini", "claude-sonnet-4-6"],
     "creative": ["claude-sonnet-4-6", "gpt-4o"],
     "quick": ["groq/llama-3.3-70b-versatile", "cerebras/llama3.1-8b", "gemini/gemini-2.5-flash"],

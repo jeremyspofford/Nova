@@ -8,9 +8,9 @@ Client configuration examples:
 
   VS Code Continue.dev (config.json):
     {
-      "title": "Nova (Claude Sonnet)",
+      "title": "Nova (Qwen 2.5 7B)",
       "provider": "openai",
-      "model": "claude-max/claude-sonnet-4-6",
+      "model": "qwen2.5:7b",
       "apiBase": "http://localhost:8001/v1",
       "apiKey": "unused"
     }
@@ -18,7 +18,7 @@ Client configuration examples:
   curl:
     curl http://localhost:8001/v1/chat/completions \\
       -H "Content-Type: application/json" \\
-      -d '{"model": "claude-max/claude-sonnet-4-6",
+      -d '{"model": "qwen2.5:7b",
            "messages": [{"role": "user", "content": "hello"}]}'
 
 Model IDs must be valid Nova model IDs as listed in registry.py.

@@ -1082,7 +1082,7 @@ def _build_prompt(
     prefix (system_prompt + nova_context) so subsequent calls in the same session
     reuse the cached prefix — saving ~50-90% on those tokens.
     """
-    is_anthropic = model.startswith(("claude", "claude-max/"))
+    is_anthropic = model.startswith("claude")
 
     if is_anthropic:
         # Anthropic prompt caching: split into cacheable static prefix + dynamic suffix

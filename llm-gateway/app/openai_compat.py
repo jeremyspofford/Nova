@@ -102,7 +102,7 @@ def nova_response_to_oai(
     """Map a Nova CompleteResponse to OpenAI ChatCompletion format.
 
     Echoes request_model (not response.model) so clients that use Nova model
-    IDs like 'claude-max/claude-sonnet-4-6' get back exactly what they sent,
+    IDs like 'groq/llama-3.3-70b-versatile' get back exactly what they sent,
     avoiding confusion from internal routing identifiers.
     """
     return OAIChatCompletionResponse(

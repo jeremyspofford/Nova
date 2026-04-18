@@ -19,7 +19,7 @@ ollama:
 
     # ── Chat models (optional — comment out any you don't need locally) ──────
     # These are only needed if you want local inference.
-    # If you've configured Cerebras, Groq, Claude Max, etc. in .env, you can
+    # If you've configured Cerebras, Groq, Anthropic API, etc. in .env, you can
     # comment out all chat models to skip a large download.
     - name: llama3.2
       required: false

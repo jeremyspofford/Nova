@@ -10,7 +10,7 @@ ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 
 # ── Collected config ──────────────────────────────────────────────────────────
 CFG_MODE=""              # 1=all-in-one, 2=cloud-only, 3=remote-gpu, 4=host-native
-CFG_PROVIDER=""          # groq, cerebras, gemini, claude-max, chatgpt, skip
+CFG_PROVIDER=""          # groq, cerebras, gemini, chatgpt, skip
 CFG_API_KEY=""
 CFG_REMOTE_IP=""
 CFG_REMOTE_MAC=""
@@ -259,31 +259,28 @@ step_provider() {
   echo "  1) Groq        — Free, 14,400 req/day           https://console.groq.com"
   echo "  2) Cerebras    — Free, 1M tokens/day             https://cloud.cerebras.ai"
   echo "  3) Gemini      — Free, 250 req/day               https://aistudio.google.com"
-  echo "  4) Claude Max  — Uses your claude.ai subscription"
-  echo "  5) ChatGPT     — Uses your chatgpt.com subscription"
+  echo "  4) ChatGPT     — Uses your chatgpt.com subscription"
   if [ "${required}" = "false" ]; then
-    echo "  6) Skip for now"
+    echo "  5) Skip for now"
   fi
   echo ""
 
   local default="1"
   if [ "${required}" = "false" ] && ([ "${CFG_MODE}" = "1" ] || [ "${CFG_MODE}" = "4" ]); then
-    default="6"
+    default="5"
   fi
 
   # Detect existing provider as default
-  local existing_groq existing_cerebras existing_gemini existing_claude existing_chatgpt
+  local existing_groq existing_cerebras existing_gemini existing_chatgpt
   existing_groq="$(get_existing GROQ_API_KEY "")"
   existing_cerebras="$(get_existing CEREBRAS_API_KEY "")"
   existing_gemini="$(get_existing GEMINI_API_KEY "")"
-  existing_claude="$(get_existing CLAUDE_CODE_OAUTH_TOKEN "")"
   existing_chatgpt="$(get_existing CHATGPT_ACCESS_TOKEN "")"
 
   if [ -n "${existing_groq}" ]; then default="1"
   elif [ -n "${existing_cerebras}" ]; then default="2"
   elif [ -n "${existing_gemini}" ]; then default="3"
-  elif [ -n "${existing_claude}" ]; then default="4"
-  elif [ -n "${existing_chatgpt}" ]; then default="5"
+  elif [ -n "${existing_chatgpt}" ]; then default="4"
   fi
 
   prompt "Choice" "${default}" provider_choice
@@ -301,17 +298,12 @@ step_provider() {
        echo ""
        prompt_secret "Paste your Gemini API key" "$(get_existing GEMINI_API_KEY "")" CFG_API_KEY
        ;;
-    4) CFG_PROVIDER="claude-max"
-       echo ""
-       echo "  Run: claude auth login && claude setup-token"
-       prompt_secret "Paste your sk-ant-oat01-... token" "$(get_existing CLAUDE_CODE_OAUTH_TOKEN "")" CFG_API_KEY
-       ;;
-    5) CFG_PROVIDER="chatgpt"
+    4) CFG_PROVIDER="chatgpt"
        echo ""
        echo "  Run: codex login  (token auto-read from ~/.codex/auth.json)"
        prompt_secret "Paste your access token (or press Enter for auto-detect)" "$(get_existing CHATGPT_ACCESS_TOKEN "")" CFG_API_KEY
        ;;
-    6|"")
+    5|"")
        if [ "${required}" = "true" ]; then
          warn "Cloud-only mode requires at least one provider."
          step_provider
@@ -494,7 +486,7 @@ write_env() {
     1) # All-in-one
       compose_profiles="local-ollama"
       routing_strategy="local-first"
-      default_model="llama3.2"
+      default_model="qwen2.5:7b"
       ;;
     2) # Cloud-only
       compose_profiles=""
@@ -503,7 +495,6 @@ write_env() {
         groq)       default_model="groq/llama-3.3-70b-versatile" ;;
         cerebras)   default_model="cerebras/llama-3.3-70b" ;;
         gemini)     default_model="gemini/gemini-2.5-flash" ;;
-        claude-max) default_model="claude-max/claude-sonnet-4-6" ;;
         chatgpt)    default_model="chatgpt/gpt-4o" ;;
         *)          default_model="groq/llama-3.3-70b-versatile" ;;
       esac
@@ -512,13 +503,13 @@ write_env() {
       compose_profiles=""
       ollama_url="http://${CFG_REMOTE_IP}:11434"
       routing_strategy="local-first"
-      default_model="llama3.2"
+      default_model="qwen2.5:7b"
       ;;
     4) # Host native
       compose_profiles=""
       ollama_url="host"
       routing_strategy="local-first"
-      default_model="llama3.2"
+      default_model="qwen2.5:7b"
       ;;
   esac
 
@@ -535,7 +526,7 @@ write_env() {
   local extra_lines=""
   local managed_keys="POSTGRES_PASSWORD NOVA_ADMIN_SECRET COMPOSE_PROFILES OLLAMA_BASE_URL"
   managed_keys="${managed_keys} LLM_ROUTING_STRATEGY DEFAULT_CHAT_MODEL WOL_MAC_ADDRESS WOL_BROADCAST_IP"
-  managed_keys="${managed_keys} GROQ_API_KEY CEREBRAS_API_KEY GEMINI_API_KEY CLAUDE_CODE_OAUTH_TOKEN CHATGPT_ACCESS_TOKEN"
+  managed_keys="${managed_keys} GROQ_API_KEY CEREBRAS_API_KEY GEMINI_API_KEY CHATGPT_ACCESS_TOKEN"
   managed_keys="${managed_keys} REQUIRE_AUTH LOG_LEVEL SHELL_TIMEOUT_SECONDS GEMINI_USE_ADC"
   managed_keys="${managed_keys} CLOUDFLARE_TUNNEL_TOKEN TAILSCALE_AUTHKEY CORS_ALLOWED_ORIGINS"
 
@@ -571,11 +562,10 @@ write_env() {
   existing_gemini_adc="$(get_existing GEMINI_USE_ADC "false")"
 
   # Preserve provider keys we didn't ask about
-  local existing_groq existing_cerebras existing_gemini existing_claude existing_chatgpt
+  local existing_groq existing_cerebras existing_gemini existing_chatgpt
   existing_groq="$(get_existing GROQ_API_KEY "")"
   existing_cerebras="$(get_existing CEREBRAS_API_KEY "")"
   existing_gemini="$(get_existing GEMINI_API_KEY "")"
-  existing_claude="$(get_existing CLAUDE_CODE_OAUTH_TOKEN "")"
   existing_chatgpt="$(get_existing CHATGPT_ACCESS_TOKEN "")"
 
   # Apply the user's chosen provider key
@@ -583,19 +573,17 @@ write_env() {
     groq)       existing_groq="${CFG_API_KEY}" ;;
     cerebras)   existing_cerebras="${CFG_API_KEY}" ;;
     gemini)     existing_gemini="${CFG_API_KEY}" ;;
-    claude-max) existing_claude="${CFG_API_KEY}" ;;
     chatgpt)    existing_chatgpt="${CFG_API_KEY}" ;;
   esac
 
   # Also preserve per-provider default model overrides
   local existing_default_ollama existing_default_groq existing_default_gemini
-  local existing_default_cerebras existing_default_claude_max existing_default_chatgpt
+  local existing_default_cerebras existing_default_chatgpt
   local existing_default_openrouter existing_default_github
   existing_default_ollama="$(get_existing DEFAULT_OLLAMA_MODEL "")"
   existing_default_groq="$(get_existing DEFAULT_GROQ_MODEL "")"
   existing_default_gemini="$(get_existing DEFAULT_GEMINI_MODEL "")"
   existing_default_cerebras="$(get_existing DEFAULT_CEREBRAS_MODEL "")"
-  existing_default_claude_max="$(get_existing DEFAULT_CLAUDE_MAX_MODEL "")"
   existing_default_chatgpt="$(get_existing DEFAULT_CHATGPT_MODEL "")"
   existing_default_openrouter="$(get_existing DEFAULT_OPENROUTER_MODEL "")"
   existing_default_github="$(get_existing DEFAULT_GITHUB_MODEL "")"
@@ -638,7 +626,6 @@ ENVEOF
   [ -n "${existing_default_groq}" ] && echo "DEFAULT_GROQ_MODEL=${existing_default_groq}" >> "${ENV_FILE}"
   [ -n "${existing_default_gemini}" ] && echo "DEFAULT_GEMINI_MODEL=${existing_default_gemini}" >> "${ENV_FILE}"
   [ -n "${existing_default_cerebras}" ] && echo "DEFAULT_CEREBRAS_MODEL=${existing_default_cerebras}" >> "${ENV_FILE}"
-  [ -n "${existing_default_claude_max}" ] && echo "DEFAULT_CLAUDE_MAX_MODEL=${existing_default_claude_max}" >> "${ENV_FILE}"
   [ -n "${existing_default_chatgpt}" ] && echo "DEFAULT_CHATGPT_MODEL=${existing_default_chatgpt}" >> "${ENV_FILE}"
   [ -n "${existing_default_openrouter}" ] && echo "DEFAULT_OPENROUTER_MODEL=${existing_default_openrouter}" >> "${ENV_FILE}"
   [ -n "${existing_default_github}" ] && echo "DEFAULT_GITHUB_MODEL=${existing_default_github}" >> "${ENV_FILE}"
@@ -658,7 +645,6 @@ ENVEOF
 
 # ── AI Providers ──────────────────────────────────────────────────────────
 # Subscription providers
-CLAUDE_CODE_OAUTH_TOKEN=${existing_claude}
 CHATGPT_ACCESS_TOKEN=${existing_chatgpt}
 
 # Free tier providers (no credit card)
@@ -726,7 +712,6 @@ step_summary() {
     groq)       printf "  AI provider:   Groq (free tier)\n" ;;
     cerebras)   printf "  AI provider:   Cerebras (free tier)\n" ;;
     gemini)     printf "  AI provider:   Gemini (free tier)\n" ;;
-    claude-max) printf "  AI provider:   Claude Max (subscription)\n" ;;
     chatgpt)    printf "  AI provider:   ChatGPT (subscription)\n" ;;
     skip)       printf "  AI provider:   None (local only)\n" ;;
   esac

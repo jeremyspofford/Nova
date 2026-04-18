@@ -20,11 +20,15 @@ class TestDiscoverEndpoint:
 
         slugs = {p["slug"] for p in providers}
         expected = {
-            "ollama", "vllm", "claude-max", "chatgpt", "groq",
+            "ollama", "vllm", "chatgpt", "groq",
             "gemini", "cerebras", "openrouter", "github",
             "anthropic", "openai",
         }
         assert expected.issubset(slugs), f"Missing providers: {expected - slugs}"
+        assert "claude-max" not in slugs, (
+            "Claude subscription provider must not be advertised — "
+            "Anthropic 2026-02 ToS prohibits third-party use of sk-ant-oat01-* tokens."
+        )
 
     async def test_provider_has_required_fields(self, llm_gateway):
         """Each provider entry must have the required shape."""
@@ -131,6 +135,8 @@ class TestModelResolve:
         # Resolved model should be in the available set, or be a local fallback
         # (local models may not appear in discovery if nothing is pulled)
         if available_models:
-            assert resolved in available_models or resolved.startswith("llama"), (
-                f"Resolved model '{resolved}' is not in available models"
-            )
+            local_fallback_prefixes = ("llama", "qwen", "mistral", "phi", "gemma", "deepseek")
+            assert (
+                resolved in available_models
+                or resolved.startswith(local_fallback_prefixes)
+            ), f"Resolved model '{resolved}' is not in available models"

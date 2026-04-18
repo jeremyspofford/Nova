@@ -56,11 +56,6 @@ async def close_redis() -> None:
 AUTH_METHODS: dict[str, list[str]] = {
     "ollama": ["Always available (local)"],
     "vllm": ["Available when vLLM is the active inference backend"],
-    "claude-max": [
-        "CLAUDE_CODE_OAUTH_TOKEN env var",
-        "~/.claude/.credentials.json (auto-detected on Linux)",
-        "macOS Keychain (auto-detected)",
-    ],
     "chatgpt": [
         "CHATGPT_ACCESS_TOKEN env var",
         "~/.codex/auth.json (auto-detected after `codex login`)",
@@ -324,18 +319,9 @@ async def _discover_github() -> list[DiscoveredModel]:
 
 
 async def _discover_from_model_map(slug: str) -> list[DiscoveredModel]:
-    """For providers without listing APIs (Claude Max, ChatGPT, Cerebras),
+    """For providers without listing APIs (ChatGPT, Cerebras),
     return models from the provider's own _MODEL_MAP or registry entries."""
-    if slug == "claude-max":
-        from app.providers.claude_subscription_provider import _MODEL_MAP
-        from app.registry import _claude_subscription
-        models = []
-        for k in _MODEL_MAP:
-            if k.startswith("claude-max/"):
-                _ensure_registered(k, _claude_subscription)
-                models.append(DiscoveredModel(id=k, registered=True))
-        return models
-    elif slug == "chatgpt":
+    if slug == "chatgpt":
         from app.providers.chatgpt_subscription_provider import _MODEL_MAP
         from app.registry import _chatgpt_subscription
         models = []
@@ -359,7 +345,6 @@ async def _discover_from_model_map(slug: str) -> list[DiscoveredModel]:
 _PROVIDER_META = [
     {"slug": "ollama",      "name": "Ollama",           "type": "local"},
     {"slug": "vllm",        "name": "vLLM",             "type": "local"},
-    {"slug": "claude-max",  "name": "Claude Max/Pro",   "type": "subscription"},
     {"slug": "anthropic",   "name": "Anthropic API",    "type": "paid"},
     {"slug": "openai",      "name": "OpenAI API",       "type": "paid"},
     {"slug": "chatgpt",     "name": "ChatGPT Plus/Pro", "type": "subscription"},
@@ -381,7 +366,6 @@ _DISCOVERY_FNS: dict[str, Any] = {
     "gemini": _discover_gemini,
     "github": _discover_github,
     # These use _MODEL_MAP instead of API calls
-    "claude-max": lambda: _discover_from_model_map("claude-max"),
     "chatgpt": lambda: _discover_from_model_map("chatgpt"),
     "cerebras": lambda: _discover_from_model_map("cerebras"),
 }
@@ -389,7 +373,6 @@ _DISCOVERY_FNS: dict[str, Any] = {
 
 async def _is_provider_available(slug: str) -> bool:
     """Check if a provider has credentials configured."""
-    from app.providers.claude_subscription_provider import discover_claude_oauth_token
     from app.providers.chatgpt_subscription_provider import discover_chatgpt_token
 
     if slug == "vllm":
@@ -401,7 +384,6 @@ async def _is_provider_available(slug: str) -> bool:
 
     checks = {
         "ollama": lambda: True,
-        "claude-max": lambda: bool(discover_claude_oauth_token()),
         "chatgpt": lambda: bool(discover_chatgpt_token()),
         "groq": lambda: bool(settings.groq_api_key),
         "gemini": lambda: bool(settings.gemini_api_key or settings.gemini_use_adc),
@@ -487,19 +469,17 @@ async def discover_all() -> list[ProviderModelList]:
 # Each entry: (model_id, provider_slug, requires_ollama_check)
 _AUTO_PREFERENCE: list[tuple[str, str, bool]] = [
     ("claude-sonnet-4-6",              "anthropic",   False),
-    ("claude-max/claude-sonnet-4-6",   "claude-max",  False),
     ("gpt-4o",                         "openai",      False),
     ("chatgpt/gpt-4o",                 "chatgpt",     False),
     ("gemini/gemini-2.5-flash",        "gemini",      False),
     ("groq/llama-3.3-70b-versatile",   "groq",        False),
     ("claude-haiku-4-5-20251001",      "anthropic",   False),
-    ("claude-max/claude-haiku-4-5",    "claude-max",  False),
     ("chatgpt/gpt-4o-mini",           "chatgpt",     False),
     ("github/gpt-4o-mini",            "github",      False),
     ("cerebras/llama3.1-8b",           "cerebras",    False),
 ]
 
-_FALLBACK_MODEL = "llama3.2"
+_FALLBACK_MODEL = "qwen2.5:7b"
 
 # Module-level cache for resolve result — lock prevents thundering herd on TTL expiry
 _resolve_cache: dict[str, tuple[str, str, float]] = {}  # "resolve" -> (model, source, timestamp)
@@ -551,7 +531,7 @@ def _best_ollama_model() -> str | None:
 
 async def resolve_auto_model() -> str:
     """Iterate the preference list and return the first model whose provider is available.
-    Falls back to preferred local model, best Ollama model, then llama3.2."""
+    Falls back to preferred local model, best Ollama model, then qwen2.5:7b."""
     for model_id, slug, _ in _AUTO_PREFERENCE:
         if await _is_provider_available(slug):
             return model_id

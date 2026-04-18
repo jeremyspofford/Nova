@@ -62,7 +62,7 @@ PLATFORM_TOOLS: list[ToolDefinition] = [
                 "model": {
                     "type": "string",
                     "description": (
-                        "Model ID, e.g. 'claude-max/claude-sonnet-4-6' or 'groq/llama-3.3-70b-versatile'. "
+                        "Model ID, e.g. 'qwen2.5:7b' or 'groq/llama-3.3-70b-versatile'. "
                         "Call list_available_models to see all options."
                     ),
                 },
@@ -288,12 +288,17 @@ def _execute_list_available_models() -> str:
 Available models by provider:
 
   Ollama (local, unlimited):
-    llama3.2, llama3.1, mistral, phi4, qwen2.5, deepseek-r1, gemma3
+    qwen2.5:7b   ← recommended local default
+    qwen2.5:1.5b, llama3.2, llama3.1, mistral, phi4, deepseek-r1, gemma3
 
-  Claude Max subscription (fast, high-quality):
-    claude-max/claude-sonnet-4-6   ← recommended default
-    claude-max/claude-opus-4-6     ← most capable
-    claude-max/claude-haiku-4-5    ← fastest, cheapest
+  Anthropic API (paid):
+    claude-sonnet-4-6, claude-opus-4-6, claude-haiku-4-5-20251001
+
+  OpenAI API (paid):
+    gpt-4o, gpt-4o-mini
+
+  ChatGPT Plus/Pro subscription (no API billing):
+    chatgpt/gpt-4o, chatgpt/gpt-4o-mini, chatgpt/o3, chatgpt/o4-mini
 
   Groq (free API, 14 400 req/day):
     groq/llama-3.3-70b-versatile

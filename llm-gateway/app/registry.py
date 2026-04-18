@@ -11,11 +11,6 @@ ROUTING STRATEGIES (configurable at runtime via platform_config)
 
 SUBSCRIPTION AUTH (no API billing — uses your existing subscription quota)
 ─────────────────────────────────────────────────────────────────────────────
-  Claude Max/Pro    Run `claude setup-token`, set CLAUDE_CODE_OAUTH_TOKEN
-                    OR auto-read from ~/.claude/.credentials.json (Linux)
-                    OR auto-read from macOS Keychain
-                    → Models: claude-max/claude-sonnet-4-6, etc.
-
   ChatGPT Plus/Pro  Run `codex login`, then auto-read from ~/.codex/auth.json
                     OR set CHATGPT_ACCESS_TOKEN manually
                     → Models: chatgpt/gpt-4o, chatgpt/o3, etc.
@@ -47,7 +42,6 @@ import redis.asyncio as aioredis
 from app.config import settings
 from app.providers import (
     ChatGPTSubscriptionProvider,
-    ClaudeSubscriptionProvider,
     FallbackProvider,
     GeminiADCProvider,
     LiteLLMProvider,
@@ -57,7 +51,6 @@ from app.providers import (
     OllamaProvider,
     VLLMProvider,
     discover_chatgpt_token,
-    discover_claude_oauth_token,
 )
 
 log = logging.getLogger(__name__)
@@ -105,12 +98,6 @@ _gemini = GeminiADCProvider(api_key=settings.gemini_api_key, use_adc=settings.ge
 
 # ── Subscription providers — auto-detect credentials at startup ────────────────
 
-_claude_oauth_token = discover_claude_oauth_token()
-_claude_subscription = ClaudeSubscriptionProvider(
-    oauth_token=_claude_oauth_token,
-    default_model=settings.default_claude_max_model,
-)
-
 _chatgpt_token = discover_chatgpt_token()
 _chatgpt_subscription = ChatGPTSubscriptionProvider(
     access_token=_chatgpt_token,
@@ -118,11 +105,6 @@ _chatgpt_subscription = ChatGPTSubscriptionProvider(
 )
 
 # Log what was found
-if _claude_subscription.is_available:
-    log.info("✓ Claude Max/Pro subscription active  → models: claude-max/*")
-else:
-    log.info("  Claude subscription not detected   (run `claude setup-token`, set CLAUDE_CODE_OAUTH_TOKEN)")
-
 if _chatgpt_subscription.is_available:
     log.info("✓ ChatGPT Plus/Pro subscription active → models: chatgpt/*")
 else:
@@ -154,8 +136,6 @@ def _build_cloud_fallback() -> FallbackProvider:
         chain.append(_github)
 
     # Subscription providers come before paid API to prefer zero-cost
-    if _claude_subscription.is_available:
-        chain.append(_claude_subscription)
     if _chatgpt_subscription.is_available:
         chain.append(_chatgpt_subscription)
 
@@ -190,8 +170,6 @@ def _build_default_fallback() -> FallbackProvider:
         chain.append(_github)
 
     # Subscription providers come before paid API to prefer zero-cost
-    if _claude_subscription.is_available:
-        chain.append(_claude_subscription)
     if _chatgpt_subscription.is_available:
         chain.append(_chatgpt_subscription)
 
@@ -324,7 +302,8 @@ async def get_prefer_subscription() -> bool:
 
 _OLLAMA_MODELS = {
     "llama3.2", "llama3.2:3b", "llama3.1", "mistral", "qwen2.5",
-    "phi4", "deepseek-r1", "gemma3", "nomic-embed-text", "qwen2.5:1.5b",
+    "qwen2.5:7b", "qwen2.5:1.5b",
+    "phi4", "deepseek-r1", "gemma3", "nomic-embed-text",
 }
 
 
@@ -398,7 +377,6 @@ async def sync_vllm_models() -> int:
 # ── Model → provider routing table ────────────────────────────────────────────
 #
 # Naming convention:
-#   claude-max/*   → Claude subscription (no billing)
 #   chatgpt/*      → ChatGPT subscription (no billing)
 #   groq/*         → Groq free tier
 #   gemini/*       → Gemini free tier
@@ -410,11 +388,6 @@ async def sync_vllm_models() -> int:
 
 MODEL_REGISTRY: dict[str, ModelProvider] = {
 
-    # ── Claude Max/Pro subscription ────────────────────────────────────────────
-    "claude-max/claude-sonnet-4-6":       _claude_subscription,
-    "claude-max/claude-opus-4-6":         _claude_subscription,
-    "claude-max/claude-haiku-4-5":        _claude_subscription,
-
     # ── ChatGPT Plus/Pro subscription ─────────────────────────────────────────
     "chatgpt/gpt-4o":                     _chatgpt_subscription,
     "chatgpt/gpt-4o-mini":                _chatgpt_subscription,
@@ -425,6 +398,7 @@ MODEL_REGISTRY: dict[str, ModelProvider] = {
 
     # ── Local (Ollama) — will be overridden per-request by routing strategy ───
     "qwen2.5:1.5b":                       _ollama,
+    "qwen2.5:7b":                         _ollama,
     "llama3.2":                           _ollama,
     "llama3.2:3b":                        _ollama,
     "llama3.1":                           _ollama,
@@ -460,10 +434,9 @@ MODEL_REGISTRY: dict[str, ModelProvider] = {
     "github/gpt-4o-mini":                 _github,
     "github/meta-llama-3.1-70b-instruct": _github,
 
-    # ── Paid Anthropic API (bare model names route here when no subscription) ──
-    # If a Claude subscription IS active, use claude-max/* prefix to use it.
-    "claude-sonnet-4-6":                  _claude_subscription if _claude_oauth_token else _litellm,
-    "claude-opus-4-6":                    _claude_subscription if _claude_oauth_token else _litellm,
+    # ── Paid Anthropic API (bare model names route here via ANTHROPIC_API_KEY) ──
+    "claude-sonnet-4-6":                  _litellm,
+    "claude-opus-4-6":                    _litellm,
     "claude-haiku-4-5-20251001":          _litellm,
 
     # ── Paid OpenAI API ────────────────────────────────────────────────────────
@@ -489,9 +462,6 @@ _DEFAULT_CONTEXT_WINDOW = 128_000
 _DEFAULT_MAX_OUTPUT_TOKENS = 8_096
 
 MODEL_SPECS: dict[str, dict[str, int]] = {
-    "claude-max/claude-sonnet-4-6":      {"context_window": 200_000, "max_output_tokens": 16_000},
-    "claude-max/claude-opus-4-6":        {"context_window": 200_000, "max_output_tokens": 32_000},
-    "claude-max/claude-haiku-4-5":       {"context_window": 200_000, "max_output_tokens": 8_192},
     "claude-sonnet-4-6":                 {"context_window": 200_000, "max_output_tokens": 16_000},
     "claude-opus-4-6":                   {"context_window": 200_000, "max_output_tokens": 32_000},
     "claude-haiku-4-5-20251001":         {"context_window": 200_000, "max_output_tokens": 8_192},
@@ -521,8 +491,6 @@ def get_provider_catalog() -> list[dict]:
     _PROVIDER_META: list[dict] = [
         {"slug": "ollama",      "name": "Ollama",              "type": "local",        "instance": _ollama,
          "available": True,     "default_model": settings.default_ollama_model},
-        {"slug": "claude-max",  "name": "Claude Max/Pro",      "type": "subscription", "instance": _claude_subscription,
-         "available": _claude_subscription.is_available, "default_model": settings.default_claude_max_model},
         {"slug": "chatgpt",     "name": "ChatGPT Plus/Pro",    "type": "subscription", "instance": _chatgpt_subscription,
          "available": _chatgpt_subscription.is_available, "default_model": settings.default_chatgpt_model},
         {"slug": "groq",        "name": "Groq",                "type": "free",         "instance": _groq,
@@ -633,8 +601,6 @@ async def get_provider(model: str) -> ModelProvider:
     # ── Non-local model with soft strategy ────────────────────────────
     # Subscription preference — try zero-cost subscription providers first
     if await get_prefer_subscription():
-        if _claude_subscription.is_available:
-            return _claude_subscription
         if _chatgpt_subscription.is_available:
             return _chatgpt_subscription
 

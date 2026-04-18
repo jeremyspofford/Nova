@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     def resolve_magic_ollama_url(self):
         self.ollama_base_url = _resolve_ollama_url(self.ollama_base_url)
         return self
-    default_chat_model: str = "llama3.2"
+    default_chat_model: str = "qwen2.5:7b"
     default_embed_model: str = "nomic-embed-text"
 
     # Wake-on-LAN (for remote Ollama host)
@@ -87,13 +87,12 @@ class Settings(BaseSettings):
     # ── Per-provider default models — override in .env to swap models ──────────
     # These control which model a provider uses when no explicit model is given.
     # e.g. set DEFAULT_CEREBRAS_MODEL=cerebras/llama-3.1-8b for a faster/cheaper model
-    default_ollama_model: str = "llama3.2"
+    default_ollama_model: str = "qwen2.5:7b"
     default_groq_model: str = "groq/llama-3.3-70b-versatile"
     default_gemini_model: str = "gemini/gemini-2.5-flash"
     default_cerebras_model: str = "cerebras/llama3.1-8b"   # llama3.3-70b was retired
     default_openrouter_model: str = "openrouter/meta-llama/llama-3.1-8b-instruct:free"
     default_github_model: str = "github/gpt-4o-mini"
-    default_claude_max_model: str = "claude-max/claude-sonnet-4-6"
     default_chatgpt_model: str = "chatgpt/gpt-4o"
 
     # Anthropic (production) — api.anthropic.com API key, separate from claude.ai subscription
@@ -123,11 +122,6 @@ class Settings(BaseSettings):
     github_token: str = ""
 
     # ── Subscription providers (quota from existing subscriptions) ─────────────
-    # Claude Max/Pro subscription — no api.anthropic.com billing
-    # Get token: run `claude setup-token` → produces sk-ant-oat01-...
-    # Auto-read from ~/.claude/.credentials.json (Linux) or macOS Keychain
-    claude_code_oauth_token: str = ""
-
     # ChatGPT Plus/Pro subscription — no api.openai.com billing
     # Auto-read from ~/.codex/auth.json after `codex login`
     # Or extract manually: jq -r '.tokens.access_token' ~/.codex/auth.json
@@ -135,11 +129,11 @@ class Settings(BaseSettings):
     chatgpt_token_dir: str = ""  # defaults to ~/.codex
 
     # Subscription routing preference
-    prefer_subscription: bool = True  # Try Claude Max / ChatGPT Plus before any other provider
+    prefer_subscription: bool = True  # Try ChatGPT Plus before any other cloud provider
 
     # Tier-based routing defaults
-    tier_preferences_best: str = "claude-sonnet-4-6,gpt-4o,claude-max/claude-sonnet-4-6,chatgpt/gpt-4o,gemini/gemini-2.5-pro"
-    tier_preferences_mid: str = "groq/llama-3.3-70b-versatile,gemini/gemini-2.5-flash,cerebras/llama3.1-8b,claude-max/claude-haiku-4-5"
+    tier_preferences_best: str = "claude-sonnet-4-6,gpt-4o,chatgpt/gpt-4o,gemini/gemini-2.5-pro"
+    tier_preferences_mid: str = "groq/llama-3.3-70b-versatile,gemini/gemini-2.5-flash,cerebras/llama3.1-8b"
     tier_preferences_cheap: str = "groq/llama-3.3-70b-versatile,cerebras/llama3.1-8b,default-ollama,gemini/gemini-2.5-flash"
 
     # Cost tracking
