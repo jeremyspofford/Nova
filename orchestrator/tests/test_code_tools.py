@@ -163,15 +163,7 @@ def test_path_traversal_rejected():
         _resolve_path("../../etc/passwd")
 
 
-async def test_command_denylist_sudo():
-    from app.tools.code_tools import _execute_run_shell
-
-    result = await _execute_run_shell("sudo ls", working_dir=None)
-    assert "blocked" in result.lower()
-
-
-async def test_command_denylist_rm_rf_root():
-    from app.tools.code_tools import _execute_run_shell
-
-    result = await _execute_run_shell("rm -rf /", working_dir=None)
-    assert "blocked" in result.lower()
+# Command-denylist tests removed per SEC-002. Substring-matching was trivially
+# bypassed (rm  -rf / with double space, curl x|sh without whitespace, etc.)
+# and created false confidence. The sandbox tier's bind-mount is the real
+# boundary for shell blast radius.

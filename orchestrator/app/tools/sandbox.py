@@ -2,10 +2,13 @@
 Sandbox tier system — controls filesystem and shell access scope per agent execution.
 
 Tiers:
-  workspace — paths scoped to /workspace (default)
-  home      — paths scoped to user's home directory on the host
-  root      — full host filesystem via /host-root mount
+  workspace — paths scoped to /workspace (default — bind-mount isolated from host)
+  home      — user's home directory on the host (admin-toggle opt-in; see SEC-001)
   isolated  — no filesystem or shell access
+
+Removed 2026-04-17 / SEC-001: the `root` tier (full host filesystem via
+/host-root) — the mount + tier together were an RCE-by-design configuration.
+Legacy aliases map `root`/`host` to `workspace` to fail safely.
 
 Usage:
   token = set_sandbox(SandboxTier.home)
@@ -25,12 +28,15 @@ class SandboxTier(str, enum.Enum):
     isolated  = "isolated"
     workspace = "workspace"
     home      = "home"
-    root      = "root"
 
     @classmethod
     def _missing_(cls, value):
-        """Backward compat: accept old tier names during transition."""
-        _ALIASES = {"nova": cls.home, "host": cls.root}
+        """Backward compat: legacy tiers (`root`, `host`, `nova`) collapse safely.
+
+        `root`/`host` → workspace (SEC-001: tier removed, never enforce host fs).
+        `nova` → home (prior rename).
+        """
+        _ALIASES = {"nova": cls.home, "host": cls.workspace, "root": cls.workspace}
         return _ALIASES.get(value)
 
 
@@ -66,8 +72,6 @@ def get_root() -> Path:
         return Path(settings.workspace_root).resolve()
     elif tier == SandboxTier.home:
         return Path(settings.home_root).resolve()
-    elif tier == SandboxTier.root:
-        return Path("/host-root")
     elif tier == SandboxTier.isolated:
         raise PermissionError("Filesystem access disabled in isolated sandbox tier")
     return Path(settings.workspace_root).resolve()

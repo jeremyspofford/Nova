@@ -52,12 +52,11 @@ def test_get_root_home(tmp_path: Path):
             reset_sandbox(token)
 
 
-def test_get_root_root():
-    token = set_sandbox(SandboxTier.root)
-    try:
-        assert get_root() == Path("/host-root")
-    finally:
-        reset_sandbox(token)
+def test_legacy_root_alias_maps_to_workspace():
+    """SEC-001: the `root` tier was deleted. Legacy config values must map
+    to `workspace` via the SandboxTier._missing_ alias table, not raise."""
+    tier = SandboxTier("root")
+    assert tier == SandboxTier.workspace
 
 
 def test_get_root_isolated_raises():
@@ -84,15 +83,7 @@ def test_resolve_path_in_workspace(tmp_path: Path):
             reset_sandbox(token)
 
 
-def test_resolve_path_root_allows_absolute(tmp_path: Path):
-    from app.tools.code_tools import _resolve_path
-
-    token = set_sandbox(SandboxTier.root)
-    try:
-        resolved = _resolve_path("/tmp")
-        assert resolved == Path("/host-root/tmp")
-    finally:
-        reset_sandbox(token)
+# test_resolve_path_root_allows_absolute removed — root tier deleted (SEC-001).
 
 
 # ─── Shell blocking in isolated tier ─────────────────────────────────────────
@@ -110,18 +101,7 @@ async def test_run_shell_blocked_in_isolated(tmp_path: Path):
             reset_sandbox(token)
 
 
-# ─── Tier-aware command blocking ─────────────────────────────────────────────
-
-def test_sudo_blocked_in_workspace():
-    from app.tools.code_tools import _is_command_blocked
-
-    blocked, reason = _is_command_blocked("sudo apt install vim", SandboxTier.workspace)
-    assert blocked
-    assert "privilege" in reason.lower()
-
-
-def test_sudo_allowed_in_root():
-    from app.tools.code_tools import _is_command_blocked
-
-    blocked, _ = _is_command_blocked("sudo apt install vim", SandboxTier.root)
-    assert not blocked
+# Command denylist removed per SEC-002 (substring-matching is theater against
+# any competent LLM). The sandbox tier is the real boundary — the workspace
+# bind-mount isolates the agent from the host filesystem. See
+# docs/audits/2026-04-16-phase0/security.md for the full reasoning.

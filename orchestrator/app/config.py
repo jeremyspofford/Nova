@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     # Phase 3: Code & Terminal Tools
     workspace_root: str = "/workspace"
     shell_timeout_seconds: int = 30
-    # Sandbox tier: workspace | home | root | isolated
+    # Sandbox tier: workspace | home | isolated (root removed per SEC-001)
     shell_sandbox: str = "workspace"
     nova_root: str = "/nova"
     # HOME on the host — set via HOST_HOME env in docker-compose.yml.

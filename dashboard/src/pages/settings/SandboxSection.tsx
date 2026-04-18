@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { Shield, ChevronDown, ChevronUp } from 'lucide-react'
+import { Shield, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import { Section, Badge } from '../../components/ui'
 import { useConfigValue, type ConfigSectionProps } from './shared'
 import { getPods, updatePod } from '../../api'
 
 // ── Tier definitions ────────────────────────────────────────────────────────
 
-type TierValue = 'workspace' | 'home' | 'root' | 'isolated'
+type TierValue = 'workspace' | 'home' | 'isolated'
 
 const TIERS: {
   value: TierValue
@@ -21,10 +21,10 @@ const TIERS: {
     label: 'Workspace',
     tagline: 'Project-scoped access',
     bullets: [
-      'Read & write files in configured workspace',
-      'Shell commands scoped to workspace',
-      'Git operations scoped to workspace',
-      'Blocks sudo, curl|sh, privilege escalation',
+      'Read & write files in the configured workspace',
+      'Shell commands scoped to the workspace',
+      'Git operations scoped to the workspace',
+      'Bind-mount isolated from your host filesystem',
     ],
     ring: 'ring-emerald-500/60',
     dot: 'bg-emerald-500',
@@ -34,26 +34,13 @@ const TIERS: {
     label: 'Home',
     tagline: 'Home directory access',
     bullets: [
-      'Read & write files in home directory',
-      'Shell commands scoped to home',
-      'Git operations on any repo in home',
-      'Blocks sudo, curl|sh, privilege escalation',
+      'Read & write files anywhere in your home directory',
+      'Shell commands scoped to your home',
+      'Git operations on any repo in your home',
+      'Admin opt-in required — off by default',
     ],
     ring: 'ring-sky-500/60',
     dot: 'bg-sky-500',
-  },
-  {
-    value: 'root',
-    label: 'Root',
-    tagline: 'Full host access',
-    bullets: [
-      'Read & write files on host filesystem',
-      'Shell commands with cwd on host',
-      'Git operations on any host repo',
-      'Only blocks fork bombs, mkfs, dd, rm -rf /',
-    ],
-    ring: 'ring-red-500/60',
-    dot: 'bg-red-500',
   },
   {
     value: 'isolated',
@@ -73,21 +60,18 @@ const TIERS: {
 // ── Capability comparison table ─────────────────────────────────────────────
 
 const CAPABILITY_ROWS: { label: string; values: Record<TierValue, string> }[] = [
-  { label: 'Filesystem scope', values: { workspace: '/workspace', home: '~ (home dir)', root: '/ (entire host)', isolated: 'None' } },
-  { label: 'File read & write', values: { workspace: 'Scoped', home: 'Scoped', root: 'Unrestricted', isolated: 'Blocked' } },
-  { label: 'Shell commands', values: { workspace: 'Scoped', home: 'Scoped', root: 'Unrestricted', isolated: 'Blocked' } },
-  { label: 'Git operations', values: { workspace: 'Scoped', home: 'Scoped', root: 'Unrestricted', isolated: 'Blocked' } },
-  { label: 'sudo / su', values: { workspace: 'Blocked', home: 'Blocked', root: 'Allowed', isolated: 'N/A' } },
-  { label: 'Remote exec (curl|sh)', values: { workspace: 'Blocked', home: 'Blocked', root: 'Allowed', isolated: 'N/A' } },
-  { label: 'Destructive commands', values: { workspace: 'Blocked', home: 'Blocked', root: 'Blocked', isolated: 'N/A' } },
-  { label: 'Best for', values: { workspace: 'Project work', home: 'Multi-project', root: 'Sysadmin', isolated: 'Reasoning' } },
+  { label: 'Filesystem scope', values: { workspace: '/workspace', home: '~ (home dir)', isolated: 'None' } },
+  { label: 'File read & write', values: { workspace: 'Scoped', home: 'Scoped', isolated: 'Blocked' } },
+  { label: 'Shell commands', values: { workspace: 'Scoped', home: 'Scoped', isolated: 'Blocked' } },
+  { label: 'Git operations', values: { workspace: 'Scoped', home: 'Scoped', isolated: 'Blocked' } },
+  { label: 'Host fs exposure', values: { workspace: 'None', home: 'Your home dir', isolated: 'None' } },
+  { label: 'Best for', values: { workspace: 'Project work', home: 'Multi-project', isolated: 'Reasoning' } },
 ]
 
 function cellColor(value: string): string {
   if (value === 'Blocked' || value === 'None') return 'text-red-600 dark:text-red-400'
-  if (value === 'Unrestricted' || value === 'Allowed') return 'text-amber-600 dark:text-amber-400'
+  if (value === 'Your home dir') return 'text-amber-600 dark:text-amber-400'
   if (value === 'Scoped') return 'text-emerald-600 dark:text-emerald-400'
-  if (value === 'N/A') return 'text-content-tertiary'
   return 'text-content-secondary'
 }
 
@@ -97,18 +81,21 @@ export function SandboxSection({ entries, onSave, saving }: ConfigSectionProps) 
   const current = useConfigValue(entries, 'shell.sandbox', 'workspace') as TierValue
   const selfModRaw = useConfigValue(entries, 'nova.self_modification', 'false')
   const selfMod = selfModRaw === 'true'
+  const homeEnabledRaw = useConfigValue(entries, 'sandbox.home_enabled', 'false')
+  const homeEnabled = homeEnabledRaw === 'true'
   const [saved, setSaved] = useState(false)
   const [showTable, setShowTable] = useState(false)
 
   const handleSelect = async (value: TierValue) => {
+    // Block home selection if the admin hasn't opted in. Backend also
+    // enforces this (see _get_sandbox_tier in orchestrator/app/router.py),
+    // but surfacing it in the UI avoids a confusing silent downgrade.
+    if (value === 'home' && !homeEnabled) return
+
     // Save global platform config (used by Chat API path)
     onSave('shell.sandbox', JSON.stringify(value))
 
     // Also sync to all pods so the pipeline executor picks it up.
-    // NOTE(2026-03-26): The pipeline reads pod.sandbox, not platform_config.
-    // This bridges the gap until per-pod sandbox controls exist in the Dashboard.
-    // TODO: Other Claude sessions may also be addressing this — once per-pod
-    // sandbox UI exists, this bulk-sync may need to become pod-specific.
     try {
       const pods = await getPods()
       await Promise.all(pods.map((pod) => updatePod(pod.id, { sandbox: value })))
@@ -127,25 +114,29 @@ export function SandboxSection({ entries, onSave, saving }: ConfigSectionProps) 
       description="Control what Nova's agents can access on the filesystem. Changes apply to new messages immediately."
     >
       {/* ── Mode cards ─────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {TIERS.map((tier) => {
           const isSelected = current === tier.value
+          const locked = tier.value === 'home' && !homeEnabled
           return (
             <button
               key={tier.value}
               onClick={() => handleSelect(tier.value)}
-              disabled={saving}
+              disabled={saving || locked}
               className={
                 'relative rounded-md border p-3 text-left transition-all ' +
-                (isSelected
-                  ? `ring-2 ${tier.ring} border-transparent bg-surface-elevated`
-                  : 'border-border bg-surface-card hover:bg-surface-card-hover')
+                (locked
+                  ? 'border-border bg-surface-card opacity-60 cursor-not-allowed'
+                  : isSelected
+                    ? `ring-2 ${tier.ring} border-transparent bg-surface-elevated`
+                    : 'border-border bg-surface-card hover:bg-surface-card-hover')
               }
             >
               <div className="mb-1.5 flex items-center gap-2">
                 <span className={`h-2 w-2 shrink-0 rounded-full ${tier.dot}`} />
                 <span className="text-compact font-semibold text-content-primary">{tier.label}</span>
-                {isSelected && <Badge color="success" size="sm">Active</Badge>}
+                {isSelected && !locked && <Badge color="success" size="sm">Active</Badge>}
+                {locked && <Lock className="ml-auto h-3 w-3 text-content-tertiary" />}
               </div>
               <p className="mb-2 text-caption text-content-tertiary">{tier.tagline}</p>
               <ul className="space-y-1">
@@ -156,6 +147,11 @@ export function SandboxSection({ entries, onSave, saving }: ConfigSectionProps) 
                   </li>
                 ))}
               </ul>
+              {locked && (
+                <p className="mt-2 text-caption text-content-tertiary italic">
+                  Enable "Home tier access" below to unlock.
+                </p>
+              )}
             </button>
           )
         })}
@@ -224,8 +220,34 @@ export function SandboxSection({ entries, onSave, saving }: ConfigSectionProps) 
         </div>
       )}
 
-      {/* ── Self-modification toggle ──────────────────────────────── */}
+      {/* ── Home-tier opt-in (SEC-001) ─────────────────────────────── */}
       <div className="mt-6 pt-4 border-t border-border-subtle">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-compact font-medium text-content-primary">Home tier access</div>
+            <div className="text-caption text-content-tertiary mt-0.5">
+              Let agents read and write anywhere in your home directory. Off by default — enabling this
+              widens the blast radius of prompt injection. Bind-mount still gates access to paths outside
+              your home.
+            </div>
+          </div>
+          <button
+            onClick={() => onSave('sandbox.home_enabled', homeEnabled ? 'false' : 'true')}
+            disabled={saving}
+            className={`relative w-10 h-5 rounded-full transition-colors shrink-0 ${
+              homeEnabled ? 'bg-amber-500' : 'bg-stone-700'
+            }`}
+            aria-label={homeEnabled ? 'Disable home tier' : 'Enable home tier'}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+              homeEnabled ? 'translate-x-5' : ''
+            }`} />
+          </button>
+        </div>
+      </div>
+
+      {/* ── Self-modification toggle ──────────────────────────────── */}
+      <div className="mt-4 pt-4 border-t border-border-subtle">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-compact font-medium text-content-primary">Self-Modification</div>

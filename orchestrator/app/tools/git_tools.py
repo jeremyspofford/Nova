@@ -121,8 +121,8 @@ def get_git_tools(tier: "SandboxTier") -> list[ToolDefinition]:
     """Generate git tool definitions with tier-appropriate descriptions."""
     from app.tools.sandbox import SandboxTier
 
-    if tier in (SandboxTier.home, SandboxTier.root):
-        scope = "home directory" if tier == SandboxTier.home else "host filesystem"
+    if tier == SandboxTier.home:
+        scope = "home directory"
         return [
             ToolDefinition(
                 name="git_status",

@@ -79,7 +79,7 @@ class PodRequest(BaseModel):
     max_execution_seconds: int = 300
     require_human_review: str = "on_escalation"   # always | never | on_escalation
     escalation_threshold: str = "medium"          # low | medium | high | critical
-    sandbox: str = "workspace"                    # workspace | nova | host | isolated
+    sandbox: str = "workspace"                    # workspace | home | isolated (root removed per SEC-001)
     metadata: dict[str, Any] = {}
 
 

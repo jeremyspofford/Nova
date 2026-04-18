@@ -645,12 +645,6 @@ def _sandbox_context() -> str:
             f"You can read and modify personal files, dotfiles, and local projects. "
             f"Be careful with changes that could affect the user's environment."
         ),
-        SandboxTier.root: (
-            f"Sandbox tier: root (full host filesystem access)\n"
-            f"Filesystem root: /\n"
-            f"You have full host filesystem access via /host-root. Exercise extreme caution — "
-            f"you can read and write any file on the system."
-        ),
         SandboxTier.isolated: (
             f"Sandbox tier: isolated (no filesystem access)\n"
             f"You have no filesystem or shell access. You can only respond with text."

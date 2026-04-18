@@ -127,16 +127,31 @@ async def _sse_stream(agent_id: str, stream_gen, error_label: str = "stream", sa
 # ── Sandbox tier (runtime from DB) ────────────────────────────────────────────
 
 async def _get_sandbox_tier() -> SandboxTier:
-    """Read the sandbox tier from platform_config (DB), falling back to env var."""
+    """Read the sandbox tier from platform_config (DB), falling back to env var.
+
+    SEC-001 policy: the `home` tier requires an explicit admin opt-in
+    (`sandbox.home_enabled` in platform_config). If the stored tier is `home`
+    but the toggle is off, the effective tier is forced to `workspace`. This
+    makes the dashboard's "Home" card a no-op until the operator also
+    toggles the enable switch on the same screen.
+    """
     try:
         pool = get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT value #>> '{}' AS val FROM platform_config WHERE key = 'shell.sandbox'"
             )
+            home_enabled_row = await conn.fetchrow(
+                "SELECT value #>> '{}' AS val FROM platform_config WHERE key = 'sandbox.home_enabled'"
+            )
         if row:
             try:
-                return SandboxTier(row["val"])
+                tier = SandboxTier(row["val"])
+                # Gate: reject home tier unless admin has opted in explicitly.
+                if tier == SandboxTier.home and (home_enabled_row is None or home_enabled_row["val"] != "true"):
+                    log.warning("sandbox tier 'home' requested but sandbox.home_enabled is off — using workspace")
+                    return SandboxTier.workspace
+                return tier
             except ValueError:
                 pass
     except Exception:

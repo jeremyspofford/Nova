@@ -4,7 +4,7 @@ Code & Terminal Tools — filesystem and shell access for Nova agents.
 Access scope is controlled by the sandbox tier:
   workspace — paths scoped to /workspace (default)
   home      — paths scoped to user's home directory
-  root      — full host filesystem via /host-root mount
+  (root tier removed 2026-04-17 / SEC-001 — see app/tools/sandbox.py)
   isolated  — no filesystem or shell access
 
 Tools provided:
@@ -25,19 +25,14 @@ from nova_contracts import ToolDefinition
 
 log = logging.getLogger(__name__)
 
-HOST_ROOT_PREFIX = "/host-root"
-
 
 def display_path(path: Path | str) -> str:
     """Convert internal container path to user-facing path.
 
-    Root tier paths are prefixed with /host-root inside the container.
-    Strip this prefix so agents and users see real host paths.
+    With the root tier removed (SEC-001), there's no longer a /host-root
+    prefix to strip — paths are either /workspace or the real home dir.
     """
-    s = str(path)
-    if s.startswith(HOST_ROOT_PREFIX):
-        return s[len(HOST_ROOT_PREFIX):] or "/"
-    return s
+    return str(path)
 
 # ─── Tool definitions (what the LLM sees) ────────────────────────────────────
 
@@ -214,52 +209,6 @@ def get_code_tools(tier: "SandboxTier") -> list[ToolDefinition]:
             ),
         ]
 
-    if tier == SandboxTier.root:
-        return [
-            ToolDefinition(
-                name="list_dir",
-                description=(
-                    "List files and directories at any path on the host filesystem. "
-                    "Use absolute paths (e.g., '/etc/nginx', '/var/log')."
-                ),
-                parameters=_CODE_PARAMS["list_dir"],
-            ),
-            ToolDefinition(
-                name="read_file",
-                description=(
-                    "Read the contents of any file on the host filesystem. "
-                    "Use absolute paths (e.g., '/etc/nginx/nginx.conf'). "
-                    "Large files are truncated at 8000 characters."
-                ),
-                parameters=_CODE_PARAMS["read_file"],
-            ),
-            ToolDefinition(
-                name="write_file",
-                description=(
-                    "Write or overwrite any file on the host filesystem. "
-                    "Use absolute paths. Creates parent directories automatically."
-                ),
-                parameters=_CODE_PARAMS["write_file"],
-            ),
-            ToolDefinition(
-                name="run_shell",
-                description=(
-                    "Run a shell command on the host. "
-                    "Working directory defaults to home. "
-                    "Use file tools (read_file, write_file) for accessing arbitrary host paths."
-                ),
-                parameters=_CODE_PARAMS["run_shell"],
-            ),
-            ToolDefinition(
-                name="search_codebase",
-                description=(
-                    "Search for a pattern across files on the host filesystem using ripgrep. "
-                    "Use absolute paths to scope the search (e.g., '/etc', '/home/user/project')."
-                ),
-                parameters=_CODE_PARAMS["search_codebase"],
-            ),
-        ]
-
     # workspace / isolated — return defaults
     return list(CODE_TOOLS)
 
@@ -271,7 +220,6 @@ def _resolve_path(relative: str) -> Path:
 
     - workspace: relative paths only, scoped to /workspace
     - home: absolute or relative, scoped to $HOME
-    - root: absolute or relative, transparently mapped to /host-root
     - isolated: raises PermissionError
     """
     from app.tools.sandbox import get_root, get_sandbox, SandboxTier
@@ -282,18 +230,6 @@ def _resolve_path(relative: str) -> Path:
         get_root()  # raises PermissionError
 
     root = get_root()
-
-    if tier == SandboxTier.root:
-        if relative.startswith("/"):
-            candidate = (Path(HOST_ROOT_PREFIX) / relative.lstrip("/")).resolve()
-        else:
-            candidate = (Path(HOST_ROOT_PREFIX) / relative).resolve()
-        if not str(candidate).startswith(HOST_ROOT_PREFIX):
-            raise ValueError(
-                f"Path '{relative}' resolves outside host filesystem mount. "
-                "Directory traversal is not permitted."
-            )
-        return candidate
 
     if tier == SandboxTier.home:
         if relative.startswith("/"):
@@ -429,18 +365,15 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     if not cwd.exists():
         return f"Working directory '{working_dir}' does not exist."
 
-    # Security check — tier-aware
-    blocked, reason = _is_command_blocked(command, tier)
-    if blocked:
-        return f"Command blocked: {reason}"
-
-    # Warning check — non-blocking, prepended to result
+    # No command denylist: substring-matching is theater against any competent
+    # LLM (see SEC-002 in docs/audits/2026-04-16-phase0/). The real boundary is
+    # the sandbox tier — workspace bind-mount isolates the agent from the host.
+    # Destructive-command WARNING is kept (non-blocking, surfaces risk to the
+    # LLM so it can flag to the user).
     warned, warning_msg = _is_command_warned(command)
 
     # Set HOME correctly per tier
-    if tier == SandboxTier.root:
-        shell_home = f"{HOST_ROOT_PREFIX}{settings.home_root}"
-    elif tier == SandboxTier.home:
+    if tier == SandboxTier.home:
         shell_home = settings.home_root
     else:
         shell_home = str(cwd)
@@ -476,59 +409,6 @@ async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     if err:
         parts.append(f"stderr:\n{err}")
     return "\n".join(parts)
-
-
-def _is_command_blocked(command: str, tier=None) -> tuple[bool, str]:
-    """
-    Return (True, reason) if the command should be blocked, (False, "") otherwise.
-
-    This is the security boundary for shell access. The rules below block the
-    most obviously destructive commands while keeping the tool useful for
-    real development work (running tests, builds, linters, etc.).
-
-    In root tier, only the most dangerous hard blocks are enforced.
-    In workspace/nova tiers, all hard blocks apply.
-    """
-    from app.tools.sandbox import SandboxTier
-
-    if tier is None:
-        tier = SandboxTier.workspace
-
-    cmd_lower = command.lower().strip()
-
-    # Absolute hard blocks — always enforced regardless of tier
-    _CRITICAL_BLOCKS: list[tuple[str, str]] = [
-        ("rm -rf /",        "recursive delete of filesystem root"),
-        ("rm -rf /*",       "recursive delete of filesystem root"),
-        (":(){:|:&};:",     "fork bomb"),
-        ("mkfs",            "filesystem format"),
-        ("dd if=",          "raw disk write"),
-        ("> /dev/sd",       "raw disk overwrite"),
-    ]
-
-    for fragment, reason in _CRITICAL_BLOCKS:
-        if fragment in cmd_lower:
-            return True, reason
-
-    # Additional blocks for workspace and home tiers
-    if tier in (SandboxTier.workspace, SandboxTier.home):
-        _TIER_BLOCKS: list[tuple[str, str]] = [
-            ("chmod -r /",      "recursive permission change on root"),
-            ("chown -r /",      "recursive ownership change on root"),
-            ("sudo",            "privilege escalation"),
-            ("su -",            "privilege escalation"),
-            ("curl | sh",       "remote code execution via pipe"),
-            ("wget | sh",       "remote code execution via pipe"),
-            ("curl | bash",     "remote code execution via pipe"),
-            ("wget | bash",     "remote code execution via pipe"),
-            ("base64 -d | sh",  "obfuscated remote code execution"),
-        ]
-
-        for fragment, reason in _TIER_BLOCKS:
-            if fragment in cmd_lower:
-                return True, reason
-
-    return False, ""
 
 
 # ─── Destructive command warnings (non-blocking) ─────────────────────────────
@@ -593,10 +473,6 @@ async def _execute_search_codebase(
 
     out = stdout.decode(errors="replace").strip()
     err = stderr.decode(errors="replace").strip()
-
-    # Strip /host-root prefix from ripgrep output paths
-    if HOST_ROOT_PREFIX + "/" in (out or ""):
-        out = out.replace(HOST_ROOT_PREFIX + "/", "/")
 
     if proc.returncode == 1 and not out:
         return f"No matches found for '{pattern}' in '{path}'."
