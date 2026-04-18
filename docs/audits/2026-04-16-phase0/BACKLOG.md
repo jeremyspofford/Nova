@@ -42,10 +42,10 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| SEC-001 | security | Orchestrator `/:/host-root:rw` mount + sandbox `root` tier | P0 | H | M | Open |
-| SEC-002 | security | Shell-command blocklist is substring-match, trivially bypassed | P0 | H | S | Open |
-| SEC-003 | security | LLM-gateway `/v1/chat/completions` unauthenticated on all interfaces | P0 | H | M | Open |
-| SEC-004 | security | Memory-service and cortex expose all endpoints with no auth | P0 | H | S | Open |
+| SEC-001 | security | Orchestrator `/:/host-root:rw` mount + sandbox `root` tier | P0 | H | M | Done |
+| SEC-002 | security | Shell-command blocklist is substring-match, trivially bypassed | P0 | H | S | Done |
+| SEC-003 | security | LLM-gateway `/v1/chat/completions` unauthenticated on all interfaces | P0 | H | M | Done |
+| SEC-004 | security | Memory-service and cortex expose all endpoints with no auth | P0 | H | S | Done |
 | SEC-005 | security | Default admin secret + Postgres password survive non-wizard install | P0 | H | S | Done |
 | SEC-006 | security | Recovery-service writable `.env` mount + docker socket (`:ro` is cosmetic) | P0 | M | M | Open |
 | SEC-007 | security | Google OAuth flow lacks CSRF `state` parameter | P1 | M | S | Open |
@@ -105,7 +105,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
 | AQ-001 | agent-quality | Critique agents fail-open on JSON parse errors (weaker models = more permissive pipeline) | P0 | H | S | Done |
-| AQ-002 | agent-quality | Outcome feedback only reinforces positive; bad engrams never lose activation | P0 | H | S | Open |
+| AQ-002 | agent-quality | Outcome feedback only reinforces positive; bad engrams never lose activation | P0 | H | S | Done |
 | AQ-003 | agent-quality | Guardrail findings not actionable — no `guardrail_refactor` loop, medium-severity tainted output ships | P0 | H | M | Done |
 | AQ-004 | agent-quality | `think_json` schema-validation failure returns raw dict; executor defaults (`.get("verdict","pass")`) are all permissive | P0 | H | S | Done |
 | AQ-005 | agent-quality | Self-Model Update (consolidation Phase 6) is a stub — only counts engrams, never updates self-model | P1 | M | M | Open |
@@ -231,6 +231,17 @@ Groups of findings that share a root cause — fixing one often unlocks several.
 ## Killed / explicitly-skipped
 
 Intentionally empty at Phase 0 close — nothing has been killed yet. As Phase 1 planning progresses, findings deferred indefinitely (or rejected after discussion) should be moved here with a one-line reason so future audits don't re-flag them.
+
+---
+
+## Post-Phase-0 follow-ups
+
+Items surfaced during Phase 1+ execution that weren't in the original audit. Tracked here so they don't fall through the cracks.
+
+| # | Surfaced in | Finding | Sev | Status |
+|---|---|---|---|---|
+| FU-001 | Phase 1.2 sprint | Chat appears broken over Tailscale (user-reported 2026-04-17). Investigate chat-api / chat-bridge paths. | P1 | Open |
+| FU-002 | Phase 1.2 sprint | Remove Claude subscription auth method (`claude_subscription_provider.py`). Anthropic deprecated the subscription OAuth flow for harnesses — API keys only going forward. | P1 | Open |
 
 ---
 
