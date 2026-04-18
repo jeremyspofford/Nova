@@ -49,11 +49,11 @@ async def create_agent(config: AgentConfig) -> AgentInfo:
         created_at=now,
     )
     redis = get_redis()
-    await redis.set(
-        AGENT_KEY.format(agent_id=agent_id),
-        info.model_dump_json(),
-        ex=86400,  # 24h TTL — prevents orphaned keys if agent crashes
-    )
+    # No TTL: agents are registered resources, not session state.
+    # Deletion is explicit via delete_agent(); a startup-time seed in
+    # ensure_primary_agent() rebuilds the primary if Redis is ever wiped.
+    # (Prior 24h TTL caused silent chat 503s after a day of uptime — FU-001.)
+    await redis.set(AGENT_KEY.format(agent_id=agent_id), info.model_dump_json())
     log.info("Created agent %s (%s)", agent_id, config.name)
     return info
 
@@ -73,7 +73,7 @@ async def update_agent_status(agent_id: str, status: AgentStatus) -> None:
     agent.status = status
     agent.last_active = datetime.now(timezone.utc)
     redis = get_redis()
-    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json(), ex=86400)
+    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json())
 
 
 async def list_agents() -> list[AgentInfo]:
@@ -149,7 +149,7 @@ async def update_agent_config(
     agent.config.fallback_models = fallback_models
     agent.last_active = datetime.now(timezone.utc)
     redis = get_redis()
-    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json(), ex=86400)
+    await redis.set(AGENT_KEY.format(agent_id=agent_id), agent.model_dump_json())
     log.info("Updated config for agent %s (%s)", agent_id, agent.config.name)
     return agent
 

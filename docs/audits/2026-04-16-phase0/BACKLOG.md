@@ -240,7 +240,7 @@ Items surfaced during Phase 1+ execution that weren't in the original audit. Tra
 
 | # | Surfaced in | Finding | Sev | Status |
 |---|---|---|---|---|
-| FU-001 | Phase 1.2 sprint | Chat appears broken over Tailscale (user-reported 2026-04-17). Investigate chat-api / chat-bridge paths. | P1 | Open |
+| FU-001 | Phase 1.2 sprint | Chat appears broken over Tailscale (user-reported 2026-04-17). **Root cause: 24h Redis TTL on `nova:agent:{id}` records silently expired the primary agent; `list_agents()` then returned `[]` and `POST /api/v1/chat/stream` 503'd with "No agents available — Nova is still starting up".** Not Tailscale-specific — affected all chat access once Nova had been running for a day. Fixed by removing the TTL in `orchestrator/app/store.py` (3 sites). | P0 | Done |
 | FU-002 | Phase 1.2 sprint | Remove Claude subscription auth method (`claude_subscription_provider.py`). Anthropic deprecated the subscription OAuth flow for harnesses — API keys only going forward. | P1 | Open |
 
 ---
