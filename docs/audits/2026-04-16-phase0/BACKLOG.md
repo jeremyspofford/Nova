@@ -241,7 +241,7 @@ Items surfaced during Phase 1+ execution that weren't in the original audit. Tra
 | # | Surfaced in | Finding | Sev | Status |
 |---|---|---|---|---|
 | FU-001 | Phase 1.2 sprint | Chat appears broken over Tailscale (user-reported 2026-04-17). **Root cause: 24h Redis TTL on `nova:agent:{id}` records silently expired the primary agent; `list_agents()` then returned `[]` and `POST /api/v1/chat/stream` 503'd with "No agents available — Nova is still starting up".** Not Tailscale-specific — affected all chat access once Nova had been running for a day. Fixed by removing the TTL in `orchestrator/app/store.py` (3 sites). | P0 | Done |
-| FU-002 | Phase 1.2 sprint | Remove Claude subscription auth method (`claude_subscription_provider.py`). Anthropic deprecated the subscription OAuth flow for harnesses — API keys only going forward. | P1 | Open |
+| FU-002 | Phase 1.2 sprint | Remove Claude subscription auth method (`claude_subscription_provider.py`). Anthropic **explicitly prohibited** third-party OAuth use as of Feb 19 2026; enforcement started Jan 2026 (sources: Claude Code legal-compliance page, The Register). Running the provider against api.anthropic.com with a Max/Pro token is an active ToS violation. Silently downgraded Sonnet 4.6 → Haiku 4.5 anyway. **Removed** in commit ca9b40e: provider file deleted, all claude-max/* registry/discovery/config references scrubbed, setup-wizard option removed, migration 059 cleans stale routing-map entries. | P0 | Done |
 
 ---
 
