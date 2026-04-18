@@ -25,6 +25,7 @@ IMPORTANCE_CEILING = 1.0
 MIN_OBSERVATIONS = 5
 EDGE_WEIGHT_BOOST = 0.02
 EDGE_WEIGHT_CEILING = 1.0
+EDGE_WEIGHT_FLOOR = 0.01   # Floor for negative-outcome edge decay (AQ-002)
 
 
 async def process_feedback(
@@ -35,9 +36,16 @@ async def process_feedback(
 
     Each entry: {"engram_id": "uuid", "outcome_score": float, "task_type": str}
 
-    Returns stats: {"activations": int, "recalibrations": int, "edges": int}
+    Returns stats: {"activations": int, "deactivations": int,
+                    "recalibrations": int, "edges": int, "edges_weakened": int}
     """
-    stats = {"activations": 0, "recalibrations": 0, "edges": 0}
+    stats = {
+        "activations": 0,
+        "deactivations": 0,
+        "recalibrations": 0,
+        "edges": 0,
+        "edges_weakened": 0,
+    }
 
     # Group by interaction — entries with the same task_type + outcome_score
     # were part of the same LLM call (they share an engram_ids list in one usage_event).
@@ -68,7 +76,11 @@ async def process_feedback(
         except ValueError:
             continue
 
-        # 1. Activation boost for positive outcomes
+        # 1. Symmetric activation adjustment (AQ-002).
+        # Positive outcome → boost toward 1.0; negative outcome → decay toward the
+        # floor at the same magnitude. Without the negative branch, a bad engram
+        # that retrieves often only gains activation, never loses it, so memory
+        # develops a strong positivity bias and can't "unlearn" bad retrievals.
         if score > POSITIVE_THRESHOLD:
             await session.execute(
                 text("""
@@ -80,6 +92,17 @@ async def process_feedback(
                 {"eid": eid_uuid, "boost": ACTIVATION_BOOST},
             )
             stats["activations"] += 1
+        elif score < NEGATIVE_THRESHOLD:
+            await session.execute(
+                text("""
+                    UPDATE engrams
+                    SET activation = GREATEST(:floor, activation - :boost * activation),
+                        updated_at = NOW()
+                    WHERE id = :eid
+                """),
+                {"eid": eid_uuid, "boost": ACTIVATION_BOOST, "floor": IMPORTANCE_FLOOR},
+            )
+            stats["deactivations"] += 1
 
         # 2. Update rolling outcome stats
         await session.execute(
@@ -130,47 +153,70 @@ async def process_feedback(
                     )
                     stats["recalibrations"] += 1
 
-    # 4. Outcome-driven Hebbian learning: strengthen edges between co-successful engrams
+    # 4. Outcome-driven Hebbian learning (AQ-002).
+    # Positive co-retrieval → strengthen edge. Negative co-retrieval → weaken
+    # edge (co-activated in a bad outcome, probably less related than thought).
+    # Neutral scores leave edges untouched.
     for _group_key, (score, eids) in interactions.items():
-        if score <= POSITIVE_THRESHOLD or len(eids) < 2:
+        if len(eids) < 2:
             continue
-        # Strengthen edges between all pairs
+        positive = score > POSITIVE_THRESHOLD
+        negative = score < NEGATIVE_THRESHOLD
+        if not (positive or negative):
+            continue
         for i, eid_a in enumerate(eids):
             for eid_b in eids[i + 1:]:
                 try:
                     a_uuid, b_uuid = UUID(eid_a), UUID(eid_b)
                 except ValueError:
                     continue
-                # Update existing edge or create new co-activation edge
-                result = await session.execute(
-                    text("""
-                        UPDATE engram_edges
-                        SET weight = LEAST(:ceiling, weight + :boost),
-                            co_activations = co_activations + 1,
-                            last_co_activated = NOW()
-                        WHERE (source_id = :a AND target_id = :b)
-                           OR (source_id = :b AND target_id = :a)
-                        RETURNING id
-                    """),
-                    {
-                        "a": a_uuid, "b": b_uuid,
-                        "boost": EDGE_WEIGHT_BOOST,
-                        "ceiling": EDGE_WEIGHT_CEILING,
-                    },
-                )
-                if not result.fetchone():
-                    # No existing edge — create one from co-retrieval
+                if positive:
+                    result = await session.execute(
+                        text("""
+                            UPDATE engram_edges
+                            SET weight = LEAST(:ceiling, weight + :boost),
+                                co_activations = co_activations + 1,
+                                last_co_activated = NOW()
+                            WHERE (source_id = :a AND target_id = :b)
+                               OR (source_id = :b AND target_id = :a)
+                            RETURNING id
+                        """),
+                        {
+                            "a": a_uuid, "b": b_uuid,
+                            "boost": EDGE_WEIGHT_BOOST,
+                            "ceiling": EDGE_WEIGHT_CEILING,
+                        },
+                    )
+                    if not result.fetchone():
+                        # No existing edge — create one from co-retrieval
+                        await session.execute(
+                            text("""
+                                INSERT INTO engram_edges (source_id, target_id, relation, weight, co_activations, last_co_activated)
+                                VALUES (:a, :b, 'related_to', :boost, 2, NOW())
+                                ON CONFLICT (source_id, target_id, relation) DO UPDATE
+                                SET co_activations = engram_edges.co_activations + 1,
+                                    last_co_activated = NOW()
+                            """),
+                            {"a": a_uuid, "b": b_uuid, "boost": EDGE_WEIGHT_BOOST},
+                        )
+                    stats["edges"] += 1
+                else:  # negative
+                    # Weaken existing edges only — don't create new ones for bad outcomes.
                     await session.execute(
                         text("""
-                            INSERT INTO engram_edges (source_id, target_id, relation, weight, co_activations, last_co_activated)
-                            VALUES (:a, :b, 'related_to', :boost, 2, NOW())
-                            ON CONFLICT (source_id, target_id, relation) DO UPDATE
-                            SET co_activations = engram_edges.co_activations + 1,
+                            UPDATE engram_edges
+                            SET weight = GREATEST(:floor, weight - :boost),
                                 last_co_activated = NOW()
+                            WHERE (source_id = :a AND target_id = :b)
+                               OR (source_id = :b AND target_id = :a)
                         """),
-                        {"a": a_uuid, "b": b_uuid, "boost": EDGE_WEIGHT_BOOST},
+                        {
+                            "a": a_uuid, "b": b_uuid,
+                            "boost": EDGE_WEIGHT_BOOST,
+                            "floor": EDGE_WEIGHT_FLOOR,
+                        },
                     )
-                stats["edges"] += 1
+                    stats["edges_weakened"] += 1
 
     await session.commit()
     return stats
