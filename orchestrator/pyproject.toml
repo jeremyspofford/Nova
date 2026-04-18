@@ -35,3 +35,11 @@ asyncio_mode = "auto"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+# Path-map the two in-repo packages so `uv run pytest` works locally without
+# every caller having to pass --no-project --with /path/... for each.
+# The Docker build bypasses uv entirely (COPY + pip install), so this is
+# dev-only and doesn't affect the production image.
+[tool.uv.sources]
+nova-contracts = { path = "../nova-contracts", editable = true }
+nova-worker-common = { path = "../nova-worker-common", editable = true }

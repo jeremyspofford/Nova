@@ -80,13 +80,14 @@ async def test_streaming_captures_token_counts():
     with (
         patch("app.agents.runner.get_llm_client", return_value=mock_llm_client),
         patch("app.agents.runner.get_memory_client", return_value=AsyncMock()),
-        patch("app.agents.runner._get_memory_context", new_callable=AsyncMock, return_value=""),
+        patch("app.agents.runner._get_memory_context", new_callable=AsyncMock, return_value=("", 0, [], [], None)),
         patch("app.agents.runner._build_nova_context", new_callable=AsyncMock, return_value=""),
         patch("app.agents.runner._store_exchange", new_callable=AsyncMock),
         patch("app.agents.runner._resolve_tool_rounds", new_callable=AsyncMock, return_value=(
             [{"role": "user", "content": "hi"}], False
         )),
-        patch("app.agents.runner.log_usage", side_effect=capture_usage),
+        patch("app.agents.runner.resolve_effective_tools", new_callable=AsyncMock, return_value=([], [])),
+        patch("app.usage.log_usage", side_effect=capture_usage),
     ):
         from uuid import UUID
         from app.agents.runner import run_agent_turn_streaming
@@ -102,7 +103,10 @@ async def test_streaming_captures_token_counts():
         ):
             deltas.append(d)
 
-    assert deltas == ["Hello", " world"]
+    # Runner mixes status JSON events ({"status": ...}) with text deltas.
+    # The test's assertion here is that text deltas flow through to the caller.
+    text_deltas = [d for d in deltas if not (d.startswith("{") and '"status"' in d)]
+    assert text_deltas == ["Hello", " world"]
     assert len(usage_calls) == 1
     assert usage_calls[0]["input_tokens"] == 50
     assert usage_calls[0]["output_tokens"] == 10
@@ -129,13 +133,14 @@ async def test_streaming_zero_tokens_when_no_usage():
     with (
         patch("app.agents.runner.get_llm_client", return_value=mock_llm_client),
         patch("app.agents.runner.get_memory_client", return_value=AsyncMock()),
-        patch("app.agents.runner._get_memory_context", new_callable=AsyncMock, return_value=""),
+        patch("app.agents.runner._get_memory_context", new_callable=AsyncMock, return_value=("", 0, [], [], None)),
         patch("app.agents.runner._build_nova_context", new_callable=AsyncMock, return_value=""),
         patch("app.agents.runner._store_exchange", new_callable=AsyncMock),
         patch("app.agents.runner._resolve_tool_rounds", new_callable=AsyncMock, return_value=(
             [{"role": "user", "content": "hi"}], False
         )),
-        patch("app.agents.runner.log_usage", side_effect=capture_usage),
+        patch("app.agents.runner.resolve_effective_tools", new_callable=AsyncMock, return_value=([], [])),
+        patch("app.usage.log_usage", side_effect=capture_usage),
     ):
         from uuid import UUID
         from app.agents.runner import run_agent_turn_streaming
