@@ -153,5 +153,12 @@ class Settings(BaseSettings):
     gateway_public_url: str = "http://localhost:8001/v1"
     require_auth: bool = False
 
+    # Admin auth (SEC-003) — shared rotated secret; Redis-backed with env fallback.
+    # Orchestrator's POST /api/v1/admin/rotate-secret writes the live value into
+    # Redis db1 at nova:config:auth.admin_secret; the AdminSecretResolver here
+    # re-reads it on a 30s cache, so no restart is needed after rotation.
+    nova_admin_secret: str = ""
+    trusted_network_cidrs: str = ""  # empty = default list from nova_worker_common
+
 
 settings = Settings()

@@ -5,6 +5,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 
 WORKDIR /app
 
+COPY nova-worker-common /nova-worker-common
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir /nova-worker-common
+
 COPY cortex/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .

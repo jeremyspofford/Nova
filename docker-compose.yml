@@ -186,6 +186,8 @@ services:
       DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL:-llama3.2}
       DEFAULT_EMBED_MODEL: nomic-embed-text
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-}
+      TRUSTED_NETWORK_CIDRS: ${TRUSTED_NETWORK_CIDRS:-}
       # ── Remote Ollama + WoL + routing ────────────────────────────────────────
       WOL_MAC_ADDRESS: ${WOL_MAC_ADDRESS:-}
       WOL_BROADCAST_IP: ${WOL_BROADCAST_IP:-255.255.255.255}
@@ -236,7 +238,11 @@ services:
     #   - ${HOME}/.codex:/root/.codex:ro
     #   - ${HOME}/.config/gcloud:/root/.config/gcloud:ro
     ports:
-      - "8001:8001"
+      # Loopback-only by default (SEC-003). External access goes through
+      # the dashboard proxy or the orchestrator; IDE plugins on this host
+      # still reach it via localhost:8001. Override with LLM_GATEWAY_BIND
+      # to "0.0.0.0:" if you need direct LAN/Tailscale access.
+      - "${LLM_GATEWAY_BIND:-127.0.0.1:}8001:8001"
     depends_on:
       redis:
         condition: service_healthy
@@ -262,10 +268,14 @@ services:
       EMBEDDING_MODEL: nomic-embed-text
       EMBEDDING_DIMENSIONS: "768"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-}
+      TRUSTED_NETWORK_CIDRS: ${TRUSTED_NETWORK_CIDRS:-}
     volumes:
       - ./data/sources:/data/sources
     ports:
-      - "8002:8002"
+      # Loopback-only by default (SEC-004). Dashboard/orchestrator reach it
+      # via Docker DNS. Override with MEMORY_SERVICE_BIND to expose externally.
+      - "${MEMORY_SERVICE_BIND:-127.0.0.1:}8002:8002"
     depends_on:
       postgres:
         condition: service_healthy
@@ -362,8 +372,12 @@ services:
     volumes:
       - ${NOVA_WORKSPACE:-${HOME}/.nova/workspace}:/workspace:rw
       - .:/nova:rw
-      - ${HOME}:${HOME}:rw
-      - /:/host-root:rw
+      # home tier is admin-opt-in (sandbox.home_enabled in platform_config).
+      # Dropped 2026-04-17 / SEC-001: the /:/host-root:rw mount (the
+      # `root` sandbox tier was RCE-by-design against any prompt injection).
+      # Override with NOVA_HOME_MOUNT=ro if you want to lock home tier to
+      # read-only at the mount layer (defence-in-depth on top of the UI toggle).
+      - ${HOME}:${HOME}:${NOVA_HOME_MOUNT:-rw}
     ports:
       - "8000:8000"
     depends_on:
@@ -547,6 +561,7 @@ services:
       MEMORY_SERVICE_URL: http://memory-service:8002
       RECOVERY_URL: http://recovery:8888
       NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
+      TRUSTED_NETWORK_CIDRS: ${TRUSTED_NETWORK_CIDRS:-}
       CORTEX_ENABLED: ${CORTEX_ENABLED:-true}
       CORTEX_CYCLE_INTERVAL: ${CORTEX_CYCLE_INTERVAL:-300}
       CORTEX_DAILY_BUDGET_USD: ${CORTEX_DAILY_BUDGET_USD:-5.00}
@@ -557,7 +572,8 @@ services:
       CORTEX_IDLE_CONSOLIDATION: ${CORTEX_IDLE_CONSOLIDATION:-true}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "8100:8100"
+      # Loopback-only by default (SEC-004). Override with CORTEX_BIND if needed.
+      - "${CORTEX_BIND:-127.0.0.1:}8100:8100"
     depends_on:
       postgres:
         condition: service_healthy
@@ -609,7 +625,8 @@ services:
       NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
-      - "8110:8110"
+      # Loopback-only — intel-worker only serves a health endpoint.
+      - "${INTEL_WORKER_BIND:-127.0.0.1:}8110:8110"
     depends_on:
       orchestrator:
         condition: service_healthy
@@ -661,7 +678,8 @@ services:
       MAX_CRAWL_PAGES: ${MAX_CRAWL_PAGES:-50}
       MAX_LLM_CALLS_PER_CRAWL: ${MAX_LLM_CALLS_PER_CRAWL:-60}
     ports:
-      - "8120:8120"
+      # Loopback-only — knowledge-worker only serves a health endpoint.
+      - "${KNOWLEDGE_WORKER_BIND:-127.0.0.1:}8120:8120"
     depends_on:
       orchestrator:
         condition: service_healthy
@@ -714,7 +732,8 @@ services:
       NOVA_ADMIN_SECRET: ${NOVA_ADMIN_SECRET:-nova-admin-secret-change-me}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3001,http://localhost:5173}
     ports:
-      - "8130:8130"
+      # Loopback-only — dashboard proxies voice via nginx → docker-net DNS.
+      - "${VOICE_SERVICE_BIND:-127.0.0.1:}8130:8130"
     depends_on:
       redis:
         condition: service_healthy

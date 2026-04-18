@@ -6,6 +6,10 @@ COPY nova-contracts /nova-contracts
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir /nova-contracts
 
+COPY nova-worker-common /nova-worker-common
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir /nova-worker-common
+
 COPY llm-gateway/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .

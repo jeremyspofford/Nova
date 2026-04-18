@@ -23,6 +23,8 @@ class Settings:
 
     # Auth — cortex uses its own API key to talk to orchestrator
     admin_secret: str = os.getenv("NOVA_ADMIN_SECRET", "nova-admin-secret-change-me")
+    # Trusted-network CIDRs for SEC-004 ingress auth. Empty = default list.
+    trusted_network_cidrs: str = os.getenv("TRUSTED_NETWORK_CIDRS", "")
 
     # Thinking cycle
     cycle_interval_seconds: int = int(os.getenv("CORTEX_CYCLE_INTERVAL", "300"))

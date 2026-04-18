@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     service_port: int = 8002
     log_level: str = "INFO"
 
+    # Admin auth (SEC-004) — same pattern as llm-gateway + orchestrator.
+    # Redis-backed rotatable secret + trusted-network bypass.
+    nova_admin_secret: str = ""
+    trusted_network_cidrs: str = ""  # empty = default list from nova_worker_common
+
 
 settings = Settings()
 

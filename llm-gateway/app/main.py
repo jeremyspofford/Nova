@@ -4,9 +4,16 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nova_contracts.logging import configure_logging
+from nova_worker_common.admin_secret import AdminSecretResolver
+from nova_worker_common.service_auth import (
+    TrustedNetworkMiddleware,
+    create_admin_auth_dep,
+    load_trusted_cidrs_from_env,
+    parse_cidrs,
+)
 
 from app.config import settings
 from app.discovery import discovery_router
@@ -58,6 +65,7 @@ async def lifespan(app: FastAPI):
     from app.registry import close_strategy_redis
     await close_discovery_redis()
     await close_strategy_redis()
+    await _admin_resolver.close()
 
 
 app = FastAPI(
@@ -67,6 +75,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Auth (SEC-003) ───────────────────────────────────────────────────────────
+# Service-level auth: trusted-network bypass (Docker internal, Tailscale, LAN)
+# OR X-Admin-Secret. Health endpoints stay open for Docker healthchecks +
+# dashboard startup probes. See nova_worker_common/service_auth.py.
+_trusted_cidrs = parse_cidrs(settings.trusted_network_cidrs) if settings.trusted_network_cidrs else load_trusted_cidrs_from_env()
+_admin_resolver = AdminSecretResolver(redis_url=settings.redis_url, fallback=settings.nova_admin_secret)
+_admin_auth = create_admin_auth_dep(_admin_resolver)
+
+app.add_middleware(TrustedNetworkMiddleware, trusted_cidrs=_trusted_cidrs)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()],
@@ -74,8 +92,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health routes stay open — used by Docker healthcheck + dashboard startup screen.
 app.include_router(health_router)
 app.include_router(health_router, prefix="/v1")  # also expose at /v1/health/* for dashboard proxy
-app.include_router(discovery_router, prefix="/v1")  # /v1/models/discover, /v1/models/ollama/*
-app.include_router(router)
-app.include_router(openai_router)  # mounts at /v1/chat/completions, /v1/models
+# All other routes require auth.
+app.include_router(discovery_router, prefix="/v1", dependencies=[Depends(_admin_auth)])
+app.include_router(router, dependencies=[Depends(_admin_auth)])
+app.include_router(openai_router, dependencies=[Depends(_admin_auth)])

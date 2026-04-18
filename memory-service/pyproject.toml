@@ -19,6 +19,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "python-multipart>=0.0.9",
     "nova-contracts",
+    "nova-worker-common",
     "tiktoken>=0.7",
     "tenacity>=9.0",
     "torch>=2.0,<3.0",

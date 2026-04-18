@@ -2,8 +2,15 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from nova_worker_common.admin_secret import AdminSecretResolver
+from nova_worker_common.service_auth import (
+    TrustedNetworkMiddleware,
+    create_admin_auth_dep,
+    load_trusted_cidrs_from_env,
+    parse_cidrs,
+)
 
 from .clients import init_clients, close_clients
 from .config import settings
@@ -59,6 +66,7 @@ async def lifespan(app: FastAPI):
     await close_clients()
     await close_redis()
     await close_budget_redis()
+    await _admin_resolver.close()
     await close_pool()
 
 
@@ -69,6 +77,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Auth (SEC-004) ───────────────────────────────────────────────────────────
+_trusted_cidrs = parse_cidrs(settings.trusted_network_cidrs) if settings.trusted_network_cidrs else load_trusted_cidrs_from_env()
+_admin_resolver = AdminSecretResolver(redis_url=settings.redis_url, fallback=settings.admin_secret)
+_admin_auth = create_admin_auth_dep(_admin_resolver)
+
+app.add_middleware(TrustedNetworkMiddleware, trusted_cidrs=_trusted_cidrs)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -76,5 +91,5 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(health_router)
-app.include_router(cortex_router)
+app.include_router(health_router)  # open
+app.include_router(cortex_router, dependencies=[Depends(_admin_auth)])

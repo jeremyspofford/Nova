@@ -7,8 +7,15 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from nova_contracts.logging import configure_logging
+from nova_worker_common.admin_secret import AdminSecretResolver
+from nova_worker_common.service_auth import (
+    TrustedNetworkMiddleware,
+    create_admin_auth_dep,
+    load_trusted_cidrs_from_env,
+    parse_cidrs,
+)
 
 from app.config import settings
 from app.db.database import AsyncSessionLocal, run_schema_migrations
@@ -54,6 +61,7 @@ async def lifespan(app: FastAPI):
     except asyncio.TimeoutError:
         log.warning("Shutdown grace period expired — some tasks may not have completed")
     await close_embedding_redis()
+    await _admin_resolver.close()
     log.info("Memory Service shutdown complete")
 
 
@@ -75,8 +83,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.include_router(health_router)
-app.include_router(engram_router)
+# ── Auth (SEC-004) ───────────────────────────────────────────────────────────
+_trusted_cidrs = parse_cidrs(settings.trusted_network_cidrs) if settings.trusted_network_cidrs else load_trusted_cidrs_from_env()
+_admin_resolver = AdminSecretResolver(redis_url=settings.redis_url, fallback=settings.nova_admin_secret)
+_admin_auth = create_admin_auth_dep(_admin_resolver)
+
+app.add_middleware(TrustedNetworkMiddleware, trusted_cidrs=_trusted_cidrs)
+
+app.include_router(health_router)  # open
+app.include_router(engram_router, dependencies=[Depends(_admin_auth)])
 
 
 async def _warmup_embedding():

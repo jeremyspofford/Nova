@@ -11,6 +11,10 @@ COPY nova-contracts /nova-contracts
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-cache-dir /nova-contracts
 
+COPY nova-worker-common /nova-worker-common
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir /nova-worker-common
+
 COPY memory-service/pyproject.toml .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install torch --index-url https://download.pytorch.org/whl/cpu && \
