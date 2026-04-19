@@ -974,12 +974,24 @@ export function Goals() {
   const recMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       updateRecommendation(id, { status }),
-    onSuccess: () => {
+    onSuccess: (_rec, { status }) => {
       qc.invalidateQueries({ queryKey: ['intel-recs'] })
       qc.invalidateQueries({ queryKey: ['intel-stats'] })
-      // Approving a recommendation creates a goal — refresh the goals list too
       qc.invalidateQueries({ queryKey: ['goals'] })
       qc.invalidateQueries({ queryKey: ['goal-stats'] })
+      if (status === 'approved') {
+        addToast({ variant: 'success', message: 'Goal created from recommendation' })
+      } else if (status === 'deferred') {
+        addToast({ variant: 'info', message: 'Recommendation deferred' })
+      } else if (status === 'dismissed') {
+        addToast({ variant: 'info', message: 'Recommendation declined' })
+      }
+    },
+    onError: (err) => {
+      addToast({
+        variant: 'error',
+        message: err instanceof Error ? err.message : 'Failed to update recommendation',
+      })
     },
   })
 

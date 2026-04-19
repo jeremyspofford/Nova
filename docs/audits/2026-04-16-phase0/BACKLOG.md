@@ -24,7 +24,7 @@ Synthesized from the nine axis reports in this folder. **Default sort: Severity 
 These rise to the top of the sort because they're severe, high-impact for daily-driver use, and each is small-to-medium effort.
 
 1. **REL-001** — Reaper infinite-loops on `task_running → queued` (state machine rejects transition) — actively spamming errors on your running stack right now
-2. **PERF-001** — `/engrams/context` takes 6–14s on every chat turn — largest fixed latency in Nova
+2. **PERF-001** — ~~`/engrams/context` takes 6–14s on every chat turn~~ **Resolved 2026-04-18** — stale Ollama URL was root cause; current latency ~150ms typical
 3. **PERF-002** — Embeddings falling back to cloud Gemini every call (`inference.backend=none`) — root cause of PERF-001 and PERF-003, also a privacy leak
 4. **AQ-001** — Critique agents fail-open on JSON parse errors — weaker models get more-permissive pipeline (backwards)
 5. **AQ-002** — Outcome feedback only reinforces positive engrams; bad engrams never lose activation (one-sided learning loop)
@@ -159,7 +159,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| PERF-001 | performance | `/api/v1/engrams/context` takes 6–14s per call — blocks every chat message | P0 | H | M | Open |
+| PERF-001 | performance | `/api/v1/engrams/context` takes 6–14s per call — blocks every chat message (audit bug — actual latency is ~150ms typical after stale Ollama URL cleanup on 2026-04-18, occasional 1–2s spikes from Ollama queue contention) | P0 | H | M | Resolved |
 | PERF-002 | performance | Embeddings fall back to cloud Gemini on every call (Ollama stopped, routing `cloud-only`) | P0 | H | M | Done |
 | PERF-003 | performance | Consolidation cycles run 65–110s, hold a single AsyncSession, starve chat | P0 | M | L | Open |
 | PERF-004 | performance | Spreading-activation recursive CTE missing tenant filter on recursive step; `OR` join won't scale | P1 | L | S | Open |
