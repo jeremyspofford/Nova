@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
 import { Brain, ChevronRight, Globe, HeartPulse, Lightbulb, Plus, Rss, Users } from 'lucide-react'
 import clsx from 'clsx'
 import { getKnowledgeSources, getKnowledgeStats, getIntelStats, getIntelRecommendations, updateRecommendation, getDomainSummary, type KnowledgeSource, type IntelRecommendation } from '../api'
 import { useTabHash } from '../hooks/useTabHash'
 import { PageHeader } from '../components/layout/PageHeader'
-import { Badge, Card, Metric, Tabs, Button, EmptyState, Skeleton } from '../components/ui'
+import { Badge, Card, Metric, Tabs, Button, EmptyState, Skeleton, Toast, type ToastVariant } from '../components/ui'
 import { SourceCard } from '../components/sources/SourceCard'
 import { AddSourceModal } from '../components/sources/AddSourceModal'
 import { CredentialManager } from '../components/sources/CredentialManager'
@@ -335,12 +336,34 @@ function RecommendationsTab({ onManageFeeds }: { onManageFeeds: () => void }) {
     staleTime: 10_000,
   })
 
+  const navigate = useNavigate()
+  const [toast, setToast] = useState<{ variant: ToastVariant; message: string; action?: { label: string; onClick: () => void } } | null>(null)
+
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       updateRecommendation(id, { status }),
-    onSuccess: () => {
+    onSuccess: (rec, { status }) => {
       qc.invalidateQueries({ queryKey: ['intel-recs'] })
       qc.invalidateQueries({ queryKey: ['intel-stats'] })
+      if (status === 'approved') {
+        qc.invalidateQueries({ queryKey: ['goals'] })
+        qc.invalidateQueries({ queryKey: ['goal-stats'] })
+        setToast({
+          variant: 'success',
+          message: 'Goal created from recommendation',
+          action: { label: 'View goal', onClick: () => navigate('/goals') },
+        })
+      } else if (status === 'deferred') {
+        setToast({ variant: 'info', message: 'Recommendation deferred' })
+      } else if (status === 'dismissed') {
+        setToast({ variant: 'info', message: 'Recommendation declined' })
+      }
+    },
+    onError: (err) => {
+      setToast({
+        variant: 'error',
+        message: err instanceof Error ? err.message : 'Failed to update recommendation',
+      })
     },
   })
 
@@ -445,6 +468,17 @@ function RecommendationsTab({ onManageFeeds }: { onManageFeeds: () => void }) {
               onStatusChange={handleStatusChange(rec.id)}
             />
           ))}
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm">
+          <Toast
+            variant={toast.variant}
+            message={toast.message}
+            action={toast.action}
+            onDismiss={() => setToast(null)}
+          />
         </div>
       )}
     </div>
