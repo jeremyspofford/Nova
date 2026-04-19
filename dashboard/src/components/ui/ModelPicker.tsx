@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback, useMemo, Fragment } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useLayoutEffect, Fragment } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Check } from 'lucide-react'
 import clsx from 'clsx'
 
@@ -21,6 +22,10 @@ type ModelPickerProps = {
   buttonClassName?: string
 }
 
+const GAP = 4
+const MAX_DROPDOWN_HEIGHT = 240 // matches max-h-60
+const MAX_DROPDOWN_WIDTH = 448 // matches max-w-[28rem]
+
 export function ModelPicker({
   value,
   onChange,
@@ -30,8 +35,9 @@ export function ModelPicker({
   buttonClassName,
 }: ModelPickerProps) {
   const [open, setOpen] = useState(false)
-  const [flipUp, setFlipUp] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; minWidth: number } | null>(null)
 
   const groups = useMemo<ModelGroup[]>(() => {
     const map = new Map<string, ModelItem[]>()
@@ -46,10 +52,52 @@ export function ModelPicker({
 
   const hasGroups = groups.some(g => g.provider !== '')
 
-  const handleClickOutside = useCallback((e: MouseEvent) => {
-    if (ref.current && !ref.current.contains(e.target as Node)) {
-      setOpen(false)
+  const computePos = useCallback(() => {
+    if (!triggerRef.current) return
+    const trigger = triggerRef.current.getBoundingClientRect()
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    // Clamp horizontally assuming dropdown will take the max width that fits
+    // the viewport (CSS caps at MAX_DROPDOWN_WIDTH on desktop, viewport-8px on
+    // narrower screens).
+    const spaceBelow = vh - trigger.bottom - GAP
+    const spaceAbove = trigger.top - GAP
+    const flipUp = spaceBelow < MAX_DROPDOWN_HEIGHT && spaceAbove > spaceBelow
+    const effectiveWidth = Math.min(MAX_DROPDOWN_WIDTH, vw - 2 * GAP)
+    const maxLeft = vw - effectiveWidth - GAP
+    let left = Math.min(trigger.left, maxLeft)
+    left = Math.max(GAP, left)
+    // Anchor bottom-up when flipping, top-down otherwise. CSS handles the
+    // rest regardless of actual dropdown height.
+    if (flipUp) {
+      setPos({ bottom: vh - trigger.top + GAP, left, minWidth: trigger.width })
+    } else {
+      setPos({ top: trigger.bottom + GAP, left, minWidth: trigger.width })
     }
+  }, [])
+
+  useLayoutEffect(() => {
+    if (!open) return
+    // First pass: estimate position so dropdown can render
+    computePos()
+    // Second pass: once dropdown is in DOM, re-measure with its actual size
+    const raf = requestAnimationFrame(() => computePos())
+    const onScroll = () => computePos()
+    const onResize = () => computePos()
+    window.addEventListener('scroll', onScroll, true)
+    window.addEventListener('resize', onResize)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', onScroll, true)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [open, computePos])
+
+  const handleClickOutside = useCallback((e: MouseEvent) => {
+    const t = e.target as Node
+    if (triggerRef.current?.contains(t)) return
+    if (dropdownRef.current?.contains(t)) return
+    setOpen(false)
   }, [])
 
   useEffect(() => {
@@ -65,25 +113,16 @@ export function ModelPicker({
       ? 'Auto'
       : models.find((m) => m.id === value)?.id || value || 'Select model...'
 
-  const toggleOpen = () => {
-    if (!open && ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      const spaceBelow = window.innerHeight - rect.bottom
-      setFlipUp(spaceBelow < 260)
-    }
-    setOpen((v) => !v)
-  }
-
   const handleSelect = (id: string) => {
     onChange(id)
     setOpen(false)
   }
 
   return (
-    <div ref={ref} className={clsx('relative', className)}>
+    <div ref={triggerRef} className={clsx('relative', className)}>
       <button
         type="button"
-        onClick={toggleOpen}
+        onClick={() => setOpen(v => !v)}
         className={clsx(
           buttonClassName ?? 'flex items-center justify-between gap-2 w-full h-9 rounded-sm border border-border bg-surface-input px-3 text-compact text-content-primary',
           'outline-none transition-colors duration-fast',
@@ -100,11 +139,19 @@ export function ModelPicker({
         />
       </button>
 
-      {open && (
-        <div className={clsx(
-          'absolute left-0 z-40 min-w-full w-max max-w-[28rem] bg-surface-card border border-border rounded-lg shadow-lg py-1 max-h-60 overflow-y-auto custom-scrollbar animate-fade-in glass-overlay dark:border-white/[0.10]',
-          flipUp ? 'bottom-full mb-1' : 'top-full mt-1',
-        )}>
+      {open && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={dropdownRef}
+          style={{
+            position: 'fixed',
+            top: pos?.top,
+            bottom: pos?.bottom,
+            left: pos?.left ?? -9999,
+            minWidth: pos?.minWidth,
+            visibility: pos ? 'visible' : 'hidden',
+          }}
+          className="z-[60] w-max max-w-[calc(100vw-8px)] sm:max-w-[28rem] bg-surface-card border border-border rounded-lg shadow-lg py-1 max-h-60 overflow-y-auto custom-scrollbar animate-fade-in glass-overlay dark:border-white/[0.10]"
+        >
           {showAuto && (
             <button
               type="button"
@@ -144,7 +191,8 @@ export function ModelPicker({
               ))}
             </Fragment>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
