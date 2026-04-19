@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Search, X, ChevronRight, Network, Settings, Palette } from 'lucide-react'
-import { apiFetch } from '../api'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Search, X, ChevronRight, Network, Settings, Palette, Trash2 } from 'lucide-react'
+import { apiFetch, deleteEngram } from '../api'
 import { useLocalStorage } from '../hooks/useLocalStorage'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
+import { useToast } from '../components/ToastProvider'
 import { BrainChat } from '../components/BrainChat'
 import { ForceGraph3D } from '../components/ForceGraph3D'
 import type { ForceGraph3DHandle } from '../components/ForceGraph3D'
@@ -120,8 +121,12 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
   const { avatarUrl } = useNovaIdentity()
   const [sidebarCollapsed] = useLocalStorage('nova-sidebar-collapsed', false)
 
+  const qc = useQueryClient()
+  const { addToast } = useToast()
+
   // UI state
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [confirmingForget, setConfirmingForget] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const layout = 'clustered'
   const [searchQuery, setSearchQuery] = useState('')
@@ -292,6 +297,29 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
     enabled: !!selectedNode,
     staleTime: 60_000,
   })
+
+  const forgetMutation = useMutation({
+    mutationFn: deleteEngram,
+    onSuccess: () => {
+      addToast({ variant: 'success', message: 'Engram forgotten' })
+      setSelectedNode(null)
+      setConfirmingForget(false)
+      qc.invalidateQueries({ queryKey: ['brain-graph'] })
+      qc.invalidateQueries({ queryKey: ['brain-graph-search'] })
+      qc.invalidateQueries({ queryKey: ['engram-stats'] })
+    },
+    onError: (err) => {
+      addToast({
+        variant: 'error',
+        message: err instanceof Error ? err.message : 'Failed to forget engram',
+      })
+    },
+  })
+
+  // Reset confirmation when navigating to a different node
+  useEffect(() => {
+    setConfirmingForget(false)
+  }, [selectedNode])
 
   // Merge: overlay full detail fields onto graph node data
   const selectedNodeData = selectedNodeBasic
@@ -898,6 +926,45 @@ export default function Brain({ hidden = false }: { hidden?: boolean }) {
                   </div>
                 ) : (
                   <p className="text-[11px] text-stone-600">No connections in this subgraph</p>
+                )}
+              </div>
+
+              {/* Forget */}
+              <div className="pt-3 border-t border-white/5">
+                {confirmingForget ? (
+                  <div className="space-y-2">
+                    <p className="text-[11px] text-red-300 leading-relaxed">
+                      Permanently forget this engram? Its edges will be removed. This cannot be undone.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={forgetMutation.isPending}
+                        onClick={() => forgetMutation.mutate(selectedNodeData.id)}
+                        className="flex-1 flex items-center justify-center gap-1.5 text-xs text-white bg-red-600/80 hover:bg-red-600 disabled:opacity-50 rounded-md py-1.5 transition-colors"
+                      >
+                        <Trash2 size={12} />
+                        {forgetMutation.isPending ? 'Forgetting…' : 'Confirm forget'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={forgetMutation.isPending}
+                        onClick={() => setConfirmingForget(false)}
+                        className="flex-1 text-xs text-stone-400 hover:text-stone-200 bg-white/5 hover:bg-white/10 rounded-md py-1.5 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingForget(true)}
+                    className="w-full flex items-center justify-center gap-1.5 text-xs text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-md py-1.5 transition-colors"
+                  >
+                    <Trash2 size={12} />
+                    Forget this engram
+                  </button>
                 )}
               </div>
             </div>

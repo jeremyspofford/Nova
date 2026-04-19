@@ -731,6 +731,30 @@ async def get_engram_detail(engram_id: str):
     }
 
 
+@engram_router.delete("/engrams/{engram_id}", status_code=204)
+async def delete_engram(engram_id: str):
+    """Permanently delete an engram ("forget this").
+
+    Cascades:
+    - engram_edges rows with this engram as source or target → deleted (FK CASCADE)
+    - working_memory_slots referencing it → deleted (FK CASCADE)
+    - retrieval_log.engrams_surfaced/engrams_used arrays → dangling UUIDs remain
+      (client code filters missing engrams at read time; keeps retrieval analytics intact)
+    - sources → preserved (other engrams may still reference them)
+    """
+    async with get_db() as session:
+        result = await session.execute(
+            text("DELETE FROM engrams WHERE id = CAST(:id AS uuid) RETURNING id"),
+            {"id": engram_id},
+        )
+        if not result.fetchone():
+            from fastapi import HTTPException
+            raise HTTPException(404, "Engram not found")
+        await session.commit()
+    log.info("Deleted engram %s", engram_id)
+    return None
+
+
 # ── Phase 5: Neural Router Status & Mark-Used ─────────────────────────
 
 

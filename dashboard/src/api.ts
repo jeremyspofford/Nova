@@ -1127,6 +1127,9 @@ export const getDomainSummary = () =>
 export const getEngramDetail = (engramId: string) =>
   apiFetch<EngramDetail>(`/mem/api/v1/engrams/engrams/${engramId}`)
 
+export const deleteEngram = (engramId: string) =>
+  apiFetch<void>(`/mem/api/v1/engrams/engrams/${engramId}`, { method: 'DELETE' })
+
 // ── Engram Reindex ──────────────────────────────────────────────────────────
 
 export interface ReindexResponse {
