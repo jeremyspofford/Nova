@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { streamChat, discoverModels, resolveModel, apiFetch, getOrCreateActiveConversation, type ChatMessage, type ContentBlock, type StreamEvent } from '../../api'
+import { streamChat, discoverModels, resolveModel, apiFetch, getOrCreateActiveConversation, readCachedModelCatalog, type ChatMessage, type ContentBlock, type StreamEvent, type ProviderModelList } from '../../api'
 import { useChatStore, type Message } from '../../stores/chat-store'
 import { cleanToolArtifacts } from '../../utils/cleanToolArtifacts'
 import { useNovaIdentity } from '../../hooks/useNovaIdentity'
@@ -60,6 +60,8 @@ export function Chat() {
   const { data: providers } = useQuery({
     queryKey: ['model-catalog'],
     queryFn: () => discoverModels(),
+    initialData: (): ProviderModelList[] | undefined => readCachedModelCatalog()?.data,
+    initialDataUpdatedAt: () => readCachedModelCatalog()?.at,
     staleTime: 60_000,
   })
   const allModels = (providers ?? [])

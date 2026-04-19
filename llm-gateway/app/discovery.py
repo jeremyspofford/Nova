@@ -29,8 +29,9 @@ log = logging.getLogger(__name__)
 
 discovery_router = APIRouter(prefix="/models", tags=["discovery"])
 
-_CACHE_TTL = 300  # 5 minutes
-_DISCOVERY_TIMEOUT = 10.0  # per-provider timeout
+_CACHE_TTL = 300  # 5 minutes for successful discoveries
+_FAILURE_CACHE_TTL = 30  # 30 seconds for timeouts/errors — faster recovery
+_DISCOVERY_TIMEOUT = 5.0  # per-provider timeout (was 10.0)
 _PULL_TIMEOUT = 600.0  # 10 minutes for model pulls
 
 _redis: aioredis.Redis | None = None
@@ -417,19 +418,25 @@ async def _discover_provider(slug: str) -> list[DiscoveredModel]:
     if not fn:
         return []
 
+    failure = False
     try:
         models = await asyncio.wait_for(fn(), timeout=_DISCOVERY_TIMEOUT)
     except asyncio.TimeoutError:
         log.warning("Discovery timeout for %s", slug)
-        return []
+        models = []
+        failure = True
     except Exception as e:
         log.warning("Discovery failed for %s: %s", slug, e)
-        return []
+        models = []
+        failure = True
 
-    # Cache result
+    # Cache result — use a shorter TTL for failures so dead providers recover
+    # quickly when they come back online, but don't keep paying the full probe
+    # timeout on every request.
     try:
         r = await _get_redis()
-        await r.set(cache_key, json.dumps([m.model_dump() for m in models]), ex=_CACHE_TTL)
+        ttl = _FAILURE_CACHE_TTL if failure else _CACHE_TTL
+        await r.set(cache_key, json.dumps([m.model_dump() for m in models]), ex=ttl)
     except Exception:
         pass
 

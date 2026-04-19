@@ -662,8 +662,26 @@ export interface OllamaPulledModel {
   modified_at: string
 }
 
-export const discoverModels = (refresh = false) =>
-  apiFetch<ProviderModelList[]>(`/v1/models/discover${refresh ? '?refresh=true' : ''}`)
+export const MODEL_CATALOG_CACHE_KEY = 'nova_model_catalog_v1'
+export const MODEL_CATALOG_MAX_AGE_MS = 24 * 60 * 60_000
+
+export async function discoverModels(refresh = false): Promise<ProviderModelList[]> {
+  const data = await apiFetch<ProviderModelList[]>(`/v1/models/discover${refresh ? '?refresh=true' : ''}`)
+  try {
+    localStorage.setItem(MODEL_CATALOG_CACHE_KEY, JSON.stringify({ data, at: Date.now() }))
+  } catch {}
+  return data
+}
+
+export function readCachedModelCatalog(): { data: ProviderModelList[]; at: number } | null {
+  try {
+    const raw = localStorage.getItem(MODEL_CATALOG_CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { data: ProviderModelList[]; at: number }
+    if (!parsed.data || Date.now() - parsed.at > MODEL_CATALOG_MAX_AGE_MS) return null
+    return parsed
+  } catch { return null }
+}
 
 export interface ResolvedModel {
   model: string
