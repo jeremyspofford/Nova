@@ -173,8 +173,8 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
     ? (voice.silenceCountdown / voice.silenceTimeoutMs) * 100
     : 0
 
-  const iconBtn = 'flex items-center justify-center rounded-full p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated/70 transition-colors duration-fast'
-  const iconBtnActive = 'flex items-center justify-center rounded-full p-1.5 text-accent hover:text-accent-hover hover:bg-accent-dim transition-colors duration-fast'
+  const iconBtn = 'flex items-center justify-center rounded-full min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 p-2.5 md:p-1.5 text-content-tertiary hover:text-content-primary hover:bg-surface-elevated/70 transition-colors duration-fast'
+  const iconBtnActive = 'flex items-center justify-center rounded-full min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 p-2.5 md:p-1.5 text-accent hover:text-accent-hover hover:bg-accent-dim transition-colors duration-fast'
 
   return (
     <div ref={dropZoneRef} className="relative">
@@ -270,32 +270,36 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
         {/* Action row */}
         <div className="flex items-center justify-between px-3 pb-3 pt-1 gap-2">
           {/* Left: attach + feature toggles + output style */}
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1.5 md:gap-0.5">
             <Tooltip content="Attach file">
               <button type="button" onClick={openFilePicker} className={iconBtn}>
                 <Paperclip size={15} />
               </button>
             </Tooltip>
 
-            <Tooltip content={webSearchEnabled ? 'Web search on' : 'Web search'}>
-              <button
-                type="button"
-                onClick={() => setWebSearchEnabled(!webSearchEnabled)}
-                className={webSearchEnabled ? iconBtnActive : iconBtn}
-              >
-                <Globe size={15} />
-              </button>
-            </Tooltip>
+            <span className="hidden md:inline-flex">
+              <Tooltip content={webSearchEnabled ? 'Web search on' : 'Web search'}>
+                <button
+                  type="button"
+                  onClick={() => setWebSearchEnabled(!webSearchEnabled)}
+                  className={webSearchEnabled ? iconBtnActive : iconBtn}
+                >
+                  <Globe size={15} />
+                </button>
+              </Tooltip>
+            </span>
 
-            <Tooltip content={deepResearchEnabled ? 'Deep research on' : 'Deep research'}>
-              <button
-                type="button"
-                onClick={() => setDeepResearchEnabled(!deepResearchEnabled)}
-                className={deepResearchEnabled ? iconBtnActive : iconBtn}
-              >
-                <BookOpen size={15} />
-              </button>
-            </Tooltip>
+            <span className="hidden md:inline-flex">
+              <Tooltip content={deepResearchEnabled ? 'Deep research on' : 'Deep research'}>
+                <button
+                  type="button"
+                  onClick={() => setDeepResearchEnabled(!deepResearchEnabled)}
+                  className={deepResearchEnabled ? iconBtnActive : iconBtn}
+                >
+                  <BookOpen size={15} />
+                </button>
+              </Tooltip>
+            </span>
 
             <Tooltip content="Output style & instructions">
               <button
@@ -309,13 +313,15 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
           </div>
 
           {/* Right: text size + mute + model chip + manage + send/mic */}
-          <div className="flex items-center gap-1">
-            <Tooltip content={`Text size: ${textSize}`}>
-              <button type="button" onClick={cycleTextSize} className={`${iconBtn} gap-0.5`}>
-                <ALargeSmall size={14} />
-                <span className="text-[10px] font-mono">{TEXT_LABELS[textSize]}</span>
-              </button>
-            </Tooltip>
+          <div className="flex items-center gap-2 md:gap-1">
+            <span className="hidden md:inline-flex">
+              <Tooltip content={`Text size: ${textSize}`}>
+                <button type="button" onClick={cycleTextSize} className={`${iconBtn} gap-0.5`}>
+                  <ALargeSmall size={14} />
+                  <span className="text-[10px] font-mono">{TEXT_LABELS[textSize]}</span>
+                </button>
+              </Tooltip>
+            </span>
 
             {voice?.available && (
               <Tooltip content={voice.muted ? 'Unmute voice responses' : 'Mute voice responses'}>
@@ -333,15 +339,17 @@ export function ChatInput({ onSubmit, isStreaming, aiName, models, modelId, onMo
               value={modelId}
               onChange={onModelChange}
               models={models.map(m => ({ id: m.id, provider: m.provider }))}
-              className="max-w-[160px]"
-              buttonClassName="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-mono text-content-tertiary hover:text-content-primary hover:bg-surface-elevated/70 transition-colors duration-fast bg-transparent border-0 outline-none cursor-pointer truncate max-w-[160px]"
+              className="max-w-[200px] md:max-w-[160px]"
+              buttonClassName="flex items-center justify-center gap-1 min-h-[44px] md:min-h-0 px-3 py-2 md:px-2 md:py-1 rounded-full text-xs md:text-[11px] font-mono text-content-tertiary hover:text-content-primary hover:bg-surface-elevated/70 transition-colors duration-fast bg-transparent border-0 outline-none cursor-pointer truncate max-w-[200px] md:max-w-[160px]"
             />
 
-            <Tooltip content="Manage models">
-              <button type="button" onClick={onManageModels} className={iconBtn}>
-                <Settings2 size={13} />
-              </button>
-            </Tooltip>
+            <span className="hidden md:inline-flex">
+              <Tooltip content="Manage models">
+                <button type="button" onClick={onManageModels} className={iconBtn}>
+                  <Settings2 size={13} />
+                </button>
+              </Tooltip>
+            </span>
 
             <MorphButton
               hasText={!!input.trim()}
