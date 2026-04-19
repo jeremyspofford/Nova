@@ -91,7 +91,12 @@ class LiteLLMProvider(ModelProvider):
                 ))
 
         usage = response.usage
-        cost = litellm.completion_cost(completion_response=response) if usage else None
+        cost = None
+        if usage:
+            try:
+                cost = litellm.completion_cost(completion_response=response)
+            except Exception as e:
+                log.warning("cost calc failed for model=%s: %s", response.model, e)
 
         return CompleteResponse(
             content=message.content or "",
