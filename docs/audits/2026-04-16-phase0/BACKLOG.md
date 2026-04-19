@@ -12,10 +12,10 @@ Synthesized from the nine axis reports in this folder. **Default sort: Severity 
 
 ## Totals
 
-- **Total findings:** 129 (113 defect findings + 16 nova-suite port recommendations)
-- **By severity:** P0=23, P1=41, P2=49, P3=16
-- **By effort:** S=74, M=45, L=10
-- **By impact:** H=45, M=59, L=25
+- **Total findings:** 130 (114 defect findings + 16 nova-suite port recommendations)
+- **By severity:** P0=23, P1=41, P2=50, P3=16
+- **By effort:** S=74, M=45, L=11
+- **By impact:** H=45, M=60, L=25
 - **Quickest high-impact wins (P0+P1 with H-impact and S-effort):** ~22 items
 - **Local-only (security report):** 20 findings
 
@@ -135,6 +135,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | FC-008 | feature-completeness | Voice service: CLAUDE.md claims Deepgram/ElevenLabs, only OpenAI providers exist | P2 | L | S | Open |
 | FC-009 | feature-completeness | Self-Modification scaffolding present; actual workflow not verified end-to-end | P2 | L | M | Open |
 | FC-010 | feature-completeness | Skills table empty; framework shipped but no content seeded | P3 | M | S | Open |
+| FC-011 | feature-completeness | No pluggable memory interface or benchmark — engram complexity unvalidated vs. markdown/vector alternatives ([design](../../designs/2026-04-18-pluggable-memory-and-benchmarks.md)) | P2 | M | L | Open |
 
 ### UI/UX
 
