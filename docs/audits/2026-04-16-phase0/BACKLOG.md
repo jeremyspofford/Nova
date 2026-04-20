@@ -87,7 +87,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 |---|---|---|---|---|---|---|
 | REL-001 | reliability | Reaper infinite-loops because `task_running → queued` rejected by state machine (9 live tasks stuck) | P0 | H | S | Done |
 | REL-002 | reliability | `make backup` / recovery backup exclude `/data/sources/` — restore produces broken memory | P0 | H | S | Done |
-| REL-003 | reliability | Engram ingestion `BRPOP` removes payload before decomposition — crash = lost memory | P0 | M | M | Open |
+| REL-003 | reliability | Engram ingestion `BRPOP` removes payload before decomposition — crash = lost memory | P0 | M | M | Done |
 | REL-004 | reliability | Memory-service + llm-gateway leak Redis connections on shutdown (violates CLAUDE.md rule) | P1 | M | S | Open |
 | REL-005 | reliability | Factory-reset `CATEGORY_TABLES` references 5 non-existent tables — partial resets silently succeed | P1 | M | S | Open |
 | REL-006 | reliability | Migration idempotency not CI-verified; gap at 042/043; data-transform migrations lack guards | P1 | L | M | Open |

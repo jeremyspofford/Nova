@@ -2,8 +2,13 @@
 Engram ingestion worker — consumes raw events from Redis queue, decomposes
 them into engrams, resolves entities, creates edges, and stores everything.
 
-Runs as an asyncio background task via BRPOP on the engram:ingestion:queue.
+Runs as an asyncio background task on the engram:ingestion:queue.
 Zero impact on chat latency — all processing is async background work.
+
+Crash safety: uses BLMOVE (main → processing list) + LREM-after-success
+pattern so a kill/OOM/container-restart during decomposition doesn't
+vaporize the payload. On startup, any items still in the processing
+list from a prior crashed run are pushed back to the main queue.
 """
 from __future__ import annotations
 
@@ -38,53 +43,113 @@ DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
 # Concurrency limit for LLM decomposition calls (backpressure)
 _decomposition_semaphore = asyncio.Semaphore(5)
 
+# Suffix for the companion "processing" list that holds in-flight payloads
+# so a mid-work crash doesn't lose them.
+_PROCESSING_SUFFIX = ":processing"
 
-async def _process_event_guarded(raw_payload: str) -> None:
-    """Run _process_event under the decomposition semaphore with error handling."""
+
+def _processing_list_name() -> str:
+    return settings.engram_ingestion_queue + _PROCESSING_SUFFIX
+
+
+async def _recover_processing_list(redis) -> int:
+    """On startup, push any orphaned in-flight payloads back to the main queue.
+    These come from a prior worker that was killed before it could LREM them.
+    Returns the number of payloads recovered."""
+    processing = _processing_list_name()
+    items = await redis.lrange(processing, 0, -1)
+    if not items:
+        return 0
+    async with redis.pipeline(transaction=True) as pipe:
+        for item in items:
+            # Push to head so recovered items are handled FIRST (FIFO preservation
+            # with BRPOP-style tail consumption).
+            pipe.lpush(settings.engram_ingestion_queue, item)
+        pipe.delete(processing)
+        await pipe.execute()
+    return len(items)
+
+
+async def _process_event_guarded(
+    payload_str: str,
+    payload_raw,
+    processing_list: str,
+) -> None:
+    """Run _process_event under the decomposition semaphore with error handling.
+    Removes the payload from the processing list on completion (success or
+    caught failure). Only uncaught crashes leave items behind for recovery."""
+    redis = get_redis()
     try:
         async with _decomposition_semaphore:
-            await _process_event(raw_payload)
+            await _process_event(payload_str)
     except Exception:
-        log.exception("Engram ingestion failed for event: %s", raw_payload[:200])
+        log.exception("Engram ingestion failed for event: %s", payload_str[:200])
+    finally:
+        # Even on failure, drop from processing — matches prior BRPOP behavior
+        # where exceptions already discarded the payload. The reliability win
+        # here is specifically around CRASHES, not logical failures.
+        try:
+            await redis.lrem(processing_list, 1, payload_raw)
+        except Exception:
+            log.warning("Failed to clear payload from processing list", exc_info=True)
 
 
 async def ingestion_loop() -> None:
-    """Main ingestion loop — BRPOP from Redis queue, process each event."""
+    """Main ingestion loop — atomic BLMOVE from queue to processing list, then
+    process each event. Startup recovers any orphaned in-flight payloads."""
     if not settings.engram_ingestion_enabled:
         log.info("Engram ingestion disabled")
         return
 
-    log.info("Engram ingestion worker started (queue=%s)", settings.engram_ingestion_queue)
+    redis = get_redis()
+    queue = settings.engram_ingestion_queue
+    processing = _processing_list_name()
+
+    # Crash recovery: items left in the processing list are from a prior
+    # worker that died before completing them.
+    recovered = await _recover_processing_list(redis)
+    if recovered:
+        log.info("Recovered %d orphaned ingestion payload(s) from processing list", recovered)
+
+    log.info("Engram ingestion worker started (queue=%s)", queue)
 
     while True:
         try:
-            redis = get_redis()
-            # BRPOP blocks until an item is available or timeout
-            result = await redis.brpop(
-                settings.engram_ingestion_queue,
-                timeout=int(settings.engram_ingestion_batch_timeout),
+            # BLMOVE atomically pops the tail of the main queue and pushes it
+            # to the head of the processing list. Returns None on timeout.
+            payload_raw = await redis.blmove(
+                queue,
+                processing,
+                int(settings.engram_ingestion_batch_timeout),
+                src="RIGHT",
+                dest="LEFT",
             )
-            if result is None:
-                # Timeout — no items in queue, loop and retry
+            if payload_raw is None:
                 continue
 
-            _queue_name, raw_payload = result
-            # Redis may return bytes or str depending on decode_responses setting
-            if isinstance(raw_payload, bytes):
-                raw_payload = raw_payload.decode("utf-8")
+            # Keep the raw value for LREM (Redis matches by byte equality);
+            # decode only for JSON parsing / downstream use.
+            payload_str = (
+                payload_raw.decode("utf-8")
+                if isinstance(payload_raw, bytes)
+                else payload_raw
+            )
 
-            # Validate JSON before processing
             try:
-                json.loads(raw_payload)
+                json.loads(payload_str)
             except json.JSONDecodeError:
-                log.warning("Malformed ingestion event (not valid JSON), skipping: %s", raw_payload[:200])
+                log.warning("Malformed ingestion event (not valid JSON), dropping: %s", payload_str[:200])
+                try:
+                    await redis.lrem(processing, 1, payload_raw)
+                except Exception:
+                    log.warning("Failed to clear malformed payload from processing list", exc_info=True)
                 continue
 
-            # Fire into background so BRPOP loop isn't blocked.
+            # Fire into background so the loop isn't blocked.
             # The semaphore inside _process_event_guarded gates
             # expensive LLM calls to at most 5 concurrent.
             asyncio.create_task(
-                _process_event_guarded(raw_payload),
+                _process_event_guarded(payload_str, payload_raw, processing),
                 name="engram-ingest",
             )
 
