@@ -65,6 +65,18 @@ echo "Restoring database..."
 docker compose exec -T postgres psql -U nova nova --single-transaction \
   < "${TMPDIR}/database.sql"
 
+# Restore filesystem source blobs (after DB so source_ref_id rows resolve)
+SOURCES_DIR="${SOURCES_DIR:-./data/sources}"
+if [ -d "${TMPDIR}/sources" ]; then
+  echo "Restoring source blobs to ${SOURCES_DIR}..."
+  mkdir -p "$SOURCES_DIR"
+  # Mirror the DB's DROP-and-recreate semantics — backup is authoritative
+  find "$SOURCES_DIR" -mindepth 1 -delete 2>/dev/null || true
+  cp -r "${TMPDIR}/sources/." "$SOURCES_DIR/"
+  COUNT=$(find "$SOURCES_DIR" -type f | wc -l)
+  echo "  Restored ${COUNT} source blob(s)"
+fi
+
 echo ""
 echo "Database restored. Restarting services..."
 docker compose restart orchestrator memory-service llm-gateway chat-api

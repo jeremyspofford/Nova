@@ -515,6 +515,9 @@ services:
       - ./docker-compose.gpu.yml:/project/docker-compose.gpu.yml:ro
       - ./docker-compose.rocm.yml:/project/docker-compose.rocm.yml:ro
       - ./data:/app/data:ro
+      # Sources filesystem blobs need rw for restore (overlays the :ro parent mount above).
+      # Scoped to just data/sources rather than widening the whole /app/data mount.
+      - ./data/sources:/app/data/sources:rw
     ports:
       - "8888:8888"
     depends_on:

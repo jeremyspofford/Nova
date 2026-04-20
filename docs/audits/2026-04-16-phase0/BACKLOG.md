@@ -31,7 +31,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 6. **OPS-001** — Health-check cascade: 3s inner timeout == outer timeout → three services flip to "degraded" from one slow probe
 7. **SEC-001** — Orchestrator has rw mount `/:/host-root:rw` + bypassable shell denylist = host-level RCE-by-design
 8. **SEC-005** — Default admin secret `nova-admin-secret-change-me` and Postgres password survive non-wizard install path
-9. **REL-002** — Backups silently exclude `/data/sources/` filesystem blobs — restore produces broken memory
+9. **REL-002** — ~~Backups silently exclude `/data/sources/` filesystem blobs — restore produces broken memory~~ **Resolved 2026-04-20** — recovery-service + scripts now roundtrip sources/ alongside the DB dump
 10. **FC-012** — Triggers/scheduler: goal-level cron works, but no UI picker, no generalized trigger abstraction — Jeremy's explicit callout
 
 ---
@@ -67,8 +67,8 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| PRIV-001 | privacy | No engram deletion endpoint — "forget this" is impossible | P0 | H | M | Open |
-| PRIV-002 | privacy | Orchestrator mounts host `/:/host-root:rw` (privacy angle of SEC-001) | P0 | H | M | Open |
+| PRIV-001 | privacy | No engram deletion endpoint — "forget this" is impossible | P0 | H | M | Done |
+| PRIV-002 | privacy | Orchestrator mounts host `/:/host-root:rw` (privacy angle of SEC-001) | P0 | H | M | Done |
 | PRIV-003 | privacy | Factory reset ignores ~90% of user data (engrams, intel, knowledge, conversations, cortex, friction…) | P0 | M | M | Open |
 | PRIV-004 | privacy | Backups unencrypted plaintext; include `JWT_SECRET`, OAuth tokens, every message/memory | P1 | M | M | Open |
 | PRIV-005 | privacy | Filesystem-stored sources orphaned on `delete_source` | P1 | M | S | Open |
@@ -86,7 +86,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
 | REL-001 | reliability | Reaper infinite-loops because `task_running → queued` rejected by state machine (9 live tasks stuck) | P0 | H | S | Done |
-| REL-002 | reliability | `make backup` / recovery backup exclude `/data/sources/` — restore produces broken memory | P0 | H | S | Open |
+| REL-002 | reliability | `make backup` / recovery backup exclude `/data/sources/` — restore produces broken memory | P0 | H | S | Done |
 | REL-003 | reliability | Engram ingestion `BRPOP` removes payload before decomposition — crash = lost memory | P0 | M | M | Open |
 | REL-004 | reliability | Memory-service + llm-gateway leak Redis connections on shutdown (violates CLAUDE.md rule) | P1 | M | S | Open |
 | REL-005 | reliability | Factory-reset `CATEGORY_TABLES` references 5 non-existent tables — partial resets silently succeed | P1 | M | S | Open |

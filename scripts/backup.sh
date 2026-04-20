@@ -29,9 +29,24 @@ echo "  Dumping database..."
 docker compose exec -T postgres pg_dump -U nova nova --no-owner --no-acl \
   > "${TMPDIR}/database.sql"
 
+# Stage filesystem source blobs alongside the SQL dump if any exist
+SOURCES_DIR="${SOURCES_DIR:-./data/sources}"
+SOURCES_COUNT=0
+if [ -d "$SOURCES_DIR" ] && [ -n "$(ls -A "$SOURCES_DIR" 2>/dev/null)" ]; then
+  echo "  Staging source blobs from ${SOURCES_DIR}..."
+  mkdir -p "${TMPDIR}/sources"
+  cp -r "$SOURCES_DIR"/. "${TMPDIR}/sources/"
+  SOURCES_COUNT=$(find "${TMPDIR}/sources" -type f | wc -l)
+  echo "  Included ${SOURCES_COUNT} source blob(s)"
+fi
+
 # Bundle into tar.gz
 echo "  Packaging..."
-tar -czf "${BACKUP_DIR}/${FILENAME}" -C "$TMPDIR" database.sql
+if [ "$SOURCES_COUNT" -gt 0 ]; then
+  tar -czf "${BACKUP_DIR}/${FILENAME}" -C "$TMPDIR" database.sql sources
+else
+  tar -czf "${BACKUP_DIR}/${FILENAME}" -C "$TMPDIR" database.sql
+fi
 
 SIZE=$(du -h "${BACKUP_DIR}/${FILENAME}" | cut -f1)
 echo ""

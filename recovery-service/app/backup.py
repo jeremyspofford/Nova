@@ -14,11 +14,61 @@ from .config import settings
 
 logger = logging.getLogger("nova.recovery.backup")
 
+# Filesystem blob store for large sources (>100KB). Mounted rw from the host
+# so restore can write back into it. If the dir is missing (e.g., early install),
+# backup skips it silently.
+SOURCES_DIR = Path("/app/data/sources")
+
 
 def _backup_dir() -> Path:
     d = settings.backup_dir
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _sources_files() -> list[Path]:
+    """List all files under SOURCES_DIR that a backup should include."""
+    if not SOURCES_DIR.exists() or not SOURCES_DIR.is_dir():
+        return []
+    return [f for f in SOURCES_DIR.rglob("*") if f.is_file()]
+
+
+def _add_sources_to_archive(tar: tarfile.TarFile) -> int:
+    """Add data/sources/ filesystem blobs to an open tar archive.
+    Returns count of files added."""
+    files = _sources_files()
+    for f in files:
+        # Store with relative path under "sources/" prefix inside the archive
+        tar.add(f, arcname=f"sources/{f.relative_to(SOURCES_DIR).as_posix()}")
+    if files:
+        logger.info("Included %d source blob(s) in backup", len(files))
+    return len(files)
+
+
+def _restore_sources_from_archive(archive_dir: Path) -> int:
+    """If the extracted archive contains a sources/ subdir, replace the live
+    SOURCES_DIR contents with it. Returns count of files restored."""
+    staged = archive_dir / "sources"
+    if not staged.exists() or not staged.is_dir():
+        return 0
+    if not SOURCES_DIR.exists():
+        SOURCES_DIR.mkdir(parents=True, exist_ok=True)
+    # Wipe existing to mirror the DB's DROP-and-recreate semantics — the backup
+    # is the authoritative state, anything added post-backup is intentionally lost.
+    for child in SOURCES_DIR.iterdir():
+        if child.is_file() or child.is_symlink():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+    count = 0
+    for f in staged.rglob("*"):
+        if f.is_file():
+            dest = SOURCES_DIR / f.relative_to(staged)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, dest)
+            count += 1
+    logger.info("Restored %d source blob(s)", count)
+    return count
 
 
 def list_backups() -> list[dict]:
@@ -68,6 +118,7 @@ async def create_backup() -> dict:
         # Bundle into tar.gz
         with tarfile.open(outpath, "w:gz") as tar:
             tar.add(sql_path, arcname="database.sql")
+            _add_sources_to_archive(tar)
 
         logger.info("Backup created: %s (%.1f MB)", filename, outpath.stat().st_size / 1_048_576)
 
@@ -144,8 +195,11 @@ async def restore_backup(filename: str) -> dict:
         if proc.returncode != 0:
             raise RuntimeError(f"Database restore failed: {stderr.decode()}")
 
+        # Restore filesystem source blobs (after DB so source_ref_id rows resolve)
+        sources_restored = _restore_sources_from_archive(tmp)
+
     logger.info("Restored from backup: %s", filename)
-    return {"filename": filename, "restored": True}
+    return {"filename": filename, "restored": True, "sources_restored": sources_restored}
 
 
 def delete_backup(filename: str) -> dict:
@@ -206,6 +260,7 @@ async def create_checkpoint() -> dict:
 
         with tarfile.open(outpath, "w:gz") as tar:
             tar.add(sql_path, arcname="database.sql")
+            _add_sources_to_archive(tar)
 
         logger.info("Checkpoint created: %s (%.1f MB)", filename, outpath.stat().st_size / 1_048_576)
 
