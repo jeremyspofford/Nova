@@ -355,6 +355,7 @@ async def _process_event(raw_payload: str) -> dict:
                 embedding = await get_embedding(new_engram_content, session)
                 candidates = await find_contradiction_candidates(
                     session, embedding, contradiction.existing_content_hint,
+                    tenant_id=tenant_id,
                 )
                 for candidate in candidates:
                     created = await _create_edge(
@@ -425,12 +426,13 @@ async def _store_or_update_engram(
 
     Returns (engram_id, is_new).
     """
-    # Entity resolution: check for existing matches
+    # Entity resolution: check for existing matches. All dedup queries are
+    # tenant-scoped so tenant A never collapses into tenant B's engrams (FC-001).
     existing = None
 
     if decomposed_type == "entity" and content:
         # Strategy 1: exact name match for entities
-        existing = await find_existing_entity(session, content)
+        existing = await find_existing_entity(session, content, tenant_id=tenant_id)
 
     # Always compute embedding — needed for dedup and INSERT
     embedding = await get_embedding(content, session)
@@ -438,7 +440,9 @@ async def _store_or_update_engram(
     if not existing:
         # Strategy 2: embedding similarity for entity-type engrams
         if decomposed_type == "entity":
-            existing = await find_similar_engram(session, embedding, decomposed_type)
+            existing = await find_similar_engram(
+                session, embedding, decomposed_type, tenant_id=tenant_id,
+            )
 
     if existing:
         # Update existing engram instead of creating duplicate
@@ -453,6 +457,7 @@ async def _store_or_update_engram(
         similar = await find_similar_engram(
             session, embedding, decomposed_type,
             threshold=settings.engram_fact_dedup_threshold,
+            tenant_id=tenant_id,
         )
         if similar:
             await update_existing_engram(session, similar["id"], importance)
@@ -466,6 +471,7 @@ async def _store_or_update_engram(
     cross_match = await find_similar_engram_any_type(
         session, embedding,
         threshold=settings.engram_entity_similarity_threshold,  # 0.92
+        tenant_id=tenant_id,
     )
     if cross_match:
         await update_existing_engram(session, cross_match["id"], importance_boost=max(0, importance - cross_match["importance"]) * 0.3)
@@ -529,7 +535,7 @@ async def _store_or_update_engram(
     # Create edges from this engram to existing entities it references
     for entity_name in entities_referenced:
         try:
-            entity_match = await find_existing_entity(session, entity_name)
+            entity_match = await find_existing_entity(session, entity_name, tenant_id=tenant_id)
             if entity_match and entity_match["id"] != row.id:
                 await _create_edge(session, row.id, entity_match["id"], "related_to", 0.5)
         except Exception:
