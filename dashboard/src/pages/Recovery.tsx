@@ -15,7 +15,7 @@ import {
   getResetCategories, factoryReset, getRecoveryOverview,
   troubleshootChat,
   type ServiceStatus, type BackupInfo, type ResetCategory, type RecoveryOverview,
-  type TroubleshootMessage,
+  type TroubleshootMessage, type FactoryResetResult,
 } from '../api-recovery'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -332,7 +332,8 @@ export function FactoryResetSection() {
   const [initialized, setInitialized] = useState(false)
   const [confirmText, setConfirmText] = useState('')
   const [resetting, setResetting] = useState(false)
-  const [result, setResult] = useState<{ wiped: string[]; kept: string[] } | null>(null)
+  const [result, setResult] = useState<FactoryResetResult | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   if (categories && !initialized) {
     setKeepSet(new Set(categories.filter(c => c.default_keep).map(c => c.key)))
@@ -348,15 +349,27 @@ export function FactoryResetSection() {
     })
   }
 
+  const nukeAll = () => setKeepSet(new Set())
+  const resetDefaults = () => {
+    if (categories) setKeepSet(new Set(categories.filter(c => c.default_keep).map(c => c.key)))
+  }
+
   const handleReset = useCallback(async () => {
     setResetting(true)
+    setError(null)
     try {
       const r = await factoryReset(Array.from(keepSet), confirmText)
       setResult(r)
       setConfirmText('')
-    } catch { /* error handled by UI */ }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
     setResetting(false)
   }, [keepSet, confirmText])
+
+  const unchecked = (categories ?? []).filter(c => !keepSet.has(c.key))
+  const destructiveUnchecked = unchecked.filter(c => c.destructive_warning)
+  const isNuke = categories && unchecked.length === categories.length
 
   return (
     <Card className="overflow-hidden border-danger/20">
@@ -375,36 +388,74 @@ export function FactoryResetSection() {
           <p className="text-compact text-content-tertiary">Loading categories...</p>
         ) : (
           <>
-            <div>
-              <label className="mb-2 block text-caption font-medium text-content-secondary">
+            <div className="flex items-center justify-between">
+              <label className="text-caption font-medium text-content-secondary">
                 What do you want to keep?
               </label>
-              <div className="space-y-2">
-                {(categories ?? []).map((cat: ResetCategory) => (
-                  <label
-                    key={cat.key}
-                    className="flex items-center gap-3 rounded-lg border border-border-subtle bg-surface-elevated px-3 py-2.5 cursor-pointer hover:bg-surface-card-hover transition-colors"
-                  >
-                    <Checkbox
-                      checked={keepSet.has(cat.key)}
-                      onChange={() => toggleKeep(cat.key)}
-                    />
-                    <div>
-                      <span className="text-compact text-content-primary">{cat.label}</span>
-                      {keepSet.has(cat.key) ? (
-                        <Badge color="success" size="sm" className="ml-2">Preserved</Badge>
-                      ) : (
-                        <Badge color="danger" size="sm" className="ml-2">Will be wiped</Badge>
-                      )}
-                    </div>
-                  </label>
-                ))}
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="ghost" onClick={resetDefaults}>Defaults</Button>
+                <Button size="sm" variant="ghost" onClick={nukeAll} className="text-danger hover:bg-danger-dim">
+                  Nuke everything
+                </Button>
               </div>
             </div>
 
+            <div className="space-y-2">
+              {(categories ?? []).map((cat: ResetCategory) => {
+                const keep = keepSet.has(cat.key)
+                const showWarn = !keep && cat.destructive_warning
+                return (
+                  <label
+                    key={cat.key}
+                    className={`flex gap-3 rounded-lg border px-3 py-2.5 cursor-pointer hover:bg-surface-card-hover transition-colors ${
+                      showWarn
+                        ? 'border-danger/40 bg-danger-dim'
+                        : 'border-border-subtle bg-surface-elevated'
+                    }`}
+                  >
+                    <Checkbox
+                      checked={keep}
+                      onChange={() => toggleKeep(cat.key)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-compact text-content-primary">{cat.label}</span>
+                        {keep ? (
+                          <Badge color="success" size="sm">Preserved</Badge>
+                        ) : (
+                          <Badge color="danger" size="sm">Will be wiped</Badge>
+                        )}
+                      </div>
+                      {cat.description && (
+                        <p className="mt-0.5 text-caption text-content-tertiary">{cat.description}</p>
+                      )}
+                      {showWarn && (
+                        <p className="mt-1 flex items-start gap-1 text-caption text-danger">
+                          <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+                          <span>{cat.destructive_warning}</span>
+                        </p>
+                      )}
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+
+            {destructiveUnchecked.length > 0 && (
+              <div className="rounded-lg border border-danger/40 bg-danger-dim px-3 py-2 text-caption text-danger flex items-start gap-2">
+                <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                <span>
+                  {destructiveUnchecked.length === 1
+                    ? `You're wiping ${destructiveUnchecked[0].label} — read the warning above before confirming.`
+                    : `You're wiping ${destructiveUnchecked.length} destructive categories — read the warnings above before confirming.`}
+                </span>
+              </div>
+            )}
+
             <div className="border-t border-border-subtle pt-4">
               <label className="mb-2 block text-caption font-medium text-danger">
-                Type RESET to confirm
+                Type RESET to confirm {isNuke && <span>(nuking everything)</span>}
               </label>
               <div className="flex gap-2">
                 <Input
@@ -420,20 +471,52 @@ export function FactoryResetSection() {
                   disabled={confirmText !== 'RESET' || resetting}
                   loading={resetting}
                 >
-                  {resetting ? 'Resetting...' : 'Factory Reset'}
+                  {resetting ? 'Resetting...' : isNuke ? 'Nuke Everything' : 'Factory Reset'}
                 </Button>
               </div>
             </div>
 
+            {error && (
+              <div className="rounded-lg border border-danger/20 bg-danger-dim px-3 py-2.5 text-caption flex items-start gap-2 text-red-700 dark:text-red-400">
+                <XCircle size={12} className="mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+
             {result && (
-              <div className="rounded-lg border border-success/20 bg-success-dim px-3 py-2.5 text-caption space-y-1">
+              <div className="rounded-lg border border-success/20 bg-success-dim px-3 py-2.5 text-caption space-y-1.5">
                 <p className="font-medium text-emerald-700 dark:text-emerald-400">Reset complete</p>
+                <p className="text-emerald-600 dark:text-emerald-500">
+                  Truncated {result.stats.tables_truncated} table(s) &middot; deleted{' '}
+                  {result.stats.redis_keys_deleted} Redis key(s) &middot; removed{' '}
+                  {result.stats.filesystem_files_removed} file(s)
+                  {result.stats.backup_files_removed > 0 && (
+                    <> &middot; purged {result.stats.backup_files_removed} backup(s) ({formatBytes(result.stats.backup_bytes_reclaimed)})</>
+                  )}
+                </p>
                 {result.wiped.length > 0 && (
-                  <p className="text-emerald-600 dark:text-emerald-500">Wiped: {result.wiped.join(', ')}</p>
+                  <p className="text-emerald-600 dark:text-emerald-500">
+                    <span className="font-medium">Wiped:</span> {result.wiped.join(', ')}
+                  </p>
                 )}
                 {result.kept.length > 0 && (
-                  <p className="text-emerald-600 dark:text-emerald-500">Kept: {result.kept.join(', ')}</p>
+                  <p className="text-emerald-600 dark:text-emerald-500">
+                    <span className="font-medium">Kept:</span> {result.kept.join(', ')}
+                  </p>
                 )}
+                {result.errors && result.errors.length > 0 && (
+                  <details className="text-red-700 dark:text-red-400">
+                    <summary className="cursor-pointer font-medium">
+                      {result.errors.length} error(s)
+                    </summary>
+                    <ul className="mt-1 ml-4 list-disc">
+                      {result.errors.map((err, i) => <li key={i}>{err}</li>)}
+                    </ul>
+                  </details>
+                )}
+                <p className="text-content-tertiary pt-1">
+                  Tip: restart services to clear any in-flight state — use "Restart All Services" above.
+                </p>
               </div>
             )}
           </>

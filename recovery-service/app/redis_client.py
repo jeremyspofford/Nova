@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _redis: Optional[aioredis.Redis] = None
 _config_redis: Optional[aioredis.Redis] = None
+_per_db_redis: dict[int, aioredis.Redis] = {}
 
 
 async def get_redis() -> aioredis.Redis:
@@ -27,6 +28,22 @@ async def get_config_redis() -> aioredis.Redis:
         base = settings.redis_url.rsplit("/", 1)[0]
         _config_redis = aioredis.from_url(f"{base}/1", decode_responses=True)
     return _config_redis
+
+
+async def get_redis_for_db(db: int) -> aioredis.Redis:
+    """Return (and cache) a Redis client for an arbitrary DB number.
+
+    Used by factory reset to wipe per-service state across all Nova Redis DBs:
+    db0=memory-service, db1=llm-gateway, db2=orchestrator, db3=chat-api,
+    db4=chat-bridge, db5=cortex, db6=intel-worker, db7=recovery (reuses
+    get_redis), db8=knowledge-worker, db9=voice-service.
+    """
+    if db in _per_db_redis:
+        return _per_db_redis[db]
+    base = settings.redis_url.rsplit("/", 1)[0]
+    client = aioredis.from_url(f"{base}/{db}", decode_responses=True)
+    _per_db_redis[db] = client
+    return client
 
 
 async def read_config(key: str, default: str = "") -> str:
@@ -66,10 +83,16 @@ async def write_config_state(key: str, value: str) -> None:
 
 
 async def close_redis() -> None:
-    global _redis, _config_redis
+    global _redis, _config_redis, _per_db_redis
     if _redis:
         await _redis.aclose()
         _redis = None
     if _config_redis:
         await _config_redis.aclose()
         _config_redis = None
+    for client in _per_db_redis.values():
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+    _per_db_redis = {}

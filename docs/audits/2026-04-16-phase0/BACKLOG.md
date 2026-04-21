@@ -69,7 +69,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 |---|---|---|---|---|---|---|
 | PRIV-001 | privacy | No engram deletion endpoint — "forget this" is impossible | P0 | H | M | Done |
 | PRIV-002 | privacy | Orchestrator mounts host `/:/host-root:rw` (privacy angle of SEC-001) | P0 | H | M | Done |
-| PRIV-003 | privacy | Factory reset ignores ~90% of user data (engrams, intel, knowledge, conversations, cortex, friction…) | P0 | M | M | Open |
+| PRIV-003 | privacy | Factory reset ignores ~90% of user data (engrams, intel, knowledge, conversations, cortex, friction…) | P0 | M | M | Done |
 | PRIV-004 | privacy | Backups unencrypted plaintext; include `JWT_SECRET`, OAuth tokens, every message/memory | P1 | M | M | Open |
 | PRIV-005 | privacy | Filesystem-stored sources orphaned on `delete_source` | P1 | M | S | Open |
 | PRIV-006 | privacy | All engrams/sources/knowledge tied to single hardcoded tenant UUID (multi-user would silently merge) | P1 | L | L | Open |
@@ -89,7 +89,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | REL-002 | reliability | `make backup` / recovery backup exclude `/data/sources/` — restore produces broken memory | P0 | H | S | Done |
 | REL-003 | reliability | Engram ingestion `BRPOP` removes payload before decomposition — crash = lost memory | P0 | M | M | Done |
 | REL-004 | reliability | Memory-service + llm-gateway leak Redis connections on shutdown (violates CLAUDE.md rule) | P1 | M | S | Open |
-| REL-005 | reliability | Factory-reset `CATEGORY_TABLES` references 5 non-existent tables — partial resets silently succeed | P1 | M | S | Open |
+| REL-005 | reliability | Factory-reset `CATEGORY_TABLES` references 5 non-existent tables — partial resets silently succeed | P1 | M | S | Done |
 | REL-006 | reliability | Migration idempotency not CI-verified; gap at 042/043; data-transform migrations lack guards | P1 | L | M | Open |
 | REL-007 | reliability | `memory-service/schema.sql` is unversioned monolith; re-runs `DROP TABLE IF EXISTS …` every boot | P1 | M | M | Open |
 | REL-008 | reliability | 99% of live engrams have NULL `source_ref_id` (provenance aspirational, not enforced) | P1 | M | M | Open |

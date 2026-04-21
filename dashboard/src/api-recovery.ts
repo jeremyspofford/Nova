@@ -135,14 +135,32 @@ export const deleteBackup = (filename: string) =>
 export interface ResetCategory {
   key: string
   label: string
+  description: string
   default_keep: boolean
+  destructive_warning: string | null
+}
+
+export interface FactoryResetStats {
+  tables_truncated: number
+  redis_keys_deleted: number
+  filesystem_files_removed: number
+  backup_files_removed: number
+  backup_bytes_reclaimed: number
+}
+
+export interface FactoryResetResult {
+  wiped: string[]
+  kept: string[]
+  errors: string[] | null
+  stats: FactoryResetStats
+  detail: Record<string, unknown>
 }
 
 export const getResetCategories = () =>
   recoveryFetch<ResetCategory[]>('/api/v1/recovery/factory-reset/categories')
 
 export const factoryReset = (keep: string[], confirm: string) =>
-  recoveryFetch<{ wiped: string[]; kept: string[]; errors: string[] | null }>(
+  recoveryFetch<FactoryResetResult>(
     '/api/v1/recovery/factory-reset',
     { method: 'POST', body: JSON.stringify({ keep, confirm }) },
   )
