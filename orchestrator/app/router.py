@@ -330,6 +330,23 @@ BASE_FORMAT_PROMPT = (
     "  - Point two"
 )
 
+TOOL_USE_PROMPT = (
+    "IMPORTANT — Tool use rules:\n"
+    "- When the user asks you to DO something (list, read, run, call, search, "
+    "look up, show me, find, check, open, execute, fetch, etc.) against the "
+    "real world, you MUST invoke the matching tool via a structured tool call. "
+    "Do NOT describe what the tool would do. Do NOT emit the JSON shape of a "
+    "tool call inside your text response. Do NOT explain the command you "
+    "would run. Either call the tool, or (only if no tool applies) say so "
+    "explicitly and ask for clarification.\n"
+    "- After a tool returns a result, answer based on that result. Never "
+    "fabricate tool output or continue as if a tool call succeeded when it "
+    "did not appear in your tool_calls.\n"
+    "- If an earlier turn in the conversation described a tool action in "
+    "prose instead of calling it, do not mimic that pattern now. Call the "
+    "tool."
+)
+
 STYLE_PROMPTS = {
     "concise": "Be concise and brief. Give short, direct answers without unnecessary elaboration.",
     "detailed": "Give thorough, detailed answers with examples and explanations.",
@@ -478,7 +495,7 @@ async def chat_stream(req: ChatRequest, user: UserDep):
         base_prompt = (chat_pod["system_prompt"] if chat_pod and chat_pod.get("system_prompt") else None) or agent.config.system_prompt
         # Build style/research modifiers for system prompt
         system_prompt = base_prompt
-        modifiers: list[str] = [BASE_FORMAT_PROMPT]
+        modifiers: list[str] = [BASE_FORMAT_PROMPT, TOOL_USE_PROMPT]
         if req.output_style and req.output_style in STYLE_PROMPTS:
             modifiers.append(STYLE_PROMPTS[req.output_style])
         if req.custom_instructions:
