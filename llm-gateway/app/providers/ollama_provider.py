@@ -28,6 +28,76 @@ from app.providers.base import ModelProvider
 log = logging.getLogger(__name__)
 
 
+def _tool_to_ollama(tool) -> dict:
+    """Convert a ToolDefinition to Ollama's /api/chat tools format
+    (OpenAI-compatible function wrapper)."""
+    return {
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        },
+    }
+
+
+def _parse_ollama_tool_calls(raw_calls: list) -> list[ToolCall]:
+    """Convert Ollama tool_calls into Nova's ToolCall contract."""
+    import uuid
+    out: list[ToolCall] = []
+    for tc in raw_calls or []:
+        fn = tc.get("function", {}) or {}
+        args = fn.get("arguments", {})
+        # Ollama sometimes returns a dict, sometimes a JSON-encoded string
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except Exception:
+                args = {}
+        out.append(ToolCall(
+            id=tc.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+            name=fn.get("name", ""),
+            arguments=args if isinstance(args, dict) else {},
+        ))
+    return out
+
+
+def _serialize_messages_for_ollama(messages) -> list[dict]:
+    """Serialize Nova messages for Ollama /api/chat, preserving tool turns.
+
+    Nova allows content to be str | list[ContentBlock]. Ollama expects str
+    content on user/assistant/system, and role='tool' with stringified content
+    for tool results. Tool-call emission (role='assistant' with tool_calls)
+    must round-trip so multi-round tool loops keep context."""
+    out: list[dict] = []
+    for m in messages:
+        raw_content = m.content
+        # Flatten ContentBlock list to plain string for Ollama
+        if isinstance(raw_content, list):
+            parts: list[str] = []
+            for b in raw_content:
+                if hasattr(b, "text") and getattr(b, "text", None):
+                    parts.append(b.text)
+                elif isinstance(b, dict) and b.get("type") == "text":
+                    parts.append(b.get("text", ""))
+            content = "\n".join(p for p in parts if p)
+        else:
+            content = raw_content or ""
+        msg_dict: dict = {"role": m.role, "content": content}
+        if getattr(m, "tool_calls", None):
+            msg_dict["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "function": {"name": tc.name, "arguments": tc.arguments},
+                }
+                for tc in m.tool_calls
+            ]
+        if getattr(m, "tool_call_id", None):
+            msg_dict["tool_call_id"] = m.tool_call_id
+        out.append(msg_dict)
+    return out
+
+
 class OllamaProvider(ModelProvider):
     """
     Direct Ollama integration — OpenAI-compatible API at /api/chat.
@@ -64,6 +134,7 @@ class OllamaProvider(ModelProvider):
             ModelCapability.chat,
             ModelCapability.streaming,
             ModelCapability.embeddings,
+            ModelCapability.function_calling,
         }
 
     @property
@@ -121,56 +192,73 @@ class OllamaProvider(ModelProvider):
 
     async def complete(self, request: CompleteRequest) -> CompleteResponse:
         await self._ensure_healthy()
-        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        messages = _serialize_messages_for_ollama(request.messages)
+        body = {
+            "model": request.model or self._default_model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": request.temperature},
+        }
+        if request.tools:
+            body["tools"] = [_tool_to_ollama(t) for t in request.tools]
 
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:  # _base_url updated by _ensure_healthy
-            resp = await client.post("/api/chat", json={
-                "model": request.model or self._default_model,
-                "messages": messages,
-                "stream": False,
-                "options": {"temperature": request.temperature},
-            })
+        async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
+            resp = await client.post("/api/chat", json=body)
             resp.raise_for_status()
             data = resp.json()
 
+        msg = data.get("message", {})
+        tool_calls = _parse_ollama_tool_calls(msg.get("tool_calls", []))
+        finish_reason = "tool_calls" if tool_calls else "stop"
+
         return CompleteResponse(
-            content=data["message"]["content"],
+            content=msg.get("content", "") or "",
             model=data.get("model", request.model),
-            tool_calls=[],
+            tool_calls=tool_calls,
             input_tokens=data.get("prompt_eval_count", 0),
             output_tokens=data.get("eval_count", 0),
             cost_usd=None,  # local inference is free
-            finish_reason="stop",
+            finish_reason=finish_reason,
         )
 
     async def stream(self, request: CompleteRequest) -> AsyncIterator[StreamChunk]:
         await self._ensure_healthy()
-        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+        messages = _serialize_messages_for_ollama(request.messages)
+        body = {
+            "model": request.model or self._default_model,
+            "messages": messages,
+            "stream": True,
+            "options": {"temperature": request.temperature},
+        }
+        if request.tools:
+            body["tools"] = [_tool_to_ollama(t) for t in request.tools]
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
-            async with client.stream("POST", "/api/chat", json={
-                "model": request.model or self._default_model,
-                "messages": messages,
-                "stream": True,
-                "options": {"temperature": request.temperature},
-            }) as resp:
+            async with client.stream("POST", "/api/chat", json=body) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line:
                         continue
                     chunk = json.loads(line)
-                    content = chunk.get("message", {}).get("content", "")
+                    msg = chunk.get("message", {}) or {}
+                    content = msg.get("content", "") or ""
                     done = chunk.get("done", False)
+                    # Ollama emits tool_calls on the final chunk when the model
+                    # decides to invoke tools — pass them through verbatim.
+                    tool_calls = _parse_ollama_tool_calls(msg.get("tool_calls", []))
 
                     input_tokens = None
                     output_tokens = None
+                    finish_reason = None
                     if done:
                         input_tokens = chunk.get("prompt_eval_count")
                         output_tokens = chunk.get("eval_count")
+                        finish_reason = "tool_calls" if tool_calls else "stop"
 
                     yield StreamChunk(
                         delta=content,
-                        finish_reason="stop" if done else None,
+                        finish_reason=finish_reason,
+                        tool_calls=tool_calls,
                         input_tokens=input_tokens,
                         output_tokens=output_tokens,
                     )

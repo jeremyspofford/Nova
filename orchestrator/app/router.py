@@ -509,7 +509,12 @@ async def chat_stream(req: ChatRequest, user: UserDep):
                 model=model,
                 system_prompt=system_prompt,
                 api_key_id=None,
-                skip_tool_preresolution=True,
+                # Run tool pre-resolution before the streaming final answer, so
+                # the model can actually invoke tools mid-chat. Earlier this was
+                # True as a first-token-latency optimization, but that path
+                # sends tools=[] to the streaming call and the model has no way
+                # to act — it only describes what it "would" do.
+                skip_tool_preresolution=False,
                 explicit_model=explicit_model,
                 guest_mode=is_guest,
                 allowed_tools=allowed_tools,
