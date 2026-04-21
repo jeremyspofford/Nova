@@ -30,6 +30,14 @@ ollama:
       required: false
       description: "7B, ~4.4 GB — best structured output quality, ideal for engram decomposition"
 
+    # ── Recommended for chat + tool calling on 8GB VRAM ──────────────────────
+    # Hermes 3 handles Nova's full 52+ tool catalog without the "tool paralysis"
+    # that qwen2.5:7b hits at >~30 tools. Same 4.7GB footprint. This is the
+    # chat pod's default model (see migration 061) — keep it uncommented.
+    - name: hermes3:8b
+      required: false
+      description: "8B, ~4.7 GB — purpose-built for function calling, chat pod default"
+
     # Uncomment to pull additional models:
     # - name: llama3.2:3b
     #   required: false
