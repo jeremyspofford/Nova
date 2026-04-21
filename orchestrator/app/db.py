@@ -195,7 +195,7 @@ async def lookup_api_key(raw_key: str) -> dict[str, Any] | None:
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, name, is_active, rate_limit_rpm "
+            "SELECT id, name, is_active, rate_limit_rpm, tenant_id "
             "FROM api_keys WHERE key_hash = $1",
             key_hash,
         )

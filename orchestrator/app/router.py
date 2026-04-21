@@ -258,6 +258,7 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
             system_prompt=agent.config.system_prompt,
             api_key_id=key.id,
             agent_name=agent.config.name,
+            tenant_id=key.tenant_id,
         )
         await store_task_result(result)
         await update_agent_status(str(req.agent_id), AgentStatus.idle)
@@ -298,6 +299,7 @@ async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
                 api_key_id=key.id,
                 skip_tool_preresolution=True,
                 agent_name=agent.config.name,
+                tenant_id=key.tenant_id,
             ),
             error_label="Streaming",
             sandbox_token=sandbox_token,
@@ -536,6 +538,7 @@ async def chat_stream(req: ChatRequest, user: UserDep):
                 guest_mode=is_guest,
                 allowed_tools=allowed_tools,
                 agent_name=agent.config.name,
+                tenant_id=user.tenant_id,
             ),
             error_label="Chat stream",
             sandbox_token=sandbox_token,

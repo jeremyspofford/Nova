@@ -153,6 +153,9 @@ class AuthenticatedKey:
         self.id: UUID | None = row["id"]
         self.name: str = row["name"]
         self.rate_limit_rpm: int = row["rate_limit_rpm"]
+        # FC-001: every authenticated key carries the tenant it operates under.
+        # Dev-bypass and trusted-network bypass default to the seeded tenant.
+        self.tenant_id: str = str(row.get("tenant_id") or "00000000-0000-0000-0000-000000000001")
 
 
 async def _apply_rate_limit(api_key_id: UUID, rate_limit_rpm: int) -> None:

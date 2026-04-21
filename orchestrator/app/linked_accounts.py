@@ -77,20 +77,52 @@ async def get_active_conversation_for_user(user_id: str) -> dict[str, Any]:
     return d
 
 
-async def auto_link(platform: str, platform_id: str, platform_username: str | None = None) -> dict | None:
-    """Auto-link if exactly one user exists and no one is linked for this platform.
-    Returns the linked account info, or None if conditions not met."""
+async def auto_link(
+    platform: str,
+    platform_id: str,
+    platform_username: str | None = None,
+    tenant_id: str | None = None,
+) -> dict | None:
+    """Auto-link if exactly one user exists in the caller's tenant and no one
+    is linked on that tenant for this platform. Returns the linked account
+    info, or None if conditions not met.
+
+    FC-001: single-user-globally was the old check; multi-tenant installs
+    would have linked a bridge to whichever user existed first. Now scoped
+    per tenant — a brand-new tenant with one user can still auto-link its
+    own Telegram bridge without disturbing the other tenants."""
     pool = get_pool()
     async with pool.acquire() as conn:
-        user_count = await conn.fetchval("SELECT count(*) FROM users")
+        if tenant_id:
+            user_count = await conn.fetchval(
+                "SELECT count(*) FROM users WHERE tenant_id = CAST($1 AS uuid)",
+                tenant_id,
+            )
+        else:
+            user_count = await conn.fetchval("SELECT count(*) FROM users")
         if user_count != 1:
             return None
-        link_count = await conn.fetchval(
-            "SELECT count(*) FROM linked_accounts WHERE platform = $1", platform
-        )
+        if tenant_id:
+            link_count = await conn.fetchval(
+                "SELECT count(*) FROM linked_accounts la"
+                " JOIN users u ON u.id = la.user_id"
+                " WHERE la.platform = $1 AND u.tenant_id = CAST($2 AS uuid)",
+                platform, tenant_id,
+            )
+        else:
+            link_count = await conn.fetchval(
+                "SELECT count(*) FROM linked_accounts WHERE platform = $1", platform,
+            )
         if link_count > 0:
             return None
-        user = await conn.fetchrow("SELECT id, display_name FROM users LIMIT 1")
+        if tenant_id:
+            user = await conn.fetchrow(
+                "SELECT id, display_name FROM users"
+                " WHERE tenant_id = CAST($1 AS uuid) LIMIT 1",
+                tenant_id,
+            )
+        else:
+            user = await conn.fetchrow("SELECT id, display_name FROM users LIMIT 1")
     if not user:
         return None
     return await create_link(str(user["id"]), platform, platform_id, platform_username)

@@ -45,8 +45,14 @@ async def run_agent_turn(
     api_key_id: UUID | None = None,
     explicit_model: bool = False,
     agent_name: str = "Chat",
+    tenant_id: str | None = None,
 ) -> TaskResult:
-    """Execute one agent turn: memory retrieval → LLM call → memory storage → usage log."""
+    """Execute one agent turn: memory retrieval → LLM call → memory storage → usage log.
+
+    tenant_id threads through to the memory-service /context call, the engram
+    ingestion queue payload, and /mark-used feedback (FC-001). When the caller
+    is an API key, derive it from AuthenticatedKey.tenant_id at the router.
+    """
     from app.usage import log_usage
 
     started_at = datetime.now(timezone.utc)
@@ -90,7 +96,7 @@ async def run_agent_turn(
         else:
             # Legacy: full 40% context injection
             memory_ctx, _mem_count, _engram_ids, _engram_summaries, _retrieval_log_id = await _get_memory_context(
-                agent_id, query, session_id
+                agent_id, query, session_id, tenant_id=tenant_id,
             )
 
         if classified_model:
@@ -108,10 +114,10 @@ async def run_agent_turn(
         )
 
         # 4. Store exchange in episodic memory
-        await _store_exchange(agent_id, session_id, query, assistant_content)
+        await _store_exchange(agent_id, session_id, query, assistant_content, tenant_id=tenant_id)
 
         # 4b. Mark engrams as used (ground truth for Neural Router training)
-        await _mark_engrams_used(_engram_ids, _retrieval_log_id)
+        await _mark_engrams_used(_engram_ids, _retrieval_log_id, tenant_id=tenant_id)
 
         completed_at = datetime.now(timezone.utc)
         duration_ms = int((completed_at - started_at).total_seconds() * 1000)
@@ -168,6 +174,7 @@ async def run_agent_turn_streaming(
     guest_mode: bool = False,
     allowed_tools: list[str] | None = None,
     agent_name: str = "Chat",
+    tenant_id: str | None = None,
 ):
     """Streaming variant — yields text deltas as they arrive from the LLM.
 
@@ -250,7 +257,7 @@ async def run_agent_turn_streaming(
         else:
             _mem_t = time.monotonic()
             memory_ctx, memory_count, _engram_ids, _engram_summaries, _retrieval_log_id = await _get_memory_context(
-                agent_id, query, session_id
+                agent_id, query, session_id, tenant_id=tenant_id,
             )
             mem_ms = int((time.monotonic() - _mem_t) * 1000)
 
@@ -354,8 +361,8 @@ async def run_agent_turn_streaming(
                     stream_cost_usd = chunk_data["cost_usd"]
 
     if full_response:
-        await _store_exchange(agent_id, session_id, query, "".join(full_response))
-        await _mark_engrams_used(_engram_ids, _retrieval_log_id)
+        await _store_exchange(agent_id, session_id, query, "".join(full_response), tenant_id=tenant_id)
+        await _mark_engrams_used(_engram_ids, _retrieval_log_id, tenant_id=tenant_id)
 
     completed_at = datetime.now(timezone.utc)
     duration_ms = int((completed_at - started_at).total_seconds() * 1000)
@@ -377,7 +384,7 @@ async def run_agent_turn_streaming(
 
     # Phase 4b: Pre-warm memory cache for the next message in this session
     if settings.memory_prewarm_enabled and not guest_mode and query:
-        asyncio.create_task(_prewarm_memory(session_id, query))
+        asyncio.create_task(_prewarm_memory(session_id, query, tenant_id=tenant_id))
 
 
 async def _get_domain_priming(session_id: str) -> str:
@@ -423,7 +430,12 @@ async def _get_domain_priming(session_id: str) -> str:
         return ""
 
 
-async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -> tuple[str, int, list[str], list[dict], str | None]:
+async def _get_memory_context(
+    agent_id: str,
+    query: str,
+    session_id: str = "",
+    tenant_id: str | None = None,
+) -> tuple[str, int, list[str], list[dict], str | None]:
     """Fetch engram-powered memory context for prompt assembly.
 
     Calls the engram /context endpoint which returns a formatted prompt string
@@ -456,9 +468,12 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
 
     memory_client = await get_memory_client_async()
     try:
+        body = {"query": query, "session_id": session_id}
+        if tenant_id:
+            body["tenant_id"] = tenant_id
         resp = await memory_client.post(
             "/api/v1/engrams/context",
-            json={"query": query, "session_id": session_id},
+            json=body,
         )
         if resp.status_code != 200:
             return "", 0, [], [], None
@@ -477,7 +492,7 @@ async def _get_memory_context(agent_id: str, query: str, session_id: str = "") -
         return "", 0, [], [], None
 
 
-async def _prewarm_memory(session_id: str, query: str) -> None:
+async def _prewarm_memory(session_id: str, query: str, tenant_id: str | None = None) -> None:
     """Pre-fetch memory context for likely follow-up queries in this session.
 
     Called as a fire-and-forget task after a chat response is fully streamed.
@@ -491,9 +506,12 @@ async def _prewarm_memory(session_id: str, query: str) -> None:
 
         # Fetch fresh context from memory-service
         memory_client = await get_memory_client_async()
+        body = {"query": query, "session_id": session_id}
+        if tenant_id:
+            body["tenant_id"] = tenant_id
         resp = await memory_client.post(
             "/api/v1/engrams/context",
-            json={"query": query, "session_id": session_id},
+            json=body,
         )
         if resp.status_code == 200:
             await redis.setex(
@@ -1114,18 +1132,20 @@ async def _store_exchange(
     session_id: str,
     user_message: str,
     assistant_response: str,
+    tenant_id: str | None = None,
 ) -> None:
     """Emit the exchange to the engram ingestion queue for graph decomposition.
 
     The engram ingestion worker (memory-service) consumes this asynchronously
     via BRPOP, decomposes it into atomic engrams, and builds the memory graph.
     """
-    await _emit_to_engram_queue(agent_id, session_id, user_message, assistant_response)
+    await _emit_to_engram_queue(agent_id, session_id, user_message, assistant_response, tenant_id=tenant_id)
 
 
 async def _mark_engrams_used(
     engram_ids: list[str],
     retrieval_log_id: str | None,
+    tenant_id: str | None = None,
 ) -> None:
     """Fire-and-forget: tell memory-service which engrams were used.
 
@@ -1137,12 +1157,15 @@ async def _mark_engrams_used(
         return
     try:
         memory_client = await get_memory_client_async()
+        body = {
+            "retrieval_log_id": retrieval_log_id,
+            "engram_ids_used": engram_ids,
+        }
+        if tenant_id:
+            body["tenant_id"] = tenant_id
         await memory_client.post(
             "/api/v1/engrams/mark-used",
-            json={
-                "retrieval_log_id": retrieval_log_id,
-                "engram_ids_used": engram_ids,
-            },
+            json=body,
         )
     except Exception as e:
         log.debug("Failed to mark engrams used: %s", e)
@@ -1167,6 +1190,7 @@ async def _emit_to_engram_queue(
     session_id: str,
     user_message: str,
     assistant_response: str,
+    tenant_id: str | None = None,
 ) -> None:
     """Push a conversation exchange to the engram ingestion queue via Redis LPUSH.
 
@@ -1178,14 +1202,17 @@ async def _emit_to_engram_queue(
         redis = _get_engram_redis()
 
         raw_text = f"User: {user_message}\n\nAssistant: {assistant_response}"
-        payload = json.dumps({
+        payload_dict = {
             "raw_text": raw_text,
             "source_type": "chat",
             "source_id": agent_id,
             "session_id": session_id,
             "occurred_at": datetime.now(timezone.utc).isoformat(),
             "metadata": {"agent_id": agent_id, "session_id": session_id},
-        })
+        }
+        if tenant_id:
+            payload_dict["tenant_id"] = tenant_id
+        payload = json.dumps(payload_dict)
         await redis.lpush("engram:ingestion:queue", payload)
     except Exception as e:
         log.warning("Failed to emit to engram queue: %s", e)
