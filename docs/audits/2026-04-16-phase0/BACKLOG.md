@@ -72,7 +72,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | PRIV-003 | privacy | Factory reset ignores ~90% of user data (engrams, intel, knowledge, conversations, cortex, friction…) | P0 | M | M | Done |
 | PRIV-004 | privacy | Backups unencrypted plaintext; include `JWT_SECRET`, OAuth tokens, every message/memory | P1 | M | M | Open |
 | PRIV-005 | privacy | Filesystem-stored sources orphaned on `delete_source` | P1 | M | S | Open |
-| PRIV-006 | privacy | All engrams/sources/knowledge tied to single hardcoded tenant UUID (multi-user would silently merge) | P1 | L | L | Open |
+| PRIV-006 | privacy | All engrams/sources/knowledge tied to single hardcoded tenant UUID (multi-user would silently merge) | P1 | L | L | Done |
 | PRIV-007 | privacy | No user-data export; no user-deletion endpoint | P1 | M | M | Open |
 | PRIV-008 | privacy | Unbounded growth on intel/knowledge/engrams (no retention knobs) | P1 | M | M | Open |
 | PRIV-009 | privacy | Classifier + complexity-classifier log first-50-chars of prompts at DEBUG | P2 | M | S | Open |
@@ -125,7 +125,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 
 | # | Axis | Finding | Sev | Impact | Effort | Status |
 |---|---|---|---|---|---|---|
-| FC-001 | feature-completeness | Multi-user auth plumbing uses single hardcoded tenant UUID — adding family silently merges graphs | P0 | L | L | Open |
+| FC-001 | feature-completeness | Multi-user auth plumbing uses single hardcoded tenant UUID — adding family silently merges graphs | P0 | L | L | Done |
 | FC-002 | feature-completeness | Consolidation runs but higher-order phases produce zeros (`schemas_created=0`, `edges_strengthened=0`) | P1 | M | M | Open |
 | FC-003 | feature-completeness | Knowledge-worker profile-gated off by default; only 3 engrams with knowledge provenance | P1 | M | S | Open |
 | FC-004 | feature-completeness | Cortex cost rollup shows `cost_so_far_usd=0.0` on active goals (March fix may be incomplete) | P1 | M | M | Open |
@@ -242,6 +242,12 @@ Items surfaced during Phase 1+ execution that weren't in the original audit. Tra
 | # | Surfaced in | Finding | Sev | Status |
 |---|---|---|---|---|
 | FU-001 | Phase 1.2 sprint | Chat appears broken over Tailscale (user-reported 2026-04-17). **Root cause: 24h Redis TTL on `nova:agent:{id}` records silently expired the primary agent; `list_agents()` then returned `[]` and `POST /api/v1/chat/stream` 503'd with "No agents available — Nova is still starting up".** Not Tailscale-specific — affected all chat access once Nova had been running for a day. Fixed by removing the TTL in `orchestrator/app/store.py` (3 sites). | P0 | Done |
+| FU-003 | FC-001 close (2026-04-21) | Cortex runs as a single global brain — no tenant concept. Per Q1=C in the FC-001 design, deferred to a future audit item. When the second tenant is added, decide whether cortex stays global (household-assistant model) or gets per-tenant instances. | P2 | Open |
+| FU-004 | FC-001 close (2026-04-21) | `tenant_id` still missing on `pods`, `pod_agents`, `tasks`, `mcp_servers`, `friction_log`, `activity_events`, `skills`, `rules`, `selfmod_prs`, pipeline artifacts (`artifacts`, `code_reviews`, `guardrail_findings`, `pipeline_training_logs`). FC-001 scope was the memory/knowledge merging risk; these remain instance-global. Add before multi-user rollout if any of them should be per-tenant. | P1 | Open |
+| FU-005 | FC-001 close (2026-04-21) | `knowledge_router` admin credential endpoints (create/delete/validate) and crawl-log ingest still hardcode `DEFAULT_TENANT_ID` — admin paths without user context. Needs body-level `tenant_id` param once multi-tenant credentials actually exist. | P2 | Open |
+| FU-006 | FC-001 close (2026-04-21) | Memory-service diagnostic endpoints (`/reconstruct`, `/graph`, `/user-profile`, `/engrams/{id}`, `/correct`, `/topics`, `/batch`) don't yet accept or filter by `tenant_id`. Admin-only paths so not a leak today; tighten before multi-tenant rollout. | P2 | Open |
+| FU-007 | FC-001 close (2026-04-21) | Pipeline ingestion paths don't carry tenant: `orchestrator/app/quality_router.py:236` (benchmark harness) and `orchestrator/app/pipeline/agents/post_pipeline.py:107` (post-pipeline extraction) push to the engram queue without `tenant_id`. Fix when pipeline state adopts tenant context. | P2 | Open |
+| FU-008 | FC-001 close (2026-04-21) | Flip memory-service endpoint grace-period default from WARN to strict 400 once all callers have been audited silent for a sustained period. Target: one clean week of logs with zero "called without tenant_id" WARNs. | P1 | Open |
 | FU-002 | Phase 1.2 sprint | Remove Claude subscription auth method (`claude_subscription_provider.py`). Anthropic **explicitly prohibited** third-party OAuth use as of Feb 19 2026; enforcement started Jan 2026 (sources: Claude Code legal-compliance page, The Register). Running the provider against api.anthropic.com with a Max/Pro token is an active ToS violation. Silently downgraded Sonnet 4.6 → Haiku 4.5 anyway. **Removed** in commit ca9b40e: provider file deleted, all claude-max/* registry/discovery/config references scrubbed, setup-wizard option removed, migration 059 cleans stale routing-map entries. | P0 | Done |
 
 ---
