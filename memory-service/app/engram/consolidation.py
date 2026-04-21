@@ -10,6 +10,11 @@ Transforms raw experience into lasting wisdom through six phases:
 6. Self-Model Update — refresh identity from corrections and patterns
 
 Triggers: idle (30+ min), nightly (3 AM), threshold (50+ new engrams).
+
+PERF-003 phase 2 — LLM-heavy phases (2 pattern extraction, 2.5 topic
+clustering) are gated by user activity: if the user chatted within the
+configured idle window, those phases skip so Ollama can serve chat
+without queue contention. Scheduled/nightly triggers bypass the gate.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from sqlalchemy import text
 
 from app.config import settings
 from app.db.database import AsyncSessionLocal
-from app.embedding import get_embedding
+from app.embedding import get_embedding, get_redis
 from app.embedding import to_pg_vector
 from .cortex_stimulus import emit_to_cortex
 
@@ -34,6 +39,30 @@ log = logging.getLogger(__name__)
 _last_consolidation_at: float = 0.0
 _engrams_since_last: int = 0
 _consolidation_lock = asyncio.Lock()
+
+# Redis key the orchestrator bumps on every chat turn (both services talk to db0).
+_ACTIVITY_KEY = b"nova:activity:last_chat_turn"
+
+
+async def _user_recently_active() -> bool:
+    """True if a chat turn happened within the configured idle window.
+
+    Reads the heartbeat the orchestrator writes on every run_agent_turn.
+    Non-fatal on any error: returns False so consolidation never stalls
+    because Redis had a hiccup."""
+    try:
+        idle_sec = settings.engram_consolidation_user_idle_minutes * 60
+        if idle_sec <= 0:
+            return False
+        redis = get_redis()
+        raw = await redis.get(_ACTIVITY_KEY)
+        if not raw:
+            return False
+        ts = float(raw.decode() if isinstance(raw, bytes) else raw)
+        return (time.time() - ts) < idle_sec
+    except Exception:
+        log.debug("Activity heartbeat read failed — assuming idle", exc_info=True)
+        return False
 
 
 async def consolidation_loop() -> None:
@@ -142,24 +171,40 @@ async def run_consolidation(trigger: str = "manual") -> dict:
             stats["engrams_reviewed"] = count_row.scalar() or 0
         await _run_phase("Phase 1 (replay/review)", _phase1)
 
-        # Phase 2: Pattern Extraction → Schema engrams
-        async def _phase2(session):
-            stats["schemas_created"] = await _extract_patterns(session)
-        await _run_phase("Phase 2 (pattern extraction)", _phase2)
-
-        # Phase 2.5: Topic Discovery — cluster engrams into topics
-        async def _phase25(session):
-            from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
-            topics_created = await discover_topics(session)
-            topics_assigned = await assign_new_engrams_to_topics(session)
-            maintenance = await maintain_topics(session)
-            stats["topics_created"] = topics_created
+        # Phase 2: Pattern Extraction → Schema engrams (LLM-heavy)
+        # Gate on user activity: scheduled/nightly triggers always run, but
+        # idle/threshold/manual triggers skip when the user is actively
+        # chatting so Ollama serves the chat turn first (PERF-003 phase 2).
+        skip_llm_phases = (
+            trigger != "scheduled"
+            and await _user_recently_active()
+        )
+        if skip_llm_phases:
             log.info(
-                "Phase 2.5: %d topics created, %d engrams assigned, %d dissolved, %d regenerated",
-                topics_created, topics_assigned,
-                maintenance.get("dissolved", 0), maintenance.get("regenerated", 0),
+                "Consolidation (trigger=%s): user active within %dm — skipping LLM phases 2, 2.5",
+                trigger, settings.engram_consolidation_user_idle_minutes,
             )
-        await _run_phase("Phase 2.5 (topic discovery)", _phase25)
+            stats["schemas_created"] = 0
+            stats["topics_created"] = 0
+            stats["llm_phases_skipped"] = True
+        else:
+            async def _phase2(session):
+                stats["schemas_created"] = await _extract_patterns(session)
+            await _run_phase("Phase 2 (pattern extraction)", _phase2)
+
+            # Phase 2.5: Topic Discovery — cluster engrams into topics
+            async def _phase25(session):
+                from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
+                topics_created = await discover_topics(session)
+                topics_assigned = await assign_new_engrams_to_topics(session)
+                maintenance = await maintain_topics(session)
+                stats["topics_created"] = topics_created
+                log.info(
+                    "Phase 2.5: %d topics created, %d engrams assigned, %d dissolved, %d regenerated",
+                    topics_created, topics_assigned,
+                    maintenance.get("dissolved", 0), maintenance.get("regenerated", 0),
+                )
+            await _run_phase("Phase 2.5 (topic discovery)", _phase25)
 
         # Phase 3: Edge Strengthening & Weakening (Hebbian)
         async def _phase3(session):

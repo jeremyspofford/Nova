@@ -63,6 +63,10 @@ async def run_agent_turn(
         user_messages = [m for m in messages if m.get("role") == "user"]
         query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
 
+        # Heartbeat for PERF-003 phase 2: lets memory-service consolidation
+        # defer LLM-heavy phases while the user is actively chatting.
+        _bump_activity_heartbeat()
+
         # Notify Cortex of new user message (fire-and-forget)
         try:
             await emit_stimulus("message.received", {
@@ -198,6 +202,9 @@ async def run_agent_turn_streaming(
     started_at = datetime.now(timezone.utc)
     user_messages = [m for m in messages if m.get("role") == "user"]
     query = extract_text_content(user_messages[-1]["content"]) if user_messages else ""
+
+    # Heartbeat for PERF-003 phase 2 — see run_agent_turn above.
+    _bump_activity_heartbeat()
 
     # Notify Cortex of new user message (fire-and-forget)
     try:
@@ -1183,6 +1190,26 @@ def _get_engram_redis():
         base_url = settings.redis_url.rsplit("/", 1)[0]  # strip /2
         _engram_redis = aioredis.from_url(f"{base_url}/0", decode_responses=True)
     return _engram_redis
+
+
+def _bump_activity_heartbeat() -> None:
+    """Fire-and-forget: write a chat-activity timestamp to memory-service's db0.
+
+    Consolidation reads this key at cycle start; when it's within the
+    configured idle window, Phase 2 + 2.5 (the LLM-heavy phases) skip
+    so Ollama isn't serializing chat behind schema synthesis.
+    Non-fatal on Redis error — worst case, the gate never trips and
+    consolidation behaves as before.
+    """
+    try:
+        redis = _get_engram_redis()
+        # 15-minute TTL is plenty longer than any configured idle window
+        # and keeps the key from sticking around after a long outage.
+        asyncio.create_task(
+            redis.set("nova:activity:last_chat_turn", str(time.time()), ex=900)
+        )
+    except Exception as e:
+        log.debug("Failed to bump activity heartbeat: %s", e)
 
 
 async def _emit_to_engram_queue(

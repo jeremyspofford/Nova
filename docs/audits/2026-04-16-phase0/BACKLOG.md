@@ -161,7 +161,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 |---|---|---|---|---|---|---|
 | PERF-001 | performance | `/api/v1/engrams/context` takes 6–14s per call — blocks every chat message (audit bug — actual latency is ~150ms typical after stale Ollama URL cleanup on 2026-04-18, occasional 1–2s spikes from Ollama queue contention) | P0 | H | M | Resolved |
 | PERF-002 | performance | Embeddings fall back to cloud Gemini on every call (Ollama stopped, routing `cloud-only`) | P0 | H | M | Done |
-| PERF-003 | performance | Consolidation cycles run 65–110s, hold a single AsyncSession, starve chat (DB session fixed 2026-04-21; Ollama queue contention during Phase 2 LLM synthesis remains — see follow-up task) | P0 | M | L | Partial |
+| PERF-003 | performance | Consolidation cycles run 65–110s, hold a single AsyncSession, starve chat (DB session fix 2026-04-21 e64ead0; user-idle gate 2026-04-21 closes Ollama queue contention by skipping LLM phases 2+2.5 when user chatted within 5m) | P0 | M | L | Done |
 | PERF-004 | performance | Spreading-activation recursive CTE missing tenant filter on recursive step; `OR` join won't scale | P1 | L | S | Open |
 | PERF-005 | performance | Dashboard main bundle 2.9 MB; only 2 of ~20 routes are `React.lazy()` | P1 | H | S | Open |
 | PERF-006 | performance | Topic regeneration parses embeddings via Python `float()` per component (should batch/binary) | P1 | M | S | Open |

@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     engram_consolidation_nightly_hour: int = 3  # 3 AM
     engram_consolidation_threshold: int = 50  # new engrams trigger
     engram_consolidation_model: str = "auto"
+    # PERF-003 phase 2 — defer LLM-heavy consolidation phases when the user
+    # chatted within the last N minutes so Ollama queue contention doesn't
+    # hurt chat latency. Scheduled/nightly triggers bypass this gate.
+    engram_consolidation_user_idle_minutes: int = 5
     engram_edge_decay: float = 0.95
     engram_prune_activation_floor: float = 0.01
     engram_merge_similarity_threshold: float = 0.88
