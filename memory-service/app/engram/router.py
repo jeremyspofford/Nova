@@ -22,8 +22,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from nova_contracts.engram import (
+    ActivateRequest,
+    ContextRequest,
     IngestRequest,
     IngestResponse,
+    MarkUsedRequest,
 )
 
 from app.db.database import get_db
@@ -42,12 +45,36 @@ log = logging.getLogger(__name__)
 engram_router = APIRouter(prefix="/api/v1/engrams", tags=["engrams"])
 
 
+# ── Tenant resolution (FC-001 grace period) ───────────────────────────────────
+#
+# Phase 1-3 of the multi-tenancy rollout: callers SHOULD pass tenant_id on every
+# request. Missing values default to the seeded tenant with a WARNING log so we
+# can find stragglers in production. Phase 4 flips this to raise 400.
+
+DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
+
+
+def _resolve_tenant(tenant_id: UUID | None, endpoint: str) -> str:
+    """Return a tenant_id string, falling back to DEFAULT_TENANT with a WARNING
+    when the caller didn't provide one. Centralizes the Phase 1 grace-period
+    behavior so Phase 4 can flip it in one place."""
+    if tenant_id is None:
+        log.warning(
+            "memory-service %s called without tenant_id — defaulting to %s. "
+            "This will become a 400 once FC-001 rollout completes (Phase 4).",
+            endpoint, DEFAULT_TENANT,
+        )
+        return DEFAULT_TENANT
+    return str(tenant_id)
+
+
 # ── Phase 1: Ingestion ────────────────────────────────────────────────
 
 
 @engram_router.post("/ingest", response_model=IngestResponse, status_code=201)
 async def ingest_engram(req: IngestRequest):
     """Ingest raw text directly into the engram graph (bypasses queue)."""
+    tenant_id = _resolve_tenant(req.tenant_id, "/ingest")
     result = await ingest_direct(
         raw_text=req.raw_text,
         source_type=req.source_type.value if hasattr(req.source_type, "value") else req.source_type,
@@ -55,6 +82,7 @@ async def ingest_engram(req: IngestRequest):
         session_id=str(req.session_id) if req.session_id else None,
         occurred_at=req.occurred_at.isoformat() if req.occurred_at else None,
         metadata=req.metadata,
+        tenant_id=tenant_id,
     )
     return IngestResponse(
         engrams_created=result["engrams_created"],
@@ -492,21 +520,17 @@ async def bootstrap_user_profile(req: BootstrapRequest):
 
 
 @engram_router.post("/activate")
-async def activate_engrams(
-    query: str,
-    seed_count: int | None = None,
-    max_hops: int | None = None,
-    max_results: int | None = None,
-    depth: str = "standard",
-):
+async def activate_engrams(req: ActivateRequest):
     """Run spreading activation on a query and return activated engrams."""
+    tenant_id = _resolve_tenant(req.tenant_id, "/activate")
     async with get_db() as session:
         activated = await spreading_activation(
-            session, query,
-            seed_count=seed_count,
-            max_hops=max_hops,
-            max_results=max_results,
-            depth=depth,
+            session, req.query,
+            seed_count=req.seed_count,
+            max_hops=req.max_hops,
+            max_results=req.max_results,
+            depth=req.depth,
+            tenant_id=tenant_id,
         )
     return {
         "count": len(activated),
@@ -554,24 +578,21 @@ async def reconstruct_memory(query: str):
 
 
 @engram_router.post("/context")
-async def get_engram_context(
-    query: str = Body(...),
-    session_id: str = Body(""),
-    current_turn: int = Body(0),
-    depth: str = Body("standard"),
-):
+async def get_engram_context(req: ContextRequest):
     """Assemble the full working memory context for a query.
 
     This is the main endpoint the orchestrator calls to get engram-powered
     memory context for prompt assembly.
     """
+    tenant_id = _resolve_tenant(req.tenant_id, "/context")
     async with get_db() as session:
         ctx = await assemble_context(
             session,
-            query=query,
-            session_id=session_id,
-            current_turn=current_turn,
-            depth=depth,
+            query=req.query,
+            session_id=req.session_id,
+            current_turn=req.current_turn,
+            depth=req.depth,
+            tenant_id=tenant_id,
         )
     prompt = format_context_prompt(ctx)
     return {
@@ -790,17 +811,29 @@ async def router_status():
 
 
 @engram_router.post("/mark-used")
-async def mark_used(
-    retrieval_log_id: str = Body(...),
-    engram_ids_used: list[str] = Body(...),
-):
+async def mark_used(req: MarkUsedRequest):
     """Mark which engrams were actually used from a retrieval context.
 
     Called by the orchestrator after the LLM response to provide ground
     truth for Neural Router training.
     """
+    tenant_id = _resolve_tenant(req.tenant_id, "/mark-used")
     async with get_db() as session:
-        await mark_engrams_used(session, retrieval_log_id, engram_ids_used)
+        # Tenant isolation: verify the retrieval log belongs to the caller's
+        # tenant before updating. Silently returns ok for cross-tenant attempts
+        # so we don't leak existence of other tenants' logs.
+        owner = await session.execute(
+            text("SELECT tenant_id FROM retrieval_log WHERE id = CAST(:id AS uuid)"),
+            {"id": req.retrieval_log_id},
+        )
+        owner_tid = owner.scalar()
+        if owner_tid is not None and str(owner_tid) != tenant_id:
+            log.warning(
+                "mark-used: retrieval_log %s belongs to tenant %s, caller is %s — ignored",
+                req.retrieval_log_id, owner_tid, tenant_id,
+            )
+            return {"status": "ok"}
+        await mark_engrams_used(session, req.retrieval_log_id, req.engram_ids_used)
         await session.commit()
     return {"status": "ok"}
 

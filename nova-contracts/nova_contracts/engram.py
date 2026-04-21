@@ -126,6 +126,10 @@ class IngestionEvent(BaseModel):
     source_title: str | None = None
     source_author: str | None = None
     source_trust: float | None = None
+    # Multi-tenant isolation (FC-001). None = caller didn't set it; memory-service
+    # treats that as the default tenant with a WARNING log during Phase 1-3
+    # rollout, then becomes a strict 400 in Phase 4.
+    tenant_id: UUID | None = None
 
 
 # ── Decomposition output (structured LLM response) ──────────────────────────
@@ -173,6 +177,34 @@ class IngestRequest(BaseModel):
     session_id: UUID | None = None
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Multi-tenant isolation (FC-001) — see IngestionEvent.tenant_id.
+    tenant_id: UUID | None = None
+
+
+class ContextRequest(BaseModel):
+    """Working-memory context assembly request (POST /engrams/context)."""
+    query: str
+    session_id: str = ""
+    current_turn: int = 0
+    depth: str = "standard"
+    tenant_id: UUID | None = None
+
+
+class ActivateRequest(BaseModel):
+    """Spreading-activation request (POST /engrams/activate)."""
+    query: str
+    seed_count: int | None = None
+    max_hops: int | None = None
+    max_results: int | None = None
+    depth: str = "standard"
+    tenant_id: UUID | None = None
+
+
+class MarkUsedRequest(BaseModel):
+    """Feedback request: which surfaced engrams did the LLM actually cite."""
+    retrieval_log_id: str
+    engram_ids_used: list[str]
+    tenant_id: UUID | None = None
 
 
 class IngestResponse(BaseModel):

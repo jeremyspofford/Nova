@@ -77,11 +77,15 @@ async def assemble_context(
     session_id: str = "",
     current_turn: int = 0,
     depth: str = "standard",
+    tenant_id: str = "00000000-0000-0000-0000-000000000001",
 ) -> WorkingMemoryContext:
     """Full working memory assembly: activate → reconstruct → gate → context.
 
     This is the main entry point called by the orchestrator via
-    GET /api/v1/engrams/context.
+    POST /api/v1/engrams/context. tenant_id threads through activation +
+    retrieval logging so a second tenant's data never seeds another tenant's
+    context (FC-001). Self-model, active goal, sticky decisions, open threads
+    are not yet tenant-filtered — Phase 3 cleanup.
     """
     ctx = WorkingMemoryContext()
 
@@ -111,6 +115,7 @@ async def assemble_context(
         seed_count=seed_count,
         max_results=max_results,
         depth=depth,
+        tenant_id=tenant_id,
     )
 
     # 3b. Neural re-ranking (if model loaded)
@@ -209,6 +214,7 @@ async def assemble_context(
                 engram_ids_surfaced=[str(e.id) for e in activated],
                 session_id=session_id,
                 active_goal=goal,
+                tenant_id=tenant_id,
             )
             ctx.retrieval_log_id = log_id
         except Exception:

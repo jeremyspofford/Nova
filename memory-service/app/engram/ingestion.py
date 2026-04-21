@@ -168,6 +168,7 @@ async def ingest_direct(
     session_id: str | None = None,
     occurred_at: str | None = None,
     metadata: dict | None = None,
+    tenant_id: str | None = None,
 ) -> dict:
     """Direct ingestion (bypasses queue). Used by the /engrams/ingest endpoint.
 
@@ -180,6 +181,7 @@ async def ingest_direct(
         "session_id": session_id,
         "occurred_at": occurred_at,
         "metadata": metadata or {},
+        "tenant_id": tenant_id,
     }
     return await _process_event(json.dumps(event))
 
@@ -217,6 +219,16 @@ async def _process_event(raw_payload: str) -> dict:
         except (ValueError, AttributeError):
             occurred_at = datetime.now(timezone.utc)
     metadata = event.get("metadata", {})
+    # FC-001 grace period: payloads enqueued before Phase 2 rolled out may not
+    # carry tenant_id. Fall back to DEFAULT_TENANT with a WARN so we can spot
+    # stragglers in prod logs. Phase 4 will reject missing tenant_id outright.
+    tenant_id = event.get("tenant_id") or None
+    if tenant_id is None:
+        log.warning(
+            "engram ingestion payload missing tenant_id — defaulting to %s",
+            DEFAULT_TENANT,
+        )
+        tenant_id = DEFAULT_TENANT
 
     if not raw_text.strip():
         return {"engrams_created": 0, "engrams_updated": 0, "edges_created": 0, "engram_ids": []}
@@ -257,6 +269,7 @@ async def _process_event(raw_payload: str) -> dict:
                 trust_score=trust_override if trust_override is not None else None,
                 author=source_author,
                 metadata=metadata,
+                tenant_id=tenant_id,
             )
             source_meta = {
                 k: v for k, v in {
@@ -289,6 +302,7 @@ async def _process_event(raw_payload: str) -> dict:
                     source_meta=source_meta,
                     trust=trust,
                     temporal_validity=getattr(decomposed, 'temporal_validity', 'unknown'),
+                    tenant_id=tenant_id,
                 )
                 index_to_id[i] = engram_id
                 engram_ids.append(engram_id)
@@ -405,6 +419,7 @@ async def _store_or_update_engram(
     source_meta=None,
     trust=0.8,
     temporal_validity: str = "unknown",
+    tenant_id: str = DEFAULT_TENANT,
 ) -> tuple[UUID, bool]:
     """Store a new engram or update an existing one after entity resolution.
 
@@ -503,7 +518,7 @@ async def _store_or_update_engram(
             "source_type": source_type,
             "source_id": valid_source_id,
             "confidence": trust,
-            "tenant_id": DEFAULT_TENANT,
+            "tenant_id": tenant_id,
             "source_ref_id": source_ref_id,
             "source_meta": json.dumps(source_meta or {}),
             "temporal_validity": temporal_validity,

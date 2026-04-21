@@ -117,11 +117,12 @@ async def list_sources(
     scope: str | None = Query(default=None),
     status: str | None = Query(default=None),
 ):
-    """List knowledge sources, optionally filtered by scope or status."""
+    """List knowledge sources for the caller's tenant. FC-001: filters by
+    _user.tenant_id so users never see other tenants' sources."""
     pool = get_pool()
-    conditions: list[str] = []
-    values: list = []
-    idx = 1
+    conditions: list[str] = ["tenant_id = $1"]
+    values: list = [UUID(_user.tenant_id)]
+    idx = 2
 
     if scope is not None:
         conditions.append(f"scope = ${idx}")
@@ -132,7 +133,7 @@ async def list_sources(
         values.append(status)
         idx += 1
 
-    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    where = " WHERE " + " AND ".join(conditions)
     query = f"SELECT * FROM knowledge_sources{where} ORDER BY created_at DESC"
 
     async with pool.acquire() as conn:
@@ -162,7 +163,7 @@ async def create_source(req: CreateSourceRequest, _user: UserDep):
             detail=f"Invalid scope '{req.scope}'. Must be one of: {', '.join(sorted(VALID_SCOPES))}",
         )
 
-    tenant_id = UUID(DEFAULT_TENANT_ID)
+    tenant_id = UUID(_user.tenant_id)
     cred_id = UUID(req.credential_id) if req.credential_id else None
 
     pool = get_pool()
@@ -177,17 +178,20 @@ async def create_source(req: CreateSourceRequest, _user: UserDep):
             tenant_id, req.name, req.url, req.source_type, req.scope,
             json.dumps(req.crawl_config or {}), cred_id,
         )
-    log.info("Knowledge source created: %s — %s", row["id"], req.name)
+    log.info("Knowledge source created: %s — %s (tenant %s)", row["id"], req.name, tenant_id)
     return dict(row)
 
 
 @knowledge_router.get("/api/v1/knowledge/sources/{source_id}")
 async def get_source(source_id: UUID, _user: UserDep):
-    """Get source detail with recent crawl history."""
+    """Get source detail with recent crawl history. Tenant-scoped — returns
+    404 (not 403) for cross-tenant lookups so we don't leak existence."""
+    tenant_id = UUID(_user.tenant_id)
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM knowledge_sources WHERE id = $1", source_id,
+            "SELECT * FROM knowledge_sources WHERE id = $1 AND tenant_id = $2",
+            source_id, tenant_id,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Source not found")
@@ -195,11 +199,11 @@ async def get_source(source_id: UUID, _user: UserDep):
         crawl_history = await conn.fetch(
             """
             SELECT * FROM knowledge_crawl_log
-            WHERE source_id = $1
+            WHERE source_id = $1 AND tenant_id = $2
             ORDER BY started_at DESC
             LIMIT 10
             """,
-            source_id,
+            source_id, tenant_id,
         )
 
     source = dict(row)
@@ -252,13 +256,16 @@ async def update_source(source_id: UUID, req: UpdateSourceRequest, _user: UserDe
         values.append(val)
 
     values.append(source_id)
+    values.append(UUID(_user.tenant_id))
     set_clause = ", ".join(set_parts)
-    idx = len(values)
+    id_idx = len(values) - 1
+    tenant_idx = len(values)
 
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            f"UPDATE knowledge_sources SET {set_clause}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
+            f"UPDATE knowledge_sources SET {set_clause}, updated_at = NOW() "
+            f"WHERE id = ${id_idx} AND tenant_id = ${tenant_idx} RETURNING *",
             *values,
         )
     if not row:
@@ -269,11 +276,13 @@ async def update_source(source_id: UUID, req: UpdateSourceRequest, _user: UserDe
 
 @knowledge_router.delete("/api/v1/knowledge/sources/{source_id}", status_code=204)
 async def delete_source(source_id: UUID, _user: UserDep):
-    """Delete a knowledge source. Cascading deletes handle crawl_log and page_cache."""
+    """Delete a knowledge source. Tenant-scoped so users can't delete other
+    tenants' sources by guessing UUIDs. Cascades handle crawl_log/page_cache."""
     pool = get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
-            "DELETE FROM knowledge_sources WHERE id = $1", source_id,
+            "DELETE FROM knowledge_sources WHERE id = $1 AND tenant_id = $2",
+            source_id, UUID(_user.tenant_id),
         )
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Source not found")
@@ -282,11 +291,13 @@ async def delete_source(source_id: UUID, _user: UserDep):
 
 @knowledge_router.post("/api/v1/knowledge/sources/{source_id}/crawl")
 async def trigger_crawl(source_id: UUID, _user: UserDep):
-    """Trigger an immediate crawl. Activates paused sources."""
+    """Trigger an immediate crawl. Activates paused sources. Tenant-scoped."""
+    tenant_id = UUID(_user.tenant_id)
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id, status FROM knowledge_sources WHERE id = $1", source_id,
+            "SELECT id, status FROM knowledge_sources WHERE id = $1 AND tenant_id = $2",
+            source_id, tenant_id,
         )
         if not row:
             raise HTTPException(status_code=404, detail="Source not found")
@@ -294,8 +305,9 @@ async def trigger_crawl(source_id: UUID, _user: UserDep):
         # If paused, activate it
         if row["status"] == "paused":
             await conn.execute(
-                "UPDATE knowledge_sources SET status = 'active', updated_at = NOW() WHERE id = $1",
-                source_id,
+                "UPDATE knowledge_sources SET status = 'active', updated_at = NOW() "
+                "WHERE id = $1 AND tenant_id = $2",
+                source_id, tenant_id,
             )
 
     log.info("Crawl triggered for knowledge source: %s", source_id)
@@ -504,11 +516,13 @@ async def retrieve_credential(credential_id: UUID, _admin: AdminDep):
 
 @knowledge_router.post("/api/v1/knowledge/sources/{source_id}/paste")
 async def paste_content(source_id: UUID, req: PasteContentRequest, _user: UserDep):
-    """Manual content paste — pushes to engram ingestion queue."""
+    """Manual content paste — pushes to engram ingestion queue. Tenant-scoped."""
+    tenant_id = _user.tenant_id
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT id FROM knowledge_sources WHERE id = $1", source_id,
+            "SELECT id FROM knowledge_sources WHERE id = $1 AND tenant_id = $2",
+            source_id, UUID(tenant_id),
         )
         if not row:
             raise HTTPException(status_code=404, detail="Source not found")
@@ -520,6 +534,7 @@ async def paste_content(source_id: UUID, req: PasteContentRequest, _user: UserDe
             "source_type": "knowledge",
             "source_id": str(source_id),
             "metadata": {"import_method": "paste"},
+            "tenant_id": tenant_id,
         })
         await redis.lpush("engram:ingestion:queue", payload)
     except Exception as e:
@@ -535,17 +550,22 @@ async def paste_content(source_id: UUID, req: PasteContentRequest, _user: UserDe
 
 @knowledge_router.get("/api/v1/knowledge/stats")
 async def knowledge_stats(_user: UserDep):
-    """Aggregate knowledge stats for the dashboard."""
+    """Aggregate knowledge stats for the caller's tenant only."""
+    tenant_id = UUID(_user.tenant_id)
     pool = get_pool()
     async with pool.acquire() as conn:
         status_rows = await conn.fetch(
-            "SELECT status, COUNT(*) AS count FROM knowledge_sources GROUP BY status"
+            "SELECT status, COUNT(*) AS count FROM knowledge_sources"
+            " WHERE tenant_id = $1 GROUP BY status",
+            tenant_id,
         )
         total_credentials = await conn.fetchval(
-            "SELECT COUNT(*) FROM knowledge_credentials"
+            "SELECT COUNT(*) FROM knowledge_credentials WHERE tenant_id = $1",
+            tenant_id,
         )
         latest_crawl = await conn.fetchval(
-            "SELECT MAX(last_crawl_at) FROM knowledge_sources"
+            "SELECT MAX(last_crawl_at) FROM knowledge_sources WHERE tenant_id = $1",
+            tenant_id,
         )
 
     status_map = {r["status"]: r["count"] for r in status_rows}

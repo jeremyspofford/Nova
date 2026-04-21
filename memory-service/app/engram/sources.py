@@ -46,6 +46,9 @@ def _content_hash(content: str) -> str:
     return hashlib.sha256(content.encode()).hexdigest()
 
 
+_DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
+
+
 async def find_or_create_source(
     session: AsyncSession,
     *,
@@ -59,20 +62,28 @@ async def find_or_create_source(
     completeness: str = "complete",
     coverage_notes: str | None = None,
     metadata: dict | None = None,
+    tenant_id: str = _DEFAULT_TENANT,
 ) -> UUID:
-    """Find existing source by content hash or URI, or create a new one.
+    """Find existing source by (tenant_id, content_hash) or (tenant_id, URI, kind),
+    or create a new one.
 
     Returns the source UUID. Does NOT call session.commit() — relies on
-    the caller's get_db() context manager for auto-commit.
+    the caller's get_db() context manager for auto-commit. tenant_id ensures
+    the same URI can legitimately exist for two tenants without collision.
     """
     c_hash = _content_hash(content) if content else None
     trust = trust_score if trust_score is not None else DEFAULT_TRUST.get(source_kind, 0.7)
 
-    # Dedup: check content hash first, then URI
+    # Dedup: check content hash first, then URI — scoped per tenant so two
+    # tenants reading the same article each get their own source row.
     if c_hash:
         row = await session.execute(
-            text("SELECT id FROM sources WHERE content_hash = :h LIMIT 1"),
-            {"h": c_hash},
+            text(
+                "SELECT id FROM sources"
+                " WHERE content_hash = :h AND tenant_id = CAST(:tid AS uuid)"
+                " LIMIT 1"
+            ),
+            {"h": c_hash, "tid": tenant_id},
         )
         existing = row.fetchone()
         if existing:
@@ -81,8 +92,13 @@ async def find_or_create_source(
 
     if uri:
         row = await session.execute(
-            text("SELECT id FROM sources WHERE uri = :u AND source_kind = :k LIMIT 1"),
-            {"u": uri, "k": source_kind},
+            text(
+                "SELECT id FROM sources"
+                " WHERE uri = :u AND source_kind = :k"
+                "   AND tenant_id = CAST(:tid AS uuid)"
+                " LIMIT 1"
+            ),
+            {"u": uri, "k": source_kind, "tid": tenant_id},
         )
         existing = row.fetchone()
         if existing:
@@ -103,11 +119,11 @@ async def find_or_create_source(
             INSERT INTO sources (
                 source_kind, title, uri, content, content_path, content_hash,
                 trust_score, author, published_at, completeness, coverage_notes,
-                metadata
+                metadata, tenant_id
             ) VALUES (
                 :kind, :title, :uri, :content, :content_path, :hash,
                 :trust, :author, :published_at, :completeness, :coverage_notes,
-                CAST(:metadata AS jsonb)
+                CAST(:metadata AS jsonb), CAST(:tenant_id AS uuid)
             )
             RETURNING id
         """),
@@ -124,6 +140,7 @@ async def find_or_create_source(
             "completeness": completeness,
             "coverage_notes": coverage_notes,
             "metadata": json.dumps(metadata or {}),
+            "tenant_id": tenant_id,
         },
     )
     source_id = row.scalar_one()
