@@ -47,7 +47,7 @@ These rise to the top of the sort because they're severe, high-impact for daily-
 | SEC-003 | security | LLM-gateway `/v1/chat/completions` unauthenticated on all interfaces | P0 | H | M | Done |
 | SEC-004 | security | Memory-service and cortex expose all endpoints with no auth | P0 | H | S | Done |
 | SEC-005 | security | Default admin secret + Postgres password survive non-wizard install | P0 | H | S | Done |
-| SEC-006 | security | Recovery-service writable `.env` mount + docker socket (`:ro` is cosmetic) | P0 | M | M | Open |
+| SEC-006 | security | Recovery-service writable `.env` mount + docker socket (`:ro` is cosmetic) — bigger than initially scoped; split into SEC-006a (migrate secrets out of .env) + SEC-006b (docker-socket-proxy for SDK path) | P0 | M | M | Split |
 | SEC-007 | security | Google OAuth flow lacks CSRF `state` parameter | P1 | M | S | Open |
 | SEC-008 | security | Chat-api WebSocket has no Origin validation | P1 | H | S | Open |
 | SEC-009 | security | API keys hashed with unsalted SHA-256 | P1 | M | M | Open |
