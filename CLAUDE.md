@@ -9,6 +9,7 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 ## Architecture
 
 **Services and ports:**
+
 - **orchestrator** (8000) — Agent lifecycle, task queue, pipeline execution, MCP tool dispatch, DB migrations (FastAPI + asyncpg)
 - **llm-gateway** (8001) — Multi-provider model routing via LiteLLM: Anthropic, OpenAI, Ollama, Groq, Gemini, Cerebras, OpenRouter, GitHub, Claude/ChatGPT subscription providers (FastAPI)
 - **memory-service** (8002) — Embedding + hybrid semantic/keyword retrieval via pgvector (FastAPI + SQLAlchemy async)
@@ -76,6 +77,7 @@ make test-quick    # Health endpoints only (~0.4s)
 Integration tests live in `tests/` at the repo root. They hit real running services over HTTP/WebSocket — no mocks. Pipeline tests are opt-in (skipped unless an LLM provider is configured). Tests create resources with `nova-test-` prefix and clean up via fixture teardown.
 
 Additional validation:
+
 - Dashboard: `cd dashboard && npm run build` (TypeScript compilation check)
 - Each FastAPI service: `/health/live` and `/health/ready` endpoints
 - Interactive: chat-api serves a test UI at `http://localhost:8080/`
@@ -84,6 +86,7 @@ Additional validation:
 ## Code Conventions
 
 **Python (all backend services):**
+
 - Async/await throughout (FastAPI + asyncpg + async Redis)
 - Config via `pydantic_settings.BaseSettings` reading from `.env`
 - Orchestrator uses raw asyncpg queries (no ORM); memory-service uses SQLAlchemy async
@@ -93,11 +96,13 @@ Additional validation:
 - Snake_case everywhere; JSONB for flexible fields; UUID primary keys; TIMESTAMPTZ
 
 **React/TypeScript (dashboard):**
+
 - Functional components only, TanStack Query for server state (staleTime=5s, retry=1)
 - Tailwind CSS with stone/teal/amber/emerald palette; Lucide React icons
 - API calls via `apiFetch<T>()` in `src/api.ts`; admin secret stored in localStorage
 
 **API design:**
+
 - Raw JSON responses (no `{ data: ... }` wrapper)
 - Admin auth: `X-Admin-Secret` header
 - API key auth: `Authorization: Bearer sk-nova-<hash>` or `X-API-Key`
@@ -108,6 +113,7 @@ Additional validation:
 The old 4-tier memory (working/episodic/semantic/procedural) has been replaced by the **Engram Network** — a graph-based cognitive memory system. Code lives in `memory-service/app/engram/`.
 
 **Key components:**
+
 - **Ingestion** (`ingestion.py`) — Async Redis queue worker decomposes raw text into structured engrams via LLM. Backpressure via `Semaphore(5)`.
 - **Spreading Activation** (`activation.py`) — Graph traversal retrieval via recursive CTE. Seeds by cosine similarity, then spreads through weighted edges.
 - **Working Memory** (`working_memory.py`) — Five-tier slot system (pinned, sticky, refreshed, sliding, expiring) with token budgeting.
@@ -132,6 +138,7 @@ Every engram links back to a `sources` table tracking where knowledge came from.
 ### Memory Tools
 
 Agents can access memory via tools instead of pre-injected context:
+
 - `what_do_i_know` — lightweight domain overview (~200 tokens)
 - `search_memory` — semantic search across engrams
 - `recall_topic` — graph traversal from an entity
@@ -191,6 +198,7 @@ docker compose logs --tail 30 2>&1 | grep -i "error\|exception" | tail -20
 Nova's website lives at `website/` (Astro/Starlight, arialabs.ai). The site serves both the Aria Labs company landing page and Nova product pages/docs. After completing feature work, check if any website content needs updating.
 
 **Website structure:**
+
 - `website/src/content/docs/nova/docs/` — Documentation pages (Starlight, served at arialabs.ai/nova/docs/)
 - `website/src/content/changelog/` — Release changelog entries
 - `website/src/data/features.ts` — Landing page feature list and differentiators
@@ -235,6 +243,7 @@ Nova's website lives at `website/` (Astro/Starlight, arialabs.ai). The site serv
 **Skip** for internal refactors with no user-visible change.
 
 ## Design System
+
 Always read DESIGN.md before making any visual or UI decisions.
 All font choices, colors, spacing, and aesthetic direction are defined there.
 Do not deviate without explicit user approval.
@@ -247,6 +256,7 @@ tool as your FIRST action. Do NOT answer directly, do NOT use other tools first.
 The skill has specialized workflows that produce better results than ad-hoc answers.
 
 Key routing rules:
+
 - Product ideas, "is this worth building", brainstorming → invoke office-hours
 - Bugs, errors, "why is this broken", 500 errors → invoke investigate
 - Ship, deploy, push, create PR → invoke ship

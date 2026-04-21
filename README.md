@@ -24,9 +24,11 @@ Built by [Aria Labs](https://arialabs.ai).
 ## Quick Start
 
 ### Prerequisites
+
 - [Docker Desktop](https://docker.com/products/docker-desktop) (includes Docker Compose)
 
 ### Install
+
 ```bash
 git clone https://github.com/arialabs/nova.git
 cd nova
@@ -34,17 +36,21 @@ cd nova
 ```
 
 The setup wizard asks a few questions and starts everything.
-Open **http://localhost:3001** when it's done.
+Open **<http://localhost:3001>** when it's done.
 
 ### Remote GPU (optional)
+
 If you have a separate machine with a GPU for AI inference:
+
 ```bash
 # Run this ON the GPU machine:
 bash <(curl -s https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh)
 ```
+
 Then re-run `./setup` on the Nova machine and choose "Remote GPU".
 
 ### Manual configuration
+
 If you prefer to skip the wizard, copy `.env.example` to `.env`, edit it, and run `make dev`.
 See [.env.example](.env.example) for all configurable values.
 
@@ -66,5 +72,6 @@ Nova exposes an OpenAI-compatible endpoint at `http://localhost:8000/v1`. Compat
 
 See [docs/ide-integration.md](docs/ide-integration.md) for setup instructions.
 
-## License                       
-PolyForm Noncommercial 1.0.0 — see [LICENSE](./LICENSE). Commercial licensing available — contact jeremy.spofford@arialabs.ai
+## License
+
+PolyForm Noncommercial 1.0.0 — see [LICENSE](./LICENSE). Commercial licensing available — contact <jeremy.spofford@arialabs.ai>
