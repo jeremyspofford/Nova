@@ -49,6 +49,7 @@ OPTIONAL_SERVICE_URLS = {
 def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "requires_llm: skip unless an LLM provider is available")
     config.addinivalue_line("markers", "pipeline: full pipeline tests requiring LLM provider")
+    config.addinivalue_line("markers", "slow: marker for long-running e2e tests (~3-5 min)")
 
 
 # ---------------------------------------------------------------------------

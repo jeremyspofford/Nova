@@ -427,13 +427,26 @@ async def reject_spec(goal_id: UUID, req: RejectSpecRequest, _user: UserDep):
 
 @goals_router.get("/api/v1/goals/{goal_id}/scope")
 async def get_goal_scope(goal_id: UUID, _user: UserDep):
-    """Get scope analysis for a goal."""
+    """Get scope analysis for a goal.
+
+    asyncpg returns JSONB as a string by default (no codec registered), so we
+    decode it here to ensure callers get a dict — mirroring _row_to_goal()'s
+    defensive decoding for the same column.
+    """
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow("SELECT scope_analysis FROM goals WHERE id = $1", goal_id)
     if not row:
         raise HTTPException(status_code=404, detail="Goal not found")
-    return row["scope_analysis"] or {}
+    raw = row["scope_analysis"]
+    if not raw:
+        return {}
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return raw  # already a dict (asyncpg may return dict if codec registered later)
 
 
 # ── Goal Iterations & Artifacts ──────────────────────────────────────────────
