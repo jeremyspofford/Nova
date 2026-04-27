@@ -20,7 +20,7 @@
 | **3 — Self-aware** | Nova understands its own architecture, config, health; can inspect and modify itself. | Not Started |
 | **4 — Triggered execution** | Tasks start from external events — git push, cron, webhook, Slack. | Partial (intel/knowledge polling) |
 | **5 — Reactive** | Nova watches continuous streams, applies AI judgment, acts autonomously. | Not Started |
-| **6 — Self-directed** | Nova breaks goals into subtasks, executes, evaluates, re-plans, loops to completion. | Partial (cortex exists, goal loop blocked — see P1: Autonomous Loop Activation) |
+| **6 — Self-directed** | Nova breaks goals into subtasks, executes, evaluates, re-plans, loops to completion. | Partial (P1 Autonomous Loop code delivered 2026-04 — runtime verification + goal decomposition + maturation executor remain) |
 
 ---
 
@@ -104,10 +104,12 @@ Autonomous AI ecosystem feed poller. Feed ingestion is operational; recommendati
 - Dashboard: feed management, recommendation browsing, suggested goals tab
 - Database schema: intel_feeds, intel_content_items, intel_recommendations, linkage tables
 
+**Recently delivered (P1 Autonomous Loop Activation, Tier 3 — 2026-04):**
+- ✅ Recommendation generation — `POST /api/v1/intel/recommendations` endpoint shipped (`intel_router.py:358`); Cortex MCP tools in `intel_tools.py` (`query_intel_content`, `create_recommendation`, `get_dismissed_hashes`); system goals seeded by migration `040_intel_system_goals.sql`. Runtime population of `intel_recommendations` table needs live cycle confirmation.
+- ✅ `intel:new_items` Redis queue dead letter — push removed (zero project references remain).
+
 **Not yet implemented:**
-- Recommendation generation — no Cortex goal or background task analyzes intel content and creates recommendations. The CRUD endpoints exist (GET/PATCH/DELETE) but POST is missing and nothing populates the `intel_recommendations` table. Root cause analysis and implementation plan in **P1: Autonomous Loop Activation, Tier 3**.
 - Goal maturation pipeline — maturation stages defined in schema but Cortex drive logic to execute them is not built.
-- `intel:new_items` Redis queue (db6) has no consumer — accumulates indefinitely as dead letter.
 - See spec: `docs/superpowers/specs/2026-03-25-intelligence-and-goal-maturation-design.md`
 - See analysis: `docs/superpowers/specs/2026-03-28-platform-health-analysis.md`
 
@@ -203,7 +205,9 @@ Cross-cutting reliability work shipped across hardening phases:
 
 ---
 
-## WIP Snapshot — 2026-04-03
+## WIP Snapshot — 2026-04-03 (Historical)
+
+> **Superseded 2026-04-27.** All feature branches listed below were consolidated into main or dropped during repo cleanup; main is the single source of truth. Stash references may also be stale (branches deleted). Section retained for historical context — do not use for current state.
 
 Uncommitted work, stashed branches, and feature branch status as of this date.
 
@@ -344,7 +348,7 @@ Cortex brain loop works. The feedback loop that makes it actually autonomous is 
 | ~~**Hardcoded outcome scores**~~ | ~~Reports 0.2 or 0.7 — no actual measurement~~ | ✅ Delivered (status-based scoring) |
 | ~~**No goal progress tracking**~~ | ~~`progress` field never updated~~ | ✅ Delivered (iteration-based progress) |
 | ~~**Cost tracking pipeline broken**~~ | ~~`cost_so_far_usd` never written — 3 gaps in the data pipeline~~ | ✅ Fixed 2026-03-28 |
-| **Goals stuck — LLM planner always skips** | Serve drive sends only title (no description/history/plan) to planner. "skip" escape hatch too easy. `last_checked_at` not updated on skip → infinite 30s loop. 6700+ wasted cycles. | **See P1: Autonomous Loop Activation** |
+| ~~**Goals stuck — LLM planner always skips**~~ | ~~Serve drive sends only title (no description/history/plan) to planner. "skip" escape hatch too easy. `last_checked_at` not updated on skip → infinite 30s loop. 6700+ wasted cycles.~~ | ✅ Delivered (P1 Autonomous Loop, Tier 1, 2026-04) |
 | **No goal decomposition** | Can't break "build a feature" into subtask DAG. One blob per cycle. | 2-3 weeks |
 | **Maturation pipeline stub** | Status columns exist but no executor transitions goals through phases | 2-3 days |
 | **No learning from failures** | Writes reflections but never reads them back. **Spec complete** — see `docs/specs/2026-03-28-cortex-learning-from-experience.md` | 1 week |
@@ -459,9 +463,11 @@ Safety: read tools unrestricted, write tools require confirmation, service resta
 - ✅ Failed task errors stored in goal `current_plan` metadata for next cycle's LLM planning
 - ✅ Goal cost tracking — 3-gap pipeline fixed 2026-03-28: `executor.py` rolls up agent_session costs to `tasks.total_cost_usd`, `pipeline_router.py` includes cost in task detail response, `task_tracker.py` carries cost in `TaskOutcome`, `cycle.py` accumulates cost on every goal update
 - Integration tests for cortex goal lifecycle — partial (`test_cortex_goals.py` covers cost + schema)
-- Read prior reflections before planning — **spec complete**, implementation next (`docs/specs/2026-03-28-cortex-learning-from-experience.md`)
+- ✅ Read prior reflections before planning — `cortex/app/reflections.py` + migration `048_cortex_reflections.sql` shipped (commit `95ad5d6 feat(cortex): restore all reflection learning files`)
 
-### P1: Autonomous Loop Activation — 2026-03-28
+### ✅ P1: Autonomous Loop Activation — Code Delivered 2026-04 (runtime verification pending)
+
+**Status (2026-04-27):** Tier 1-5 code artifacts confirmed on main. Spot-checks: serve drive enriched (`serve.py:30-44`), `MAX_CONSECUTIVE_SKIPS = 3` + skip persistence (`cycle.py:38, 459-463, 476-477`), POST recommendations endpoint (`intel_router.py:358`), Sidebar shows "Knowledge", `intel:new_items` push removed. Tier 4 EngramExplorer rename moot (file no longer exists). `tests/test_cortex_loop.py` and `tests/test_intel_recommendations.py` files exist; pass/fail unverified pending `make test`. Live runtime verification (start a goal → watch cortex dispatch instead of skip → confirm `intel_recommendations` populates) also pending.
 
 **Why:** The autonomous loop infrastructure is built (Cortex, Intel, Memory, Goals, Recommendations) but the end-to-end flow is broken at multiple integration points. Goals never dispatch tasks. Intel never generates recommendations. The chat agent can't verify its own state. Fixing these turns "infrastructure exists" into "Nova actually does things autonomously."
 
@@ -538,6 +544,19 @@ Tests written during this analysis. Expand to cover the new code from Tiers 1-4.
 | Recommendation pipeline | `tests/test_agent_capabilities.py` | POST endpoint exists, approve→goal flow works |
 
 **Total effort:** ~4 days, working serially through Tiers 1-5.
+
+### IDE Activity Monitoring — Pending Design (2026-04-27)
+
+**Why:** Nova should observe what's happening in the user's IDE (VS Code, Cursor, Neovim) to learn coding styles, language patterns, and per-repo conventions, feeding signal into engram memory. Today the chat agent has zero visibility into the user's editing context — every conversation starts cold. Persistent IDE telemetry would let Nova develop opinions ("you prefer pytest fixtures over class-based setUp", "this repo uses asyncpg, not SQLAlchemy", "you tend to refactor names mid-session").
+
+**Status:** Captured for future design. Major decisions still open:
+- **Privacy boundaries** — opt-in per repo, redaction of secrets/.env files, what counts as monitored vs. excluded
+- **Platform coverage** — single LSP-based plugin (broadest reach) vs. per-IDE extension (richest signal); Cursor specifically may need its own pathway
+- **Capture granularity** — file events only, AST-level changes, or keystroke-level
+- **Engram ingestion shape** — one engram per session, per file, or per detected pattern; how to dedupe noisy signals
+- **Bandwidth/storage** — local batching cadence, what gets dropped on backpressure
+
+**Next step:** Brainstorm the design space (`superpowers:brainstorming` skill) before writing a spec.
 
 ### P1: Skills & Rules System `[spec]`
 
