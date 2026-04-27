@@ -15,12 +15,16 @@ def admin_headers():
 
 
 def test_simple_goal_does_not_enter_maturation():
-    """A trivial goal stays in NULL maturation_status."""
+    """A trivial goal stays in NULL maturation_status after triage runs."""
     resp = httpx.post(
         f"{BASE}/goals",
         json={
             "title": "nova-test-simple",
-            "description": "Add a print statement to log.py",
+            "description": (
+                "Fix a typo in the README. Single-file documentation change, "
+                "no code, no migrations, no services touched, no auth, no "
+                "frontend, no infra. One line edit."
+            ),
             "priority": 3, "max_iterations": 5, "max_cost_usd": 0.50,
         },
         headers=HEADERS,
@@ -28,15 +32,18 @@ def test_simple_goal_does_not_enter_maturation():
     assert resp.status_code in (200, 201)
     gid = resp.json()["id"]
     try:
-        time.sleep(2)
+        # 35s gives cortex enough time to actually run triage (LLM call up to
+        # 30s + drive cycle cadence). Without this, the test would pass by
+        # asserting the initial NULL state, not that triage classified simple.
+        time.sleep(35)
         detail = httpx.get(f"{BASE}/goals/{gid}", headers=HEADERS).json()
         assert detail.get("maturation_status") in (None, "simple")
     finally:
         httpx.delete(f"{BASE}/goals/{gid}", headers=HEADERS)
 
 
-def test_complex_goal_enters_triaging():
-    """A multi-service goal is classified complex and enters maturation."""
+def test_complex_goal_enters_scoping():
+    """A multi-service goal is classified complex and enters maturation at scoping."""
     resp = httpx.post(
         f"{BASE}/goals",
         json={
@@ -56,6 +63,9 @@ def test_complex_goal_enters_triaging():
     try:
         time.sleep(35)
         detail = httpx.get(f"{BASE}/goals/{gid}", headers=HEADERS).json()
-        assert detail.get("maturation_status") in ("triaging", "scoping")
+        # Complex goals route directly to `scoping` — the first active phase.
+        # There is no transient `triaging` status; the classifier writes
+        # `scoping` once it returns "complex".
+        assert detail.get("maturation_status") == "scoping"
     finally:
         httpx.delete(f"{BASE}/goals/{gid}", headers=HEADERS)
