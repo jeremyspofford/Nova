@@ -511,6 +511,12 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
         if scope:
             return f"Scoping phase: goal {goal_id} analyzed and transitioned to speccing"
         return f"Scoping phase: goal {goal_id} failed (LLM unavailable or invalid response)"
+    elif maturation_phase == "speccing":
+        from .maturation.speccing import run_speccing
+        spec = await run_speccing(goal_id)
+        if spec:
+            return f"Speccing phase: goal {goal_id} spec generated and transitioned to review"
+        return f"Speccing phase: goal {goal_id} failed (LLM unavailable or missing scope)"
     elif maturation_phase == "verifying":
         from .maturation.verifying import run_verifying
         ok = await run_verifying(goal_id)

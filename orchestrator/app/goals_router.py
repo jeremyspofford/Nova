@@ -57,6 +57,9 @@ class UpdateGoalRequest(BaseModel):
     max_completions: int | None = None
     complexity: str | None = None
     maturation_status: str | None = None
+    scope_analysis: dict | None = None  # admin-only seeding for maturation tests
+    spec: str | None = None              # admin-only seeding for maturation tests
+    spec_rejection_feedback: str | None = None  # admin-only seeding for maturation tests
 
 
 class GoalResponse(BaseModel):
@@ -88,6 +91,7 @@ class GoalResponse(BaseModel):
     complexity: str | None = None
     scope_analysis: dict | None = None
     spec: str | None = None
+    spec_rejection_feedback: str | None = None
     spec_approved_at: datetime | None = None
     spec_approved_by: str | None = None
     source_recommendation_id: UUID | None = None
@@ -213,9 +217,16 @@ async def update_goal(goal_id: UUID, req: UpdateGoalRequest, _user: UserDep):
 
     set_parts = []
     values = []
+    # Columns stored as JSONB need explicit cast + JSON-serialized text so asyncpg
+    # doesn't reject dict values.
+    JSONB_COLUMNS = {"scope_analysis"}
     for i, (key, val) in enumerate(updates.items(), start=1):
-        set_parts.append(f"{key} = ${i}")
-        values.append(val)
+        if key in JSONB_COLUMNS and isinstance(val, dict):
+            set_parts.append(f"{key} = ${i}::jsonb")
+            values.append(json.dumps(val))
+        else:
+            set_parts.append(f"{key} = ${i}")
+            values.append(val)
 
     values.append(goal_id)
     set_clause = ", ".join(set_parts)
@@ -270,6 +281,12 @@ def _row_to_goal(row) -> GoalResponse:
             plan = json.loads(plan)
         except (json.JSONDecodeError, TypeError):
             plan = None
+    scope = row.get("scope_analysis")
+    if isinstance(scope, str):
+        try:
+            scope = json.loads(scope)
+        except (json.JSONDecodeError, TypeError):
+            scope = None
     return GoalResponse(
         id=row["id"],
         title=row["title"],
@@ -297,8 +314,9 @@ def _row_to_goal(row) -> GoalResponse:
         updated_at=row["updated_at"],
         maturation_status=row.get("maturation_status"),
         complexity=row.get("complexity"),
-        scope_analysis=row.get("scope_analysis"),
+        scope_analysis=scope,
         spec=row.get("spec"),
+        spec_rejection_feedback=row.get("spec_rejection_feedback"),
         spec_approved_at=row.get("spec_approved_at"),
         spec_approved_by=row.get("spec_approved_by"),
         source_recommendation_id=row.get("source_recommendation_id"),
