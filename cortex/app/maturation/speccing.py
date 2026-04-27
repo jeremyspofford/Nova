@@ -61,25 +61,35 @@ async def run_speccing(goal_id: str) -> str:
         scope_analysis=scope_str,
     )
 
+    # Retry on empty/short content — same Ollama empty-response failure mode
+    # as scoping.py. Temperature drift breaks deterministic empty states.
     llm = get_llm()
-    resp = await llm.post(
-        "/complete",
-        json={
-            "model": settings.planning_model or "",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.2,
-            "max_tokens": 3000,
-            "tier": "best",
-        },
-        timeout=180.0,
-    )
-    if resp.status_code != 200:
-        log.warning("Speccing LLM returned %d for goal %s", resp.status_code, goal_id)
-        return ""
+    spec = ""
+    for attempt, temp in enumerate((0.2, 0.4, 0.6), start=1):
+        resp = await llm.post(
+            "/complete",
+            json={
+                "model": settings.planning_model or "",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temp,
+                "max_tokens": 3000,
+                "tier": "best",
+            },
+            timeout=180.0,
+        )
+        if resp.status_code != 200:
+            log.warning("Speccing LLM returned %d for goal %s (attempt %d)",
+                        resp.status_code, goal_id, attempt)
+            continue
+        spec = resp.json().get("content", "").strip()
+        if len(spec) >= 50:
+            break
+        log.warning("Speccing returned too-short spec for goal %s (attempt %d, len=%d)",
+                    goal_id, attempt, len(spec))
+        spec = ""
 
-    spec = resp.json().get("content", "").strip()
-    if len(spec) < 50:
-        log.warning("Speccing returned too-short spec for goal %s", goal_id)
+    if not spec:
+        log.warning("Speccing exhausted retries for goal %s; deferring", goal_id)
         return ""
 
     async with pool.acquire() as conn:

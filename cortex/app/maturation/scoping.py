@@ -53,27 +53,43 @@ async def run_scoping(goal_id: str) -> dict:
         memory_context=memory_str,
     )
 
+    # Retry on empty/invalid JSON — local Ollama occasionally returns empty
+    # content for structured-output prompts. Temperature drift breaks out of
+    # any deterministic empty-response state on retry.
     llm = get_llm()
-    resp = await llm.post(
-        "/complete",
-        json={
-            "model": settings.planning_model or "",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 1500,
-            "tier": "mid",
-            "response_format": {"type": "json_object"},
-        },
-        timeout=120.0,
-    )
-    if resp.status_code != 200:
-        log.warning("Scoping LLM returned %d for goal %s", resp.status_code, goal_id)
-        return {}
+    scope_data: dict | None = None
+    for attempt, temp in enumerate((0.1, 0.3, 0.5), start=1):
+        resp = await llm.post(
+            "/complete",
+            json={
+                "model": settings.planning_model or "",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temp,
+                "max_tokens": 1500,
+                "tier": "mid",
+                "response_format": {"type": "json_object"},
+            },
+            timeout=120.0,
+        )
+        if resp.status_code != 200:
+            log.warning("Scoping LLM returned %d for goal %s (attempt %d)",
+                        resp.status_code, goal_id, attempt)
+            continue
+        content = resp.json().get("content", "").strip()
+        if not content:
+            log.warning("Scoping LLM returned empty for goal %s (attempt %d)",
+                        goal_id, attempt)
+            continue
+        try:
+            scope_data = json.loads(content)
+            break
+        except json.JSONDecodeError as e:
+            log.warning("Scoping LLM returned invalid JSON for goal %s (attempt %d): %s",
+                        goal_id, attempt, e)
+            continue
 
-    try:
-        scope_data = json.loads(resp.json().get("content", "{}"))
-    except json.JSONDecodeError as e:
-        log.warning("Scoping LLM returned invalid JSON for goal %s: %s", goal_id, e)
+    if scope_data is None:
+        log.warning("Scoping exhausted retries for goal %s; deferring", goal_id)
         return {}
 
     async with pool.acquire() as conn:
