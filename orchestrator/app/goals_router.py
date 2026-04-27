@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app.auth import UserDep
 from app.db import get_pool
 from app.intel_router import CreateCommentRequest
-from app.stimulus import GOAL_COMMENTED, GOAL_SPEC_APPROVED, GOAL_SPEC_REJECTED, emit_stimulus
+from app.stimulus import GOAL_COMMENTED, GOAL_CREATED, GOAL_SPEC_APPROVED, GOAL_SPEC_REJECTED, emit_stimulus
 
 log = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ async def create_goal(req: CreateGoalRequest, user: UserDep):
             req.max_completions, req.created_via,
         )
     log.info("Goal created: %s — %s", row["id"], req.title)
-    await emit_stimulus("goal.created", {
+    await emit_stimulus(GOAL_CREATED, {
         "goal_id": str(row["id"]),
         "title": req.title,
         "schedule_cron": req.schedule_cron,

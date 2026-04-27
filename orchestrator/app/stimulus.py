@@ -22,6 +22,7 @@ _CORTEX_REDIS_DB = 5
 RECOMMENDATION_CREATED = "recommendation.created"
 RECOMMENDATION_APPROVED = "recommendation.approved"
 RECOMMENDATION_COMMENTED = "recommendation.commented"
+GOAL_CREATED = "goal.created"
 GOAL_SPEC_APPROVED = "goal.spec_approved"
 GOAL_SPEC_REJECTED = "goal.spec_rejected"
 GOAL_COMMENTED = "goal.commented"
