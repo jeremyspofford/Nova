@@ -500,6 +500,20 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
     goal_id = goal["id"]
     state.goal_id = goal_id
 
+    # ── Maturation phase dispatch ────────────────────────────────────────
+    # Goals in an active maturation phase route to phase-specific executors
+    # instead of the generic pipeline task dispatch. Future phases (scoping,
+    # speccing) hook in alongside `verifying` here.
+    maturation_phase = goal.get("maturation_status")
+    if maturation_phase == "verifying":
+        from .maturation.verifying import run_verifying
+        ok = await run_verifying(goal_id)
+        return (
+            f"Verifying phase: goal {goal_id} marked completed (health checks passed)"
+            if ok else
+            f"Verifying phase: goal {goal_id} rolled back to review (health checks failed)"
+        )
+
     # Check if this approach has already failed (oscillation prevention)
     try:
         is_blocked, failed = await check_approach_blocked(goal_id, plan, state.budget_tier)
