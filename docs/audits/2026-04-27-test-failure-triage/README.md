@@ -74,3 +74,17 @@ Recommendation: option 2 — better long-term posture, mirrors production behavi
 - Mark inference-backend tests with environment gate
 - Add `requires_llm` marker to pipeline-behavior tests
 - Triage the misc 6 one-offs individually
+
+## Update — 2026-04-27 (Task 9): Groq 401 cluster resolved via local-only routing
+
+The pipeline-behavior + maturation-phase 500s traced to a single root cause: the dev `GROQ_API_KEY` in `.env` was returning 401 Invalid API Key, and the gateway's default tier preferences put `groq/llama-3.3-70b-versatile` first for tier=mid/cheap. Per the user's stored preference ("local AI is primary"), fixed by routing locally rather than refreshing the cloud key:
+
+1. Set `nova:config:llm.routing_strategy = local-only` in Redis db 1.
+2. Overrode `nova:config:llm.tier_preferences` in Redis db 1 to a JSON dict putting Ollama models (`qwen2.5:7b`, `hermes3:8b`, `default-ollama`) at the head of every tier — without this, the resolver still returned the `groq/...` model name and the local-only override sent that string to Ollama, which 404s on unknown models.
+3. Commented out `GROQ_API_KEY` in `.env` (gitignored, not committed) for durability across full-stack rebuilds. Restarted `llm-gateway`.
+
+**Verification:** `POST /complete` with `tier=mid` returns 200 with `model=qwen2.5:7b`. Maturation tests `test_complex_goal_enters_scoping` and `test_speccing_produces_spec_and_transitions_to_review` now PASS (previously 500). Two remaining maturation failures are unrelated:
+- `test_simple_goal_does_not_enter_maturation` — local model judges the simple-goal prompt as "complex" (LLM judgment quality, not env).
+- `test_scoping_produces_scope_analysis` — `scope` returned as `str`, test iterates expecting dict (test/scoping shape mismatch, not env).
+
+These two are now legitimate code/test work, not environment issues.
