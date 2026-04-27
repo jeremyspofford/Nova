@@ -502,10 +502,16 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
 
     # ── Maturation phase dispatch ────────────────────────────────────────
     # Goals in an active maturation phase route to phase-specific executors
-    # instead of the generic pipeline task dispatch. Future phases (scoping,
-    # speccing) hook in alongside `verifying` here.
+    # instead of the generic pipeline task dispatch. Future phases (speccing)
+    # hook in alongside `scoping` and `verifying` here.
     maturation_phase = goal.get("maturation_status")
-    if maturation_phase == "verifying":
+    if maturation_phase == "scoping":
+        from .maturation.scoping import run_scoping
+        scope = await run_scoping(goal_id)
+        if scope:
+            return f"Scoping phase: goal {goal_id} analyzed and transitioned to speccing"
+        return f"Scoping phase: goal {goal_id} failed (LLM unavailable or invalid response)"
+    elif maturation_phase == "verifying":
         from .maturation.verifying import run_verifying
         ok = await run_verifying(goal_id)
         return (
