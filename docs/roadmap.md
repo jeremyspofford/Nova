@@ -549,14 +549,21 @@ Tests written during this analysis. Expand to cover the new code from Tiers 1-4.
 
 **Why:** Nova should observe what's happening in the user's IDE (VS Code, Cursor, Neovim) to learn coding styles, language patterns, and per-repo conventions, feeding signal into engram memory. Today the chat agent has zero visibility into the user's editing context — every conversation starts cold. Persistent IDE telemetry would let Nova develop opinions ("you prefer pytest fixtures over class-based setUp", "this repo uses asyncpg, not SQLAlchemy", "you tend to refactor names mid-session").
 
-**Status:** Captured for future design. Major decisions still open:
-- **Privacy boundaries** — opt-in per repo, redaction of secrets/.env files, what counts as monitored vs. excluded
-- **Platform coverage** — single LSP-based plugin (broadest reach) vs. per-IDE extension (richest signal); Cursor specifically may need its own pathway
-- **Capture granularity** — file events only, AST-level changes, or keystroke-level
-- **Engram ingestion shape** — one engram per session, per file, or per detected pattern; how to dedupe noisy signals
-- **Bandwidth/storage** — local batching cadence, what gets dropped on backpressure
+**Status:** Mid-brainstorm 2026-04-27 — paused before completion.
 
-**Next step:** Brainstorm the design space (`superpowers:brainstorming` skill) before writing a spec.
+**Decisions captured so far:**
+- **Primary purpose ranking:** B > C > A — real-time chat context (B) is primary; queryable activity timeline (C) secondary; long-term style/preference learning (A) tertiary and emerges downstream from C+consolidation, not built explicitly first.
+- **Privacy/scope model:** UI-configurable in dashboard Settings, backed by Redis (`nova:config:ide_monitoring.*`); pattern-based allowlist (e.g. `~/workspace/**`) + per-context boundaries (Aria/personal/alertventure split per CLAUDE.md) + non-overridable sensitive-file safety net (`**/.env*`, `**/secrets/**`, `~/Obsidian_Vault/**`). No `.env`/YAML config — UI only per `feedback_ui_configurable.md`.
+- **Capture content:** Path-only payload (`repo`, `file`, `line`). Nova reads file contents on demand via existing fs/memory tools — avoids duplicating content in transit, shrinks privacy surface. Upgrade to viewport/full-file later only if path-only proves insufficient.
+
+**Still open (resume here):**
+- **Platform priority** — Neovim first (primary daily-driver per CLAUDE.md, smaller Lua plugin), then VS Code extension (covers Cursor via fork)? Or both in parallel? Or VS Code first for broader reach? Sanity-check the user's "built in ide" phrasing — external IDE plugin vs. Nova's embedded editor vs. Claude Code's IDE integration.
+- **Trigger model** — Push (IDE streams events continuously, Nova caches current state in Redis) vs. pull (Nova queries IDE at chat time) vs. hybrid (events for C/timeline, Redis cache for B/chat).
+- **Cross-machine topology** — Nova runs on Beelink; user also develops on Dell PC over Tailscale. Does the IDE plugin push across the tailnet, or is monitoring local-only per machine?
+- **Engram ingestion shape** — One episode engram per file-focus event? Aggregated per session? How to dedupe noisy editor signals (rapid file switches, etc.).
+- **What chat actually does with the signal** — Auto-injected into every chat turn? Tool-callable (`get_current_editor_state`)? Pinned working memory slot?
+
+**Next step (when resuming):** Continue brainstorming via `superpowers:brainstorming` skill from the platform-priority question, then complete spec → plan → implementation.
 
 ### P1: Skills & Rules System `[spec]`
 
