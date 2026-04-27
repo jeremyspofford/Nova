@@ -37,7 +37,7 @@ async def test_create_source():
         data = resp.json()
         assert data["source_kind"] == "intel_feed"
         assert data["title"] == "nova-test-intel-source"
-        assert data["trust_score"] == 0.8
+        assert data["trust_score"] == pytest.approx(0.8)
         await c.delete(f"{BASE}/sources/{data['id']}")
 
 
@@ -59,7 +59,7 @@ async def test_get_source_detail(created_source):
         assert resp.status_code == 200
         data = resp.json()
         assert data["title"] == "nova-test-source-provenance"
-        assert data["trust_score"] == 0.9
+        assert data["trust_score"] == pytest.approx(0.9)
 
 
 @pytest.mark.asyncio

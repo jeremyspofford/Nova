@@ -9,12 +9,13 @@ import pytest
 
 VOICE = os.getenv("NOVA_VOICE_URL", "http://localhost:8130")
 HAS_OPENAI = bool(os.getenv("OPENAI_API_KEY"))
+HEADERS = {"X-Admin-Secret": os.getenv("NOVA_ADMIN_SECRET", "")}
 
 
 @pytest.mark.asyncio
 async def test_voice_health_live():
     """Voice service liveness check."""
-    async with httpx.AsyncClient(timeout=5) as c:
+    async with httpx.AsyncClient(timeout=5, headers=HEADERS) as c:
         resp = await c.get(f"{VOICE}/health/live")
         assert resp.status_code == 200
         assert resp.json()["status"] == "alive"
@@ -23,7 +24,7 @@ async def test_voice_health_live():
 @pytest.mark.asyncio
 async def test_voice_health_ready():
     """Voice service readiness reports provider availability."""
-    async with httpx.AsyncClient(timeout=5) as c:
+    async with httpx.AsyncClient(timeout=5, headers=HEADERS) as c:
         resp = await c.get(f"{VOICE}/health/ready")
         assert resp.status_code == 200
         data = resp.json()
@@ -36,7 +37,7 @@ async def test_voice_health_ready():
 @pytest.mark.asyncio
 async def test_voice_list_voices():
     """GET /voices returns provider and voice list."""
-    async with httpx.AsyncClient(timeout=5) as c:
+    async with httpx.AsyncClient(timeout=5, headers=HEADERS) as c:
         resp = await c.get(f"{VOICE}/api/v1/voice/voices")
         assert resp.status_code == 200
         data = resp.json()
@@ -48,7 +49,7 @@ async def test_voice_list_voices():
 @pytest.mark.asyncio
 async def test_transcribe_no_audio():
     """POST /transcribe with no file returns 422."""
-    async with httpx.AsyncClient(timeout=5) as c:
+    async with httpx.AsyncClient(timeout=5, headers=HEADERS) as c:
         resp = await c.post(f"{VOICE}/api/v1/voice/transcribe")
         assert resp.status_code == 422
 
@@ -56,7 +57,7 @@ async def test_transcribe_no_audio():
 @pytest.mark.asyncio
 async def test_synthesize_empty_text():
     """POST /synthesize with empty text returns 400."""
-    async with httpx.AsyncClient(timeout=5) as c:
+    async with httpx.AsyncClient(timeout=5, headers=HEADERS) as c:
         resp = await c.post(
             f"{VOICE}/api/v1/voice/synthesize",
             json={"text": "", "voice": "nova", "model": "tts-1"},
@@ -67,7 +68,7 @@ async def test_synthesize_empty_text():
 @pytest.mark.asyncio
 async def test_synthesize_text_too_long():
     """POST /synthesize with text exceeding max_tts_chars returns 400."""
-    async with httpx.AsyncClient(timeout=5) as c:
+    async with httpx.AsyncClient(timeout=5, headers=HEADERS) as c:
         resp = await c.post(
             f"{VOICE}/api/v1/voice/synthesize",
             json={"text": "x" * 5000, "voice": "nova", "model": "tts-1"},
@@ -79,7 +80,7 @@ async def test_synthesize_text_too_long():
 @pytest.mark.skipif(not HAS_OPENAI, reason="OPENAI_API_KEY not set")
 async def test_synthesize_returns_mp3():
     """POST /synthesize returns valid MP3 audio."""
-    async with httpx.AsyncClient(timeout=15) as c:
+    async with httpx.AsyncClient(timeout=15, headers=HEADERS) as c:
         resp = await c.post(
             f"{VOICE}/api/v1/voice/synthesize",
             json={"text": "Hello, this is Nova.", "voice": "nova", "model": "tts-1"},
