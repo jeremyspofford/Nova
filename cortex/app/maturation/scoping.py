@@ -89,8 +89,30 @@ async def run_scoping(goal_id: str) -> dict:
             continue
 
     if scope_data is None:
-        log.warning("Scoping exhausted retries for goal %s; deferring", goal_id)
-        return {}
+        # Hard fallback: write a minimal scope so the goal can advance to
+        # speccing instead of looping forever in scoping. Some local models
+        # (e.g. qwen2.5:7b on CPU) deterministically return empty for the
+        # structured-output prompt regardless of temperature. Liveness over
+        # quality — speccing can still produce a useful spec from the goal
+        # title/description even with a thin scope.
+        log.warning(
+            "Scoping exhausted retries for goal %s; writing minimal scope and advancing",
+            goal_id,
+        )
+        scope_data = {
+            "affected_scopes": ["unknown"],
+            "estimated_files_changed": 0,
+            "key_components": [],
+            "open_questions": [
+                "LLM scoping unavailable — review goal scope manually before approving spec.",
+            ],
+            "summary": (
+                f"Scoping deferred — LLM returned no structured output after 3 retries. "
+                f"Goal title: {goal['title']}. Description: "
+                f"{(goal['description'] or '(none)')[:200]}"
+            ),
+            "_fallback": True,
+        }
 
     async with pool.acquire() as conn:
         await conn.execute(
