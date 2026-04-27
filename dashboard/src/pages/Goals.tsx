@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Target, Plus, Trash2, DollarSign,
   TrendingUp, Repeat, Pencil, Zap, Pause, Play,
-  ChevronDown, ChevronRight, Check, X as XIcon, Lightbulb,
+  ChevronDown, ChevronRight, Lightbulb,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { formatDistanceToNow } from 'date-fns'
@@ -18,6 +18,8 @@ import {
   Metric, Modal, ProgressBar, Select, Skeleton, Textarea, Toast, Tooltip,
 } from '../components/ui'
 import { DiscussionThread } from '../components/DiscussionThread'
+import { MaturationBadge, type MaturationStatus } from '../components/MaturationBadge'
+import { GoalMaturationDetail } from '../components/GoalMaturationDetail'
 import { RecommendationCard } from '../components/intel/RecommendationCard'
 import type { SemanticColor } from '../lib/design-tokens'
 
@@ -560,8 +562,6 @@ function GoalCard({ goal }: { goal: Goal }) {
   const [editing, setEditing] = useState(false)
   const [toast, setToast] = useState<{ variant: 'success' | 'error'; message: string } | null>(null)
   const [maturationOpen, setMaturationOpen] = useState(false)
-  const [rejectFeedback, setRejectFeedback] = useState('')
-  const [showRejectForm, setShowRejectForm] = useState(false)
   const qc = useQueryClient()
   const [viewingFile, setViewingFile] = useState<string | null>(null)
 
@@ -600,30 +600,6 @@ function GoalCard({ goal }: { goal: Goal }) {
     onError: (e) => setToast({ variant: 'error', message: `Failed to toggle: ${e}` }),
   })
 
-  const approveSpec = useMutation({
-    mutationFn: () => apiFetch<void>(`/api/v1/goals/${goal.id}/approve-spec`, { method: 'POST' }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['goals'] })
-      setToast({ variant: 'success', message: 'Spec approved.' })
-    },
-    onError: (e) => setToast({ variant: 'error', message: `Failed to approve: ${e}` }),
-  })
-
-  const rejectSpec = useMutation({
-    mutationFn: (feedback: string) =>
-      apiFetch<void>(`/api/v1/goals/${goal.id}/reject-spec`, {
-        method: 'POST',
-        body: JSON.stringify({ feedback }),
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['goals'] })
-      setShowRejectForm(false)
-      setRejectFeedback('')
-      setToast({ variant: 'success', message: 'Spec rejected. Goal will re-scope.' })
-    },
-    onError: (e) => setToast({ variant: 'error', message: `Failed to reject: ${e}` }),
-  })
-
   const progressPct = Math.round(goal.progress * 100)
   const color = STATUS_COLOR[goal.status] ?? 'neutral'
 
@@ -654,6 +630,7 @@ function GoalCard({ goal }: { goal: Goal }) {
                 {goal.title}
               </span>
               <Badge color={color} size="sm">{goal.status}</Badge>
+              <MaturationBadge status={goal.maturation_status as MaturationStatus} />
               {goal.maturation_status && (
                 <MaturationStages current={goal.maturation_status} compact />
               )}
@@ -804,84 +781,11 @@ function GoalCard({ goal }: { goal: Goal }) {
 
               {maturationOpen && (
                 <div className="mt-3 space-y-3" onClick={e => e.stopPropagation()}>
-                  {/* Scope analysis */}
-                  {goal.scope_analysis != null && (
-                    <div>
-                      <span className="text-caption font-medium text-content-secondary">Scope Analysis</span>
-                      <div className="mt-1 p-2.5 rounded-sm bg-surface-elevated text-caption text-content-secondary overflow-x-auto">
-                        <pre className="whitespace-pre-wrap font-mono text-[11px]">
-                          {typeof goal.scope_analysis === 'string'
-                            ? goal.scope_analysis
-                            : JSON.stringify(goal.scope_analysis, null, 2) as string}
-                        </pre>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Spec */}
-                  {goal.spec && (
-                    <div>
-                      <span className="text-caption font-medium text-content-secondary">Spec</span>
-                      <div className="mt-1 p-2.5 rounded-sm bg-surface-elevated text-caption text-content-secondary overflow-x-auto">
-                        <pre className="whitespace-pre-wrap font-mono text-[11px]">
-                          {goal.spec}
-                        </pre>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Approve/Reject when in review */}
-                  {goal.maturation_status === 'review' && (
-                    <div className="flex items-start gap-2">
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        icon={<Check size={14} />}
-                        onClick={() => approveSpec.mutate()}
-                        loading={approveSpec.isPending}
-                      >
-                        Approve Spec
-                      </Button>
-                      {!showRejectForm ? (
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          icon={<XIcon size={14} />}
-                          onClick={() => setShowRejectForm(true)}
-                        >
-                          Reject Spec
-                        </Button>
-                      ) : (
-                        <div className="flex-1 space-y-2">
-                          <input
-                            value={rejectFeedback}
-                            onChange={e => setRejectFeedback(e.target.value)}
-                            placeholder="Feedback for rejection..."
-                            className="h-8 w-full rounded-sm border border-border bg-surface-input px-2.5 text-caption text-content-primary placeholder:text-content-tertiary outline-none focus:border-border-focus focus:ring-2 focus:ring-accent-500/40"
-                            autoFocus
-                          />
-                          <div className="flex gap-1.5">
-                            <Button
-                              variant="danger"
-                              size="sm"
-                              onClick={() => rejectSpec.mutate(rejectFeedback)}
-                              loading={rejectSpec.isPending}
-                              disabled={!rejectFeedback.trim()}
-                            >
-                              Confirm Reject
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => { setShowRejectForm(false); setRejectFeedback('') }}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  <GoalMaturationDetail
+                    goal={goal}
+                    onSuccess={(message) => setToast({ variant: 'success', message })}
+                    onError={(message) => setToast({ variant: 'error', message })}
+                  />
 
                   {/* Discussion thread */}
                   <DiscussionThread entityType="goal" entityId={goal.id} />
