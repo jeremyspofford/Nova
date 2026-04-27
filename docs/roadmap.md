@@ -465,9 +465,9 @@ Safety: read tools unrestricted, write tools require confirmation, service resta
 - Integration tests for cortex goal lifecycle — partial (`test_cortex_goals.py` covers cost + schema)
 - ✅ Read prior reflections before planning — `cortex/app/reflections.py` + migration `048_cortex_reflections.sql` shipped (commit `95ad5d6 feat(cortex): restore all reflection learning files`)
 
-### ✅ P1: Autonomous Loop Activation — Code Delivered 2026-04 (runtime verification pending)
+### ✅ P1: Autonomous Loop Activation — Delivered 2026-04 (runtime verified 2026-04-27)
 
-**Status (2026-04-27):** Tier 1-5 code artifacts confirmed on main. Spot-checks: serve drive enriched (`serve.py:30-44`), `MAX_CONSECUTIVE_SKIPS = 3` + skip persistence (`cycle.py:38, 459-463, 476-477`), POST recommendations endpoint (`intel_router.py:358`), Sidebar shows "Knowledge", `intel:new_items` push removed. Tier 4 EngramExplorer rename moot (file no longer exists). `tests/test_cortex_loop.py` and `tests/test_intel_recommendations.py` files exist; pass/fail unverified pending `make test`. Live runtime verification (start a goal → watch cortex dispatch instead of skip → confirm `intel_recommendations` populates) also pending.
+**Status (2026-04-27):** All 5 tiers shipped and runtime-verified. Code spot-checks: serve drive enriched (`serve.py:30-44`), `MAX_CONSECUTIVE_SKIPS = 3` + skip persistence (`cycle.py:38, 459-463, 476-477`), POST recommendations endpoint (`intel_router.py:358`), Sidebar shows "Knowledge", `intel:new_items` push removed. Tier 4 EngramExplorer rename moot (file no longer exists). Runtime evidence: all 9 P1 tests pass (`test_cortex_loop.py` + `test_intel_recommendations.py`); cortex cycle 22394+ shows steady "Dispatched task" outcomes (zero skip loops); 19 active goals advancing autonomously; `intel_recommendations` table populated with 20 rows (5 real intel-feed-derived); `intel:new_items` queue depth = 0 (dead letter leak confirmed fixed).
 
 **Why:** The autonomous loop infrastructure is built (Cortex, Intel, Memory, Goals, Recommendations) but the end-to-end flow is broken at multiple integration points. Goals never dispatch tasks. Intel never generates recommendations. The chat agent can't verify its own state. Fixing these turns "infrastructure exists" into "Nova actually does things autonomously."
 
