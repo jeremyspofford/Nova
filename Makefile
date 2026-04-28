@@ -14,12 +14,10 @@ else ifeq ($(NOVA_GPU),auto)
   GPU_OVERLAY = $(shell command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1 && echo "-f docker-compose.gpu.yml")
 endif
 
-# ── Ollama URL auto-detection ────────────────────────────────────────────
-OLLAMA_BASE_URL ?=
-ifneq ($(filter auto host,$(OLLAMA_BASE_URL)),)
-  RESOLVED_OLLAMA_URL := $(shell ./scripts/resolve-ollama-url.sh)
-  export OLLAMA_BASE_URL := $(RESOLVED_OLLAMA_URL)
-endif
+# OLLAMA_BASE_URL: 'auto' and 'host' are back-compat aliases handled inside
+# the gateway (llm-gateway/app/config.py). The Makefile no longer pre-resolves
+# them — the gateway treats them as http://ollama:11434, and the bundled
+# Compose service is reachable at that internal hostname.
 
 EDITOR_PROFILE := $(if $(filter vscode,$(EDITOR_FLAVOR)),--profile editor-vscode,$(if $(filter neovim,$(EDITOR_FLAVOR)),--profile editor-neovim,))
 COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice $(EDITOR_PROFILE)
