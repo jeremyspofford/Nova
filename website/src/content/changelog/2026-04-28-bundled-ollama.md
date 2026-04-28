@@ -5,9 +5,9 @@ date: 2026-04-28
 
 Nova now asks how you'd like to use it on first run, and ships sensible defaults for each option:
 
-- **hybrid** (default) — bundles Ollama for local AI, falls back to cloud providers when needed. Best of both worlds.
-- **local-only** — bundles Ollama, never uses cloud. Privacy-first or offline-friendly.
-- **cloud-only** — does not bundle Ollama at all (no image pull, no container). Lightest footprint, requires cloud API keys.
+- **hybrid** (default) — bundles Ollama for local AI, falls back to cloud providers when needed. Best of both worlds. First-run downloads ~5.4 GB of starter models (`qwen2.5:1.5b`, `qwen2.5:7b`, `nomic-embed-text`).
+- **local-only** — bundles Ollama, never uses cloud. Privacy-first or offline-friendly. Same ~5.4 GB starter models.
+- **cloud-only** — does not bundle Ollama at all (no image pull, no container, no model downloads). Lightest footprint, requires cloud API keys.
 
 Switch modes anytime by re-running `./scripts/setup.sh`, or set `NOVA_INFERENCE_MODE` and run `./scripts/setup.sh --derive-mode-only` non-interactively. A dashboard UI to switch modes (and point Nova at an external Ollama / vLLM instance like `http://192.168.x.y:11434`) without restarting is coming soon.
 
