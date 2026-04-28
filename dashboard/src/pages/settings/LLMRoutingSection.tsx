@@ -5,6 +5,7 @@ import { getOllamaStatus, discoverModels, resolveModel, testProvider, type Platf
 import { Section, Button, Input, Select, Toggle, StatusDot, Card, Slider, Badge } from '../../components/ui'
 import { ConfigField, useConfigValue } from './shared'
 import { LocalInferenceSection } from './LocalInferenceSection'
+import { manageComposeProfile, patchEnv } from '../../api-recovery'
 
 // ── LLM Routing section ──────────────────────────────────────────────────────
 
@@ -405,10 +406,32 @@ export function LLMRoutingSection({
     }
   }, [])
 
-  const handleStrategyChange = (value: string) => {
+  const handleStrategyChange = async (value: string) => {
+    // Save runtime strategy (existing — flows to nova:config:llm.routing_strategy in Redis).
     onSave('llm.routing_strategy', JSON.stringify(value))
     setStrategySaved(true)
     setTimeout(() => setStrategySaved(false), 1500)
+
+    // Drive the bundled Ollama compose service from the routing choice so the
+    // user never has to re-run setup.sh to switch modes:
+    //   cloud-only          → stop the bundled service (no local AI needed)
+    //   any other strategy  → start it (local-only / local-first / cloud-first)
+    // Also persist NOVA_INFERENCE_MODE in .env so `make dev` honors the choice
+    // on the next boot.
+    const mode = value === 'cloud-only' ? 'cloud-only'
+               : value === 'local-only' ? 'local-only'
+               : 'hybrid'
+    const action = mode === 'cloud-only' ? 'stop' : 'start'
+    try {
+      await manageComposeProfile('local-ollama', action)
+    } catch (e) {
+      console.warn('Failed to manage local-ollama compose profile:', e)
+    }
+    try {
+      await patchEnv({ NOVA_INFERENCE_MODE: mode })
+    } catch (e) {
+      console.warn('Failed to persist NOVA_INFERENCE_MODE in .env:', e)
+    }
   }
 
   return (
