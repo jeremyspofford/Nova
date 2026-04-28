@@ -20,7 +20,14 @@ endif
 # Compose service is reachable at that internal hostname.
 
 EDITOR_PROFILE := $(if $(filter vscode,$(EDITOR_FLAVOR)),--profile editor-vscode,$(if $(filter neovim,$(EDITOR_FLAVOR)),--profile editor-neovim,))
-COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice $(EDITOR_PROFILE)
+
+# Include the local-ollama profile in compose commands when NOVA_INFERENCE_MODE
+# is hybrid or local-only. setup.sh writes this to .env; we read it here so
+# `make dev` / `make up` activate the bundled Ollama service automatically.
+NOVA_INFERENCE_MODE ?= $(shell grep -E '^NOVA_INFERENCE_MODE=' .env 2>/dev/null | cut -d= -f2-)
+INFERENCE_PROFILE := $(if $(filter hybrid local-only,$(NOVA_INFERENCE_MODE)),--profile local-ollama,)
+
+COMPOSE      = docker compose -f docker-compose.yml $(GPU_OVERLAY) --profile voice $(EDITOR_PROFILE) $(INFERENCE_PROFILE)
 ALL_PROFILES = --profile voice --profile website --profile bridges --profile knowledge \
                --profile local-ollama --profile local-vllm --profile local-sglang \
                --profile cloudflare-tunnel --profile tailscale \
