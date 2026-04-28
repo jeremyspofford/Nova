@@ -1,5 +1,4 @@
 import logging
-import subprocess
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -8,44 +7,14 @@ _log = logging.getLogger(__name__)
 
 
 def _resolve_ollama_url(raw: str) -> str:
-    """Resolve magic OLLAMA_BASE_URL values (auto, host) to concrete URLs."""
-    if raw not in ("auto", "host"):
-        return raw
+    """Resolve OLLAMA_BASE_URL.
 
-    port = "11434"
-    host_url = "http://host.docker.internal:" + port
-
-    # WSL2: gateway IP reaches the Windows host
-    try:
-        with open("/proc/version") as f:
-            if "microsoft" in f.read().lower():
-                result = subprocess.run(
-                    ["ip", "route", "show", "default"],
-                    capture_output=True, text=True, timeout=2,
-                )
-                gw = result.stdout.split()[2] if result.stdout.strip() else ""
-                if gw:
-                    host_url = f"http://{gw}:{port}"
-    except Exception:
-        pass
-
-    if raw == "host":
-        _log.info("Resolved OLLAMA_BASE_URL=host → %s", host_url)
-        return host_url
-
-    # auto: probe host first, then fall back to Docker service
-    import httpx
-    try:
-        resp = httpx.get(f"{host_url}/api/tags", timeout=2.0)
-        if resp.status_code == 200:
-            _log.info("Resolved OLLAMA_BASE_URL=auto → %s (host probe OK)", host_url)
-            return host_url
-    except Exception:
-        pass
-
-    fallback = f"http://ollama:{port}"
-    _log.info("Resolved OLLAMA_BASE_URL=auto → %s (host probe failed)", fallback)
-    return fallback
+    'auto' and 'host' are back-compat aliases for the bundled compose service URL.
+    Any other value is treated as a literal URL and passes through unchanged.
+    """
+    if raw in ("auto", "host"):
+        return "http://ollama:11434"
+    return raw
 
 
 class Settings(BaseSettings):
