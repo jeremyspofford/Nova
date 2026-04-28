@@ -25,9 +25,21 @@ The setup wizard handles the rest.
 
 1. Copies `.env.example` to `.env` if it doesn't exist
 2. Detects GPU availability (NVIDIA / AMD ROCm)
-3. Asks about your deployment mode (cloud-only, local model serving, remote GPU)
+3. Asks how you want to use Nova (default is `hybrid`):
+
+   ```text
+   Nova can run with local AI, cloud AI, or both.
+
+     [1] hybrid     — bundle Ollama for local AI, fall back to cloud (recommended)
+     [2] local-only — bundle Ollama, never use cloud (privacy/offline-friendly)
+     [3] cloud-only — no bundled Ollama, only use cloud APIs (lighter setup)
+
+   Choice [1/2/3] (default 1):
+   ```
+
+   Just hit enter for `hybrid`. You can change modes anytime by re-running `./scripts/setup.sh`.
 4. Configures LLM provider API keys
-5. Pulls selected Ollama models (if using local inference)
+5. Pulls Ollama models for hybrid/local-only modes (skipped under cloud-only)
 6. Starts all services via Docker Compose
 
 When it finishes, open **http://localhost:3001** to access the dashboard.

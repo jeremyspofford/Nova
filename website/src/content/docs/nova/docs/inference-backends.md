@@ -7,6 +7,20 @@ Nova manages local inference backend lifecycle for you. Select a backend from th
 
 All supported backends expose OpenAI-compatible APIs, and the LLM Gateway's `LocalInferenceProvider` abstracts the active backend so the rest of Nova doesn't need to know which one is running.
 
+## Inference modes (set on first run)
+
+The setup wizard asks once which mode you want, and writes the result to `.env` as `NOVA_INFERENCE_MODE`:
+
+| Mode | Bundled Ollama | Routing strategy | Use when |
+|------|----------------|------------------|----------|
+| `hybrid` (default) | Pulled and started | local-first | You want local AI with cloud fallback when needed |
+| `local-only` | Pulled and started | local-only | Privacy-first or offline-friendly — never call cloud |
+| `cloud-only` | Not pulled, not started | cloud-only | Cloud APIs only — lightest setup, no GPU/disk for models |
+
+Switching modes later: re-run `./scripts/setup.sh` (interactive) or set `NOVA_INFERENCE_MODE=<new>` and run `./scripts/setup.sh --derive-mode-only` non-interactively. A runtime UI to swap modes (and point Nova at an external Ollama / vLLM instance like `http://192.168.x.y:11434`) without restarting is coming soon.
+
+Mode is the user-facing knob; under the hood it derives `COMPOSE_PROFILES` (whether the bundled `ollama` Compose service is in the active profile set) and `LLM_ROUTING_STRATEGY` (how the gateway picks providers).
+
 ## Backend comparison
 
 | Capability | Ollama | vLLM | SGLang |
