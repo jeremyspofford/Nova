@@ -35,6 +35,9 @@ ENV_WHITELIST = {
     "VLLM_MODEL",
     "SGLANG_MODEL",
     "VLLM_GPU_MEMORY_UTILIZATION",
+    # Inference mode (user-facing rollup of routing strategy + bundled service)
+    "NOVA_INFERENCE_MODE",
+    "OLLAMA_BASE_URL",
     # Self-modification
     "NOVA_GITHUB_PAT",
     "NOVA_GITHUB_REPO",
