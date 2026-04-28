@@ -6,28 +6,11 @@ Built by [Aria Labs](https://arialabs.ai).
 
 ---
 
-## Architecture
+## Get Started
 
-| Service | Port | Role |
-|---|---|---|
-| orchestrator | 8000 | Agent lifecycle, tool dispatch, session state, pipeline queue, MCP |
-| llm-gateway | 8001 | Model routing — Anthropic, OpenAI, Ollama, Groq, Gemini, and more |
-| memory-service | 8002 | Embedding + semantic retrieval via pgvector |
-| chat-api | 8080 | WebSocket streaming for external clients |
-| dashboard | 3000 | React admin UI |
-| postgres | 5432 | pgvector/pg16 — agents, tasks, pods, platform config |
-| redis | 6379 | Agent state, task queue, rate limiting, session memory |
-| ollama | 11434 | Local model serving (dev) |
+You need [Docker Desktop](https://docker.com/products/docker-desktop) (which includes Docker Compose) and [Git](https://git-scm.com/). Nothing else — Python, Node.js, Postgres, Redis, and Ollama all run inside containers.
 
----
-
-## Quick Start
-
-### Prerequisites
-
-- [Docker Desktop](https://docker.com/products/docker-desktop) (includes Docker Compose)
-
-### Install
+Copy this whole block and paste it in your terminal:
 
 ```bash
 git clone https://github.com/arialabs/nova.git
@@ -35,30 +18,60 @@ cd nova
 ./setup
 ```
 
-The setup wizard asks a few questions and starts everything.
-Open **<http://localhost:3001>** when it's done.
+The `./setup` wizard will:
 
-### Remote GPU (optional)
+1. Check Docker is installed and running
+2. Ask how you want to use Nova:
+   - **hybrid** (default) — local AI (bundled Ollama) with cloud fallback
+   - **local-only** — bundled Ollama, never call cloud
+   - **cloud-only** — no local AI, only cloud APIs (skips ~5 GB of model downloads)
+3. Configure provider API keys (optional — paste your Groq/OpenAI/etc keys when prompted, or skip)
+4. Pull starter models (`qwen2.5:1.5b`, `qwen2.5:7b`, `nomic-embed-text` — about 5.4 GB total under hybrid/local-only; nothing under cloud-only)
+5. Start every service via Docker Compose
 
-If you have a separate machine with a GPU for AI inference:
+When it finishes, open **<http://localhost:3000>** for the dashboard.
+
+You can change inference mode, point at an external Ollama / vLLM instance, and manage cloud provider keys later via **Settings → AI & Models** — no scripts.
+
+---
+
+## Architecture
+
+| Service | Port | Role |
+|---|---|---|
+| dashboard | 3000 | React admin UI |
+| orchestrator | 8000 | Agent lifecycle, tool dispatch, session state, pipeline queue, MCP |
+| llm-gateway | 8001 | Model routing — Anthropic, OpenAI, Ollama, Groq, Gemini, Cerebras, OpenRouter |
+| memory-service | 8002 | Embedding + Engram graph retrieval via pgvector |
+| chat-api | 8080 | WebSocket streaming for external clients |
+| cortex | 8100 | Autonomous brain: thinking loop, goals, drives, budget tracking |
+| intel-worker | 8110 | AI ecosystem feed poller (RSS, Reddit, GitHub trending) |
+| voice-service | 8130 | STT/TTS proxy (OpenAI, Deepgram, ElevenLabs) — optional |
+| recovery | 8888 | Backup/restore, factory reset, service management |
+| ollama | 11434 | Bundled local model serving (hybrid / local-only modes only) |
+| postgres | 5432 | pgvector/pg16 — agents, tasks, pods, platform config, engrams |
+| redis | 6379 | Agent state, task queue, rate limiting, runtime config |
+
+Full architecture detail: <https://arialabs.ai/nova/docs/architecture>.
+
+---
+
+## Common commands
 
 ```bash
-# Run this ON the GPU machine:
-bash <(curl -s https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh)
+make dev          # Start everything detached + dashboard with hot reload
+make down         # Stop all
+make logs         # Tail all container logs
+make ps           # Container status
+make test         # Integration suite (~2 min, requires services running)
+make backup       # Create a database backup to ./backups/
 ```
-
-Then re-run `./setup` on the Nova machine and choose "Remote GPU".
-
-### Manual configuration
-
-If you prefer to skip the wizard, copy `.env.example` to `.env`, edit it, and run `make dev`.
-See [.env.example](.env.example) for all configurable values.
 
 ---
 
 ## Tech Stack
 
-- **Backend:** Python + FastAPI + asyncpg + asyncio
+- **Backend:** Python 3.12 + FastAPI + asyncpg + asyncio
 - **Frontend:** Vite + React + TypeScript + Tailwind + TanStack Query
 - **Database:** PostgreSQL 16 + pgvector
 - **Queue:** Redis (BRPOP task dispatch)
@@ -68,10 +81,8 @@ See [.env.example](.env.example) for all configurable values.
 
 ## IDE Integration
 
-Nova exposes an OpenAI-compatible endpoint at `http://localhost:8000/v1`. Compatible with Cursor, Continue.dev, Aider, and any OpenAI-API client.
-
-See [docs/ide-integration.md](docs/ide-integration.md) for setup instructions.
+Nova exposes an OpenAI-compatible endpoint at `http://localhost:8000/v1`. Compatible with Cursor, Continue.dev, Aider, and any OpenAI-API client. See [docs/ide-integration.md](docs/ide-integration.md) (or <https://arialabs.ai/nova/docs/ide-integration>) for setup.
 
 ## License
 
-PolyForm Noncommercial 1.0.0 — see [LICENSE](./LICENSE). Commercial licensing available — contact <jeremy.spofford@arialabs.ai>
+PolyForm Noncommercial 1.0.0 — see [LICENSE](./LICENSE). Commercial licensing available — contact <jeremy.spofford@arialabs.ai>.

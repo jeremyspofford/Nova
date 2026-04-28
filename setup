@@ -480,17 +480,19 @@ step_remote_access() {
 # ══════════════════════════════════════════════════════════════════════════════
 write_env() {
   # Determine mode-specific values
-  local compose_profiles="" ollama_url="" routing_strategy="" default_model=""
+  local compose_profiles="" ollama_url="" routing_strategy="" default_model="" inference_mode=""
 
   case "${CFG_MODE}" in
     1) # All-in-one
       compose_profiles="local-ollama"
       routing_strategy="local-first"
       default_model="qwen2.5:7b"
+      inference_mode="hybrid"
       ;;
     2) # Cloud-only
       compose_profiles=""
       routing_strategy="cloud-only"
+      inference_mode="cloud-only"
       case "${CFG_PROVIDER}" in
         groq)       default_model="groq/llama-3.3-70b-versatile" ;;
         cerebras)   default_model="cerebras/llama-3.3-70b" ;;
@@ -499,17 +501,19 @@ write_env() {
         *)          default_model="groq/llama-3.3-70b-versatile" ;;
       esac
       ;;
-    3) # Remote GPU
+    3) # Remote GPU — hybrid mode pointing at an external Ollama
       compose_profiles=""
       ollama_url="http://${CFG_REMOTE_IP}:11434"
       routing_strategy="local-first"
       default_model="qwen2.5:7b"
+      inference_mode="hybrid"
       ;;
-    4) # Host native
+    4) # Host native — hybrid mode pointing at host's Ollama
       compose_profiles=""
       ollama_url="host"
       routing_strategy="local-first"
       default_model="qwen2.5:7b"
+      inference_mode="hybrid"
       ;;
   esac
 
@@ -524,7 +528,7 @@ write_env() {
 
   # Collect extra lines from existing .env that we don't manage
   local extra_lines=""
-  local managed_keys="POSTGRES_PASSWORD NOVA_ADMIN_SECRET COMPOSE_PROFILES OLLAMA_BASE_URL"
+  local managed_keys="POSTGRES_PASSWORD NOVA_ADMIN_SECRET COMPOSE_PROFILES OLLAMA_BASE_URL NOVA_INFERENCE_MODE"
   managed_keys="${managed_keys} LLM_ROUTING_STRATEGY DEFAULT_CHAT_MODEL WOL_MAC_ADDRESS WOL_BROADCAST_IP"
   managed_keys="${managed_keys} GROQ_API_KEY CEREBRAS_API_KEY GEMINI_API_KEY CHATGPT_ACCESS_TOKEN"
   managed_keys="${managed_keys} REQUIRE_AUTH LOG_LEVEL SHELL_TIMEOUT_SECONDS GEMINI_USE_ADC"
@@ -617,6 +621,7 @@ ENVEOF
 
   cat >> "${ENV_FILE}" <<ENVEOF
 LLM_ROUTING_STRATEGY=${routing_strategy}
+NOVA_INFERENCE_MODE=${inference_mode}
 DEFAULT_CHAT_MODEL=${default_model}
 
 # ── Per-provider default models (optional overrides) ──────────────────────

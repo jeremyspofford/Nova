@@ -6,12 +6,12 @@ description: "Get Nova running in under five minutes with Docker Compose."
 ## Prerequisites
 
 - [Docker Desktop](https://docker.com/products/docker-desktop) (includes Docker Compose)
-- [GNU Make](https://www.gnu.org/software/make/) (pre-installed on most Linux/macOS systems; on Windows use WSL or install via `choco install make`)
 - [Git](https://git-scm.com/)
+- (Optional) [GNU Make](https://www.gnu.org/software/make/) for the convenience commands — pre-installed on most Linux/macOS systems; on Windows use WSL or `choco install make`.
 
 No Python, Node.js, or database installs required -- everything runs in containers.
 
-## Install
+## Install — copy/paste
 
 ```bash
 git clone https://github.com/arialabs/nova.git
@@ -19,7 +19,7 @@ cd nova
 ./setup
 ```
 
-The setup wizard handles the rest.
+That's it. The wizard handles prereq checks, mode selection, optional provider keys, model pulls (if applicable), and bringing every service up.
 
 ## What the setup wizard does
 
@@ -42,7 +42,7 @@ The setup wizard handles the rest.
 5. Pulls Ollama models for hybrid/local-only modes (skipped under cloud-only)
 6. Starts all services via Docker Compose
 
-When it finishes, open **http://localhost:3001** to access the dashboard.
+When it finishes, open **<http://localhost:3000>** to access the dashboard.
 
 ## Remote GPU (optional)
 
@@ -75,15 +75,16 @@ Check container status:
 make ps
 ```
 
-All 7 core services should show as healthy. Hit the health endpoints to confirm:
+All core services should show as healthy. Hit the health endpoints to confirm:
 
 | Service | Health endpoint |
 |---------|----------------|
+| dashboard | `http://localhost:3000` |
 | orchestrator | `http://localhost:8000/health/live` |
 | llm-gateway | `http://localhost:8001/health/live` |
 | memory-service | `http://localhost:8002/health/live` |
 | chat-api | `http://localhost:8080/health/live` |
-| dashboard | `http://localhost:3001` |
+| cortex | `http://localhost:8100/health/live` |
 | recovery | `http://localhost:8888/health/live` |
 
 You can also test the chat interface at `http://localhost:8080/` for an interactive demo.
