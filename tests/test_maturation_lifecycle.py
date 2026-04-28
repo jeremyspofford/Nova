@@ -60,7 +60,11 @@ def test_full_maturation_lifecycle():
         resp = httpx.post(f"{BASE}/goals/{gid}/approve-spec", headers=HEADERS)
         assert resp.status_code == 200
 
-        d = _wait_for_status(gid, lambda x: x.get("status") == "completed", timeout=120)
+        # Verifying can take longer than the default poll budget when scoping
+        # exhausted all 3 retries before fallback (~90s LLM calls) and speccing
+        # took its full max_tokens budget. 240s matches other waits and gives
+        # headroom for the full slow path.
+        d = _wait_for_status(gid, lambda x: x.get("status") == "completed", timeout=240)
         assert d.get("status") == "completed"
         assert d.get("maturation_status") is None
     finally:
