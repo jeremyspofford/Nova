@@ -10,10 +10,10 @@ import { manageComposeProfile, patchEnv } from '../../api-recovery'
 // ── LLM Routing section ──────────────────────────────────────────────────────
 
 const ROUTING_STRATEGIES = [
-  { value: 'local-only',  label: 'Local Only',  desc: 'Use Ollama exclusively. Requests fail if offline.' },
-  { value: 'local-first', label: 'Local First',  desc: 'Try Ollama, fall back to cloud if offline. WoL wakes remote PC.' },
-  { value: 'cloud-only',  label: 'Cloud Only',  desc: 'Skip Ollama entirely. Always use cloud providers.' },
-  { value: 'cloud-first', label: 'Cloud First', desc: 'Prefer cloud, use Ollama as backup.' },
+  { value: 'local-first', label: 'Hybrid',     desc: 'Local AI by default; falls back to cloud providers when local is unavailable.' },
+  { value: 'local-only',  label: 'Local Only', desc: 'Use the bundled (or external) local AI exclusively. Requests fail if local is offline.' },
+  { value: 'cloud-only',  label: 'Cloud Only', desc: 'Skip local entirely. Bundled Ollama service is stopped; only cloud providers are used.' },
+  { value: 'cloud-first', label: 'Cloud First (advanced)', desc: 'Prefer cloud; fall back to local if every cloud provider fails.' },
 ] as const
 
 function CloudFallbackModelPicker({
@@ -372,12 +372,14 @@ export function LLMRoutingSection({
   saving: boolean
 }) {
   const strategy = useConfigValue(entries, 'llm.routing_strategy', 'local-first')
-  const ollamaUrl = useConfigValue(entries, 'llm.ollama_url', '')
+  // Ollama URL is now read from inference.url (canonical) — see LocalInferenceSection.
   const cloudFallback = useConfigValue(entries, 'llm.cloud_fallback_model', 'groq/llama-3.3-70b-versatile')
   const wolMac = useConfigValue(entries, 'llm.wol_mac', '')
   const wolBroadcast = useConfigValue(entries, 'llm.wol_broadcast', '255.255.255.255')
 
   const [strategySaved, setStrategySaved] = useState(false)
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null)
+  const [switchError, setSwitchError] = useState<string | null>(null)
 
   const usesOllama = strategy !== 'cloud-only'
   const usesCloud = strategy !== 'local-only'
@@ -409,8 +411,8 @@ export function LLMRoutingSection({
   const handleStrategyChange = async (value: string) => {
     // Save runtime strategy (existing — flows to nova:config:llm.routing_strategy in Redis).
     onSave('llm.routing_strategy', JSON.stringify(value))
-    setStrategySaved(true)
-    setTimeout(() => setStrategySaved(false), 1500)
+    setSwitchingTo(value)
+    setSwitchError(null)
 
     // Drive the bundled Ollama compose service from the routing choice so the
     // user never has to re-run setup.sh to switch modes:
@@ -422,15 +424,23 @@ export function LLMRoutingSection({
                : value === 'local-only' ? 'local-only'
                : 'hybrid'
     const action = mode === 'cloud-only' ? 'stop' : 'start'
+    const errors: string[] = []
     try {
       await manageComposeProfile('local-ollama', action)
     } catch (e) {
-      console.warn('Failed to manage local-ollama compose profile:', e)
+      errors.push(`compose ${action}: ${(e as Error).message || String(e)}`)
     }
     try {
       await patchEnv({ NOVA_INFERENCE_MODE: mode })
     } catch (e) {
-      console.warn('Failed to persist NOVA_INFERENCE_MODE in .env:', e)
+      errors.push(`persist mode: ${(e as Error).message || String(e)}`)
+    }
+    setSwitchingTo(null)
+    if (errors.length > 0) {
+      setSwitchError(errors.join('; '))
+    } else {
+      setStrategySaved(true)
+      setTimeout(() => setStrategySaved(false), 1500)
     }
   }
 
@@ -447,7 +457,12 @@ export function LLMRoutingSection({
       <div>
         <div className="mb-2 flex items-center gap-2">
           <label className="text-caption font-medium text-content-secondary">Routing Strategy</label>
-          {strategySaved && (
+          {switchingTo && (
+            <Badge color="warning" size="sm">
+              {switchingTo === 'cloud-only' ? 'Stopping local Ollama…' : 'Starting local Ollama…'}
+            </Badge>
+          )}
+          {!switchingTo && strategySaved && (
             <Badge color="success" size="sm">Saved</Badge>
           )}
         </div>
@@ -456,9 +471,9 @@ export function LLMRoutingSection({
             <button
               key={value}
               onClick={() => handleStrategyChange(value)}
-              disabled={saving}
+              disabled={saving || switchingTo !== null}
               className={
-                'rounded-xs px-3 py-1.5 text-caption font-medium transition-colors ' +
+                'rounded-xs px-3 py-1.5 text-caption font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ' +
                 (strategy === value
                   ? 'bg-surface-elevated text-accent'
                   : 'text-content-tertiary hover:text-content-secondary')
@@ -471,6 +486,17 @@ export function LLMRoutingSection({
         <p className="mt-1.5 text-caption text-content-tertiary">
           {ROUTING_STRATEGIES.find(s => s.value === strategy)?.desc}
         </p>
+        {switchError && (
+          <div className="mt-2 rounded-sm border border-status-danger/30 bg-status-danger/10 px-3 py-2 text-caption text-status-danger">
+            <strong>Switch failed:</strong> {switchError}
+            <button
+              onClick={() => setSwitchError(null)}
+              className="ml-2 text-content-tertiary hover:text-content-primary"
+            >
+              dismiss
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Ollama settings */}
@@ -512,15 +538,10 @@ export function LLMRoutingSection({
             </div>
           </Card>
 
-          <ConfigField
-            label="Ollama URL"
-            configKey="llm.ollama_url"
-            value={ollamaUrl}
-            placeholder="http://192.168.1.50:11434"
-            description="Remote Ollama base URL. Leave blank to use the OLLAMA_BASE_URL env var."
-            onSave={onSave}
-            saving={saving}
-          />
+          {/* Ollama URL is configured in the Local Inference section above
+              (External target URL field). The legacy llm.ollama_url key here
+              has been retired in favor of inference.url, which the gateway
+              now reads first; legacy values keep working as a fallback. */}
 
           {/* Wake-on-LAN config */}
           <div className="border-t border-border-subtle pt-4">

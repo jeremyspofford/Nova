@@ -506,28 +506,70 @@ export function LocalInferenceSection({ entries, onSave, saving, inline }: Confi
             size="sm"
           />
           <Wifi className="w-4 h-4" />
-          <span>Use remote inference server</span>
+          <span>Point at external Ollama / vLLM instance (instead of bundled)</span>
         </div>
+        {!showRemote && (
+          <p className="mt-1 text-caption text-content-tertiary">
+            Currently using the bundled inference service inside Docker (<code>http://ollama:11434</code>).
+            Toggle on to point Nova at a different server (e.g. another LAN box, a cloud VM).
+          </p>
+        )}
 
         {showRemote && (
           <div className="mt-3 space-y-3">
             <ConfigField
-              label="Remote URL"
+              label="External URL"
               configKey="inference.url"
               value={remoteUrl}
               onSave={onSave}
               saving={saving}
-              placeholder="http://192.168.1.50:8000"
-              description="URL of remote vLLM/Ollama/SGLang server"
+              placeholder="http://192.168.12.10:11434"
+              description="Base URL of the external Ollama / vLLM / SGLang server. Leave blank to use the bundled service."
             />
+            {remoteUrl && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    setTestingConnection(true);
+                    setTestResult(null);
+                    try {
+                      const r = await fetch(remoteUrl.replace(/^"|"$/g, '').replace(/\/$/, "") + "/api/tags", {
+                        signal: AbortSignal.timeout(5000),
+                      });
+                      if (r.ok) {
+                        const data = await r.json().catch(() => ({}));
+                        const count = Array.isArray(data?.models) ? data.models.length : 0;
+                        setTestResult({ ok: true, message: `Connected — ${count} model${count === 1 ? '' : 's'} available` });
+                      } else {
+                        setTestResult({ ok: false, message: `Server returned HTTP ${r.status}` });
+                      }
+                    } catch (e) {
+                      setTestResult({ ok: false, message: e instanceof Error ? e.message : "Connection failed" });
+                    } finally {
+                      setTestingConnection(false);
+                    }
+                  }}
+                  loading={testingConnection}
+                >
+                  Test Connection
+                </Button>
+                {testResult && (
+                  <p className={`text-compact ${testResult.ok ? "text-success" : "text-danger"}`}>
+                    {testResult.message}
+                  </p>
+                )}
+              </div>
+            )}
             <ConfigField
-              label="WoL MAC Address"
+              label="WoL MAC Address (optional)"
               configKey="llm.wol_mac"
               value={wolMac}
               onSave={onSave}
               saving={saving}
               placeholder="aa:bb:cc:dd:ee:ff"
-              description="Send Wake-on-LAN to start remote GPU machine"
+              description="If set, Nova will send Wake-on-LAN to this MAC before retrying when the external server is unreachable."
             />
           </div>
         )}

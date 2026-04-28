@@ -278,8 +278,20 @@ async def _get_redis_config(key: str, default: str) -> str:
 
 
 async def get_ollama_base_url() -> str:
-    """Get the current Ollama base URL (runtime-configurable via dashboard)."""
-    return await _get_redis_config("llm.ollama_url", settings.ollama_base_url)
+    """Get the current Ollama base URL (runtime-configurable via dashboard).
+
+    Resolution order (first non-empty wins):
+      1. nova:config:inference.url   — canonical key (LocalInferenceSection writes here)
+      2. nova:config:llm.ollama_url  — legacy key (deprecated, kept for back-compat)
+      3. settings.ollama_base_url    — env-derived default (typically http://ollama:11434)
+    """
+    primary = await _get_redis_config("inference.url", "")
+    if primary:
+        return primary
+    legacy = await _get_redis_config("llm.ollama_url", "")
+    if legacy:
+        return legacy
+    return settings.ollama_base_url
 
 
 async def get_wol_mac() -> str:
