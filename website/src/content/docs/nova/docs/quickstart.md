@@ -37,7 +37,7 @@ The setup wizard handles the rest.
    Choice [1/2/3] (default 1):
    ```
 
-   Just hit enter for `hybrid`. You can change modes anytime by re-running `./scripts/setup.sh`.
+   Just hit enter for `hybrid`. After install, mode changes (and pointing Nova at an external Ollama / vLLM instance) live in Settings → AI & Models — no scripts.
 4. Configures LLM provider API keys
 5. Pulls Ollama models for hybrid/local-only modes (skipped under cloud-only)
 6. Starts all services via Docker Compose

@@ -9,7 +9,7 @@ Nova now asks how you'd like to use it on first run, and ships sensible defaults
 - **local-only** — bundles Ollama, never uses cloud. Privacy-first or offline-friendly. Same ~5.4 GB starter models.
 - **cloud-only** — does not bundle Ollama at all (no image pull, no container, no model downloads). Lightest footprint, requires cloud API keys.
 
-Switch modes anytime by re-running `./scripts/setup.sh`, or set `NOVA_INFERENCE_MODE` and run `./scripts/setup.sh --derive-mode-only` non-interactively. A dashboard UI to switch modes (and point Nova at an external Ollama / vLLM instance like `http://192.168.x.y:11434`) without restarting is coming soon.
+After install, switching modes (and pointing Nova at an external Ollama / vLLM instance like `http://192.168.x.y:11434`) lives in the dashboard — Settings → AI & Models, no scripts. The first-install prompt is just the bootstrap step before the dashboard is running.
 
 Under the hood: a single user-facing `NOVA_INFERENCE_MODE` knob now derives both `COMPOSE_PROFILES` (whether the bundled `ollama` Compose service ships and starts) and `LLM_ROUTING_STRATEGY` (how the gateway picks providers). The `setup.sh` wizard writes both to `.env` idempotently, preserving any unrelated profiles you already have set.
 

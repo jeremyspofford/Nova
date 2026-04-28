@@ -17,7 +17,7 @@ The setup wizard asks once which mode you want, and writes the result to `.env` 
 | `local-only` | Pulled and started | local-only | Privacy-first or offline-friendly — never call cloud |
 | `cloud-only` | Not pulled, not started | cloud-only | Cloud APIs only — lightest setup, no GPU/disk for models |
 
-Switching modes later: re-run `./scripts/setup.sh` (interactive) or set `NOVA_INFERENCE_MODE=<new>` and run `./scripts/setup.sh --derive-mode-only` non-interactively. A runtime UI to swap modes (and point Nova at an external Ollama / vLLM instance like `http://192.168.x.y:11434`) without restarting is coming soon.
+Switching modes after install is a dashboard task — Settings → AI & Models will let you change mode, swap to an external Ollama / vLLM instance (e.g. `http://192.168.x.y:11434`), and add/remove models without ever touching a script or `.env` file. (UI is in active development; the wizard prompt at first install is the bootstrap fallback while the dashboard isn't running yet.)
 
 Mode is the user-facing knob; under the hood it derives `COMPOSE_PROFILES` (whether the bundled `ollama` Compose service is in the active profile set) and `LLM_ROUTING_STRATEGY` (how the gateway picks providers).
 
