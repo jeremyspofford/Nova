@@ -24,10 +24,13 @@ ollama:
       required: false
       description: "3.8B params, ~2.0 GB — fast, good quality, good default"
 
-    # ── Recommended for engram decomposition (structured JSON extraction) ────
+    # ── Mid-tier chat model (orchestrator's default for pipeline agents) ─────
+    # Required: the orchestrator's tier resolver picks qwen2.5:7b for the
+    # 'mid' tier by default, so without this model the pipeline fails at the
+    # Context agent on any task. ~4.4 GB.
     - name: qwen2.5:7b
-      required: false
-      description: "7B, ~4.4 GB — best structured output quality, ideal for engram decomposition"
+      required: true
+      description: "7B, ~4.4 GB — pipeline default for mid-tier agent calls, ideal for engram decomposition"
 
     # ── Recommended for chat + tool calling on 8GB VRAM ──────────────────────
     # Hermes 3 handles Nova's full 52+ tool catalog without the "tool paralysis"
