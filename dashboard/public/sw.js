@@ -2,17 +2,27 @@
  * Nova PWA Service Worker
  *
  * Strategy:
- *  - Cache the app shell (HTML, CSS, JS) on install for instant home-screen launch
- *  - Network-first for API calls (never cache API responses)
- *  - Cache-first for static assets (icons, fonts)
- *  - Stale-while-revalidate for the app shell after initial load
+ *  - Network-first for HTML and navigations: always serve the freshest
+ *    document so it references the chunk hashes that actually exist on the
+ *    server. Cache only as offline fallback.
+ *  - Cache-first for content-hashed assets under /assets/: Vite hashes the
+ *    filename, so the file at a given URL is immutable forever — safe to
+ *    cache with no revalidation.
+ *  - Cache-first for static media (icons, fonts) for the same reason.
+ *  - Pass-through for API, WebSocket, and HMR traffic.
+ *
+ * The previous version used stale-while-revalidate for the app shell,
+ * which served a cached index.html referencing chunk hashes that no longer
+ * existed on the server after a deploy → "Failed to fetch dynamically
+ * imported module" errors on lazy-loaded routes. Bumping CACHE_NAME nukes
+ * any leftover broken cache from that strategy.
  */
 
-const CACHE_NAME = 'nova-shell-v2'
+const CACHE_NAME = 'nova-shell-v3'
 
-// App shell files cached on install — updated on new SW deployment
-const SHELL_FILES = [
-  '/',
+// Static media we want available offline. Notably absent: '/' and HTML —
+// those go network-first so the chunk-hash references stay current.
+const STATIC_PRECACHE = [
   '/manifest.json',
   '/nova-icon.png',
   '/nova-icon-192.png',
@@ -20,7 +30,7 @@ const SHELL_FILES = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(STATIC_PRECACHE))
   )
   // Activate immediately without waiting for old SW to stop
   self.skipWaiting()
@@ -45,19 +55,44 @@ self.addEventListener('fetch', (event) => {
     url.pathname.startsWith('/v1') ||
     url.pathname.startsWith('/ws') ||
     url.pathname.startsWith('/recovery-api') ||
+    url.pathname.startsWith('/cortex-api') ||
+    url.pathname.startsWith('/voice-api') ||
     url.pathname.includes('hot-update') ||
     event.request.method !== 'GET'
   ) {
     return // Fall through to network
   }
 
-  // Static assets: cache-first
-  if (url.pathname.match(/\.(png|jpg|svg|ico|woff2?|ttf|eot)$/)) {
+  // Navigations and HTML: network-first, cache fallback for offline.
+  // This guarantees the document we serve always references chunk hashes
+  // that exist on the server — the root cause of stale-bundle 404s.
+  const isNavigation = event.request.mode === 'navigate'
+  const isHTML = event.request.headers.get('accept')?.includes('text/html')
+  if (isNavigation || isHTML) {
+    event.respondWith(
+      fetch(event.request)
+        .then((resp) => {
+          const clone = resp.clone()
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          return resp
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/')))
+    )
+    return
+  }
+
+  // Content-hashed assets (Vite emits /assets/<name>-<hash>.<ext>): cache
+  // forever — the URL itself changes when the content changes, so there is
+  // no staleness risk. This is what makes long-cache + content-hash work.
+  if (url.pathname.startsWith('/assets/')) {
     event.respondWith(
       caches.match(event.request).then((cached) =>
         cached || fetch(event.request).then((resp) => {
-          const clone = resp.clone()
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          // Only cache successful responses — don't poison the cache with 404s
+          if (resp.ok) {
+            const clone = resp.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          }
           return resp
         })
       )
@@ -65,16 +100,24 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
-  // App shell (HTML, JS, CSS): stale-while-revalidate
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const fetchPromise = fetch(event.request).then((resp) => {
-        const clone = resp.clone()
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
-        return resp
-      }).catch(() => cached) // Offline fallback to cache
+  // Static media (icons, fonts): cache-first
+  if (url.pathname.match(/\.(png|jpg|jpeg|svg|ico|webp|woff2?|ttf|eot)$/)) {
+    event.respondWith(
+      caches.match(event.request).then((cached) =>
+        cached || fetch(event.request).then((resp) => {
+          if (resp.ok) {
+            const clone = resp.clone()
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone))
+          }
+          return resp
+        })
+      )
+    )
+    return
+  }
 
-      return cached || fetchPromise
-    })
+  // Default: pass through to network with cache fallback for offline
+  event.respondWith(
+    fetch(event.request).catch(() => caches.match(event.request))
   )
 })
