@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from app.auth_router import router as auth_router
@@ -84,6 +85,20 @@ async def _seed_config_from_env() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Orchestrator starting")
+
+    # FC-002: refuse to start with the literal default admin secret.
+    # NOVA_ALLOW_DEFAULT_ADMIN_SECRET=1 is an escape hatch for tests/dev only.
+    if settings.nova_admin_secret == "nova-admin-secret-change-me":
+        if os.getenv("NOVA_ALLOW_DEFAULT_ADMIN_SECRET") != "1":
+            raise RuntimeError(
+                "NOVA_ADMIN_SECRET is set to the literal default. "
+                "Run scripts/install.sh to generate a strong secret, "
+                "or set NOVA_ALLOW_DEFAULT_ADMIN_SECRET=1 to bypass (dev/test only)."
+            )
+        log.warning(
+            "NOVA_ADMIN_SECRET is the literal default — bypass active. "
+            "Do not use this configuration in production."
+        )
 
     # Recover Redis agents stuck in 'running' from a previous crashed process
     recovered = await recover_stale_agents()

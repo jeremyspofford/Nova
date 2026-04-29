@@ -6,6 +6,7 @@ Only depends on: Postgres (for backups) and Docker socket (for service managemen
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -26,6 +27,19 @@ async def lifespan(app: FastAPI):
     from .inference.hardware import sync_hardware_from_file
     from .redis_client import close_redis
     from .scheduler import checkpoint_loop
+
+    # FC-002: refuse to start with the literal default admin secret.
+    if settings.admin_secret == "nova-admin-secret-change-me":
+        if os.getenv("NOVA_ALLOW_DEFAULT_ADMIN_SECRET") != "1":
+            raise RuntimeError(
+                "NOVA_ADMIN_SECRET is set to the literal default. "
+                "Run scripts/install.sh to generate a strong secret, "
+                "or set NOVA_ALLOW_DEFAULT_ADMIN_SECRET=1 to bypass (dev/test only)."
+            )
+        logger.warning(
+            "NOVA_ADMIN_SECRET is the literal default — bypass active. "
+            "Do not use this configuration in production."
+        )
 
     await init_pool()
     checkpoint_task = asyncio.create_task(checkpoint_loop())

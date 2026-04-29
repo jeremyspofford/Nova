@@ -14,6 +14,12 @@ from dotenv import load_dotenv
 # Load .env from repo root
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+# FC-002: services refuse to start with the literal default admin secret.
+# In CI / fresh dev environments where .env.example is used as-is, set the
+# bypass so services come up. Real deployments must run scripts/install.sh
+# (which generates a strong secret) and never need this flag.
+os.environ.setdefault("NOVA_ALLOW_DEFAULT_ADMIN_SECRET", "1")
+
 # ---------------------------------------------------------------------------
 # Service base URLs (override via env vars if services are on different hosts)
 # ---------------------------------------------------------------------------

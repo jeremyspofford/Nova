@@ -159,10 +159,13 @@ if grep -q "^POSTGRES_PASSWORD=$" "${PROJECT_ROOT}/.env" 2>/dev/null; then
   echo "  Generated POSTGRES_PASSWORD"
 fi
 
-# ── Rotate admin secret if still the shipped placeholder ───────────────────────
-if grep -q '^NOVA_ADMIN_SECRET=nova-admin-secret-change-me$' "${PROJECT_ROOT}/.env" 2>/dev/null; then
+# ── Rotate admin secret if missing, empty, or still the shipped placeholder ────
+GENERATED_ADMIN_SECRET=""
+if grep -qE '^NOVA_ADMIN_SECRET=(nova-admin-secret-change-me|)$' "${PROJECT_ROOT}/.env" 2>/dev/null \
+   || ! grep -q '^NOVA_ADMIN_SECRET=' "${PROJECT_ROOT}/.env" 2>/dev/null; then
   NOVA_ADMIN_SECRET=$(openssl rand -hex 32)
-  sed -i "s|^NOVA_ADMIN_SECRET=nova-admin-secret-change-me$|NOVA_ADMIN_SECRET=${NOVA_ADMIN_SECRET}|" "${PROJECT_ROOT}/.env"
+  upsert_env NOVA_ADMIN_SECRET "${NOVA_ADMIN_SECRET}"
+  GENERATED_ADMIN_SECRET="${NOVA_ADMIN_SECRET}"
   echo "  Generated NOVA_ADMIN_SECRET"
 fi
 
@@ -445,3 +448,17 @@ echo "  Stop: docker compose down"
 echo ""
 echo "  To reconfigure: ./install"
 echo "  To add/remove models: edit models.yaml, then re-run ./scripts/install.sh"
+
+if [ -n "${GENERATED_ADMIN_SECRET}" ]; then
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  ✓ Generated admin secret"
+  echo "═══════════════════════════════════════════════════════"
+  echo ""
+  echo "  NOVA_ADMIN_SECRET=${GENERATED_ADMIN_SECRET}"
+  echo ""
+  echo "  Save this to your password manager."
+  echo "  It is also stored in .env as NOVA_ADMIN_SECRET."
+  echo "  This is the only time it will be displayed."
+  echo ""
+fi
