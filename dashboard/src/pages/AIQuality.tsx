@@ -33,14 +33,18 @@ type BenchmarkRun = {
   started_at: string | null
   completed_at: string | null
   status: string
-  composite_score: number | null
-  category_scores: Record<string, number>
+  composite_score: number | null   /* 0-100 scale */
+  dimension_scores: Record<string, number>   /* 0-1 per dimension */
+  category_scores: Record<string, number>    /* legacy, retained for old rows */
   case_results: Array<{
     name: string
     category: string
     scores: Record<string, number>
     composite: number
+    error?: string
   }>
+  config_snapshot_id?: string | null
+  error_summary?: string | null
   metadata: Record<string, unknown>
 }
 
@@ -82,13 +86,14 @@ const PERIODS = [
 ] as const
 
 const DIMENSION_LABELS: Record<string, string> = {
-  memory_relevance: 'Memory Relevance',
-  tool_accuracy: 'Tool Accuracy',
-  instruction_adherence: 'Instruction Adherence',
-  response_coherence: 'Response Coherence',
-  context_utilization: 'Context Utilization',
-  reasoning_quality: 'Reasoning Quality',
-  safety_compliance: 'Safety Compliance',
+  memory_relevance:        'Memory Relevance',
+  memory_recall:           'Memory Recall',
+  memory_usage:            'Memory Usage',
+  tool_accuracy:           'Tool Accuracy',
+  response_coherence:      'Response Coherence',
+  task_completion:         'Task Completion',
+  instruction_adherence:   'Instruction Adherence',
+  safety_compliance:       'Safety Compliance',
 }
 
 const PROVIDER_COLORS: Record<string, { bg: string; text: string; bar: string }> = {
@@ -290,11 +295,12 @@ function BenchmarksTab() {
   const queryClient = useQueryClient()
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null)
   const [selectedMemRun, setSelectedMemRun] = useState(0)
+  const [diffOpen, setDiffOpen] = useState<{from: string; to: string} | null>(null)
 
   // Quality benchmark runs
   const { data: qualityRuns, isLoading: qualityLoading } = useQuery({
     queryKey: ['quality-benchmark-results'],
-    queryFn: () => apiFetch<BenchmarkRun[]>('/api/v1/benchmarks/quality-results'),
+    queryFn: () => apiFetch<BenchmarkRun[]>('/api/v1/quality/benchmarks/runs'),
   })
 
   // Memory benchmark runs (existing)
@@ -426,13 +432,29 @@ function BenchmarksTab() {
                     const isExpanded = expandedRunId === run.id
 
                     return (
-                      <BenchmarkRunRow
-                        key={run.id}
-                        run={run}
-                        delta={delta}
-                        isExpanded={isExpanded}
-                        onToggle={() => setExpandedRunId(isExpanded ? null : run.id)}
-                      />
+                      <>
+                        <BenchmarkRunRow
+                          key={run.id}
+                          run={run}
+                          delta={delta}
+                          isExpanded={isExpanded}
+                          onToggle={() => setExpandedRunId(isExpanded ? null : run.id)}
+                        />
+                        {idx > 0 && runs[idx - 1]?.config_snapshot_id && run.config_snapshot_id &&
+                         runs[idx - 1].config_snapshot_id !== run.config_snapshot_id && (
+                          <tr key={`diff-${run.id}`}>
+                            <td colSpan={5} className="bg-surface-elevated px-4 py-2 text-caption text-content-secondary">
+                              <button
+                                type="button"
+                                onClick={() => setDiffOpen({from: runs[idx - 1].config_snapshot_id!, to: run.config_snapshot_id!})}
+                                className="underline hover:text-content-primary"
+                              >
+                                Show config diff with previous run
+                              </button>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     )
                   })}
                 </tbody>
@@ -628,6 +650,8 @@ function BenchmarksTab() {
           </>
         )}
       </section>
+
+      <DiffModal open={diffOpen} onClose={() => setDiffOpen(null)} />
     </div>
   )
 }
@@ -691,6 +715,15 @@ function BenchmarkRunRow({
         </td>
       </tr>
 
+      {/* Error summary banner */}
+      {run.error_summary ? (
+        <tr>
+          <td colSpan={5} className="bg-danger/5 px-4 py-2 text-caption text-danger">
+            <strong>Errors:</strong> {run.error_summary}
+          </td>
+        </tr>
+      ) : null}
+
       {/* Expanded case results */}
       {isExpanded && hasCaseResults && (
         <tr>
@@ -736,6 +769,51 @@ function BenchmarkRunRow({
         </tr>
       )}
     </>
+  )
+}
+
+// ── Diff Modal ──────────────────────────────────────────────────────────────
+
+function DiffModal({open, onClose}: {open: {from: string; to: string} | null; onClose: () => void}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['snapshot-diff', open?.from, open?.to],
+    queryFn: () => apiFetch<{changed_keys: Array<{key: string; from: unknown; to: unknown}>}>(
+      `/api/v1/quality/snapshots/diff?from=${open!.from}&to=${open!.to}`
+    ),
+    enabled: !!open,
+  })
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-surface-card border border-border-subtle rounded-md p-6 max-w-2xl w-full mx-4" onClick={e => e.stopPropagation()}>
+        <h3 className="text-h3 text-content-primary mb-4">Config diff</h3>
+        {isLoading && <p className="text-caption text-content-tertiary">Loading…</p>}
+        {data && data.changed_keys.length === 0 && (
+          <p className="text-caption text-content-tertiary">No differences (snapshots are equal).</p>
+        )}
+        {data && data.changed_keys.length > 0 && (
+          <table className="w-full text-compact">
+            <thead>
+              <tr>
+                <th className="text-left text-caption text-content-tertiary py-1">Key</th>
+                <th className="text-left text-caption text-content-tertiary py-1">From</th>
+                <th className="text-left text-caption text-content-tertiary py-1">To</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.changed_keys.map(c => (
+                <tr key={c.key} className="border-t border-border-subtle">
+                  <td className="py-2 font-mono text-mono-sm">{c.key}</td>
+                  <td className="py-2 font-mono text-mono-sm text-content-tertiary">{JSON.stringify(c.from)}</td>
+                  <td className="py-2 font-mono text-mono-sm">{JSON.stringify(c.to)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <button onClick={onClose} className="mt-4 text-caption text-content-tertiary underline">Close</button>
+      </div>
+    </div>
   )
 }
 
