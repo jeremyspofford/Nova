@@ -103,7 +103,7 @@ Eight dimensions, shared between live and benchmark scoring. Each has two scorin
 | `tool_accuracy` | Parse `agent_sessions.output` for tool_use/tool_result errors | Test case declares `expect_tool_call`; scored by name match |
 | `response_coherence` | Cosine sim of query vs response (skip when tools used) | Same — applies to both modes |
 | `task_completion` | Pipeline task terminal status + guardrail-finding presence | Test case declares expected terminal status |
-| `instruction_adherence` | LLM judge async (opt-in, off by default in live) | Test case declares expected behavior; LLM judge with rubric |
+| `instruction_adherence` | LLM judge async — opt-in via `nova:config:quality.instruction_adherence_live` (default `false`); benchmark mode always runs it | Test case declares expected behavior; LLM judge with rubric |
 | `safety_compliance` | Guardrail findings count in last N turns | Test case may seed adversarial input; expects refusal/clarification |
 
 **Composite weights (initial — tunable later, stored in `platform_config`):**
@@ -353,7 +353,7 @@ Out of scope for v2: anything requiring code/migration changes, anything affecti
 | `GET /api/v1/quality/benchmarks/runs/{id}` | Single run with case-level detail | AdminDep |
 | `DELETE /api/v1/quality/benchmarks/runs` | Clear all (existing, retained) | AdminDep |
 
-The legacy paths (`/api/v1/benchmarks/run-quality`, `/api/v1/benchmarks/quality-results`) stay routed during Cycle 1 as aliases to the new paths. Removed in a follow-up after dashboard fully migrates.
+The legacy paths (`/api/v1/benchmarks/run-quality`, `/api/v1/benchmarks/quality-results`) stay routed during Cycle 1 as aliases to the new paths. Removed once the dashboard `/ai-quality` page on `main` no longer references the legacy paths (verifiable by `grep` in dashboard code) — that's the gating signal for the cleanup commit.
 
 **Live scores** (Cycle 1, existing endpoints with updated dimension list):
 
@@ -383,7 +383,7 @@ The legacy paths (`/api/v1/benchmarks/run-quality`, `/api/v1/benchmarks/quality-
 
 Cortex's thinking cycle includes a Quality drive (`cortex/app/drives/quality.py`) that:
 
-1. Polls `GET /api/v1/quality/summary?period=7d` periodically (e.g., every 30 min, configurable).
+1. Polls `GET /api/v1/quality/summary?period=7d` periodically (default 30 min; configurable via `nova:config:quality.cortex_poll_interval_sec`).
 2. Compares against rolling baseline; if regression detected, calls `POST /api/v1/quality/loops/{name}/run-now` for the loop watching that dimension.
 3. Polls `GET /api/v1/quality/loops/sessions/{id}` for in-flight sessions.
 4. For `propose_for_approval` sessions: cortex either auto-approves (if confidence high + change reversibility easy) or escalates to human via existing notification path.
@@ -411,7 +411,7 @@ Three tabs at `/ai-quality`:
 
 Each step is its own commit, independently revertable. TDD per step.
 
-1. **Migration `057_quality_v2.sql`** — adds `config_snapshot_id`, `dimension_scores`, `vocabulary_version`, `error_summary` columns to `quality_benchmark_runs`; creates `quality_config_snapshots` table; backfills existing `'complete'` rows to `'completed'`.
+1. **Migration `NNN_quality_v2.sql`** (planner picks next available number — `065_` likely at plan time) — adds `config_snapshot_id`, `dimension_scores`, `vocabulary_version`, `error_summary` columns to `quality_benchmark_runs`; creates `quality_config_snapshots` table; backfills existing `'complete'` rows to `'completed'`.
 
 2. **Snapshot capture utility** — `orchestrator/app/quality_loop/snapshot.py` with `async def capture_snapshot(captured_by: str) -> tuple[UUID, dict]`. Reads from Redis + DB, normalizes, hashes, dedups. Single function, ~50 lines.
 
@@ -440,7 +440,7 @@ Each step is its own commit, independently revertable. TDD per step.
 
 ## Cycle 2 (closed loop) — implementation order
 
-10. **Migration `058_quality_loop_sessions.sql`** — adds `quality_loop_sessions` table.
+10. **Migration `NNN_quality_loop_sessions.sql`** (planner picks next available, one after Cycle 1's migration) — adds `quality_loop_sessions` table.
 
 11. **`QualityLoop` interface + base classes** — `orchestrator/app/quality_loop/base.py` with `Protocol`, `SenseReading`, `Proposal`, `AppliedChange`, `Verification`, `Decision` types.
 
@@ -456,7 +456,7 @@ Each step is its own commit, independently revertable. TDD per step.
 
 17. **Dashboard Loops tab** — new component `dashboard/src/pages/quality/LoopsTab.tsx`. Reads `/api/v1/quality/loops`. Approval UI for `propose_for_approval` sessions.
 
-18. **Approval flow infrastructure** — used by future B/D. Notifications when session enters `pending_approval`; UI to approve/reject; cortex-side auto-approval logic for low-risk reversible cases.
+18. **Approval flow infrastructure** — built in Cycle 2 to support Loop A's `propose_for_approval` mode (testable by temporarily switching A's agency); will be reused by future B/D loops. Notifications when session enters `pending_approval`; UI to approve/reject; cortex-side auto-approval logic for low-risk reversible cases.
 
 ### Cycle 2 success criteria
 
