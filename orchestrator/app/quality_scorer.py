@@ -4,8 +4,8 @@ Called by chat_scorer.py after each assistant turn. Each score_* function
 returns a dict with {dimension, score, confidence, metadata} or None if
 no signal for this turn.
 """
-import re
 import logging
+import re
 from typing import Any
 
 import httpx

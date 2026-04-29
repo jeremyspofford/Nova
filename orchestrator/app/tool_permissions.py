@@ -23,10 +23,13 @@ from __future__ import annotations
 
 import json
 import logging
-
-from nova_contracts import ToolDefinition
+from typing import TYPE_CHECKING
 
 from app.db import get_pool
+from nova_contracts import ToolDefinition
+
+if TYPE_CHECKING:
+    from app.tools.sandbox import SandboxTier
 
 log = logging.getLogger(__name__)
 

@@ -16,9 +16,9 @@ Usage in registry: set GEMINI_USE_ADC=true in .env
 from __future__ import annotations
 
 import logging
-import os
 from typing import AsyncIterator
 
+from app.providers.base import ModelProvider
 from nova_contracts import (
     CompleteRequest,
     CompleteResponse,
@@ -26,10 +26,7 @@ from nova_contracts import (
     EmbedResponse,
     ModelCapability,
     StreamChunk,
-    ToolCall,
 )
-
-from app.providers.base import ModelProvider
 
 log = logging.getLogger(__name__)
 

@@ -15,11 +15,10 @@ from uuid import UUID
 
 import httpx
 import numpy as np
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import settings
 from app.embedding import get_embedding, to_pg_vector
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 
@@ -218,8 +217,9 @@ async def _create_topic_engram(
     engram_contents: dict[str, str],
 ) -> bool:
     """Stage 3: Create a topic engram with LLM-generated name and summary."""
-    from .ingestion import _create_edge
     import json as _json
+
+    from .ingestion import _create_edge
 
     ids = cluster["engram_ids"]
     anchors = cluster.get("anchor_entities", [])
@@ -400,8 +400,9 @@ async def _name_topic(
 
 async def assign_new_engrams_to_topics(session: AsyncSession) -> int:
     """Assign recently ingested engrams to existing topics by centroid similarity."""
-    from .ingestion import _create_edge
     import json as _json
+
+    from .ingestion import _create_edge
 
     unassigned = await session.execute(
         text("""

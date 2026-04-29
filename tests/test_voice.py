@@ -4,6 +4,7 @@ Requires: docker compose --profile voice up
 Tests that call paid APIs (transcribe, synthesize) are skipped unless OPENAI_API_KEY is set.
 """
 import os
+
 import httpx
 import pytest
 

@@ -4,9 +4,8 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from pydantic import BaseModel
-
 from app.db import get_pool
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 

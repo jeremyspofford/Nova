@@ -7,7 +7,6 @@ import json
 import httpx
 import pytest
 import websockets
-
 from conftest import CHAT_API_URL
 
 

@@ -5,7 +5,7 @@ per-domain rate limiting, LLM-scored link relevance, and engram ingestion.
 """
 import logging
 from dataclasses import dataclass, field
-from typing import Callable, Coroutine, Any
+from typing import Any, Callable, Coroutine
 from urllib.parse import urlparse
 
 from nova_worker_common.content_hash import compute_content_hash

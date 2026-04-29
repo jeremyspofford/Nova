@@ -1,19 +1,19 @@
 """API endpoints for linked accounts — maps platform identities to Nova users."""
 
 import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from .auth import UserDep
 from .linked_accounts import (
-    resolve_platform_account,
-    get_active_conversation_for_user,
     auto_link,
-    create_link,
-    list_links,
     delete_link,
     generate_link_code,
+    get_active_conversation_for_user,
+    list_links,
     redeem_link_code,
+    resolve_platform_account,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ class RedeemRequest(BaseModel):
 def _require_service_secret(request: Request):
     """Validate X-Service-Secret header for bridge-to-orchestrator trust."""
     import hmac
+
     from .config import settings
     secret = request.headers.get("X-Service-Secret", "")
     if not secret or not settings.bridge_service_secret or not hmac.compare_digest(secret, settings.bridge_service_secret):

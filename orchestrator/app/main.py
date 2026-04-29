@@ -5,14 +5,10 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from nova_contracts.logging import configure_logging
-
+from app.auth_router import router as auth_router
 from app.clients import close_clients
 from app.config import settings
 from app.db import close_db, init_db
-from app.auth_router import router as auth_router
 from app.friction_router import router as friction_router
 from app.goals_router import goals_router
 from app.health import health_router
@@ -22,8 +18,11 @@ from app.pipeline_router import router as pipeline_router
 from app.queue import queue_worker
 from app.reaper import cleanup_stale_running_on_startup, reaper_loop
 from app.router import router
-from app.store import close_redis, ensure_primary_agent, recover_stale_agents
 from app.stimulus import close_redis as close_stimulus_redis
+from app.store import close_redis, ensure_primary_agent, recover_stale_agents
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from nova_contracts.logging import configure_logging
 
 configure_logging("orchestrator", settings.log_level)
 log = logging.getLogger(__name__)
@@ -36,6 +35,7 @@ async def _seed_config_from_env() -> None:
     Never overwrites DB with .env — DB is the source of truth once set.
     """
     import json
+
     from app.db import get_pool
 
     SEEDS = {
@@ -101,7 +101,13 @@ async def lifespan(app: FastAPI):
     await _seed_config_from_env()
 
     # Sync DB config to Redis so LLM gateway has correct values immediately
-    from app.config_sync import sync_llm_config_to_redis, sync_inference_config_to_redis, sync_engram_config_to_redis, sync_voice_config_to_redis, sync_features_config_to_redis
+    from app.config_sync import (
+        sync_engram_config_to_redis,
+        sync_features_config_to_redis,
+        sync_inference_config_to_redis,
+        sync_llm_config_to_redis,
+        sync_voice_config_to_redis,
+    )
     await sync_llm_config_to_redis()
     await sync_inference_config_to_redis()
     await sync_engram_config_to_redis()
@@ -183,6 +189,7 @@ app.add_middleware(
 )
 
 from app.trusted_network import TrustedNetworkMiddleware, parse_cidrs
+
 app.add_middleware(
     TrustedNetworkMiddleware,
     trusted_cidrs=parse_cidrs(settings.trusted_networks),
@@ -191,8 +198,8 @@ app.add_middleware(
 
 from app.engram_router import router as engram_router
 from app.linked_accounts_router import router as linked_accounts_router
-from app.workspace_router import workspace_router
 from app.quality_router import quality_router
+from app.workspace_router import workspace_router
 
 app.include_router(health_router)
 app.include_router(router)

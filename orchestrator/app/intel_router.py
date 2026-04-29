@@ -3,12 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from urllib.parse import urlparse
 from uuid import UUID
-
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 
 from app.auth import AdminDep, UserDep
 from app.db import get_pool
@@ -17,7 +14,9 @@ from app.stimulus import (
     RECOMMENDATION_COMMENTED,
     emit_stimulus,
 )
+from fastapi import APIRouter, HTTPException, Query
 from nova_worker_common.url_validator import validate_url
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 

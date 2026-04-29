@@ -1,6 +1,6 @@
-from fastapi import APIRouter
 from app.config import settings
 from app.store import get_redis
+from fastapi import APIRouter
 
 health_router = APIRouter(prefix="/health", tags=["health"])
 

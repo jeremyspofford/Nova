@@ -12,14 +12,14 @@ from nova_worker_common.service_auth import (
     parse_cidrs,
 )
 
-from .clients import init_clients, close_clients
-from .config import settings
-from .db import init_pool, close_pool
-from .stimulus import close_redis
+from . import loop
 from .budget import close_redis as close_budget_redis
+from .clients import close_clients, init_clients
+from .config import settings
+from .db import close_pool, init_pool
 from .health import health_router
 from .router import cortex_router
-from . import loop
+from .stimulus import close_redis
 
 logging.basicConfig(level=getattr(logging, settings.log_level, logging.INFO))
 log = logging.getLogger("nova.cortex")
@@ -33,8 +33,8 @@ async def lifespan(app: FastAPI):
 
     # Recover in-flight tasks from last run
     try:
-        from .task_monitor import dispatch as _monitor_dispatch
         from .db import get_pool
+        from .task_monitor import dispatch as _monitor_dispatch
         pool = get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch("""

@@ -326,6 +326,7 @@ async def _execute_send_message_to_agent(agent_id: str, message: str) -> str:
     agent pipeline (memory retrieval, system prompt, etc.).
     """
     from uuid import uuid4
+
     from app.clients import get_orchestrator_client
 
     client = get_orchestrator_client()
@@ -371,6 +372,7 @@ async def _execute_create_task(
     """Submit a task to a pipeline pod for autonomous execution."""
     import json as _json
     from uuid import uuid4
+
     from app.db import get_pool
     from app.queue import enqueue_task
 
@@ -432,6 +434,7 @@ async def _execute_create_goal(args: dict) -> str:
     """Create a strategic goal for Cortex with autonomy check and rate limiting."""
     import uuid as _uuid
     from datetime import datetime, timezone
+
     from app.db import get_pool
     from app.stimulus import emit_stimulus
 

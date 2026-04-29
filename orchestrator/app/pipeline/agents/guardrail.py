@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import logging
 
-from .base import BaseAgent, PipelineState
 from ..schemas import GuardrailOutput
+from .base import BaseAgent, PipelineState
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,7 @@ class GuardrailAgent(BaseAgent):
         )
 
         if tier1_result["blocked"] or has_high_findings:
-            logger.info(f"Guardrail: Tier 1 flagged findings — escalating to Tier 2")
+            logger.info("Guardrail: Tier 1 flagged findings — escalating to Tier 2")
             tier2_model = self.tier2_model or self.model
             tier2_agent = BaseAgent(
                 model=tier2_model,

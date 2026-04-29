@@ -21,12 +21,11 @@ from collections import defaultdict
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import WebSocket, WebSocketDisconnect
-from nova_contracts import ChatMessageType
-
 from app.config import settings
 from app.queue import enqueue_message
 from app.session import get_or_create_session
+from fastapi import WebSocket, WebSocketDisconnect
+from nova_contracts import ChatMessageType
 
 log = logging.getLogger(__name__)
 

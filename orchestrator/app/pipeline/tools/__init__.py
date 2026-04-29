@@ -12,13 +12,13 @@ Usage at startup (main.py lifespan):
 """
 
 from .registry import (
-    load_mcp_servers,
-    stop_all_servers,
-    get_mcp_tool_definitions,
-    execute_mcp_tool,
-    list_connected_servers,
-    reload_mcp_server,
     disconnect_server,
+    execute_mcp_tool,
+    get_mcp_tool_definitions,
+    list_connected_servers,
+    load_mcp_servers,
+    reload_mcp_server,
+    stop_all_servers,
 )
 
 __all__ = [

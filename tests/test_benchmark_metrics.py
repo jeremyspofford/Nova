@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from benchmarks.metrics import compute_summary, mrr, precision_at_k
 
-
 # ── precision@5 ─────────────────────────────────────────────────────────────
 
 

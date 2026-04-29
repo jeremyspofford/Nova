@@ -20,11 +20,10 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request
-
 from app.config import settings
 from app.db import lookup_api_key, touch_api_key
 from app.store import get_redis
+from fastapi import Depends, Header, HTTPException, Request
 
 log = logging.getLogger(__name__)
 
@@ -330,8 +329,8 @@ async def require_user(
                     log.warning("Access denied: token on deny-list (user=%s, reason=%s, ip=%s)", user_id, reason, ip)
                     # Fire-and-forget audit
                     try:
-                        from app.db import get_pool
                         from app.audit import audit_rbac
+                        from app.db import get_pool
                         pool = get_pool()
                         asyncio.create_task(audit_rbac(
                             pool, user_id, "token_denied",
@@ -351,8 +350,9 @@ async def require_user(
 
             # Check account expiry
             try:
-                from app.db import get_pool
                 from datetime import datetime, timezone
+
+                from app.db import get_pool
                 pool = get_pool()
                 row = await pool.fetchrow(
                     "SELECT status, expires_at FROM users WHERE id = $1::uuid", user_id
@@ -418,8 +418,9 @@ def require_role(min_role: str):
 
 
 async def check_account_active(user: UserDep) -> AuthenticatedUser:
-    from app.db import get_pool
     from datetime import datetime, timezone
+
+    from app.db import get_pool
     pool = get_pool()
     row = await pool.fetchrow(
         "SELECT status, expires_at FROM users WHERE id = $1", user.id

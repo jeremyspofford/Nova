@@ -1,5 +1,6 @@
 """vLLM inference provider -- thin wrapper over OpenAICompatibleProvider."""
 from nova_contracts.llm import ModelCapability
+
 from .openai_compatible_provider import OpenAICompatibleProvider
 
 

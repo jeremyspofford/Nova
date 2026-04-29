@@ -8,11 +8,10 @@ import secrets
 from uuid import UUID
 
 import bcrypt
-from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, EmailStr
-
-from app.auth import AdminDep, UserDep
+from app.auth import UserDep
 from app.config import settings
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["auth"])
@@ -115,8 +114,8 @@ async def get_network_status(request: Request):
 
 @router.post("/api/v1/auth/register", response_model=AuthResponse)
 async def register(req: RegisterRequest, request: Request):
-    from app.users import create_user, get_user_by_email, count_users
     from app.jwt_auth import create_access_token, create_refresh_token
+    from app.users import count_users, create_user, get_user_by_email
 
     # Check registration mode
     if settings.registration_mode == "admin":
@@ -215,10 +214,10 @@ async def register(req: RegisterRequest, request: Request):
 
 @router.post("/api/v1/auth/login", response_model=AuthResponse)
 async def login(req: LoginRequest, request: Request):
-    from app.users import get_user_by_email
-    from app.jwt_auth import create_access_token, create_refresh_token
-    from app.db import get_pool
     from app.audit import audit_rbac
+    from app.db import get_pool
+    from app.jwt_auth import create_access_token, create_refresh_token
+    from app.users import get_user_by_email
 
     pool = get_pool()
     ip = request.client.host if request.client else None
@@ -282,9 +281,9 @@ async def refresh_tokens(req: RefreshRequest):
 
 @router.post("/api/v1/auth/logout", status_code=204)
 async def logout(req: LogoutRequest, request: Request, user: UserDep):
-    from app.jwt_auth import revoke_refresh_token
-    from app.db import get_pool
     from app.audit import audit_rbac
+    from app.db import get_pool
+    from app.jwt_auth import revoke_refresh_token
 
     await revoke_refresh_token(req.refresh_token)
 
@@ -318,10 +317,10 @@ async def update_me(req: UpdateProfileRequest, user: UserDep):
 @router.patch("/api/v1/auth/password", status_code=204)
 async def change_password(req: ChangePasswordRequest, user: UserDep, request: Request):
     """Change the authenticated user's password."""
-    from app.users import get_user_by_id
-    from app.db import get_pool
-    from app.auth import deny_user_token
     from app.audit import audit_rbac
+    from app.auth import deny_user_token
+    from app.db import get_pool
+    from app.users import get_user_by_id
 
     full_user = await get_user_by_id(user.id)
     if not full_user or not full_user.get("password_hash"):
@@ -354,7 +353,7 @@ async def change_password(req: ChangePasswordRequest, user: UserDep, request: Re
 
 @router.get("/api/v1/auth/google")
 async def google_auth(request: Request):
-    from app.oauth import google_enabled, get_google_auth_url
+    from app.oauth import get_google_auth_url, google_enabled
     if not google_enabled():
         raise HTTPException(status_code=404, detail="Google OAuth not configured")
 
@@ -364,9 +363,14 @@ async def google_auth(request: Request):
 
 @router.post("/api/v1/auth/google/callback", name="google_callback")
 async def google_callback(request: Request):
-    from app.oauth import google_enabled, exchange_google_code
-    from app.users import get_user_by_provider, get_user_by_email, create_user, count_users
     from app.jwt_auth import create_access_token, create_refresh_token
+    from app.oauth import exchange_google_code, google_enabled
+    from app.users import (
+        count_users,
+        create_user,
+        get_user_by_email,
+        get_user_by_provider,
+    )
 
     if not google_enabled():
         raise HTTPException(status_code=404, detail="Google OAuth not configured")
@@ -511,8 +515,8 @@ async def revoke_invite(invite_id: UUID, user: UserDep, request: Request):
     if not has_min_role(user.role, "admin"):
         raise HTTPException(status_code=403, detail="Requires admin role")
 
-    from app.db import get_pool
     from app.audit import audit_rbac
+    from app.db import get_pool
     pool = get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute(
@@ -541,7 +545,7 @@ class AdminCreateUser(BaseModel):
 
 @router.post("/api/v1/admin/users")
 async def admin_create_user(req: AdminCreateUser, user: UserDep):
-    from app.roles import has_min_role, VALID_ROLES, can_assign_role
+    from app.roles import VALID_ROLES, can_assign_role, has_min_role
     if not has_min_role(user.role, "admin"):
         raise HTTPException(status_code=403, detail="Requires admin role")
     if req.role not in VALID_ROLES:
@@ -584,7 +588,7 @@ async def list_all_users(user: UserDep):
 @router.patch("/api/v1/admin/users/{user_id}")
 async def update_user_admin(user_id: str, body: AdminUpdateUser, user: UserDep):
     """Update user role, status, or expiry. Requires admin role."""
-    from app.roles import has_min_role, can_assign_role, parse_role
+    from app.roles import can_assign_role, has_min_role, parse_role
     if not has_min_role(user.role, "admin"):
         raise HTTPException(status_code=403, detail="Requires admin role")
 
@@ -649,7 +653,7 @@ async def deactivate_user_endpoint(user_id: str, user: UserDep):
     if not has_min_role(user.role, "admin"):
         raise HTTPException(status_code=403, detail="Requires admin role")
 
-    from app.users import get_user_by_id, deactivate_user
+    from app.users import deactivate_user, get_user_by_id
     target = await get_user_by_id(user_id)
     if not target:
         raise HTTPException(status_code=404, detail="User not found")

@@ -1,5 +1,6 @@
 """Integration tests for agent-callable memory tools."""
 import os
+
 import httpx
 import pytest
 

@@ -14,9 +14,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, FastAPI
 
-from app.config import settings
-from app.routes import chunks, router as memory_router, Chunk, _embed
 from app.chunker import chunk_markdown
+from app.config import settings
+from app.routes import Chunk, _embed, chunks
+from app.routes import router as memory_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),

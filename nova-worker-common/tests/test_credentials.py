@@ -3,7 +3,6 @@ import os
 
 import pytest
 from cryptography.exceptions import InvalidTag
-
 from nova_worker_common.credentials.builtin import BuiltinCredentialProvider
 
 # Stable test key — 32 random bytes as hex

@@ -8,7 +8,6 @@ These tests verify:
 """
 import httpx
 import pytest
-import pytest_asyncio
 
 MEMORY_URL = "http://localhost:8002/api/v1/engrams"
 
@@ -112,7 +111,7 @@ class TestConsolidationRunning:
 
     async def test_recent_consolidation_exists(self, memory):
         """At least one consolidation should have run in the last 24 hours."""
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timedelta, timezone
 
         resp = await memory.get(f"{MEMORY_URL}/consolidation-log", params={"limit": 1})
         data = resp.json()

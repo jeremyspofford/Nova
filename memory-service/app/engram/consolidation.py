@@ -25,12 +25,11 @@ import time
 from datetime import datetime, timezone
 
 import httpx
-from sqlalchemy import text
-
 from app.config import settings
 from app.db.database import AsyncSessionLocal
-from app.embedding import get_embedding, get_redis
-from app.embedding import to_pg_vector
+from app.embedding import get_embedding, get_redis, to_pg_vector
+from sqlalchemy import text
+
 from .cortex_stimulus import emit_to_cortex
 
 log = logging.getLogger(__name__)
@@ -194,7 +193,11 @@ async def run_consolidation(trigger: str = "manual") -> dict:
 
             # Phase 2.5: Topic Discovery — cluster engrams into topics
             async def _phase25(session):
-                from .clustering import discover_topics, assign_new_engrams_to_topics, maintain_topics
+                from .clustering import (
+                    assign_new_engrams_to_topics,
+                    discover_topics,
+                    maintain_topics,
+                )
                 topics_created = await discover_topics(session)
                 topics_assigned = await assign_new_engrams_to_topics(session)
                 maintenance = await maintain_topics(session)

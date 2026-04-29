@@ -1,7 +1,7 @@
 import time
 
+import httpx
 from fastapi import APIRouter
-from app.config import settings
 
 health_router = APIRouter(prefix="/health", tags=["health"])
 
@@ -50,7 +50,7 @@ async def provider_status():
 @health_router.post("/providers/{slug}/test")
 async def test_provider(slug: str):
     """Send a minimal completion to a provider and report latency."""
-    from app.registry import get_provider_catalog, get_provider
+    from app.registry import get_provider, get_provider_catalog
     from nova_contracts import CompleteRequest, Message
 
     catalog = get_provider_catalog()

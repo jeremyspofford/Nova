@@ -1,8 +1,9 @@
 """Integration tests for unified bridge chat flow."""
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 BASE = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
 BRIDGE_BASE = os.getenv("CHAT_BRIDGE_URL", "http://localhost:8090")

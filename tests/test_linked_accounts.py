@@ -1,8 +1,9 @@
 """Integration tests for linked accounts API."""
 
 import os
-import pytest
+
 import httpx
+import pytest
 
 BASE = os.getenv("ORCHESTRATOR_URL", "http://localhost:8000")
 ADMIN_SECRET = os.getenv("ADMIN_SECRET", "changeme")

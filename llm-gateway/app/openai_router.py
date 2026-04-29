@@ -30,23 +30,22 @@ import logging
 import time
 from uuid import uuid4
 
-from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
-
+from app.config import settings
+from app.editor_tracker import detect_editor_slug, get_connections, record_connection
 from app.openai_compat import (
     OAIChatCompletionRequest,
-    OAIStreamChunk,
     OAIStreamChoice,
+    OAIStreamChunk,
     OAIStreamDelta,
     make_stream_chunk,
     nova_response_to_oai,
     oai_request_to_nova,
 )
-from app.config import settings
-from app.editor_tracker import detect_editor_slug, record_connection, get_connections
 from app.rate_limiter import check_rate_limit
-from app.registry import MODEL_REGISTRY, DEFAULT_MODEL_KEY, get_provider
-from app.tier_resolver import resolve_model, BudgetExhaustedError
+from app.registry import DEFAULT_MODEL_KEY, MODEL_REGISTRY, get_provider
+from app.tier_resolver import BudgetExhaustedError, resolve_model
+from fastapi import APIRouter, Request
+from fastapi.responses import StreamingResponse
 
 log = logging.getLogger(__name__)
 openai_router = APIRouter(prefix="/v1", tags=["openai-compat"])

@@ -9,8 +9,6 @@ from __future__ import annotations
 import logging
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.pipeline.agents.base import PipelineState
 from app.pipeline.agents.critique import (
     CritiqueAcceptanceAgent,

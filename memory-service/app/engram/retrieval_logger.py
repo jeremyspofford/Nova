@@ -18,11 +18,10 @@ import logging
 from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import settings
 from app.embedding import to_pg_vector
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 

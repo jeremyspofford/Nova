@@ -16,8 +16,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from nova_contracts import ToolDefinition
+
+if TYPE_CHECKING:
+    from app.tools.sandbox import SandboxTier
 
 log = logging.getLogger(__name__)
 

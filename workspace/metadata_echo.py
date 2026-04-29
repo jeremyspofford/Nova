@@ -27,7 +27,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
@@ -196,24 +195,24 @@ def run_echo_test(metadata: Metadata | None = None) -> None:
 
     # ── Stage 1: original payload ──────────────────────────────────────
     original_dict = metadata.to_dict()
-    print(f"\n[1] Original metadata:")
+    print("\n[1] Original metadata:")
     for key, value in original_dict.items():
         print(f"      {key}: {value!r}")
 
     # ── Stage 2: encode ────────────────────────────────────────────────
     encoded = encode(metadata)
-    print(f"\n[2] Encoded (base64):")
+    print("\n[2] Encoded (base64):")
     print(f"      {encoded}")
 
     # ── Stage 3: decode ────────────────────────────────────────────────
     decoded = decode(encoded)
     decoded_dict = decoded.to_dict()
-    print(f"\n[3] Decoded metadata:")
+    print("\n[3] Decoded metadata:")
     for key, value in decoded_dict.items():
         print(f"      {key}: {value!r}")
 
     # ── Stage 4: field-by-field comparison ────────────────────────────
-    print(f"\n[4] Field-by-field comparison:")
+    print("\n[4] Field-by-field comparison:")
     all_ok = True
     all_keys = set(original_dict) | set(decoded_dict)
     for key in sorted(all_keys):
@@ -241,9 +240,9 @@ def run_echo_test(metadata: Metadata | None = None) -> None:
         f"  Second : {encoded_again}"
     )
 
-    print(f"\n[5] Encoding stability:  ✓  (re-encode matches original)")
+    print("\n[5] Encoding stability:  ✓  (re-encode matches original)")
     print(f"\n{'=' * 60}")
-    print(f"  ALL CHECKS PASSED — round-trip fidelity confirmed.")
+    print("  ALL CHECKS PASSED — round-trip fidelity confirmed.")
     print(f"{'=' * 60}\n")
 
 

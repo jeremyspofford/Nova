@@ -7,9 +7,19 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.inference.controller import (
-    get_backend_status, list_backends, start_backend, stop_backend, switch_model,
+    get_backend_status,
+    list_backends,
+    start_backend,
+    stop_backend,
+    switch_model,
 )
-from app.inference.hardware import detect_hardware, get_backend_recommendation, get_full_recommendation, get_gpu_stats, get_hardware
+from app.inference.hardware import (
+    detect_hardware,
+    get_backend_recommendation,
+    get_full_recommendation,
+    get_gpu_stats,
+    get_hardware,
+)
 from app.inference.model_search import search_models as do_search_models
 from app.routes import _check_admin
 

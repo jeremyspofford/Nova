@@ -6,7 +6,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from app.client import close_clients, get_llm_client, get_orchestrator_client, init_clients
+from app.client import (
+    close_clients,
+    get_llm_client,
+    get_orchestrator_client,
+    init_clients,
+)
 from app.config import settings
 from app.credentials.health import run_credential_health_loop
 from app.queue import close_queues, init_queues, push_to_engram

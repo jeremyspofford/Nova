@@ -4,8 +4,6 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 
 class MockAsyncLineIterator:
     """Mock httpx async line iterator for SSE streams."""
@@ -90,6 +88,7 @@ async def test_streaming_captures_token_counts():
         patch("app.usage.log_usage", side_effect=capture_usage),
     ):
         from uuid import UUID
+
         from app.agents.runner import run_agent_turn_streaming
 
         deltas = []
@@ -143,6 +142,7 @@ async def test_streaming_zero_tokens_when_no_usage():
         patch("app.usage.log_usage", side_effect=capture_usage),
     ):
         from uuid import UUID
+
         from app.agents.runner import run_agent_turn_streaming
 
         async for _ in run_agent_turn_streaming(

@@ -6,9 +6,8 @@ import logging
 import re
 from uuid import UUID
 
-from pydantic import BaseModel
-
 from app.db import get_pool
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 

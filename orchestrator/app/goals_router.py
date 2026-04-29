@@ -6,13 +6,18 @@ import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
-
 from app.auth import UserDep
 from app.db import get_pool
 from app.intel_router import CreateCommentRequest
-from app.stimulus import GOAL_COMMENTED, GOAL_CREATED, GOAL_SPEC_APPROVED, GOAL_SPEC_REJECTED, emit_stimulus
+from app.stimulus import (
+    GOAL_COMMENTED,
+    GOAL_CREATED,
+    GOAL_SPEC_APPROVED,
+    GOAL_SPEC_REJECTED,
+    emit_stimulus,
+)
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 log = logging.getLogger(__name__)
 

@@ -1,69 +1,91 @@
-# name: Nova CI
-#
-# on:
-#   push:
-#     branches: [main]
-#     paths-ignore:
-#       - 'website/**'
-#       - '*.md'
-#       - '.claude/**'
-#   pull_request:
-#     branches: [main]
-#     paths-ignore:
-#       - 'website/**'
-#       - '*.md'
-#       - '.claude/**'
-#
-# jobs:
-#   lint-python:
-#     name: Python Lint
-#     runs-on: ubuntu-latest
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: astral-sh/setup-ruff@v1
-#       - name: Ruff check all services
-#         run: ruff check .
-#
-#   typecheck-dashboard:
-#     name: Dashboard TypeScript Check
-#     runs-on: ubuntu-latest
-#     defaults:
-#       run:
-#         working-directory: dashboard
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-node@v4
-#         with:
-#           node-version: '20'
-#           cache: 'npm'
-#           cache-dependency-path: dashboard/package-lock.json
-#       - run: npm ci
-#       - run: npx tsc --noEmit
-#
-#   build-dashboard:
-#     name: Dashboard Build
-#     runs-on: ubuntu-latest
-#     needs: typecheck-dashboard
-#     defaults:
-#       run:
-#         working-directory: dashboard
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: actions/setup-node@v4
-#         with:
-#           node-version: '20'
-#           cache: 'npm'
-#           cache-dependency-path: dashboard/package-lock.json
-#       - run: npm ci
-#       - run: npm run build
-#
-#   docker-build:
-#     name: Docker Build Check
-#     runs-on: ubuntu-latest
-#     strategy:
-#       matrix:
-#         service: [orchestrator, llm-gateway, memory-service, chat-api, cortex, recovery, intel-worker]
-#     steps:
-#       - uses: actions/checkout@v4
-#       - name: Build ${{ matrix.service }}
-#         run: docker build -t nova-${{ matrix.service }}:ci ./${{ matrix.service }}
+name: Nova CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'website/**'
+      - '*.md'
+      - '.claude/**'
+      - 'docs/**'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'website/**'
+      - '*.md'
+      - '.claude/**'
+      - 'docs/**'
+  workflow_dispatch:
+
+jobs:
+  lint-python:
+    name: Python Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-ruff@v1
+      - name: Ruff check all services
+        run: ruff check .
+
+  typecheck-dashboard:
+    name: Dashboard TypeScript Check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  build-dashboard:
+    name: Dashboard Build
+    runs-on: ubuntu-latest
+    needs: typecheck-dashboard
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  docker-build:
+    name: Docker Build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each service builds from REPO ROOT context with -f pointing at its
+        # Dockerfile. The Dockerfiles expect this layout because they COPY
+        # shared packages like nova-contracts/ and nova-worker-common/ from
+        # the project root. Building from `./service` directly fails.
+        include:
+          - service: orchestrator
+            dockerfile: orchestrator/Dockerfile
+          - service: llm-gateway
+            dockerfile: llm-gateway/Dockerfile
+          - service: memory-service
+            dockerfile: memory-service/Dockerfile
+          - service: chat-api
+            dockerfile: chat-api/Dockerfile
+          - service: cortex
+            dockerfile: cortex/Dockerfile
+          - service: recovery
+            dockerfile: recovery-service/Dockerfile
+          - service: intel-worker
+            dockerfile: intel-worker/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ${{ matrix.service }}
+        run: docker build -f ${{ matrix.dockerfile }} -t nova-${{ matrix.service }}:ci .

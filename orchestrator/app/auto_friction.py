@@ -27,8 +27,8 @@ def is_healthy() -> bool:
 async def auto_friction_subscriber() -> None:
     """Background task: subscribe to nova:notifications, create friction on task_failed."""
     global _healthy
-    from app.store import get_redis
     from app.db import get_pool
+    from app.store import get_redis
 
     log.info("Auto-friction subscriber starting")
 

@@ -5,15 +5,13 @@ This allows horizontal scaling and crash recovery.
 """
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import redis.asyncio as aioredis
-from nova_contracts import AgentConfig, AgentInfo, AgentStatus, TaskResult, TaskStatus
-
 from app.config import settings
+from nova_contracts import AgentConfig, AgentInfo, AgentStatus, TaskResult
 
 log = logging.getLogger(__name__)
 
@@ -183,8 +181,8 @@ async def ensure_primary_agent() -> AgentInfo:
     exists, it's returned as-is. Otherwise one is created. This replaces the
     pattern of manually creating agents — the primary agent is always there.
     """
-    from nova_contracts import AgentConfig
     from app.config import settings
+    from nova_contracts import AgentConfig
 
     agents = await list_agents()
     active = [

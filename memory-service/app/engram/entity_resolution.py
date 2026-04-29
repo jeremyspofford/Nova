@@ -13,11 +13,10 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.config import settings
 from app.embedding import to_pg_vector
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 log = logging.getLogger(__name__)
 

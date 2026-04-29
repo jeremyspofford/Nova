@@ -13,19 +13,16 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 
 from app.config import settings
 from app.embedding import get_embedding
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .activation import ActivatedEngram, spreading_activation
-from .reconstruction import get_self_model_summary, reconstruct
-
-from datetime import datetime, timezone
-
 from .neural_router.serve import get_cached_model, neural_rerank
+from .reconstruction import get_self_model_summary, reconstruct
 from .retrieval_logger import log_retrieval
 
 log = logging.getLogger(__name__)

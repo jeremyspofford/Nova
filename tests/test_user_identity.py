@@ -5,7 +5,6 @@ features of the engram memory system.
 """
 import httpx
 import pytest
-import pytest_asyncio
 
 MEMORY_URL = "http://localhost:8002/api/v1/engrams"
 

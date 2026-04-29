@@ -8,13 +8,15 @@ import json
 import logging
 import time as _time
 from collections import deque
+from datetime import datetime, timedelta, timezone
 from typing import AsyncIterator
 
-from datetime import datetime, timedelta, timezone
-
+from app.rate_limiter import check_rate_limit
+from app.registry import get_embed_provider, get_provider
+from app.response_cache import get_cached, set_cached
+from app.tier_resolver import BudgetExhaustedError, resolve_model
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-
 from nova_contracts import (
     CompleteRequest,
     CompleteResponse,
@@ -22,11 +24,6 @@ from nova_contracts import (
     EmbedResponse,
     ModelInfo,
 )
-
-from app.rate_limiter import check_rate_limit
-from app.registry import get_embed_provider, get_provider
-from app.response_cache import get_cached, set_cached
-from app.tier_resolver import BudgetExhaustedError, resolve_model
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["llm"])

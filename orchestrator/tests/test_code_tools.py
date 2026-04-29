@@ -5,9 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from app.tools.sandbox import SandboxTier, set_sandbox, reset_sandbox
-
+from app.tools.sandbox import SandboxTier, reset_sandbox, set_sandbox
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 

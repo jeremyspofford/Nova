@@ -10,10 +10,8 @@ think_json retries the LLM with the schema definition appended to the prompt.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
-
 
 # ── Context Agent (Stage 1) ──────────────────────────────────────────────────
 

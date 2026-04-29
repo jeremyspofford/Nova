@@ -1,6 +1,7 @@
 """Minimal asyncpg pool — only for checking DB connectivity and metadata queries."""
 
 import asyncpg
+
 from .config import settings
 
 _pool: asyncpg.Pool | None = None

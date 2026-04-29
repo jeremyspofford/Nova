@@ -8,7 +8,6 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 import jwt
-
 from app.config import settings
 from app.db import get_pool
 

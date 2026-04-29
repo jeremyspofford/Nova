@@ -5,6 +5,8 @@ on a rejected task_running -> queued transition.
 
 from __future__ import annotations
 
+# Derive PG DSN from .env (loaded by conftest via dotenv).
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -12,11 +14,8 @@ import asyncpg
 import httpx
 import pytest
 import pytest_asyncio
+from conftest import ADMIN_SECRET, ORCHESTRATOR_URL
 
-from conftest import ORCHESTRATOR_URL, ADMIN_SECRET
-
-# Derive PG DSN from .env (loaded by conftest via dotenv).
-import os
 PG_DSN = os.getenv(
     "NOVA_PG_DSN",
     "postgresql://nova:nova_dev_password@localhost:5432/nova",

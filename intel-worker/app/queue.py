@@ -3,10 +3,11 @@ import logging
 from urllib.parse import urlparse, urlunparse
 
 import redis.asyncio as aioredis
-
 from nova_worker_common.queue import (
     close_redis_client,
     create_redis_client,
+)
+from nova_worker_common.queue import (
     push_to_engram_queue as _push_engram,
 )
 

@@ -6,7 +6,16 @@ import logging
 import time as _time
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, HTTPException, Response
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from pydantic import BaseModel
 
 from app.config import settings

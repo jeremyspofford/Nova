@@ -16,14 +16,16 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import redis.asyncio as aioredis
+from app.config import settings
+
+if TYPE_CHECKING:
+    from app.providers.base import ModelProvider
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-
-from app.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +114,7 @@ def _ensure_registered(model_id: str, provider: "ModelProvider") -> None:
     routable, not just visible.  The provider's own auth gating guarantees we
     only register models the user actually has access to.
     """
-    from app.registry import MODEL_REGISTRY, DEFAULT_MODEL_KEY
+    from app.registry import DEFAULT_MODEL_KEY, MODEL_REGISTRY
     if model_id not in MODEL_REGISTRY and model_id != DEFAULT_MODEL_KEY:
         MODEL_REGISTRY[model_id] = provider
         log.debug("Auto-registered discovered model: %s", model_id)
@@ -507,7 +509,7 @@ def _best_ollama_model() -> str | None:
 
     # We can't do async here easily, so check the Redis cache synchronously
     # Instead, use the in-memory catalog approach — check _OLLAMA_MODELS from registry
-    from app.registry import MODEL_REGISTRY, _OLLAMA_MODELS
+    from app.registry import _OLLAMA_MODELS
 
     if not _OLLAMA_MODELS:
         return None
@@ -545,7 +547,7 @@ async def resolve_auto_model() -> str:
 
     # Check if user has a preferred local model configured
     try:
-        from app.registry import _get_redis_config, _OLLAMA_MODELS
+        from app.registry import _OLLAMA_MODELS, _get_redis_config
         preferred = await _get_redis_config("llm.preferred_local_model", "")
         if preferred and preferred in _OLLAMA_MODELS:
             return preferred

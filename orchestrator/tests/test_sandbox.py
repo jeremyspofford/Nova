@@ -5,9 +5,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from app.tools.sandbox import SandboxTier, get_sandbox, set_sandbox, reset_sandbox, get_root
-
+from app.tools.sandbox import (
+    SandboxTier,
+    get_root,
+    get_sandbox,
+    reset_sandbox,
+    set_sandbox,
+)
 
 # ─── Contextvar behaviour ────────────────────────────────────────────────────
 

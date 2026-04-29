@@ -4,9 +4,6 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-
 FAKE_EMBEDDING = [0.1, 0.2, 0.3]
 FAKE_EMBEDDING_2 = [0.4, 0.5, 0.6]
 

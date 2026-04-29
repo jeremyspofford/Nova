@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import httpx
 import pytest
-
 from conftest import CHAT_API_URL, ORCHESTRATOR_URL
 
 

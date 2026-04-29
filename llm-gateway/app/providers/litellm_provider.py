@@ -9,6 +9,8 @@ import logging
 from typing import AsyncIterator
 
 import litellm
+from app.providers.base import ModelProvider
+from app.providers.utils import serialize_messages
 from nova_contracts import (
     CompleteRequest,
     CompleteResponse,
@@ -18,9 +20,6 @@ from nova_contracts import (
     StreamChunk,
     ToolCall,
 )
-
-from app.providers.base import ModelProvider
-from app.providers.utils import serialize_messages
 
 log = logging.getLogger(__name__)
 

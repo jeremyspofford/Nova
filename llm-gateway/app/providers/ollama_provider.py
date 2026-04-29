@@ -12,6 +12,8 @@ import time
 from typing import AsyncIterator
 
 import httpx
+from app.config import settings
+from app.providers.base import ModelProvider
 from nova_contracts import (
     CompleteRequest,
     CompleteResponse,
@@ -21,9 +23,6 @@ from nova_contracts import (
     StreamChunk,
     ToolCall,
 )
-
-from app.config import settings
-from app.providers.base import ModelProvider
 
 log = logging.getLogger(__name__)
 
@@ -179,7 +178,7 @@ class OllamaProvider(ModelProvider):
                 log.warning("Ollama unreachable at %s: %s", base_url, e)
 
                 # Fire WoL if configured and not recently sent
-                from app.registry import get_wol_mac, get_wol_broadcast
+                from app.registry import get_wol_broadcast, get_wol_mac
                 wol_mac = await get_wol_mac()
                 if wol_mac and (now - self._wol_sent_at) > settings.wol_boot_wait_seconds:
                     self._wol_sent_at = now

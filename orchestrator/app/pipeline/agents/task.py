@@ -23,8 +23,8 @@ from __future__ import annotations
 
 import logging
 
-from .base import BaseAgent, PipelineState
 from ..schemas import TaskAgentOutput
+from .base import BaseAgent, PipelineState
 
 logger = logging.getLogger(__name__)
 

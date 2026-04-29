@@ -20,7 +20,6 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
-
 from nova_contracts import ToolDefinition
 
 log = logging.getLogger(__name__)

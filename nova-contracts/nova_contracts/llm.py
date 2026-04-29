@@ -5,7 +5,7 @@ Any provider implementing these contracts can be swapped without touching consum
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, AsyncIterator
+from typing import Any
 
 from pydantic import BaseModel, Field
 

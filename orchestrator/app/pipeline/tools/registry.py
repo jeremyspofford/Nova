@@ -24,8 +24,8 @@ from typing import TYPE_CHECKING
 from nova_contracts import ToolDefinition
 
 if TYPE_CHECKING:
-    from .mcp_client import StdioMCPClient
     from .http_mcp_client import HTTPMCPClient
+    from .mcp_client import StdioMCPClient
 
 log = logging.getLogger(__name__)
 
@@ -300,8 +300,8 @@ async def _log_mcp_activity(
 ) -> None:
     """Write MCP tool execution to activity_events. Never raises."""
     try:
-        from app.db import get_pool
         from app.activity import emit_activity
+        from app.db import get_pool
 
         pool = get_pool()
         if pool is None:

@@ -10,16 +10,14 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from uuid import UUID
 
 import httpx
-
+from app.config import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -236,7 +234,7 @@ async def get_source_content(session: AsyncSession, source_id: UUID) -> str | No
 
 async def generate_source_summary(content: str) -> str:
     """Generate a 1-paragraph summary of source content via LLM."""
-    from .decomposition import resolve_model, SOURCE_SUMMARY_PROMPT
+    from .decomposition import SOURCE_SUMMARY_PROMPT, resolve_model
 
     model = await resolve_model(settings.engram_decomposition_model)
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:

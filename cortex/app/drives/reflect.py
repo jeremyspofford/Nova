@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 
-from ..db import get_pool
 from . import DriveContext, DriveResult
 
 log = logging.getLogger(__name__)

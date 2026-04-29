@@ -5,9 +5,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
-from fastapi import HTTPException
-
 from app.auth import AuthenticatedKey, _apply_rate_limit, require_admin, require_api_key
+from fastapi import HTTPException
 
 
 def _mock_request(*, trusted: bool = False):

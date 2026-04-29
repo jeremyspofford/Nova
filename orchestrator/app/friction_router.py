@@ -17,12 +17,11 @@ import logging
 import uuid
 from pathlib import Path
 
+from app.auth import AdminDep
+from app.db import get_pool
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-
-from app.auth import AdminDep
-from app.db import get_pool
 
 log = logging.getLogger(__name__)
 router = APIRouter()

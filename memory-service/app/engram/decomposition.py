@@ -10,9 +10,8 @@ import json
 import logging
 
 import httpx
-from nova_contracts.engram import DecompositionResult
-
 from app.config import settings
+from nova_contracts.engram import DecompositionResult
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +46,7 @@ async def resolve_model(model: str) -> str:
     # Check Redis for dashboard-configured model (db1 = config DB)
     try:
         import json as _json
+
         import redis.asyncio as aioredis
         from app.config import settings as _settings
         config_redis_url = _settings.redis_url.rsplit("/", 1)[0] + "/1"

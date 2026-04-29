@@ -95,7 +95,7 @@ async def publish_budget_tier() -> str:
 
     # Emit stimulus on tier transition
     if _last_tier is not None and tier != _last_tier:
-        from .stimulus import emit, BUDGET_TIER_CHANGE
+        from .stimulus import BUDGET_TIER_CHANGE, emit
         await emit(BUDGET_TIER_CHANGE, "cortex", {
             "old_tier": _last_tier,
             "new_tier": tier,

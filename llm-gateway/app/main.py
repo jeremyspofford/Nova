@@ -4,6 +4,11 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from app.config import settings
+from app.discovery import discovery_router
+from app.health import health_router
+from app.openai_router import openai_router
+from app.router import router
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nova_contracts.logging import configure_logging
@@ -14,12 +19,6 @@ from nova_worker_common.service_auth import (
     load_trusted_cidrs_from_env,
     parse_cidrs,
 )
-
-from app.config import settings
-from app.discovery import discovery_router
-from app.health import health_router
-from app.openai_router import openai_router
-from app.router import router
 
 configure_logging("llm-gateway", settings.log_level)
 log = logging.getLogger(__name__)

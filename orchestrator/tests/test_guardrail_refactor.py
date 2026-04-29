@@ -25,8 +25,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from app.pipeline.agents.base import PipelineState
 from app.pipeline.executor import (
     REMEDIABLE_GUARDRAIL_FINDING_TYPES,
@@ -35,7 +33,6 @@ from app.pipeline.executor import (
     _needs_rerun,
     _should_pause_for_review,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _build_guardrail_refactor_feedback

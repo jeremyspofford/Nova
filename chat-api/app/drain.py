@@ -10,11 +10,9 @@ re-queued and the loop backs off until the next poll.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 import httpx
-
 from app.config import settings
 from app.queue import dequeue_message, enqueue_message, queue_length
 

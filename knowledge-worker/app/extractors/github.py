@@ -1,8 +1,8 @@
 """GitHub platform extractor — profiles, repos, READMEs, and activity."""
 
-import re
-import logging
 import base64
+import logging
+import re
 
 from .base import BaseExtractor
 

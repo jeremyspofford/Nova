@@ -10,10 +10,8 @@ from __future__ import annotations
 import time
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
-
 from nova_contracts import CompleteRequest, CompleteResponse, Message
-
+from pydantic import BaseModel, Field
 
 # ── OpenAI request shapes ─────────────────────────────────────────────────────
 

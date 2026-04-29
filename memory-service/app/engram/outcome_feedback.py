@@ -7,7 +7,7 @@ Called via POST /api/v1/engrams/outcome-feedback with a batch of
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from sqlalchemy import text

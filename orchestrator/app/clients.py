@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 
 import httpx
-
 from app.config import settings
 
 log = logging.getLogger(__name__)

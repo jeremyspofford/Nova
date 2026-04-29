@@ -23,7 +23,7 @@ Usage
 
 from __future__ import annotations
 
-from validation_helpers import validate_type, validate_range
+from validation_helpers import validate_range, validate_type
 
 
 def is_prime(n: int) -> bool:

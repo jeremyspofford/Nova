@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app.redis_client import write_system, read_system
+from app.redis_client import read_system, write_system
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ async def get_full_recommendation(hardware: dict | None = None) -> dict:
 
 async def get_gpu_stats() -> dict | None:
     """Get live GPU stats by exec-ing nvidia-smi in the inference container."""
-    from app.inference.controller import get_backend_status, BACKENDS
+    from app.inference.controller import BACKENDS, get_backend_status
 
     status = await get_backend_status()
     backend = status.get("backend", "none")

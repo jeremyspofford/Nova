@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import AsyncIterator
 
+from app.config import settings
+from app.providers.base import ModelProvider
 from nova_contracts import (
     CompleteRequest,
     CompleteResponse,
@@ -17,9 +19,6 @@ from nova_contracts import (
     ModelCapability,
     StreamChunk,
 )
-
-from app.config import settings
-from app.providers.base import ModelProvider
 
 log = logging.getLogger(__name__)
 

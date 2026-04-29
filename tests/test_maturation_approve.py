@@ -1,5 +1,7 @@
 """Verify approve-spec routes directly to verifying (Phase 4 building deferred)."""
-import os, httpx
+import os
+
+import httpx
 
 BASE = "http://localhost:8000/api/v1"
 HEADERS = {"X-Admin-Secret": os.environ.get("NOVA_ADMIN_SECRET", "")}

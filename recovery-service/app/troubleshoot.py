@@ -3,8 +3,8 @@
 import json
 import logging
 import os
-import urllib.request
 import urllib.error
+import urllib.request
 
 from pydantic import BaseModel
 

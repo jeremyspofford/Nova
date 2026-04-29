@@ -6,11 +6,15 @@ import time
 from typing import AsyncIterator, Optional, Set
 
 import httpx
-
 from nova_contracts.llm import (
-    CompleteRequest, CompleteResponse, StreamChunk,
-    EmbedRequest, EmbedResponse, ModelCapability,
+    CompleteRequest,
+    CompleteResponse,
+    EmbedRequest,
+    EmbedResponse,
+    ModelCapability,
+    StreamChunk,
 )
+
 from .base import ModelProvider
 
 logger = logging.getLogger(__name__)

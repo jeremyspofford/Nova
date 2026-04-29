@@ -1,5 +1,4 @@
 """Integration tests for Intel endpoints."""
-import pytest
 
 
 class TestIntelFeeds:

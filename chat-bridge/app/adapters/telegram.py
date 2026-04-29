@@ -16,8 +16,8 @@ from telegram.ext import (
     filters,
 )
 
-from app.adapters.base import PlatformAdapter
 from app import bridge
+from app.adapters.base import PlatformAdapter
 from app.config import settings
 
 log = logging.getLogger(__name__)

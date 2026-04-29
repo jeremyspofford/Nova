@@ -1,6 +1,8 @@
 """Remote inference provider for user-managed OpenAI-compatible servers."""
 from typing import Optional
+
 from nova_contracts.llm import ModelCapability
+
 from .openai_compatible_provider import OpenAICompatibleProvider
 
 

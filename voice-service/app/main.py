@@ -91,4 +91,5 @@ async def health_ready():
 
 
 from app.routes import router as voice_router
+
 app.include_router(voice_router)

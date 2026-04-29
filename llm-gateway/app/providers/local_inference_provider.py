@@ -6,11 +6,16 @@ import logging
 import time
 from typing import AsyncIterator, Optional, Set
 
-from nova_contracts.llm import (
-    CompleteRequest, CompleteResponse, StreamChunk,
-    EmbedRequest, EmbedResponse, ModelCapability,
-)
 from app.config import settings
+from nova_contracts.llm import (
+    CompleteRequest,
+    CompleteResponse,
+    EmbedRequest,
+    EmbedResponse,
+    ModelCapability,
+    StreamChunk,
+)
+
 from .base import ModelProvider
 from .ollama_provider import OllamaProvider
 from .vllm_provider import VLLMProvider

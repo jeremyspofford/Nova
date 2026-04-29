@@ -4,13 +4,11 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
 import httpx
-
-from app.db import get_pool
 from app.auth import AdminDep
-from app.config import settings
+from app.db import get_pool
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 quality_router = APIRouter(tags=["quality"])

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 
 from .config import settings
 
@@ -75,9 +74,9 @@ async def _reap_stale_running_tasks() -> None:
     retry-requeue branch attempted task_running → queued, which the state
     machine rejects, causing a 60-second error spam loop (REL-001).
     """
+    from .db import get_pool
     from .pipeline.state_machine import force_fail_task
     from .queue import move_to_dead_letter
-    from .db import get_pool
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -121,8 +120,8 @@ async def cleanup_stale_running_on_startup() -> int:
 
     Returns the count of tasks cleaned up (for logging).
     """
-    from .pipeline.state_machine import force_fail_task
     from .db import get_pool
+    from .pipeline.state_machine import force_fail_task
 
     pool = get_pool()
     async with pool.acquire() as conn:
@@ -165,8 +164,8 @@ async def _reap_stuck_queued_tasks() -> None:
     Fix: re-push the task_id back onto the Redis queue. The DB status stays
     'queued' — the worker will pick it up and transition to a running state.
     """
-    from .queue import enqueue_task
     from .db import get_pool
+    from .queue import enqueue_task
 
     pool = get_pool()
     async with pool.acquire() as conn:

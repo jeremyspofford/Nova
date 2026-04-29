@@ -68,7 +68,7 @@ async def run_verifying(goal_id: str) -> bool:
                WHERE id = $1::uuid""",
             goal_id,
         )
-    from ..stimulus import emit, GOAL_COMPLETED
+    from ..stimulus import GOAL_COMPLETED, emit
     await emit(GOAL_COMPLETED, "cortex", payload={"goal_id": goal_id})
     log.info("Verification passed for goal %s — marked completed", goal_id)
     return True

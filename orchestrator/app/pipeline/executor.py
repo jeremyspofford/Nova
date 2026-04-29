@@ -22,7 +22,6 @@ import logging
 import time
 import traceback as tb_module
 from dataclasses import dataclass
-from typing import Any
 
 from ..audit import write_audit_log
 from ..config import settings
@@ -45,9 +44,10 @@ logger = logging.getLogger(__name__)
 async def _publish_notification(notification_type: str, task_id: str, title: str, body: str = "") -> None:
     """Publish a notification to Redis pub/sub for SSE clients. Fire-and-forget — never blocks pipeline."""
     try:
-        from ..store import get_redis
         import json as _json
         from datetime import datetime, timezone
+
+        from ..store import get_redis
         redis = get_redis()
         payload = _json.dumps({
             "type": notification_type,
@@ -153,7 +153,7 @@ async def execute_pipeline(task_id: str) -> None:
     Main entry point. Called by queue_worker for every dequeued task.
     Runs the full quartet pipeline and writes final status to the tasks table.
     """
-    from nova_contracts.logging import set_context, clear_context
+    from nova_contracts.logging import clear_context, set_context
     set_context(task_id=task_id)
 
     logger.info(f"Pipeline starting for task {task_id}")
@@ -746,21 +746,32 @@ async def _run_agent(
     Returns (None, session_id) if the agent failed and on_failure=abort.
     On on_failure=skip, returns ({}, session_id) so the pipeline continues.
     """
-    from .agents.context       import ContextAgent
-    from .agents.task          import TaskAgent
-    from .agents.critique      import CritiqueDirectionAgent, CritiqueAcceptanceAgent
-    from .agents.guardrail     import GuardrailAgent
-    from .agents.code_review   import CodeReviewAgent
-    from .agents.decision      import DecisionAgent
-    from .agents.post_pipeline import DocumentationAgent, DiagrammingAgent, SecurityReviewAgent, MemoryExtractionAgent
-    from ..tools.sandbox     import SandboxTier, set_sandbox, reset_sandbox, read_self_modification_config, set_self_modification, reset_self_modification
-
     # Resolve model: per-task override → agent → complexity → stage default → pod → auto
     # A "tier:<name>" value (e.g. "tier:cheap") delegates to the gateway's tier
     # resolver instead of specifying a concrete model — see Phase 4b step 3.
     from ..model_resolver import resolve_default_model
-    from .stage_model_resolver import resolve_stage_model
+    from ..tools.sandbox import (
+        SandboxTier,
+        read_self_modification_config,
+        reset_sandbox,
+        reset_self_modification,
+        set_sandbox,
+        set_self_modification,
+    )
+    from .agents.code_review import CodeReviewAgent
+    from .agents.context import ContextAgent
+    from .agents.critique import CritiqueAcceptanceAgent, CritiqueDirectionAgent
+    from .agents.decision import DecisionAgent
+    from .agents.guardrail import GuardrailAgent
+    from .agents.post_pipeline import (
+        DiagrammingAgent,
+        DocumentationAgent,
+        MemoryExtractionAgent,
+        SecurityReviewAgent,
+    )
+    from .agents.task import TaskAgent
     from .complexity_model_map import resolve_complexity_model
+    from .stage_model_resolver import resolve_stage_model
 
     _tier_override: str | None = None  # set when a "tier:*" value is found
 
@@ -990,7 +1001,6 @@ async def _run_agent(
                 logger.debug("Failed to store raw LLM output for session %s", session_id)
 
         # Build structured error_context for the task
-        import json as _json
         error_context = {
             "type": type(exc).__name__,
             "message": str(exc),

@@ -17,6 +17,12 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from uuid import UUID
 
+from app.clients import get_llm_client, get_memory_client_async
+from app.config import settings
+from app.stimulus import emit_stimulus
+from app.store import get_redis
+from app.tool_permissions import resolve_effective_tools
+from app.tools import execute_tool, get_all_tools
 from nova_contracts import (
     CompleteRequest,
     Message,
@@ -24,13 +30,6 @@ from nova_contracts import (
     TaskStatus,
     ToolCallRef,
 )
-
-from app.clients import get_llm_client, get_memory_client, get_memory_client_async
-from app.config import settings
-from app.stimulus import emit_stimulus
-from app.store import get_redis
-from app.tools import ALL_TOOLS, execute_tool, get_all_tools
-from app.tool_permissions import resolve_effective_tools
 
 log = logging.getLogger(__name__)
 
@@ -196,7 +195,6 @@ async def run_agent_turn_streaming(
     messages with no platform state or tool access.
     """
     from app.usage import log_usage
-
     from nova_contracts import extract_text_content
 
     started_at = datetime.now(timezone.utc)
@@ -580,6 +578,7 @@ async def _safe_list_agents(agent_id: str) -> str:
 async def _safe_list_goals() -> str:
     """Load active/paused goals for injection into the chat context."""
     try:
+        from app.db import get_pool
         pool = get_pool()
         async with pool.acquire() as conn:
             rows = await conn.fetch(
@@ -651,7 +650,7 @@ def _format_tool_list(tools: list) -> str:
 
 def _sandbox_context() -> str:
     """Build a context string describing the current sandbox tier and its implications."""
-    from app.tools.sandbox import get_sandbox, get_root, SandboxTier
+    from app.tools.sandbox import SandboxTier, get_root, get_sandbox
 
     tier = get_sandbox()
     root = str(get_root()) if tier != SandboxTier.isolated else "(none)"
@@ -671,13 +670,13 @@ def _sandbox_context() -> str:
             f"Be careful with changes that could affect the user's environment."
         ),
         SandboxTier.isolated: (
-            f"Sandbox tier: isolated (no filesystem access)\n"
-            f"You have no filesystem or shell access. You can only respond with text."
+            "Sandbox tier: isolated (no filesystem access)\n"
+            "You have no filesystem or shell access. You can only respond with text."
         ),
     }
     base = descriptions.get(tier, f"Sandbox tier: {tier.value}\nFilesystem root: {root}")
 
-    from app.tools.sandbox import is_self_modification_enabled, NOVA_SOURCE_ROOT
+    from app.tools.sandbox import NOVA_SOURCE_ROOT, is_self_modification_enabled
     if is_self_modification_enabled():
         base += (
             f"\n\nSelf-modification: ENABLED\n"

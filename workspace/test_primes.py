@@ -19,7 +19,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from primes import is_prime, get_first_n_primes, print_first_n_primes
+from primes import get_first_n_primes, is_prime, print_first_n_primes
 
 
 class TestIsPrime(unittest.TestCase):

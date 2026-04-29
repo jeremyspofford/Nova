@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ..clients import get_orchestrator, get_llm, get_memory
+from ..clients import get_llm, get_memory, get_orchestrator
 from ..db import get_pool
 from ..maturation.triage import triage_goal_complexity
 from ..stimulus import GOAL_CREATED

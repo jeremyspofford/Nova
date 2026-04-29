@@ -17,7 +17,6 @@ import asyncpg
 import httpx
 import pytest
 
-
 TENANT_A = str(uuid.UUID(int=0xA5F1_0000_0000_0000_0000_0000_0000_0000))
 TENANT_B = str(uuid.UUID(int=0xB5F1_0000_0000_0000_0000_0000_0000_0000))
 CONTENT_TAG = "nova-test-fc001"

@@ -3,7 +3,6 @@ import base64
 import logging
 
 import httpx
-
 from nova_worker_common.credentials.builtin import BuiltinCredentialProvider
 
 logger = logging.getLogger(__name__)

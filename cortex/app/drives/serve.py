@@ -9,7 +9,6 @@ Urgency is based on:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from ..db import get_pool
 from . import DriveContext, DriveResult

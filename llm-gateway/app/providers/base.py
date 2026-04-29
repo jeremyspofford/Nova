@@ -13,7 +13,6 @@ from nova_contracts import (
     EmbedRequest,
     EmbedResponse,
     ModelCapability,
-    ModelInfo,
     StreamChunk,
 )
 

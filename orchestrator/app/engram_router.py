@@ -13,12 +13,11 @@ from uuid import UUID
 
 import httpx
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Query
-from pydantic import BaseModel
-
 from app.auth import AdminDep
 from app.config import settings
 from app.db import get_pool
+from fastapi import APIRouter
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/engrams", tags=["engrams"])

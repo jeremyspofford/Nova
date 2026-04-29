@@ -31,16 +31,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from typing import Any
-from uuid import UUID, uuid4
-
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 
 from app.auth import AdminDep, ApiKeyDep
 from app.config import settings
 from app.db import get_pool
 from app.queue import dead_letter_depth, enqueue_task, queue_depth
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["pipeline"])
@@ -270,6 +268,7 @@ async def clarify_pipeline_task(
         raise HTTPException(status_code=400, detail="answers list required")
 
     import json as _json
+
     from .pipeline.state_machine import transition_task_status
 
     pool = get_pool()
@@ -990,7 +989,7 @@ async def reload_mcp_server_endpoint(server_id: str, _admin: AdminDep) -> dict:
     if not row:
         raise HTTPException(status_code=404, detail="MCP server not found")
 
-    from app.pipeline.tools.registry import reload_mcp_server, list_connected_servers
+    from app.pipeline.tools.registry import list_connected_servers, reload_mcp_server
     connected = await reload_mcp_server(row["name"])
     status = next(
         (s for s in list_connected_servers() if s["name"] == row["name"]),
@@ -1176,7 +1175,12 @@ async def pipeline_stats(_admin: AdminDep) -> dict:
 @router.post("/api/v1/pipeline/reap-now", tags=["pipeline-ops"])
 async def trigger_reap_now(_admin: AdminDep) -> dict:
     """Admin-only: trigger one reaper cycle immediately (for testing)."""
-    from .reaper import _reap_stale_running_tasks, _reap_stuck_queued_tasks, _reap_timed_out_sessions, _reap_stale_clarifications
+    from .reaper import (
+        _reap_stale_clarifications,
+        _reap_stale_running_tasks,
+        _reap_stuck_queued_tasks,
+        _reap_timed_out_sessions,
+    )
     await _reap_stale_running_tasks()
     await _reap_stuck_queued_tasks()
     await _reap_timed_out_sessions()
@@ -1228,8 +1232,9 @@ async def pipeline_latency_stats(_admin: AdminDep) -> dict:
 @router.get("/api/v1/pipeline/notifications/stream", tags=["pipeline-notifications"])
 async def notification_stream(request: Request):
     """SSE stream for pipeline notifications. No auth required — regular users need this."""
-    from app.store import get_redis
     import asyncio as _asyncio
+
+    from app.store import get_redis
 
     async def event_generator():
         redis = get_redis()

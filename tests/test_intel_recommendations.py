@@ -1,7 +1,8 @@
 """Tests for intel recommendation pipeline — Tier 3."""
 import os
-import pytest
+
 import httpx
+import pytest
 
 BASE = "http://localhost:8000/api/v1"
 HEADERS = {}

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 import litellm
+from app.providers.base import ModelProvider
 from nova_contracts import (
     CompleteRequest,
     CompleteResponse,
@@ -39,8 +40,6 @@ from nova_contracts import (
     StreamChunk,
     ToolCall,
 )
-
-from app.providers.base import ModelProvider
 
 log = logging.getLogger(__name__)
 

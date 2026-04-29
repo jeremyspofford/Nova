@@ -1,6 +1,6 @@
 """Integration tests for AI quality measurement system."""
-import pytest
 import httpx
+import pytest
 import pytest_asyncio
 
 MEMORY_BASE = "http://localhost:8002"

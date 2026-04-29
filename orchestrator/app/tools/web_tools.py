@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import logging
 import re
-
-from nova_worker_common.url_validator import validate_url
 from html.parser import HTMLParser
 from urllib.parse import quote_plus, unquote
 
 import httpx
-
 from nova_contracts import ToolDefinition
+from nova_worker_common.url_validator import validate_url
 
 log = logging.getLogger(__name__)
 

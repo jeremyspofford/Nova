@@ -1,6 +1,5 @@
 """Recovery service API routes."""
 
-import json
 import logging
 import time
 from typing import Any
@@ -9,11 +8,29 @@ import jwt as pyjwt
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
-from .backup import create_backup, delete_backup, list_backups, list_checkpoints, restore_backup
+from .backup import (
+    create_backup,
+    delete_backup,
+    list_backups,
+    list_checkpoints,
+    restore_backup,
+)
 from .compose_client import start_profiled_service, stop_profiled_service
 from .config import settings
-from .docker_client import check_container_status, get_container_logs, list_all_service_status, list_service_status, restart_all_services, restart_service
-from .env_manager import add_compose_profile, patch_env, read_env, remove_compose_profile
+from .docker_client import (
+    check_container_status,
+    get_container_logs,
+    list_all_service_status,
+    list_service_status,
+    restart_all_services,
+    restart_service,
+)
+from .env_manager import (
+    add_compose_profile,
+    patch_env,
+    read_env,
+    remove_compose_profile,
+)
 from .factory_reset import factory_reset, get_categories
 from .redis_client import read_config
 
@@ -372,8 +389,9 @@ async def get_chat_integrations_status(_: None = Depends(_check_admin)):
 @router.get("/api/v1/recovery/diagnostics")
 async def get_diagnostics(_: None = Depends(_check_admin)):
     """Aggregated diagnostics for AI troubleshooting: service health, logs, DB status."""
-    from .db import get_pool
     import re
+
+    from .db import get_pool
 
     services = list_service_status()
     checkpoints = list_checkpoints()
@@ -418,6 +436,7 @@ async def get_diagnostics(_: None = Depends(_check_admin)):
 # ── Troubleshoot ──────────────────────────────────────────────────────────────
 
 from .troubleshoot import TroubleshootRequest, troubleshoot_chat
+
 
 @router.post("/api/v1/recovery/troubleshoot/chat")
 async def troubleshoot_endpoint(

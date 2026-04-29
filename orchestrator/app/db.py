@@ -17,7 +17,6 @@ from typing import Any
 from uuid import UUID
 
 import asyncpg
-
 from app.config import settings
 
 log = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Save, RotateCcw, Database } from 'lucide-react'
+import { Save, RotateCcw, Database, AlertTriangle } from 'lucide-react'
 import { apiFetch } from '../../api'
 import { Section, Button, Input, StatusDot } from '../../components/ui'
 import { useConfigValue, type ConfigSectionProps } from './shared'
@@ -8,11 +8,11 @@ import { useConfigValue, type ConfigSectionProps } from './shared'
 // ── Provider presets ────────────────────────────────────────────────────────
 
 const PROVIDERS = [
-  { value: 'http://memory-service:8002', label: 'Engram Network', desc: 'Graph-based cognitive memory with spreading activation (default)' },
-  { value: 'http://baseline-pgvector:8003', label: 'pgvector Only', desc: 'Simple vector similarity search via pgvector' },
-  { value: 'http://baseline-mem0:8004', label: 'Mem0', desc: 'Mem0-backed memory provider' },
-  { value: 'http://baseline-markdown:8005', label: 'Markdown / Context', desc: 'File-based markdown context injection' },
-  { value: 'custom', label: 'Custom URL', desc: 'Provide your own memory service endpoint' },
+  { value: 'http://memory-service:8002', label: 'Engram Network', desc: 'Graph-based cognitive memory with spreading activation. Nova\'s default and only production-supported provider.' },
+  { value: 'http://baseline-pgvector:8003', label: 'pgvector (benchmark)', desc: 'Naive vector similarity baseline for comparison testing. Requires `docker compose --profile benchmark up`.' },
+  { value: 'http://baseline-mem0:8004', label: 'Mem0 (benchmark)', desc: 'mem0 library wrapper for comparison testing. Requires `docker compose --profile benchmark up`.' },
+  { value: 'http://baseline-markdown:8005', label: 'Markdown / Context (benchmark)', desc: 'File-based markdown baseline for comparison testing. Requires `docker compose --profile benchmark up`.' },
+  { value: 'custom', label: 'Custom URL (advanced)', desc: 'Point at your own service. The orchestrator calls `/api/v1/engrams/*` paths.' },
 ] as const
 
 const PRESET_URLS: Set<string> = new Set(PROVIDERS.filter(p => p.value !== 'custom').map(p => p.value))
@@ -91,7 +91,7 @@ export function MemoryProviderSection({ entries, onSave, saving }: ConfigSection
     <Section
       icon={Database}
       title="Memory Provider"
-      description="Select which memory backend the orchestrator uses for engram storage and retrieval. Changes take effect on the next request."
+      description="Memory backend used by the orchestrator. The Engram Network is the default and only production-supported provider. Other options exist for benchmark comparison and do not migrate existing memory."
     >
       {/* Current status */}
       <div className="flex items-center gap-3 mb-1">
@@ -105,6 +105,18 @@ export function MemoryProviderSection({ entries, onSave, saving }: ConfigSection
           </span>
         )}
       </div>
+
+      {selectedPreset !== DEFAULT_URL && (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-caption text-amber-700 dark:text-amber-400">
+          <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="font-medium">Benchmark / advanced provider selected.</p>
+            <p className="text-amber-700/80 dark:text-amber-400/80">
+              Switching away from Engram Network will not migrate existing engrams — your assistant starts with empty memory until new context accumulates. Baseline providers additionally require <code className="font-mono">docker compose --profile benchmark up</code> before they will respond.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Provider selector */}
       <div>
@@ -161,7 +173,7 @@ export function MemoryProviderSection({ entries, onSave, saving }: ConfigSection
             placeholder="http://my-memory-service:8002"
           />
           <p className="mt-1 text-caption text-content-tertiary">
-            Must implement the Nova memory API contract (/health/ready, /api/v1/engrams/*).
+            Must serve <code className="font-mono">/api/v1/engrams/*</code> paths. The benchmark baselines use <code className="font-mono">/api/v1/memory/*</code> and will not work as drop-in providers without an adapter.
           </p>
         </div>
       )}

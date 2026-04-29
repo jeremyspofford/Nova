@@ -20,7 +20,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -238,8 +238,8 @@ class BaseAgent:
             if cleaned.startswith("```"):
                 lines = cleaned.splitlines()
                 cleaned = "\n".join(
-                    l for l in lines
-                    if not l.strip().startswith("```")
+                    ln for ln in lines
+                    if not ln.strip().startswith("```")
                 ).strip()
 
             try:
@@ -341,8 +341,8 @@ class BaseAgent:
             if retry_cleaned.startswith("```"):
                 lines = retry_cleaned.splitlines()
                 retry_cleaned = "\n".join(
-                    l for l in lines
-                    if not l.strip().startswith("```")
+                    ln for ln in lines
+                    if not ln.strip().startswith("```")
                 ).strip()
 
             retry_parsed = json.loads(retry_cleaned)

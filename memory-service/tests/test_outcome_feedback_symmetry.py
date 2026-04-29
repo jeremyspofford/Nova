@@ -11,9 +11,6 @@ shape of each query + parameter set. No real database is required.
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID
-
-import pytest
 
 from app.engram.outcome_feedback import (
     ACTIVATION_BOOST,
@@ -24,7 +21,6 @@ from app.engram.outcome_feedback import (
     POSITIVE_THRESHOLD,
     process_feedback,
 )
-
 
 EID_A = "11111111-1111-1111-1111-111111111111"
 EID_B = "22222222-2222-2222-2222-222222222222"

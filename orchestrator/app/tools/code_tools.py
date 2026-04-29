@@ -20,8 +20,12 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from nova_contracts import ToolDefinition
+
+if TYPE_CHECKING:
+    from app.tools.sandbox import SandboxTier
 
 log = logging.getLogger(__name__)
 
@@ -222,7 +226,7 @@ def _resolve_path(relative: str) -> Path:
     - home: absolute or relative, scoped to $HOME
     - isolated: raises PermissionError
     """
-    from app.tools.sandbox import get_root, get_sandbox, SandboxTier
+    from app.tools.sandbox import SandboxTier, get_root, get_sandbox
 
     tier = get_sandbox()
 
@@ -247,7 +251,7 @@ def _resolve_path(relative: str) -> Path:
     candidate = (root / relative).resolve()
     if not str(candidate).startswith(str(root)):
         # Check self-modification overlay: allow /nova paths
-        from app.tools.sandbox import is_self_modification_enabled, NOVA_SOURCE_ROOT
+        from app.tools.sandbox import NOVA_SOURCE_ROOT, is_self_modification_enabled
         if is_self_modification_enabled():
             nova_root = str(NOVA_SOURCE_ROOT)
             if relative.startswith("/nova") or relative.startswith("nova"):
@@ -349,7 +353,7 @@ def _execute_write_file(path: str, content: str) -> str:
 
 async def _execute_run_shell(command: str, working_dir: str | None) -> str:
     from app.config import settings
-    from app.tools.sandbox import get_sandbox, SandboxTier
+    from app.tools.sandbox import SandboxTier, get_sandbox
 
     tier = get_sandbox()
 

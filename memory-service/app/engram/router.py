@@ -14,13 +14,10 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-
 from uuid import UUID
 
-from fastapi import APIRouter, Body, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy import text
-
+from app.db.database import get_db
+from fastapi import APIRouter, HTTPException, Query
 from nova_contracts.engram import (
     ActivateRequest,
     ContextRequest,
@@ -28,16 +25,20 @@ from nova_contracts.engram import (
     IngestResponse,
     MarkUsedRequest,
 )
-
-from app.db.database import get_db
+from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from .activation import spreading_activation
 from .consolidation import bootstrap_self_model, run_consolidation
 from .ingestion import ingest_direct
+from .neural_router.serve import get_cached_model
 from .outcome_feedback import process_feedback
 from .reconstruction import get_self_model_summary, reconstruct
-from .neural_router.serve import get_cached_model
-from .retrieval_logger import get_labeled_observation_count, get_observation_count, mark_engrams_used
+from .retrieval_logger import (
+    get_labeled_observation_count,
+    get_observation_count,
+    mark_engrams_used,
+)
 from .working_memory import assemble_context, format_context_prompt
 
 log = logging.getLogger(__name__)

@@ -19,7 +19,6 @@ import unittest
 
 from metadata_echo import Metadata, decode, echo, encode, run_echo_test
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

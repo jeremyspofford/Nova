@@ -17,12 +17,10 @@ import json
 import logging
 from uuid import UUID
 
-from sqlalchemy import text
-
 from app.config import settings
 from app.db.database import AsyncSessionLocal
-from app.embedding import get_embedding, get_redis
-from app.embedding import to_pg_vector
+from app.embedding import get_embedding, get_redis, to_pg_vector
+from sqlalchemy import text
 
 from .consolidation import notify_new_engrams
 from .cortex_stimulus import emit_to_cortex
@@ -253,7 +251,7 @@ async def _process_event(raw_payload: str) -> dict:
         source_meta = {}
         trust = 0.7
         try:
-            from .sources import find_or_create_source, DEFAULT_TRUST
+            from .sources import DEFAULT_TRUST, find_or_create_source
             source_kind = _map_source_type_to_kind(source_type)
             source_uri = event.get("source_uri") or metadata.get("url")
             source_title = event.get("source_title") or metadata.get("feed_name")

@@ -13,19 +13,15 @@ import asyncio
 import io
 import json
 import logging
-import math
-import sys
 
 import redis.asyncio as aioredis
 import torch
 import torch.nn as nn
-from sqlalchemy import text
-
 from app.config import settings
 from app.db.database import get_db
+from sqlalchemy import text
 
-from . import ENGRAM_TYPES
-from .features import extract_embedding_features, extract_scalar_features
+from .features import extract_scalar_features
 from .model import EmbeddingReranker, ScalarReranker
 
 logging.basicConfig(

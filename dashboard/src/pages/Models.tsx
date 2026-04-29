@@ -254,6 +254,12 @@ function isRequiredModel(name: string): boolean {
   return REQUIRED_MODELS.has(base)
 }
 
+// Ollama treats `name` and `name:latest` as identical. Strip the implicit tag
+// so a catalog entry of `nomic-embed-text` matches an installed `nomic-embed-text:latest`.
+function normalizeOllamaName(name: string): string {
+  return name.endsWith(':latest') ? name.slice(0, -7) : name
+}
+
 // ── Routing Stats section ─────────────────────────────────────────────────────
 
 function RoutingStatsSection() {
@@ -489,7 +495,7 @@ export function Models() {
   }
 
   // Derived state
-  const pulledNames = new Set((pulled.data ?? []).map(m => m.name))
+  const pulledNames = new Set((pulled.data ?? []).map(m => normalizeOllamaName(m.name)))
   const totalAvailable = (catalog.data ?? []).reduce((n, p) => n + (p.available ? p.models.length : 0), 0)
   const ollamaHealthy = ollamaStatus.data?.healthy ?? false
   const gpuAvailable = ollamaStatus.data?.gpu_available ?? false
@@ -763,9 +769,9 @@ export function Models() {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 {RECOMMENDED_OLLAMA_MODELS
                   .filter(rec => categoryFilter === 'all' || rec.category === categoryFilter)
-                  .filter(rec => sizeFilter === 0 || rec.sizeGB <= sizeFilter)
+                  .filter(rec => sizeFilter === 0 || rec.cloud || rec.sizeGB <= sizeFilter)
                   .map(rec => {
-                    const isPulled = pulledNames.has(rec.name)
+                    const isPulled = pulledNames.has(normalizeOllamaName(rec.name))
                     const isPulling = pullingModels.has(rec.name)
                     const isDeleting = deletingModels.has(rec.name)
                     return (
@@ -780,6 +786,7 @@ export function Models() {
                         }`}
                       >
                         <div className="flex items-center gap-1.5">
+                          {rec.cloud && <Cloud className="h-3.5 w-3.5 text-info shrink-0" />}
                           <span className="font-mono font-medium text-content-primary">
                             {rec.name}
                           </span>
@@ -793,13 +800,17 @@ export function Models() {
                         <div className="mt-2 flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
                             <Badge color="neutral" size="sm">{rec.category}</Badge>
-                            <Badge
-                              color={rec.sizeGB <= 2 ? 'success' : rec.sizeGB <= 5 ? 'accent' : rec.sizeGB <= 10 ? 'warning' : 'danger'}
-                              size="sm"
-                              className="font-mono"
-                            >
-                              {rec.sizeGB < 1 ? `${Math.round(rec.sizeGB * 1000)} MB` : `${rec.sizeGB} GB`}
-                            </Badge>
+                            {rec.cloud ? (
+                              <Badge color="info" size="sm" className="font-mono">Cloud</Badge>
+                            ) : (
+                              <Badge
+                                color={rec.sizeGB <= 2 ? 'success' : rec.sizeGB <= 5 ? 'accent' : rec.sizeGB <= 10 ? 'warning' : 'danger'}
+                                size="sm"
+                                className="font-mono"
+                              >
+                                {rec.sizeGB < 1 ? `${Math.round(rec.sizeGB * 1000)} MB` : `${rec.sizeGB} GB`}
+                              </Badge>
+                            )}
                           </div>
                           {isPulled ? (
                             <Button
@@ -808,21 +819,28 @@ export function Models() {
                               icon={isDeleting ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
                               onClick={() => handleDelete(rec.name)}
                               disabled={isDeleting || rec.required}
-                              title={rec.required ? 'Required by Nova' : 'Delete model'}
+                              title={rec.required ? 'Required by Nova' : rec.cloud ? 'Remove cloud model registration' : 'Delete model'}
                               className="text-danger"
                             >
-                              Delete
+                              {rec.cloud ? 'Remove' : 'Delete'}
                             </Button>
                           ) : (
                             <Button
                               variant="ghost"
                               size="sm"
-                              icon={isPulling ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                              icon={
+                                isPulling
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : rec.cloud
+                                    ? <Cloud className="h-3 w-3" />
+                                    : <Download className="h-3 w-3" />
+                              }
                               onClick={() => handlePull(rec.name)}
                               disabled={isPulling}
+                              title={rec.cloud ? 'Enable cloud model (no download)' : 'Download model'}
                               className="text-accent"
                             >
-                              Pull
+                              {rec.cloud ? 'Enable' : 'Pull'}
                             </Button>
                           )}
                         </div>

@@ -13,32 +13,30 @@ them; ALL_TOOLS only contains the static built-ins.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
-from nova_contracts import ToolDefinition
-
-from app.tools.platform_tools import PLATFORM_TOOLS
-from app.tools.platform_tools import execute_tool as _exec_platform
 from app.tools.code_tools import CODE_TOOLS
 from app.tools.code_tools import execute_tool as _exec_code
-from app.tools.git_tools import GIT_TOOLS
-from app.tools.git_tools import execute_tool as _exec_git
-from app.tools.web_tools import WEB_TOOLS
-from app.tools.web_tools import execute_tool as _exec_web
+from app.tools.config_tools import CONFIG_TOOLS
+from app.tools.config_tools import execute_tool as _exec_config
 from app.tools.diagnosis_tools import DIAGNOSIS_TOOLS
 from app.tools.diagnosis_tools import execute_tool as _exec_diagnosis
+from app.tools.git_tools import GIT_TOOLS
+from app.tools.git_tools import execute_tool as _exec_git
+from app.tools.github_tools import GITHUB_TOOLS
+from app.tools.github_tools import execute_tool as _exec_github
+from app.tools.intel_tools import INTEL_TOOLS
+from app.tools.intel_tools import execute_tool as _exec_intel
 from app.tools.introspect_tools import INTROSPECT_TOOLS
 from app.tools.introspect_tools import execute_tool as _exec_introspect
 from app.tools.memory_tools import MEMORY_TOOLS
 from app.tools.memory_tools import execute_tool as _exec_memory
-from app.tools.intel_tools import INTEL_TOOLS
-from app.tools.intel_tools import execute_tool as _exec_intel
-from app.tools.config_tools import CONFIG_TOOLS
-from app.tools.config_tools import execute_tool as _exec_config
-from app.tools.github_tools import GITHUB_TOOLS
-from app.tools.github_tools import execute_tool as _exec_github
-
+from app.tools.platform_tools import PLATFORM_TOOLS
+from app.tools.platform_tools import execute_tool as _exec_platform
+from app.tools.web_tools import WEB_TOOLS
+from app.tools.web_tools import execute_tool as _exec_web
+from nova_contracts import ToolDefinition
 
 # ── Registry ──────────────────────────────────────────────────────────────────
 

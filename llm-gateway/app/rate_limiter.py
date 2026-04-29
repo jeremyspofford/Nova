@@ -11,7 +11,6 @@ import logging
 import time
 
 import redis.asyncio as redis
-
 from app.config import settings
 
 log = logging.getLogger(__name__)

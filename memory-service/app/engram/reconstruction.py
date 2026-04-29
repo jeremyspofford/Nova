@@ -11,15 +11,13 @@ source of truth.
 """
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 
 import httpx
+from app.config import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.config import settings
 
 from .activation import ActivatedEngram
 

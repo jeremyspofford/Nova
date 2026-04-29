@@ -1,7 +1,8 @@
 """Tests for create_goal tool and creation autonomy setting."""
 import os
-import pytest
+
 import httpx
+import pytest
 
 BASE = "http://localhost:8000/api/v1"
 HEADERS = {}

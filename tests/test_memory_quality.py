@@ -10,7 +10,6 @@ These tests verify:
 """
 import httpx
 import pytest
-import pytest_asyncio
 
 MEMORY_URL = "http://localhost:8002/api/v1/engrams"
 
@@ -73,7 +72,7 @@ class TestContentDeduplication:
         if not context:
             pytest.skip("No context returned")
 
-        lines = [l.strip() for l in context.split("\n") if l.strip().startswith("- ")]
+        lines = [ln.strip() for ln in context.split("\n") if ln.strip().startswith("- ")]
         # Check for exact duplicates
         seen = set()
         duplicates = []
@@ -127,13 +126,13 @@ class TestSourceAttribution:
         if not context:
             pytest.skip("No context returned")
 
-        lines = [l.strip() for l in context.split("\n") if l.strip().startswith("- ")]
+        lines = [ln.strip() for ln in context.split("\n") if ln.strip().startswith("- ")]
         if not lines:
             pytest.skip("No bullet-point memories in context")
 
         # At least some lines should have source labels (if intel content exists)
-        labeled = [l for l in lines if l.startswith("- [")]
-        unlabeled = [l for l in lines if l.startswith("- ") and not l.startswith("- [")]
+        labeled = [ln for ln in lines if ln.startswith("- [")]
+        unlabeled = [ln for ln in lines if ln.startswith("- ") and not ln.startswith("- [")]
 
         # We can't assert exact counts since it depends on data, but if we have
         # intel in the system, at least some lines should be labeled

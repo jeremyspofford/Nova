@@ -3,6 +3,7 @@ import base64
 import logging
 
 from nova_worker_common.credentials.builtin import BuiltinCredentialProvider
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)

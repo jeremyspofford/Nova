@@ -10,24 +10,8 @@ import time as _time
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-
-from nova_contracts import (
-    AgentInfo,
-    AgentStatus,
-    CreateAgentRequest,
-    SubmitTaskRequest,
-    TaskResult,
-)
-
 from app.agents.runner import run_agent_turn, run_agent_turn_streaming
 from app.auth import AdminDep, ApiKeyDep, UserDep
-from app.tools.sandbox import (
-    SandboxTier, set_sandbox, reset_sandbox,
-    read_self_modification_config, set_self_modification, reset_self_modification,
-)
 from app.db import (
     create_api_key_record,
     generate_api_key,
@@ -36,16 +20,32 @@ from app.db import (
     revoke_api_key,
 )
 from app.rules import (
-    list_rules, create_rule as _create_rule, update_rule as _update_rule,
-    delete_rule as _delete_rule, RuleCreate, RuleUpdate,
+    RuleCreate,
+    RuleUpdate,
+    list_rules,
+)
+from app.rules import (
+    create_rule as _create_rule,
+)
+from app.rules import (
+    delete_rule as _delete_rule,
+)
+from app.rules import (
+    update_rule as _update_rule,
 )
 from app.skills import (
-    list_skills,
-    create_skill as _create_skill,
-    update_skill as _update_skill,
-    delete_skill as _delete_skill,
     SkillCreate,
     SkillUpdate,
+    list_skills,
+)
+from app.skills import (
+    create_skill as _create_skill,
+)
+from app.skills import (
+    delete_skill as _delete_skill,
+)
+from app.skills import (
+    update_skill as _update_skill,
 )
 from app.store import (
     create_agent,
@@ -57,6 +57,24 @@ from app.store import (
     update_agent_config,
     update_agent_status,
 )
+from app.tools.sandbox import (
+    SandboxTier,
+    read_self_modification_config,
+    reset_sandbox,
+    reset_self_modification,
+    set_sandbox,
+    set_self_modification,
+)
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
+from nova_contracts import (
+    AgentInfo,
+    AgentStatus,
+    CreateAgentRequest,
+    SubmitTaskRequest,
+    TaskResult,
+)
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["orchestrator"])
@@ -231,7 +249,6 @@ async def bulk_delete_agents(_admin: AdminDep, confirm: bool = Query(default=Fal
 
 @router.post("/api/v1/tasks", response_model=TaskResult, status_code=202)
 async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
-    from app.config import settings as _settings
 
     agent = await get_agent(str(req.agent_id))
     if not agent:
@@ -270,7 +287,6 @@ async def submit_task(req: SubmitTaskRequest, key: ApiKeyDep):
 
 @router.post("/api/v1/tasks/stream")
 async def submit_task_streaming(req: SubmitTaskRequest, key: ApiKeyDep):
-    from app.config import settings as _settings
 
     agent = await get_agent(str(req.agent_id))
     if not agent:
@@ -451,7 +467,7 @@ async def chat_stream(req: ChatRequest, user: UserDep):
             raise HTTPException(status_code=403, detail=str(e))
         explicit_model = True  # prevent intelligent routing from overriding
     else:
-        from app.model_resolver import resolve_default_model, is_auto_resolved
+        from app.model_resolver import is_auto_resolved, resolve_default_model
         # Pod model takes precedence over global default, request model overrides both
         pod_model = chat_pod["model"] if chat_pod and chat_pod.get("model") else None
         model = req.model or pod_model or await resolve_default_model()
@@ -792,16 +808,16 @@ async def update_platform_config(
 @router.get("/api/v1/tools")
 async def list_available_tools(_admin: AdminDep):
     """Return all available tools grouped by category. Admin-only."""
+    from app.pipeline.tools.registry import get_tools_by_server
     from app.tools.code_tools import CODE_TOOLS
+    from app.tools.config_tools import CONFIG_TOOLS
+    from app.tools.diagnosis_tools import DIAGNOSIS_TOOLS
     from app.tools.git_tools import GIT_TOOLS
+    from app.tools.intel_tools import INTEL_TOOLS
+    from app.tools.introspect_tools import INTROSPECT_TOOLS
+    from app.tools.memory_tools import MEMORY_TOOLS
     from app.tools.platform_tools import PLATFORM_TOOLS
     from app.tools.web_tools import WEB_TOOLS
-    from app.tools.diagnosis_tools import DIAGNOSIS_TOOLS
-    from app.tools.memory_tools import MEMORY_TOOLS
-    from app.tools.introspect_tools import INTROSPECT_TOOLS
-    from app.tools.intel_tools import INTEL_TOOLS
-    from app.tools.config_tools import CONFIG_TOOLS
-    from app.pipeline.tools.registry import get_tools_by_server
 
     def _to_list(defs):
         return [{"name": t.name, "description": t.description} for t in defs]
@@ -839,8 +855,10 @@ async def get_tool_permissions(_admin: AdminDep):
 async def update_tool_permissions(req: ToolPermissionUpdate, _admin: AdminDep):
     """Toggle tool groups on/off. Accepts {"groups": {"Web": false, "Git": true}}."""
     from app.tool_permissions import (
-        get_disabled_tool_groups, get_valid_group_names,
-        get_tool_groups_with_status, set_disabled_groups,
+        get_disabled_tool_groups,
+        get_tool_groups_with_status,
+        get_valid_group_names,
+        set_disabled_groups,
     )
 
     # Validate group names against registry
@@ -1405,9 +1423,10 @@ async def get_benchmark_results(_admin: AdminDep):
 @router.get("/api/v1/selfmod/status")
 async def selfmod_status(request: Request):
     """Self-modification configuration status."""
+    import time
+
     from app.config import settings
     from app.store import get_redis
-    import time
 
     # Count PRs this hour
     redis = get_redis()
@@ -1486,9 +1505,9 @@ async def rotate_admin_secret(request: Request, _admin: AdminDep):
     bootstrap env value in `NOVA_ADMIN_SECRET`.
     """
     import secrets as _secrets
-    import redis.asyncio as aioredis
 
-    from app.auth import _config_redis_url, _admin_secret_cache
+    import redis.asyncio as aioredis
+    from app.auth import _admin_secret_cache, _config_redis_url
 
     new_secret = _secrets.token_hex(32)  # 64-char hex
     r = aioredis.from_url(_config_redis_url(), decode_responses=True)

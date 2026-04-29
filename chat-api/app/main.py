@@ -5,15 +5,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from nova_contracts.logging import configure_logging
-
 from app.config import settings
 from app.drain import drain_loop
 from app.session import close_redis
 from app.websocket import handle_websocket
+from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from nova_contracts.logging import configure_logging
 
 configure_logging("chat-api", settings.log_level)
 log = logging.getLogger(__name__)

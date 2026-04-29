@@ -1,6 +1,7 @@
 """Bridge core — routes platform messages through orchestrator's unified chat endpoint."""
 
 import logging
+
 import httpx
 
 from .config import settings

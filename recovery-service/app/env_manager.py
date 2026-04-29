@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-import tempfile
 
 logger = logging.getLogger("nova.recovery.env")
 

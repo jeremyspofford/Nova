@@ -38,7 +38,6 @@ import os
 import time
 
 import redis.asyncio as aioredis
-
 from app.config import settings
 from app.providers import (
     ChatGPTSubscriptionProvider,

@@ -277,7 +277,7 @@ class TestSessionSummarization:
     async def test_session_summarize_skips_short(self, orchestrator: httpx.AsyncClient, admin_headers: dict):
         """Sessions with fewer than 2 messages are skipped."""
         resp = await orchestrator.post(
-            f"/api/v1/chat/sessions/nova-test-short/summarize",
+            "/api/v1/chat/sessions/nova-test-short/summarize",
             json={"messages": [{"role": "user", "content": "hi"}]},
             headers=admin_headers,
         )

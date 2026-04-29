@@ -1,7 +1,8 @@
 """Tests for Cortex autonomous loop fixes — Tier 1."""
 import os
-import pytest
+
 import httpx
+import pytest
 
 BASE = "http://localhost:8000/api/v1"
 CORTEX = "http://localhost:8100/api/v1/cortex"

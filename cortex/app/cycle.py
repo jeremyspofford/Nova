@@ -14,22 +14,41 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from . import task_monitor
 from .budget import get_budget_status, publish_budget_tier
-from .memory import perceive_with_memory, reflect_to_engrams, maybe_consolidate, mark_engrams_used
-from .scheduler import check_schedules
 from .clients import get_llm, get_orchestrator
 from .config import settings
 from .db import get_pool
-from .drives import DriveContext, DriveResult, DriveWinner, evaluate
-from .drives import serve, maintain, improve, learn, reflect
-from .journal import read_user_replies_since, write_entry
-from . import task_monitor
-from .task_tracker import TaskOutcome
-from .reflections import (
-    query_reflections, format_reflection_history, record_reflection,
-    check_approach_blocked, count_consecutive_failures,
-    compute_stuck_threshold, compute_approach_hash, TIER_ORDER,
+from .drives import (
+    DriveContext,
+    DriveResult,
+    DriveWinner,
+    evaluate,
+    improve,
+    learn,
+    maintain,
+    reflect,
+    serve,
 )
+from .journal import read_user_replies_since, write_entry
+from .memory import (
+    mark_engrams_used,
+    maybe_consolidate,
+    perceive_with_memory,
+    reflect_to_engrams,
+)
+from .reflections import (
+    TIER_ORDER,
+    check_approach_blocked,
+    compute_approach_hash,
+    compute_stuck_threshold,
+    count_consecutive_failures,
+    format_reflection_history,
+    query_reflections,
+    record_reflection,
+)
+from .scheduler import check_schedules
+from .task_tracker import TaskOutcome
 
 log = logging.getLogger(__name__)
 
@@ -868,7 +887,7 @@ async def _check_goal_limits(conn, goal_id: str, original_row) -> None:
         )
         log.info("Goal %s completed: max_iterations reached (%d/%d)", goal_id, iteration, max_iterations)
         try:
-            from .stimulus import emit, GOAL_COMPLETED
+            from .stimulus import GOAL_COMPLETED, emit
             await emit(GOAL_COMPLETED, "cortex", payload={"goal_id": goal_id, "title": title, "reason": "max_iterations"})
         except Exception as e:
             log.debug("Failed to emit goal.completed stimulus: %s", e)
@@ -893,7 +912,7 @@ async def _check_goal_limits(conn, goal_id: str, original_row) -> None:
         )
         log.info("Goal %s paused: budget exhausted ($%.2f/$%.2f)", goal_id, cost, max_cost_usd)
         try:
-            from .stimulus import emit, GOAL_BUDGET_PAUSED
+            from .stimulus import GOAL_BUDGET_PAUSED, emit
             await emit(GOAL_BUDGET_PAUSED, "cortex", payload={"goal_id": goal_id, "title": title, "cost": cost, "limit": max_cost_usd})
         except Exception as e:
             log.debug("Failed to emit goal.budget_paused stimulus: %s", e)
@@ -1013,7 +1032,7 @@ async def _record_cycle_reflection(state: CycleState) -> None:
 
     # Stuck detection
     try:
-        from .stimulus import emit, GOAL_STUCK
+        from .stimulus import GOAL_STUCK, emit
         failure_count = await count_consecutive_failures(state.goal_id)
         threshold = compute_stuck_threshold(max_iterations)
         if failure_count >= threshold:

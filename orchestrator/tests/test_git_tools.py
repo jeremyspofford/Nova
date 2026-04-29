@@ -7,8 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-
-from app.tools.sandbox import SandboxTier, set_sandbox, reset_sandbox
+from app.tools.sandbox import SandboxTier, reset_sandbox, set_sandbox
 
 pytestmark = pytest.mark.skipif(
     shutil.which("git") is None, reason="git not available in this environment"
@@ -115,12 +114,12 @@ async def test_git_commit(repo: Path):
 
 async def test_full_cycle(repo: Path):
     """status → write → commit → verify in log."""
+    from app.tools.code_tools import _execute_write_file
     from app.tools.git_tools import (
-        _execute_git_status,
         _execute_git_commit,
         _execute_git_log,
+        _execute_git_status,
     )
-    from app.tools.code_tools import _execute_write_file
 
     # Write a file via code tools
     _execute_write_file("app.py", "print('nova')\n")

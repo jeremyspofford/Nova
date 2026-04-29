@@ -5,7 +5,6 @@ init) so that runtime secret rotation via the dashboard propagates to this
 worker within the resolver's 30s cache window.
 """
 import httpx
-
 from nova_worker_common.admin_secret import AdminSecretResolver
 from nova_worker_common.http_client import create_client
 

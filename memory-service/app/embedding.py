@@ -10,10 +10,9 @@ import logging
 
 import httpx
 import redis.asyncio as aioredis
+from app.config import settings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.config import settings
 
 log = logging.getLogger(__name__)
 

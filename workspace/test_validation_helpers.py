@@ -14,11 +14,10 @@ Covers:
 import unittest
 
 from validation_helpers import (
-    validate_type,
     validate_not_empty,
     validate_range,
+    validate_type,
 )
-
 
 # ---------------------------------------------------------------------------
 # validate_type tests

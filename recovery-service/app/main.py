@@ -21,11 +21,11 @@ logger = logging.getLogger("nova.recovery")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
-    from .db import init_pool, close_pool
-    from .scheduler import checkpoint_loop
 
+    from .db import close_pool, init_pool
     from .inference.hardware import sync_hardware_from_file
     from .redis_client import close_redis
+    from .scheduler import checkpoint_loop
 
     await init_pool()
     checkpoint_task = asyncio.create_task(checkpoint_loop())

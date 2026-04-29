@@ -8,8 +8,6 @@ import logging
 from uuid import uuid4
 
 import redis.asyncio as aioredis
-from nova_contracts import AgentConfig
-
 from app.config import settings
 
 log = logging.getLogger(__name__)

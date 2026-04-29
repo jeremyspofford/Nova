@@ -25,8 +25,8 @@ from __future__ import annotations
 
 import logging
 
-from .base import BaseAgent, PipelineState
 from ..schemas import DecisionOutput
+from .base import BaseAgent, PipelineState
 
 logger = logging.getLogger(__name__)
 

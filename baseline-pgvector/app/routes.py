@@ -10,7 +10,6 @@ Implements the minimal memory provider interface:
 from __future__ import annotations
 
 import logging
-from uuid import UUID
 
 import httpx
 from fastapi import APIRouter

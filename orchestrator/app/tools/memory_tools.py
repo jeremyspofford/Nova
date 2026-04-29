@@ -17,11 +17,9 @@ Tools provided:
 """
 from __future__ import annotations
 
-import json
 import logging
 
 import httpx
-
 from nova_contracts import ToolDefinition
 
 log = logging.getLogger(__name__)

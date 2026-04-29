@@ -1,7 +1,6 @@
 """Backup and restore operations via pg_dump / pg_restore."""
 
 import asyncio
-import gzip
 import logging
 import os
 import shutil

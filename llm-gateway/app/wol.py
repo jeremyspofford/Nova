@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 import socket
-import struct
 from asyncio import get_running_loop
 
 log = logging.getLogger(__name__)

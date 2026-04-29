@@ -1,9 +1,9 @@
 """Linked account management — maps external platform identities to Nova users."""
 from __future__ import annotations
 
+import logging
 import secrets
 import string
-import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4

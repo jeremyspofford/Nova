@@ -181,19 +181,19 @@ class TestRunConditions:
     """Test should_agent_run() — pure function, no services needed."""
 
     def test_not_flag_returns_false_when_flag_set(self):
-        from app.pipeline.agents.base import should_agent_run, PipelineState
+        from app.pipeline.agents.base import PipelineState, should_agent_run
         state = PipelineState(task_input="test", flags={"critique_approved"})
         condition = {"type": "not_flag", "flag": "critique_approved"}
         assert should_agent_run(condition, state) is False
 
     def test_not_flag_returns_true_when_flag_absent(self):
-        from app.pipeline.agents.base import should_agent_run, PipelineState
+        from app.pipeline.agents.base import PipelineState, should_agent_run
         state = PipelineState(task_input="test", flags=set())
         condition = {"type": "not_flag", "flag": "critique_approved"}
         assert should_agent_run(condition, state) is True
 
     def test_on_flag_still_works(self):
-        from app.pipeline.agents.base import should_agent_run, PipelineState
+        from app.pipeline.agents.base import PipelineState, should_agent_run
         state = PipelineState(task_input="test", flags={"guardrail_blocked"})
         assert should_agent_run({"type": "on_flag", "flag": "guardrail_blocked"}, state) is True
         assert should_agent_run({"type": "on_flag", "flag": "other"}, state) is False

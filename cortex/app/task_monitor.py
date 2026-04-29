@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from .clients import get_task_status
 from .config import settings
-from .task_tracker import _score_task, TaskOutcome, _TERMINAL
+from .task_tracker import _TERMINAL, TaskOutcome, _score_task
 
 log = logging.getLogger(__name__)
 

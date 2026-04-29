@@ -7,6 +7,15 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
+from app.config import settings
+from app.db.database import AsyncSessionLocal, run_schema_migrations
+from app.embedding import close_redis as close_embedding_redis
+from app.embedding import get_embedding
+from app.engram.consolidation import bootstrap_self_model, consolidation_loop
+from app.engram.ingestion import ingestion_loop
+from app.engram.neural_router.serve import load_latest_model
+from app.engram.router import engram_router
+from app.health import health_router
 from fastapi import Depends, FastAPI
 from nova_contracts.logging import configure_logging
 from nova_worker_common.admin_secret import AdminSecretResolver
@@ -16,15 +25,6 @@ from nova_worker_common.service_auth import (
     load_trusted_cidrs_from_env,
     parse_cidrs,
 )
-
-from app.config import settings
-from app.db.database import AsyncSessionLocal, run_schema_migrations
-from app.embedding import close_redis as close_embedding_redis, get_embedding
-from app.engram.consolidation import bootstrap_self_model, consolidation_loop
-from app.engram.ingestion import ingestion_loop
-from app.engram.router import engram_router
-from app.engram.neural_router.serve import load_latest_model
-from app.health import health_router
 
 configure_logging("memory-service", settings.log_level)
 log = logging.getLogger(__name__)

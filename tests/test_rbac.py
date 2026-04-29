@@ -1,6 +1,6 @@
 """Integration tests for RBAC (role-based access control) and invite system."""
-import pytest
 import httpx
+import pytest
 
 ORCH = "http://localhost:8000"
 
