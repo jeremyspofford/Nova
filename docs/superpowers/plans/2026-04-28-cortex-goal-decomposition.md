@@ -32,7 +32,6 @@
 | `cortex/app/cycle.py` | Modify | Add `building`+`waiting` routes in `_execute_serve`; child-readiness checker |
 | `cortex/app/drives/serve.py` | Modify | Stale-goal query filters: skip `waiting` parents and dep-blocked children |
 | `cortex/app/maturation/speccing.py` | Modify | Rewrite prompt to emit JSON envelope; preserve markdown narrative; backward-compat fallback |
-| `cortex/app/router.py` | Modify | Add review comment endpoint (approve/reject already exist via orchestrator) |
 | `dashboard/src/components/MaturationStages.tsx` | Create | New stepper component (referenced inline in Goals.tsx today) |
 | `dashboard/src/components/GoalMaturationDetail.tsx` | Modify | Show review-policy reason + spec_children cards + verification commands |
 | `dashboard/src/pages/Goals.tsx` | Modify | Spawned-children affordance line under parent goal cards |
@@ -48,7 +47,7 @@
 
 ## Phase 1: Schema Foundation
 
-### Task 1: Write migration 064
+### Task 1: Write migration 067
 
 **Files:**
 - Create: `orchestrator/app/migrations/067_goal_decomposition.sql`
@@ -1851,7 +1850,7 @@ git commit -m "feat(orchestrator): goals_router round-trips decomposition column
 
 ## Phase 10: Dashboard UX
 
-### Task 19: Build MaturationStages component
+### Task 18: Build MaturationStages component
 
 **Files:**
 - Create: `dashboard/src/components/MaturationStages.tsx`
@@ -1918,7 +1917,7 @@ git add -f dashboard/src/components/MaturationStages.tsx
 git commit -m "feat(dashboard): MaturationStages stepper component"
 ```
 
-### Task 20: Extend GoalMaturationDetail with policy reasons + spec_children
+### Task 19: Extend GoalMaturationDetail with policy reasons + spec_children
 
 **Files:**
 - Modify: `dashboard/src/components/GoalMaturationDetail.tsx`
@@ -2006,7 +2005,7 @@ git add -f dashboard/src/components/GoalMaturationDetail.tsx
 git commit -m "feat(dashboard): GoalMaturationDetail — policy reasons + spec_children + verification commands"
 ```
 
-### Task 21: Spawned-children affordance on Goals.tsx
+### Task 20: Spawned-children affordance on Goals.tsx
 
 **Files:**
 - Modify: `dashboard/src/pages/Goals.tsx`
@@ -2071,7 +2070,7 @@ git add -f dashboard/src/pages/Goals.tsx
 git commit -m "feat(dashboard): spawned-children affordance under parent goal cards"
 ```
 
-### Task 22: Wire goal_stuck notification to toast
+### Task 21: Wire goal_stuck notification to toast
 
 **Files:**
 - Modify: `dashboard/src/hooks/useNotifications.ts` (extend `PipelineNotification` type to also accept goal-shaped messages)
@@ -2149,7 +2148,7 @@ git commit -m "feat(dashboard): goal_stuck notification dispatch + toast with Vi
 
 ## Phase 11: Integration Tests + Smoke
 
-### Task 23a: Test simple-goal path (flat tasks, no subgoals)
+### Task 22: Test simple-goal path (flat tasks, no subgoals)
 
 **Files:**
 - Create: `tests/test_decomposition_simple_path.py`
