@@ -636,3 +636,196 @@ async def delete_all_benchmark_results(_admin: AdminDep):
         "benchmark_runs_deleted": int(bench_del.split()[-1]) if bench_del else 0,
         "quality_scores_deleted": int(score_del.split()[-1]) if score_del else 0,
     }
+
+
+@quality_router.get("/api/v1/quality/loops")
+async def list_loops(_admin: AdminDep):
+    """List registered loops + their current agency + last session summary."""
+    from app.quality_loop.registry import get_registry
+    registry = get_registry()
+    pool = get_pool()
+    loops = []
+    async with pool.acquire() as conn:
+        for rl in registry.list():
+            last = await conn.fetchrow(
+                """
+                SELECT id::text, started_at, completed_at, outcome, decision
+                FROM quality_loop_sessions
+                WHERE loop_name = $1
+                ORDER BY started_at DESC LIMIT 1
+                """,
+                rl.name,
+            )
+            last_session = None
+            if last:
+                last_session = {
+                    "id": last["id"],
+                    "started_at": last["started_at"].isoformat() if last["started_at"] else None,
+                    "completed_at": last["completed_at"].isoformat() if last["completed_at"] else None,
+                    "outcome": last["outcome"],
+                    "decision": last["decision"],
+                }
+            loops.append({
+                "name": rl.name,
+                "watches": rl.impl.watches,
+                "agency": rl.agency,
+                "last_session": last_session,
+            })
+    return loops
+
+
+@quality_router.post("/api/v1/quality/loops/{name}/run-now")
+async def run_loop_now(_admin: AdminDep, name: str):
+    """Manual trigger — runs one iteration of the named loop."""
+    from app.quality_loop.registry import get_registry
+    from app.quality_loop.runner import iterate_loop
+    registry = get_registry()
+    try:
+        rl = registry.get(name)
+    except KeyError:
+        raise HTTPException(404, f"loop '{name}' not registered")
+    asyncio.create_task(iterate_loop(rl.impl))
+    return {"loop": name, "started": True}
+
+
+@quality_router.get("/api/v1/quality/loops/{name}/sessions")
+async def list_loop_sessions(_admin: AdminDep, name: str, limit: int = Query(20, ge=1, le=100)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id::text, started_at, completed_at, outcome, decision,
+                   proposed_changes, applied, notes, decided_by
+            FROM quality_loop_sessions
+            WHERE loop_name = $1
+            ORDER BY started_at DESC LIMIT $2
+            """,
+            name, limit,
+        )
+    return [
+        {
+            "id": r["id"],
+            "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+            "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
+            "outcome": r["outcome"],
+            "decision": r["decision"],
+            "proposed_changes": r["proposed_changes"] or {},
+            "applied": r["applied"],
+            "notes": r["notes"] or {},
+            "decided_by": r["decided_by"],
+        }
+        for r in rows
+    ]
+
+
+@quality_router.get("/api/v1/quality/loops/sessions/{session_id}")
+async def get_loop_session(_admin: AdminDep, session_id: str):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM quality_loop_sessions WHERE id = $1::uuid",
+            session_id,
+        )
+    if not row:
+        raise HTTPException(404, "session not found")
+    return {
+        "id": str(row["id"]),
+        "loop_name": row["loop_name"],
+        "started_at": row["started_at"].isoformat() if row["started_at"] else None,
+        "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+        "baseline_snapshot_id": str(row["baseline_snapshot_id"]) if row["baseline_snapshot_id"] else None,
+        "baseline_run_id": str(row["baseline_run_id"]) if row["baseline_run_id"] else None,
+        "proposed_changes": row["proposed_changes"] or {},
+        "applied": row["applied"],
+        "verification_run_id": str(row["verification_run_id"]) if row["verification_run_id"] else None,
+        "outcome": row["outcome"],
+        "decision": row["decision"],
+        "decided_by": row["decided_by"],
+        "decided_at": row["decided_at"].isoformat() if row["decided_at"] else None,
+        "notes": row["notes"] or {},
+    }
+
+
+@quality_router.post("/api/v1/quality/loops/sessions/{session_id}/approve")
+async def approve_loop_session(_admin: AdminDep, session_id: str):
+    """Resume a propose_for_approval session: apply, verify, decide.
+
+    Approval triggers a fresh loop iteration (proposal not replayed in v2).
+    """
+    from app.quality_loop.registry import get_registry
+    from app.quality_loop.runner import iterate_loop
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT loop_name, decision FROM quality_loop_sessions WHERE id = $1::uuid",
+            session_id,
+        )
+    if not row:
+        raise HTTPException(404, "session not found")
+    if row["decision"] != "pending_approval":
+        raise HTTPException(409, f"session is in state '{row['decision']}', not pending_approval")
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE quality_loop_sessions SET decision = 'approved', decided_by = 'admin', decided_at = NOW() WHERE id = $1::uuid",
+            session_id,
+        )
+    registry = get_registry()
+    rl = registry.get(row["loop_name"])
+    original_agency = rl.agency
+    registry.set_agency(row["loop_name"], "auto_apply")
+    try:
+        asyncio.create_task(iterate_loop(rl.impl))
+    finally:
+        registry.set_agency(row["loop_name"], original_agency)
+    return {
+        "approved": True,
+        "session_id": session_id,
+        "note": "Approval triggers a fresh loop iteration; the original proposal is not replayed in v2.",
+    }
+
+
+@quality_router.post("/api/v1/quality/loops/sessions/{session_id}/reject")
+async def reject_loop_session(_admin: AdminDep, session_id: str):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT decision FROM quality_loop_sessions WHERE id = $1::uuid",
+            session_id,
+        )
+    if not row:
+        raise HTTPException(404, "session not found")
+    if row["decision"] != "pending_approval":
+        raise HTTPException(409, f"session is in state '{row['decision']}', not pending_approval")
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE quality_loop_sessions SET decision = 'rejected', decided_by = 'admin', decided_at = NOW() WHERE id = $1::uuid",
+            session_id,
+        )
+    return {"rejected": True, "session_id": session_id}
+
+
+@quality_router.patch("/api/v1/quality/loops/{name}/agency")
+async def set_loop_agency(_admin: AdminDep, name: str, body: dict):
+    """Change an agency mode at runtime. Persists to platform_config."""
+    from app.quality_loop.registry import get_registry
+    mode = body.get("agency")
+    if mode not in {"auto_apply", "propose_for_approval", "alert_only"}:
+        raise HTTPException(400, "agency must be auto_apply | propose_for_approval | alert_only")
+    registry = get_registry()
+    try:
+        registry.set_agency(name, mode)
+    except (KeyError, ValueError) as e:
+        raise HTTPException(404, str(e))
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_config (key, value, updated_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (key) DO UPDATE
+                SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            f"quality.loops.{name}.agency",
+            mode,
+        )
+    return {"loop": name, "agency": mode}

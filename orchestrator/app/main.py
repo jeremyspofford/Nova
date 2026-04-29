@@ -163,6 +163,15 @@ async def lifespan(app: FastAPI):
     _auto_friction_task = asyncio.create_task(auto_friction_subscriber(), name="auto-friction")
     log.info("Queue worker, reaper, effectiveness loop, chat scorer, and auto-friction subscriber started")
 
+    # Register quality loops + apply DB-stored agency
+    from app.quality_loop.registry import get_registry, load_agency_from_config
+    from app.quality_loop.loops.retrieval_tuning import RetrievalTuningLoop
+
+    registry = get_registry()
+    registry.register(RetrievalTuningLoop())
+    await load_agency_from_config(registry)
+    log.info("Quality loops registered: %s", [l.name for l in registry.list()])
+
     yield
 
     log.info("Orchestrator shutting down")
