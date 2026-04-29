@@ -16,16 +16,21 @@ from conftest import CHAT_API_URL, ORCHESTRATOR_URL
 
 @pytest.fixture
 def save_restore_ollama_url(redis_db1):
-    """Save current Ollama URL, set unreachable URL for test, restore after."""
-    original = redis_db1.get("nova:config:llm.ollama_url")
+    """Save current Ollama URL, set unreachable URL for test, restore after.
+
+    Uses the canonical `nova:config:inference.url` key. The legacy
+    `llm.ollama_url` key has been retired — see llm-gateway/app/main.py
+    for the startup migration.
+    """
+    original = redis_db1.get("nova:config:inference.url")
     # TEST-NET-1 (192.0.2.0/24) is reserved for documentation / blackholes —
     # packets to it are silently dropped, giving a slow timeout (not fast refuse).
-    redis_db1.set("nova:config:llm.ollama_url", "http://192.0.2.1:11434")
+    redis_db1.set("nova:config:inference.url", "http://192.0.2.1:11434")
     yield
     if original is not None:
-        redis_db1.set("nova:config:llm.ollama_url", original)
+        redis_db1.set("nova:config:inference.url", original)
     else:
-        redis_db1.delete("nova:config:llm.ollama_url")
+        redis_db1.delete("nova:config:inference.url")
 
 
 def test_chat_api_ready_when_ollama_unreachable(save_restore_ollama_url):

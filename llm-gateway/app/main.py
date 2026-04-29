@@ -34,6 +34,29 @@ async def lifespan(app: FastAPI):
         os.environ["ANTHROPIC_API_KEY"] = settings.anthropic_api_key
     if settings.openai_api_key:
         os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+
+    # One-time migration: retire legacy nova:config:llm.ollama_url.
+    # The dual-key transition shipped with the bundled-Ollama refactor; this
+    # migration copies any value to the canonical inference.url and deletes
+    # the legacy key. Idempotent: no-op if the legacy key isn't set.
+    try:
+        import redis.asyncio as aioredis
+        _migration_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+        try:
+            legacy = await _migration_redis.get("nova:config:llm.ollama_url")
+            canonical = await _migration_redis.get("nova:config:inference.url")
+            if legacy:
+                if not canonical:
+                    await _migration_redis.set("nova:config:inference.url", legacy)
+                    log.info("Migrated nova:config:llm.ollama_url → inference.url (value: %s)", legacy)
+                else:
+                    log.info("Both inference.url and llm.ollama_url were set; keeping canonical inference.url, dropping legacy")
+                await _migration_redis.delete("nova:config:llm.ollama_url")
+        finally:
+            await _migration_redis.aclose()
+    except Exception as e:
+        log.warning("llm.ollama_url migration skipped: %s", e)
+
     # Auto-register any Ollama models that are pulled but not in the registry
     try:
         from app.registry import sync_ollama_models

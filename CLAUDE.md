@@ -154,10 +154,10 @@ Several settings are runtime-configurable via Redis (db 1, prefix `nova:config:`
 |---|---|---|
 | `inference.backend` | `ollama`, `vllm`, `sglang`, `none` | Which local inference backend the gateway uses |
 | `inference.state` | `ready`, `starting`, `error`, `draining` | Whether local inference is accepting requests |
+| `inference.url` | URL | Runtime override for the local inference endpoint (replaces legacy `llm.ollama_url`, which is now migrated on gateway startup) |
 | `llm.routing_strategy` | `local-first`, `local-only`, `cloud-first`, `cloud-only` | How the gateway routes requests between local and cloud |
-| `llm.ollama_url` | URL | Runtime Ollama endpoint override |
 
-**Gotcha:** Stale Redis config values survive container restarts. If inference is broken, check `inference.state` and `inference.backend` in Redis before debugging code. The gateway resolves `OLLAMA_BASE_URL=auto` at startup but Redis overrides take precedence at runtime.
+**Gotcha:** Stale Redis config values survive container restarts. If inference is broken, check `inference.state` and `inference.backend` in Redis before debugging code. The gateway treats `OLLAMA_BASE_URL=auto`/`host` as aliases for the bundled service URL (`http://ollama:11434`); Redis runtime overrides via `inference.url` win when set.
 
 ## Key Configuration
 

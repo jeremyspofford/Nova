@@ -539,9 +539,10 @@ export function LLMRoutingSection({
           </Card>
 
           {/* Ollama URL is configured in the Local Inference section above
-              (External target URL field). The legacy llm.ollama_url key here
-              has been retired in favor of inference.url, which the gateway
-              now reads first; legacy values keep working as a fallback. */}
+              (External target URL field). The legacy llm.ollama_url key has
+              been retired — the gateway reads only inference.url now, and
+              a startup migration in llm-gateway/app/main.py moves any value
+              from the old key over on first run. */}
 
           {/* Wake-on-LAN config */}
           <div className="border-t border-border-subtle pt-4">
