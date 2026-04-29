@@ -28,17 +28,14 @@ async def test_admin_secret_accepted_on_admin_endpoint():
     if not ADMIN_SECRET:
         pytest.skip("NOVA_ADMIN_SECRET not set")
     async with httpx.AsyncClient(base_url=ORCHESTRATOR_URL, timeout=10.0) as client:
-        r = await client.post(
-            "/api/v1/knowledge/crawl-log",
+        # GET reindex/status is the cheapest AdminDep endpoint — no body, no FK
+        # constraints, no side effects. Earlier this hit POST /knowledge/crawl-log
+        # with placeholder values, which "passed" the auth check but generated a
+        # constraint-violation 500 on every run, polluting orchestrator logs.
+        r = await client.get(
+            "/api/v1/engrams/reindex/status",
             headers={"X-Admin-Secret": ADMIN_SECRET},
-            json={
-                "source_id": "00000000-0000-0000-0000-000000000000",
-                "status": "success",
-                "items_found": 0,
-                "items_added": 0,
-            },
         )
-        # Either 201 (created) or 4xx for invalid source_id, but never 401/403.
         assert r.status_code not in (401, 403), (
             f"AdminDep endpoint must accept admin secret; got {r.status_code}: {r.text[:200]}"
         )

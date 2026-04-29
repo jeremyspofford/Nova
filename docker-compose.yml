@@ -77,6 +77,10 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
+    environment:
+      # Keep loaded models resident — default 5m evicts between Cortex/intel cycles,
+      # forcing a 1-2s runner reload each call. -1 holds forever.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
     healthcheck:
       <<: *nova-healthcheck
       # ollama/ollama image does not include curl — use the ollama binary itself.

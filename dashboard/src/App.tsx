@@ -55,7 +55,7 @@ const queryClient = new QueryClient({
  */
 async function checkBackendReady(): Promise<boolean> {
   try {
-    const resp = await fetch('/api/v1/pipeline/stats', { signal: AbortSignal.timeout(3000) })
+    const resp = await fetch('/api/v1/pipeline/stats', { signal: AbortSignal.timeout(8000) })
     return resp.ok
   } catch {
     return false
