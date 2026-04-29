@@ -42,7 +42,11 @@ export function Login() {
     try {
       const resp = await fetch('/api/v1/auth/google')
       if (!resp.ok) throw new Error('Failed to get Google auth URL')
-      const { url } = await resp.json()
+      const { url, state } = await resp.json()
+      // Stash the state we just minted so the callback handler can verify
+      // that the popup-returned state matches (CSRF protection at the
+      // browser layer too — defense in depth on top of server-side validation).
+      sessionStorage.setItem('oauth_google_state', state)
       // Open Google consent in a popup
       const popup = window.open(url, 'google-auth', 'width=500,height=600')
       // Listen for the callback
@@ -50,8 +54,15 @@ export function Login() {
         if (event.data?.type === 'google-auth-callback' && event.data.code) {
           window.removeEventListener('message', handler)
           popup?.close()
+          const expectedState = sessionStorage.getItem('oauth_google_state')
+          sessionStorage.removeItem('oauth_google_state')
+          const returnedState = event.data.state ?? null
+          if (!returnedState || returnedState !== expectedState) {
+            setError('OAuth state mismatch — possible CSRF attempt. Try again.')
+            return
+          }
           try {
-            await loginWithGoogle(event.data.code, event.data.redirect_uri)
+            await loginWithGoogle(event.data.code, returnedState)
           } catch (err) {
             setError(err instanceof Error ? err.message : 'Google login failed')
           }

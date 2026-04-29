@@ -28,7 +28,7 @@ interface AuthStore {
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, displayName?: string, inviteCode?: string) => Promise<void>
-  loginWithGoogle: (code: string, redirectUri: string) => Promise<void>
+  loginWithGoogle: (code: string, state: string) => Promise<void>
   logout: () => void
   refreshAuth: () => Promise<boolean>
   getAccessToken: () => string | null
@@ -127,11 +127,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     handleAuthResponse(await resp.json())
   }, [handleAuthResponse])
 
-  const loginWithGoogle = useCallback(async (code: string, redirectUri: string) => {
+  const loginWithGoogle = useCallback(async (code: string, state: string) => {
+    // FC-003: server validates `state` against its Redis-stored value (single-use).
+    // We pass the state through; the orchestrator looks up the original
+    // redirect_uri from Redis rather than trusting any client-supplied value.
     const resp = await fetch('/api/v1/auth/google/callback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, redirect_uri: redirectUri }),
+      body: JSON.stringify({ code, state }),
     })
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Google login failed' }))

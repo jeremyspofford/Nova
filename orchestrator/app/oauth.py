@@ -18,7 +18,10 @@ def google_enabled() -> bool:
     return bool(settings.google_client_id and settings.google_client_secret)
 
 
-def get_google_auth_url(redirect_uri: str) -> str:
+def get_google_auth_url(redirect_uri: str, state: str) -> str:
+    """Build the Google OAuth consent URL. `state` is required for CSRF
+    protection — it must be a fresh random value, stored server-side for
+    single-use validation when the callback returns it."""
     params = {
         "client_id": settings.google_client_id,
         "redirect_uri": redirect_uri,
@@ -26,6 +29,7 @@ def get_google_auth_url(redirect_uri: str) -> str:
         "scope": "openid email profile",
         "access_type": "offline",
         "prompt": "consent",
+        "state": state,
     }
     return f"{GOOGLE_AUTH_URL}?{urlencode(params)}"
 

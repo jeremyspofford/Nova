@@ -353,18 +353,35 @@ async def change_password(req: ChangePasswordRequest, user: UserDep, request: Re
 
 @router.get("/api/v1/auth/google")
 async def google_auth(request: Request):
+    """Generate a fresh OAuth state token, store it in Redis with the
+    server-computed redirect_uri, and return both to the client. State
+    must round-trip through the OAuth flow back to /callback so we can
+    validate it (CSRF protection)."""
+    import secrets
+
     from app.oauth import get_google_auth_url, google_enabled
+    from app.store import get_redis
     if not google_enabled():
         raise HTTPException(status_code=404, detail="Google OAuth not configured")
 
+    state = secrets.token_urlsafe(32)
     redirect_uri = str(request.url_for("google_callback"))
-    return {"url": get_google_auth_url(redirect_uri)}
+
+    # Store state -> redirect_uri with a 10-minute TTL. The callback validates
+    # the state via GETDEL (single-use) and uses the *stored* redirect_uri,
+    # not whatever the client sends back. This closes both the CSRF and
+    # redirect_uri-tampering vectors simultaneously.
+    redis = get_redis()
+    await redis.set(f"nova:oauth:state:{state}", redirect_uri, ex=600)
+
+    return {"url": get_google_auth_url(redirect_uri, state), "state": state}
 
 
 @router.post("/api/v1/auth/google/callback", name="google_callback")
 async def google_callback(request: Request):
     from app.jwt_auth import create_access_token, create_refresh_token
     from app.oauth import exchange_google_code, google_enabled
+    from app.store import get_redis
     from app.users import (
         count_users,
         create_user,
@@ -380,7 +397,18 @@ async def google_callback(request: Request):
     if not code:
         raise HTTPException(status_code=400, detail="Missing authorization code")
 
-    redirect_uri = body.get("redirect_uri", str(request.url_for("google_callback")))
+    # FC-003: validate state (CSRF protection) and use the server-stored
+    # redirect_uri. We never trust a client-supplied redirect_uri because that
+    # would let an attacker tamper with the OAuth grant target.
+    state = body.get("state")
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing state parameter")
+    redis = get_redis()
+    stored = await redis.getdel(f"nova:oauth:state:{state}")
+    if not stored:
+        raise HTTPException(status_code=400, detail="Invalid or expired state token")
+    redirect_uri = stored.decode() if isinstance(stored, bytes) else stored
+
     google_user = await exchange_google_code(code, redirect_uri)
 
     email = google_user.get("email", "").lower()
