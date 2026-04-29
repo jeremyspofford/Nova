@@ -12,8 +12,9 @@ import logging
 from typing import Any
 from uuid import UUID
 
+import redis.asyncio as aioredis
+
 from app.db import get_pool
-from app.store import get_redis
 
 log = logging.getLogger(__name__)
 
@@ -43,20 +44,30 @@ def hash_config(config: dict[str, Any]) -> str:
 
 
 async def _read_runtime_config() -> dict[str, Any]:
-    """Read all relevant Redis runtime-config keys + DB platform_config rows."""
-    redis = get_redis()
+    """Read all relevant Redis runtime-config keys + DB platform_config rows.
+
+    Note: nova:config:* keys live in Redis db1 (the gateway's namespace), populated
+    by sync_*_config_to_redis() functions in app.config_sync. We open a dedicated
+    connection there rather than reusing app.store.get_redis() (db2).
+
+    Redis and DB reads are not transactional — they happen sequentially within
+    the same function call but not atomically.
+    """
+    from app.config_sync import _gateway_redis_url
     pool = get_pool()
 
     runtime: dict[str, Any] = {}
-    for key in _RUNTIME_CONFIG_KEYS:
-        try:
-            val = await redis.get(key)
-            if val is not None:
-                runtime[key.replace("nova:config:", "")] = (
-                    val.decode() if isinstance(val, bytes) else val
-                )
-        except Exception as e:
-            log.debug("snapshot: failed to read %s: %s", key, e)
+    redis = aioredis.from_url(_gateway_redis_url(), decode_responses=True)
+    try:
+        for key in _RUNTIME_CONFIG_KEYS:
+            try:
+                val = await redis.get(key)
+                if val is not None:
+                    runtime[key.replace("nova:config:", "")] = val
+            except Exception as e:
+                log.debug("snapshot: failed to read %s: %s", key, e)
+    finally:
+        await redis.aclose()
 
     # Pull current model assignments from platform_config
     async with pool.acquire() as conn:
