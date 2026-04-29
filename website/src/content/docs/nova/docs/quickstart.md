@@ -16,7 +16,7 @@ No Python, Node.js, or database installs required -- everything runs in containe
 ```bash
 git clone https://github.com/arialabs/nova.git
 cd nova
-./setup
+./install
 ```
 
 That's it. The wizard handles prereq checks, mode selection, optional provider keys, model pulls (if applicable), and bringing every service up.
@@ -53,7 +53,7 @@ If you have a separate machine with a GPU for AI inference:
 bash <(curl -s https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh)
 ```
 
-Then re-run `./setup` on the Nova machine and choose "Remote GPU". The wizard will ask for the GPU machine's IP address and configure Wake-on-LAN if desired.
+Then re-run `./install` on the Nova machine and choose "Remote GPU". The wizard will ask for the GPU machine's IP address and configure Wake-on-LAN if desired.
 
 ## Manual configuration
 

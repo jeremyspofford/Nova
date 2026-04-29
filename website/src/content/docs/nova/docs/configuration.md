@@ -3,7 +3,7 @@ title: "Configuration"
 description: "Environment variables, provider API keys, model routing, and context budgets."
 ---
 
-Nova is configured primarily through a `.env` file and a `models.yaml` file. Run `./setup` for interactive configuration, or edit these files manually.
+Nova is configured primarily through a `.env` file and a `models.yaml` file. Run `./install` for interactive configuration, or edit these files manually.
 
 ## Environment file
 

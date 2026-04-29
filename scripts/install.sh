@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Nova Platform setup script (non-interactive backend)
-# Called by ./setup wizard or directly. Reads .env for configuration.
+# Called by ./install wizard or directly. Reads .env for configuration.
 # Reads models.yaml to determine which Ollama models to pull on startup.
 set -euo pipefail
 
@@ -84,9 +84,9 @@ if [ ! -f "${ENV_FILE}" ]; then
   if [ -f "${PROJECT_ROOT}/.env.example" ]; then
     cp "${PROJECT_ROOT}/.env.example" "${ENV_FILE}"
     echo "✓ Created ${ENV_FILE} from .env.example"
-    echo "  → Run ./setup to configure interactively, or edit ${ENV_FILE} manually"
+    echo "  → Run ./install to configure interactively, or edit ${ENV_FILE} manually"
   else
-    echo "✗ No ${ENV_FILE} or .env.example found. Run ./setup to generate one."
+    echo "✗ No ${ENV_FILE} or .env.example found. Run ./install to generate one."
     exit 1
   fi
 fi
@@ -413,5 +413,5 @@ echo ""
 echo "  Logs: docker compose logs -f"
 echo "  Stop: docker compose down"
 echo ""
-echo "  To reconfigure: ./setup"
-echo "  To add/remove models: edit models.yaml, then re-run ./scripts/setup.sh"
+echo "  To reconfigure: ./install"
+echo "  To add/remove models: edit models.yaml, then re-run ./scripts/install.sh"

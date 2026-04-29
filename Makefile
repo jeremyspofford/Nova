@@ -1,4 +1,4 @@
-.PHONY: help setup up dev build down logs ps watch migrate backup restore website test test-quick benchmark-quality prune prune-all
+.PHONY: help install up dev build down logs ps watch migrate backup restore website test test-quick benchmark-quality prune prune-all uninstall
 
 DASHBOARD    = dashboard
 
@@ -38,8 +38,11 @@ help: ## Show available commands
 	@awk 'BEGIN {FS = ":.*?## "}; /^[a-zA-Z_-]+:.*?## / \
 	  {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-setup: ## Interactive setup wizard (first-time or reconfigure)
-	@./setup
+install: ## Interactive install wizard (first-time or reconfigure)
+	@./install
+
+uninstall: ## Remove Nova from this machine (preview first, then confirm)
+	@./uninstall
 
 # ── Deploy ───────────────────────────────────────────────────────────────────
 up: ## Start all services detached (production / staging)

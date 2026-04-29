@@ -67,6 +67,17 @@ make test         # Integration suite (~2 min, requires services running)
 make backup       # Create a database backup to ./backups/
 ```
 
+## Uninstall
+
+```bash
+./uninstall --dry-run    # See what would be removed (no destruction)
+./uninstall              # Type 'uninstall' to confirm; cleans everything
+```
+
+The uninstaller stops all Nova containers, removes Nova-built images and named volumes, deletes `.env` / `data/` / `backups/` / build artifacts / `~/.nova/workspace/`, and reports total disk reclaimed. It leaves the cloned repo source intact and does NOT touch shared upstream Docker images (`ollama/ollama`, `pgvector/pgvector`, `redis`) — those may be in use by other Docker projects on this machine.
+
+To delete the cloned repo too: `cd .. && rm -rf nova`.
+
 ---
 
 ## Tech Stack

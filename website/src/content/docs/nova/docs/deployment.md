@@ -8,7 +8,7 @@ description: "Development and production commands, GPU overlays, remote GPU setu
 ```bash
 git clone https://github.com/arialabs/nova.git
 cd nova
-./setup
+./install
 ```
 
 The setup wizard configures everything and starts all services. See [Quick Start](/nova/docs/quickstart) for details.
