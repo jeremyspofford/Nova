@@ -144,6 +144,58 @@ async def sync_voice_config_to_redis() -> None:
         log.warning("Voice config sync to Redis failed (non-fatal): %s", e)
 
 
+async def sync_retrieval_config_to_redis() -> None:
+    """Push retrieval.* config from DB to Redis so memory-service picks up saved settings."""
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT key, value FROM platform_config WHERE key LIKE 'retrieval.%'"
+            )
+        if not rows:
+            return
+
+        r = aioredis.from_url(_gateway_redis_url(), decode_responses=True)
+        try:
+            for row in rows:
+                val = row["value"]
+                if val is not None:
+                    raw = json.dumps(val) if not isinstance(val, str) else val
+                    await r.set(f"nova:config:{row['key']}", raw)
+        finally:
+            await r.aclose()
+
+        log.info("Synced %d retrieval config keys to Redis", len(rows))
+    except Exception as e:
+        log.warning("Retrieval config sync to Redis failed (non-fatal): %s", e)
+
+
+async def sync_quality_config_to_redis() -> None:
+    """Push quality.* config from DB to Redis."""
+    try:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT key, value FROM platform_config WHERE key LIKE 'quality.%'"
+            )
+        if not rows:
+            return
+
+        r = aioredis.from_url(_gateway_redis_url(), decode_responses=True)
+        try:
+            for row in rows:
+                val = row["value"]
+                if val is not None:
+                    raw = json.dumps(val) if not isinstance(val, str) else val
+                    await r.set(f"nova:config:{row['key']}", raw)
+        finally:
+            await r.aclose()
+
+        log.info("Synced %d quality config keys to Redis", len(rows))
+    except Exception as e:
+        log.warning("Quality config sync to Redis failed (non-fatal): %s", e)
+
+
 async def sync_features_config_to_redis() -> None:
     """Push features.* config to all service Redis DBs that need them.
 
