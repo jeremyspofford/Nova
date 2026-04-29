@@ -5,7 +5,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
-from app.auth import AuthenticatedKey, _apply_rate_limit, require_admin, require_api_key
+from app.auth import (
+    AuthenticatedKey,
+    _apply_rate_limit,
+    require_admin,
+    require_api_key,
+    require_user,
+)
 from fastapi import HTTPException
 
 
@@ -121,3 +127,48 @@ async def test_admin_trusted_network_bypass():
     """Admin requests from trusted network skip the secret check entirely."""
     # No patch on get_admin_secret — if it's called, the test will fail via AsyncMock default
     await require_admin(request=_mock_request(trusted=True), x_admin_secret=None)
+
+
+# ── User auth (UserDep) ──────────────────────────────────────────────────────
+
+
+def _untrusted_request():
+    """Build a request that is NOT on a trusted network and has REQUIRE_AUTH=true."""
+    req = MagicMock()
+    req.state.is_trusted_network = False
+    req.client = MagicMock()
+    req.client.host = "203.0.113.42"  # TEST-NET-3, definitely untrusted
+    req.headers = {}
+    return req
+
+
+async def test_user_rejects_admin_secret_only():
+    """FC-005: X-Admin-Secret must NOT authenticate UserDep endpoints.
+
+    Previously the fallback at the bottom of require_user mapped admin secret
+    to _SYNTHETIC_ADMIN, silently impersonating any user. After the fix, the
+    only way through is a valid JWT (or trusted network / dev bypass).
+    """
+    with (
+        patch("app.auth._get_require_auth", new_callable=AsyncMock, return_value=True),
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await require_user(request=_untrusted_request(), authorization=None)
+        assert exc_info.value.status_code == 401
+
+
+async def test_user_rejects_no_auth():
+    """No JWT, no admin secret, untrusted network -> 401."""
+    with patch("app.auth._get_require_auth", new_callable=AsyncMock, return_value=True):
+        with pytest.raises(HTTPException) as exc_info:
+            await require_user(request=_untrusted_request(), authorization=None)
+        assert exc_info.value.status_code == 401
+
+
+async def test_user_signature_no_longer_accepts_admin_secret():
+    """The require_user signature no longer has an x_admin_secret parameter."""
+    import inspect
+    sig = inspect.signature(require_user)
+    assert "x_admin_secret" not in sig.parameters, (
+        "require_user must not accept X-Admin-Secret header — it was removed in FC-005"
+    )

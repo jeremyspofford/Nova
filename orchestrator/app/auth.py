@@ -8,7 +8,9 @@ Three separate auth paths:
 
 When REQUIRE_AUTH=false (local dev), ApiKeyDep returns a synthetic bypass key
 so all handlers work identically without distributing real keys.
-UserDep also accepts X-Admin-Secret as a fallback for backward compatibility.
+
+UserDep is JWT-only. Admin secret is no longer accepted as a user-impersonation
+token — it authenticates AdminDep endpoints only.
 """
 from __future__ import annotations
 
@@ -264,13 +266,11 @@ _SYNTHETIC_ADMIN = AuthenticatedUser(
 async def require_user(
     request: Request,
     authorization: Annotated[str | None, Header()] = None,
-    x_admin_secret: Annotated[str | None, Header(alias="X-Admin-Secret")] = None,
 ) -> AuthenticatedUser:
     """Authenticate dashboard requests. Accepts:
     1. Trusted network (LAN, Tailscale, localhost) — returns synthetic admin
     2. Bearer JWT token (user auth)
-    3. X-Admin-Secret header (legacy backward compat — maps to synthetic admin user)
-    4. If REQUIRE_AUTH=false, returns synthetic admin user (backward compat)
+    3. If REQUIRE_AUTH=false, returns synthetic admin user (dev bypass)
     """
     # Trusted network bypass
     if getattr(request.state, "is_trusted_network", False):
@@ -390,11 +390,7 @@ async def require_user(
         except HTTPException:
             raise
         except Exception:
-            pass  # Fall through to admin secret check
-
-    # Fallback: admin secret (backward compat for existing dashboard sessions)
-    if x_admin_secret and x_admin_secret == await get_admin_secret():
-        return _SYNTHETIC_ADMIN
+            pass  # JWT invalid/expired — fall through to 401
 
     raise HTTPException(status_code=401, detail="Authentication required")
 

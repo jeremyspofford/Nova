@@ -35,8 +35,15 @@ Nova is a self-directed autonomous AI platform. Users define a goal; Nova breaks
 ## Build & Run Commands
 
 ```bash
-# First-time setup (copies .env, detects GPU, pulls Ollama models, starts everything)
-./scripts/setup.sh
+# First-time install (interactive wizard: mode selection, .env, GPU detect,
+# model pulls, services up). Renamed from ./setup → ./install on 2026-04-28.
+./install
+
+# Production boot-up after install (idempotent: build + up + wait for health)
+./start
+
+# Remove Nova from this machine (preview-first, then 'type uninstall' to confirm)
+./uninstall
 
 # Dev with hot reload
 make dev          # or: docker compose up --build --watch
