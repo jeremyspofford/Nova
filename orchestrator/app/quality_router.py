@@ -13,7 +13,7 @@ from app.quality_loop.cases import BenchmarkCase, load_cases
 from app.quality_loop.score import SCORER_REGISTRY
 from app.quality_loop.snapshot import capture_snapshot
 from app.quality_loop.teardown import teardown_benchmark_engrams
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -589,6 +589,40 @@ async def get_quality_benchmark_results(
         }
         for row in rows
     ]
+
+
+@quality_router.get("/api/v1/quality/snapshots/diff")
+async def diff_snapshots(_admin: AdminDep, from_: str = Query(..., alias="from"), to: str = Query(...)):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT id::text, config FROM quality_config_snapshots WHERE id = ANY($1::uuid[])",
+            [from_, to],
+        )
+    by_id = {r["id"]: r["config"] for r in rows}
+    if from_ not in by_id or to not in by_id:
+        raise HTTPException(404, "one or both snapshots not found")
+    if from_ == to:
+        return {"changed_keys": [], "from_only": {}, "to_only": {}}
+    a, b = by_id[from_], by_id[to]
+    changed = []
+    for k in set(a.keys()) | set(b.keys()):
+        if a.get(k) != b.get(k):
+            changed.append({"key": k, "from": a.get(k), "to": b.get(k)})
+    return {"changed_keys": changed, "from_id": from_, "to_id": to}
+
+
+@quality_router.get("/api/v1/quality/snapshots/{snapshot_id}")
+async def get_snapshot(_admin: AdminDep, snapshot_id: str):
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT id::text, config_hash, config, captured_at, captured_by FROM quality_config_snapshots WHERE id = $1::uuid",
+            snapshot_id,
+        )
+    if not row:
+        raise HTTPException(404, "snapshot not found")
+    return dict(row) | {"captured_at": row["captured_at"].isoformat()}
 
 
 @quality_router.delete("/api/v1/benchmarks/quality-results")
