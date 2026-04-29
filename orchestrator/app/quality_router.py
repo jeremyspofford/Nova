@@ -221,6 +221,12 @@ async def run_quality_benchmark_legacy(
 # session_id is safe.
 _BENCHMARK_TOOLS_USED: dict[str, list[str]] = {}
 
+# Serialise benchmark runs so concurrent triggers can't corrupt the
+# _ToolTracker monkey-patch on app.agents.runner.execute_tool. The second
+# __aenter__ would otherwise capture the first run's wrapper as "original"
+# and the first __aexit__ would restore the wrong reference.
+_BENCHMARK_RUN_LOCK = asyncio.Lock()
+
 
 class _ToolTracker:
     """Async context manager that records tool calls per session_id."""
@@ -254,87 +260,104 @@ class _ToolTracker:
 
 
 async def _run_benchmark_v2(run_id: str, category: str | None) -> None:
-    """Execute fixture-driven benchmark cases, score against unified vocabulary."""
+    """Execute fixture-driven benchmark cases, score against unified vocabulary.
+
+    Wrapped in a module-level lock so concurrent runs can't corrupt the
+    _ToolTracker monkey-patch (each tracker captures app.agents.runner.execute_tool
+    on enter and restores on exit — overlapping runs would clobber each other).
+
+    Wrapped in a top-level try/except so any unhandled exception (e.g. YAML
+    parse error in load_cases, DB transient failure) marks the run as 'failed'
+    instead of leaving it stuck in 'running' forever.
+    """
     pool = get_pool()
-    cases = load_cases(_CASES_DIR, category=category)
-
-    if not cases:
-        await _mark_failed(pool, run_id, "no benchmark cases found")
-        return
-
-    seeded_engram_ids: list[str] = []
-    case_results: list[dict] = []
-    error_summary_parts: list[str] = []
-
     try:
-        for case in cases:
-            log.info("Benchmark[%s]: running %s", run_id[:8], case.name)
+        async with _BENCHMARK_RUN_LOCK:
+            cases = load_cases(_CASES_DIR, category=category)
+
+            if not cases:
+                await _mark_failed(pool, run_id, "no benchmark cases found")
+                return
+
+            seeded_engram_ids: list[str] = []
+            case_results: list[dict] = []
+            error_summary_parts: list[str] = []
+
             try:
-                case_seeded, case_scores = await _run_single_case(case, run_id)
-                seeded_engram_ids.extend(case_seeded)
-                case_results.append({
-                    "name": case.name,
-                    "category": case.category,
-                    "scores": case_scores,
-                    "composite": (
-                        sum(case_scores.values()) / len(case_scores)
-                        if case_scores else 0.0
-                    ),
-                })
-            except Exception as e:
-                log.exception("Case %s failed", case.name)
-                error_summary_parts.append(f"{case.name}: {e}")
-                case_results.append({
-                    "name": case.name,
-                    "category": case.category,
-                    "scores": {},
-                    "composite": 0.0,
-                    "error": str(e)[:200],
-                })
+                for case in cases:
+                    log.info("Benchmark[%s]: running %s", run_id[:8], case.name)
+                    try:
+                        case_seeded, case_scores = await _run_single_case(case, run_id)
+                        seeded_engram_ids.extend(case_seeded)
+                        case_results.append({
+                            "name": case.name,
+                            "category": case.category,
+                            "scores": case_scores,
+                            "composite": (
+                                sum(case_scores.values()) / len(case_scores)
+                                if case_scores else 0.0
+                            ),
+                        })
+                    except Exception as e:
+                        log.exception("Case %s failed", case.name)
+                        error_summary_parts.append(f"{case.name}: {e}")
+                        case_results.append({
+                            "name": case.name,
+                            "category": case.category,
+                            "scores": {},
+                            "composite": 0.0,
+                            "error": str(e)[:200],
+                        })
 
-        # Aggregate dimension_scores by averaging across cases
-        dim_totals: dict[str, list[float]] = {}
-        for cr in case_results:
-            for dim, score in cr["scores"].items():
-                dim_totals.setdefault(dim, []).append(score)
-        dimension_scores = {
-            dim: round(sum(scores) / len(scores), 4)
-            for dim, scores in dim_totals.items()
-        }
+                # Aggregate dimension_scores by averaging across cases
+                dim_totals: dict[str, list[float]] = {}
+                for cr in case_results:
+                    for dim, score in cr["scores"].items():
+                        dim_totals.setdefault(dim, []).append(score)
+                dimension_scores = {
+                    dim: round(sum(scores) / len(scores), 4)
+                    for dim, scores in dim_totals.items()
+                }
 
-        all_composites = [cr["composite"] for cr in case_results if cr.get("scores")]
-        composite = (
-            round((sum(all_composites) / len(all_composites)) * 100, 2)
-            if all_composites else 0.0
-        )
+                all_composites = [cr["composite"] for cr in case_results if cr.get("scores")]
+                composite = (
+                    round((sum(all_composites) / len(all_composites)) * 100, 2)
+                    if all_composites else 0.0
+                )
 
-        async with pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE quality_benchmark_runs
-                SET status = 'completed',
-                    completed_at = NOW(),
-                    composite_score = $2,
-                    dimension_scores = $3::jsonb,
-                    case_results = $4::jsonb,
-                    error_summary = $5
-                WHERE id = $1::uuid
-                """,
-                run_id,
-                composite,
-                json.dumps(dimension_scores),
-                json.dumps(case_results),
-                "; ".join(error_summary_parts) if error_summary_parts else None,
-            )
-        log.info("Benchmark[%s] completed: %.1f composite", run_id[:8], composite)
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        UPDATE quality_benchmark_runs
+                        SET status = 'completed',
+                            completed_at = NOW(),
+                            composite_score = $2,
+                            dimension_scores = $3::jsonb,
+                            case_results = $4::jsonb,
+                            error_summary = $5
+                        WHERE id = $1::uuid
+                        """,
+                        run_id,
+                        composite,
+                        json.dumps(dimension_scores),
+                        json.dumps(case_results),
+                        "; ".join(error_summary_parts) if error_summary_parts else None,
+                    )
+                log.info("Benchmark[%s] completed: %.1f composite", run_id[:8], composite)
 
-    finally:
-        if seeded_engram_ids:
-            deleted = await teardown_benchmark_engrams(seeded_engram_ids)
-            log.info(
-                "Benchmark[%s] teardown: %d/%d engrams deleted",
-                run_id[:8], deleted, len(seeded_engram_ids),
-            )
+            finally:
+                if seeded_engram_ids:
+                    deleted = await teardown_benchmark_engrams(seeded_engram_ids)
+                    log.info(
+                        "Benchmark[%s] teardown: %d/%d engrams deleted",
+                        run_id[:8], deleted, len(seeded_engram_ids),
+                    )
+    except Exception as e:
+        log.exception("Benchmark[%s] crashed: %s", run_id[:8], e)
+        try:
+            await _mark_failed(pool, run_id, f"runner crash: {e}")
+        except Exception:
+            pass
 
 
 async def _run_single_case(
@@ -402,6 +425,7 @@ async def _run_single_case(
                     api_key_id=None,
                     explicit_model=True,  # don't reroute via classifier
                     agent_name=primary.config.name,
+                    skip_memory_storage=True,  # benchmarks don't pollute production engram graph
                 )
             except Exception as e:
                 log.warning("Benchmark[%s] case %s turn failed: %s",
@@ -496,7 +520,9 @@ async def list_benchmark_runs(
             "started_at": r["started_at"].isoformat() if r["started_at"] else None,
             "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
             "status": r["status"],
-            "composite_score": float(r["composite_score"]) if r["composite_score"] else None,
+            # `is not None` check — a legitimate 0.0 score (broken-LLM failure mode)
+            # must surface in the UI as 0, not be coerced to null/missing.
+            "composite_score": float(r["composite_score"]) if r["composite_score"] is not None else None,
             "dimension_scores": r["dimension_scores"] or {},
             "case_results": r["case_results"] or [],
             "metadata": r["metadata"] or {},
@@ -555,7 +581,8 @@ async def get_quality_benchmark_results(
             "started_at": row["started_at"].isoformat() if row["started_at"] else None,
             "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
             "status": row["status"],
-            "composite_score": float(row["composite_score"]) if row["composite_score"] else None,
+            # `is not None` check — see list_benchmark_runs comment.
+            "composite_score": float(row["composite_score"]) if row["composite_score"] is not None else None,
             "category_scores": row["category_scores"] or {},
             "case_results": row["case_results"] or [],
             "metadata": row["metadata"] or {},

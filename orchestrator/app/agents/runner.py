@@ -45,12 +45,18 @@ async def run_agent_turn(
     explicit_model: bool = False,
     agent_name: str = "Chat",
     tenant_id: str | None = None,
+    skip_memory_storage: bool = False,
 ) -> TaskResult:
     """Execute one agent turn: memory retrieval → LLM call → memory storage → usage log.
 
     tenant_id threads through to the memory-service /context call, the engram
     ingestion queue payload, and /mark-used feedback (FC-001). When the caller
     is an API key, derive it from AuthenticatedKey.tenant_id at the router.
+
+    skip_memory_storage skips the engram-queue push of the user/assistant
+    exchange. Used by the quality benchmark runner so synthetic conversations
+    don't pollute production memory (their seeded engrams carry a
+    benchmark_run_id for teardown, but the live exchanges would not).
     """
     from app.usage import log_usage
 
@@ -116,8 +122,9 @@ async def run_agent_turn(
             tools=effective_tools,
         )
 
-        # 4. Store exchange in episodic memory
-        await _store_exchange(agent_id, session_id, query, assistant_content, tenant_id=tenant_id)
+        # 4. Store exchange in episodic memory (skipped for benchmark runs)
+        if not skip_memory_storage:
+            await _store_exchange(agent_id, session_id, query, assistant_content, tenant_id=tenant_id)
 
         # 4b. Mark engrams as used (ground truth for Neural Router training)
         await _mark_engrams_used(_engram_ids, _retrieval_log_id, tenant_id=tenant_id)
