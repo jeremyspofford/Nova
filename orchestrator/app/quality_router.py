@@ -194,10 +194,10 @@ async def run_quality_benchmark_v2(
             """
             INSERT INTO quality_benchmark_runs
                 (status, metadata, config_snapshot_id, vocabulary_version)
-            VALUES ('running', $1::jsonb, $2, 2)
+            VALUES ('running', $1, $2, 2)
             RETURNING id::text
             """,
-            json.dumps({"category_filter": category}),
+            {"category_filter": category},
             snapshot_id,
         )
 
@@ -332,15 +332,15 @@ async def _run_benchmark_v2(run_id: str, category: str | None) -> None:
                         SET status = 'completed',
                             completed_at = NOW(),
                             composite_score = $2,
-                            dimension_scores = $3::jsonb,
-                            case_results = $4::jsonb,
+                            dimension_scores = $3,
+                            case_results = $4,
                             error_summary = $5
                         WHERE id = $1::uuid
                         """,
                         run_id,
                         composite,
-                        json.dumps(dimension_scores),
-                        json.dumps(case_results),
+                        dimension_scores,
+                        case_results,
                         "; ".join(error_summary_parts) if error_summary_parts else None,
                     )
                 log.info("Benchmark[%s] completed: %.1f composite", run_id[:8], composite)
