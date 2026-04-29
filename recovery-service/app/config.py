@@ -17,6 +17,12 @@ class Settings:
     # Admin auth
     admin_secret: str = os.getenv("NOVA_ADMIN_SECRET", "nova-admin-secret-change-me")
 
+    # CORS allowlist — comma-separated origins. Wildcards are not accepted.
+    cors_allowed_origins: str = os.getenv(
+        "CORS_ALLOWED_ORIGINS",
+        "http://localhost:3000,http://localhost:5173",
+    )
+
     # Redis
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/7")
 

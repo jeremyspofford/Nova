@@ -7,6 +7,13 @@ from docker.errors import DockerException
 
 logger = logging.getLogger("nova.recovery.docker")
 
+# FC-001: services that must never be restarted via the API.
+# - postgres, redis: data plane; restart kills in-flight writes
+# - recovery: would mid-air the request that triggered it
+# Operators wanting to restart these should use 'docker compose restart' from
+# the host, where the consequences are obvious.
+CRITICAL_SERVICES = frozenset({"postgres", "redis", "recovery"})
+
 # Nova services we care about (container name prefix: nova-)
 NOVA_SERVICES = [
     "postgres",
@@ -157,12 +164,22 @@ def _get_health(container) -> str:
 
 
 def restart_service(service_name: str) -> dict:
-    """Restart a Nova service container."""
+    """Restart a Nova service container. Refuses critical services and matches
+    by Docker compose label (not substring) to prevent accidental matches."""
+    if service_name in CRITICAL_SERVICES:
+        return {
+            "service": service_name,
+            "action": "rejected",
+            "ok": False,
+            "error": (
+                f"{service_name} is a critical service. Restart it via "
+                f"'docker compose restart {service_name}' from the host."
+            ),
+        }
     try:
         client = _client()
-        containers = client.containers.list(all=True)
-        for c in containers:
-            if service_name in c.name and ("nova" in c.name or service_name == c.name):
+        for c in client.containers.list(all=True):
+            if c.labels.get("com.docker.compose.service") == service_name:
                 c.restart(timeout=30)
                 return {"service": service_name, "action": "restarted", "ok": True}
         return {"service": service_name, "action": "not_found", "ok": False, "error": f"Container for '{service_name}' not found"}
@@ -191,12 +208,11 @@ def check_container_status(name: str) -> dict:
 
 
 def get_container_logs(service_name: str, tail: int = 100) -> str:
-    """Get recent logs from a Nova service container."""
+    """Get recent logs from a Nova service container. Matches by Docker compose label."""
     try:
         client = _client()
-        containers = client.containers.list(all=True)
-        for c in containers:
-            if service_name in c.name and ("nova" in c.name or service_name == c.name):
+        for c in client.containers.list(all=True):
+            if c.labels.get("com.docker.compose.service") == service_name:
                 return c.logs(tail=tail, timestamps=True).decode("utf-8", errors="replace")
         return f"Container for '{service_name}' not found"
     except DockerException as e:
