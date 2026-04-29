@@ -27,6 +27,7 @@ from .drives import (
     improve,
     learn,
     maintain,
+    quality,
     reflect,
     serve,
 )
@@ -59,7 +60,7 @@ MAX_CONSECUTIVE_SKIPS = 3
 # Round-robin counter for multi-goal rotation
 _goal_round_robin: int = 0
 
-ALL_DRIVES = [serve, maintain, improve, learn, reflect]
+ALL_DRIVES = [serve, maintain, improve, learn, quality, reflect]
 
 
 def _select_goal(stale_goals: list[dict], scheduled_goal_ids: list[str]) -> dict:
