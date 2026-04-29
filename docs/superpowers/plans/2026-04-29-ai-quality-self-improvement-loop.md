@@ -1303,7 +1303,9 @@ async def _mark_failed(pool, run_id: str, error: str) -> None:
         )
 ```
 
-Note the use of `run_agent_turn` directly — eliminates the silent-failure mode where HTTP self-call hits a 401 on agent discovery. If the function name or signature differs, adjust to whatever the actual orchestrator agent runner exposes. Check `orchestrator/app/agents/runner.py` first.
+Note the use of `run_agent_turn` directly — eliminates the silent-failure mode where HTTP self-call hits a 401 on agent discovery. **The actual `run_agent_turn` signature requires more args** (`agent_id`, `task_id`, `session_id`, `messages`, `model`, `system_prompt` per `orchestrator/app/agents/runner.py:37`). Look at the canonical caller pattern in `orchestrator/app/router.py` around line 269 (the chat endpoint) to see how it constructs these args — agent discovery via `ensure_primary_agent` or similar, task/session row creation, default model selection. The benchmark variant should mirror that pattern, with a disposable `tenant_id` and a synthetic `agent_id` that doesn't conflict with the real chat agent.
+
+Also note the score conventions for the API: `composite_score` is on a **0–100** scale (sum of per-case averages × 100) while individual entries in `dimension_scores` are **0–1**. Keep this asymmetry consistent with the existing `quality_router.py:155` logic and reflect it in the dashboard TypeScript type (`composite_score: number /* 0-100 */`, `dimension_scores: Record<string, number /* 0-1 */>`).
 
 - [ ] **Step 5: Add legacy-path aliases (Cycle 1 only)**
 
@@ -2884,7 +2886,7 @@ await load_agency_from_config(registry)
 log.info("Quality loops registered: %s", [l.name for l in registry.list()])
 ```
 
-(The runner is invoked on demand via the API — there is no background scheduler in v2. Cortex schedules iterations.)
+**Important:** the runner is invoked on demand via the API — there is **no background scheduler** in v2. Cortex schedules iterations via its periodic poll of `/api/v1/quality/summary` (Task 16), and humans/admins use "Run Now" / `POST /api/v1/quality/loops/{name}/run-now`. **Do not** build a daily exploration scheduler in `chat_scorer_loop` style; that's explicitly deferred per the spec's non-goals.
 
 - [ ] **Step 2: Add loop endpoints**
 
@@ -2999,14 +3001,21 @@ async def approve_loop_session(_admin: AdminDep, session_id: str):
         )
     # Re-run loop in auto-apply mode for a new iteration that picks up the same proposal
     # (Simplification: a more sophisticated impl would replay from the proposal stored on this row.)
-    rl = get_registry().get(row["loop_name"])
+    registry = get_registry()
+    rl = registry.get(row["loop_name"])
     original_agency = rl.agency
-    rl.agency = "auto_apply"  # type: ignore[assignment]
+    registry.set_agency(row["loop_name"], "auto_apply")  # validated mutation
     try:
         asyncio.create_task(iterate_loop(rl.impl))
     finally:
-        rl.agency = original_agency  # type: ignore[assignment]
-    return {"approved": True, "session_id": session_id}
+        registry.set_agency(row["loop_name"], original_agency)
+    return {
+        "approved": True,
+        "session_id": session_id,
+        "note": "Approval triggers a fresh loop iteration; the original proposal "
+                "is not replayed in v2. A future enhancement could replay the stored "
+                "proposed_changes directly to skip the re-sense step.",
+    }
 
 
 @quality_router.post("/api/v1/quality/loops/sessions/{session_id}/reject")
