@@ -41,7 +41,9 @@ Reused infra (no parallel machinery):
 - `goal_tasks` mapping — used for leaf goals (those with `complexity='simple'` or whose triage said simple)
 - `tasks.goal_id` FK — connects executable tasks to their owning goal
 - `comments` table — already wired for `entity_type='goal'` review feedback
-- `MaturationBadge`, `MaturationStages`, `GoalMaturationDetail` dashboard components
+- `MaturationBadge`, `GoalMaturationDetail` dashboard components (a new `MaturationStages` stepper component is built as part of this work — referenced inline in `Goals.tsx` today)
+- `cortex.journal.write_entry()` — existing journal writer. Pseudocode in this spec uses `emit_journal()` as a thin new wrapper that calls `write_entry()` with a structured `{event, goal_id, payload}` shape so journal queries can filter by event.
+- A new `emit_notification()` helper that pushes to the dashboard websocket notification path (path itself exists; helper is new)
 
 ## Data Model
 
@@ -107,6 +109,10 @@ CREATE INDEX IF NOT EXISTS goal_verifications_goal_idx ON goal_verifications(goa
 -- Index for the cycle's "find a parent ready to verify" query
 CREATE INDEX IF NOT EXISTS goals_parent_status_idx
     ON goals(parent_goal_id, status) WHERE parent_goal_id IS NOT NULL;
+
+-- max_cost_usd default + backfill so building.py's budget cascade has a non-null number
+ALTER TABLE goals ALTER COLUMN max_cost_usd SET DEFAULT 5.00;
+UPDATE goals SET max_cost_usd = 5.00 WHERE max_cost_usd IS NULL AND status = 'active';
 ```
 
 The `depth` column lets the speccing prompt warn the LLM when it's getting close to `max_depth` (encouraging flatter decomposition near the floor).
@@ -237,7 +243,12 @@ async def _materialize_as_tasks(goal):
 
 
 def _inherited_policy(parent, child):
-    """Cascade review_policy with auto-upgrade for security/infra/data scopes."""
+    """Cascade review_policy with auto-upgrade for security/infra/data scopes.
+
+    Reads the *parent's* scope_analysis (set during the parent's scoping phase).
+    The child has not been scoped yet — when it re-enters maturation it will
+    re-scope itself and may re-upgrade its policy from its own scope_analysis.
+    """
     base = parent["review_policy"]
     if base == "scopes-sensitive":
         # Already strictest; cascade unchanged
@@ -308,11 +319,18 @@ When `_on_verify_fail` fires (or a leaf task fails terminally):
 
 ```python
 async def _on_verify_fail(goal_id, goal, attempt, cmd_results, quartet_review, criteria_eval):
-    # 1. Log the reflection — what was tried, what failed
+    # 1. Log the reflection — what was tried, what failed.
+    # NOTE: pseudocode signature; the real `cortex.reflections.record_reflection()`
+    # takes (goal_id, cycle_number, approach, approach_hash, outcome, outcome_score, ...)
+    # and is already called from cycle.py. This call site uses the same helper with
+    # outcome="verify_failed", outcome_score derived from cmd_results.
     await record_reflection(
         goal_id=goal_id,
+        cycle_number=current_cycle_number,
+        approach=goal["spec"],
         approach_hash=compute_approach_hash(goal),
-        outcome="failed",
+        outcome="verify_failed",
+        outcome_score=0.2,
         evidence={"cmd_failures": _failed_cmds(cmd_results),
                   "quartet": quartet_review,
                   "criteria_failures": _failed_criteria(criteria_eval)},
@@ -493,7 +511,7 @@ These are real questions that the spec deliberately defers — calling them out 
 1. **What does `success_criteria_structured.check='engram_query'` actually evaluate?** Spec assumes "engram with this content exists at importance > 0.5" — needs concrete predicate during implementation.
 2. **Quartet verification task budget** — adds an LLM call per goal completion. Cost analysis: ~$0.05–$0.15 per goal at typical token counts. Acceptable for v1; revisit if volume grows.
 3. **Notification durability** — existing notification path is best-effort websocket. For escalations, do we need persistence so they're recoverable across dashboard restarts? Likely yes; deferred to UX implementation pass.
-4. **Top-level goal max_cost defaults** — today Cortex creates goals with `max_cost_usd=NULL`. Decomposition needs a non-null cap to do budget cascading; default should probably be tier-based (cheap/mid/best maps to $1/$5/$20). Not yet decided.
+4. ~~**Top-level goal max_cost defaults**~~ — **resolved:** Migration 064 also adds a non-null backfill default. Goals created without an explicit `max_cost_usd` get a tier-based default at INSERT time: cortex-created goals → $5.00 (mid), human-created via API → $5.00, human-created via chat with explicit budget intent → use what they said. Building.py treats `NULL` as "$5.00 effective cap" defensively to prevent NoneType division during cascade for any pre-migration goals that slip through. The actual migration adds `ALTER TABLE goals ALTER COLUMN max_cost_usd SET DEFAULT 5.00;` and a one-time backfill `UPDATE goals SET max_cost_usd = 5.00 WHERE max_cost_usd IS NULL AND status = 'active';`.
 
 ## Effort Estimate
 
