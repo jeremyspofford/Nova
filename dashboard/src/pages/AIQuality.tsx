@@ -14,8 +14,10 @@ import {
   ChevronDown,
   ChevronRight,
   Trash2,
+  GitBranch,
 } from 'lucide-react'
 import { apiFetch } from '../api'
+import { LoopsTab } from './quality/LoopsTab'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Card, EmptyState, Tabs, Button, Badge, Select } from '../components/ui'
 import clsx from 'clsx'
@@ -822,6 +824,7 @@ function DiffModal({open, onClose}: {open: {from: string; to: string} | null; on
 const TABS = [
   { id: 'live', label: 'Live Scores', icon: Activity },
   { id: 'benchmarks', label: 'Benchmarks', icon: FlaskConical },
+  { id: 'loops', label: 'Loops', icon: GitBranch },
 ]
 
 export function AIQuality() {
@@ -839,6 +842,7 @@ export function AIQuality() {
 
       {activeTab === 'live' && <LiveScoresTab />}
       {activeTab === 'benchmarks' && <BenchmarksTab />}
+      {activeTab === 'loops' && <LoopsTab />}
     </div>
   )
 }
