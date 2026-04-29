@@ -1,4 +1,4 @@
-.PHONY: help install up dev build down logs ps watch migrate backup restore website test test-quick benchmark-quality prune prune-all uninstall
+.PHONY: help install start up dev build down logs ps watch migrate backup restore website test test-quick benchmark-quality prune prune-all uninstall
 
 DASHBOARD    = dashboard
 
@@ -40,6 +40,9 @@ help: ## Show available commands
 
 install: ## Interactive install wizard (first-time or reconfigure)
 	@./install
+
+start: ## Production start: build + up + wait for health + report URLs
+	@./start
 
 uninstall: ## Remove Nova from this machine (preview first, then confirm)
 	@./uninstall

@@ -67,13 +67,16 @@ Full architecture detail: <https://arialabs.ai/nova/docs/architecture>.
 ## Common commands
 
 ```bash
-make dev          # Start everything detached + dashboard with hot reload
+./start           # Production boot-up: build + up + wait for health
+make dev          # Development: detached stack + Vite dashboard with hot reload
 make down         # Stop all
 make logs         # Tail all container logs
 make ps           # Container status
 make test         # Integration suite (~2 min, requires services running)
 make backup       # Create a database backup to ./backups/
 ```
+
+`./start` and `make dev` are different intentionally: `./start` brings up production-style services and exits, `make dev` adds the Vite hot-reload dashboard and stays in the foreground. Use `./start` after a reboot or `make down`; use `make dev` while editing dashboard code.
 
 ## Uninstall
 
