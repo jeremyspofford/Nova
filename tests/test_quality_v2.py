@@ -94,3 +94,70 @@ async def test_snapshot_diff_404_on_missing():
             headers={"X-Admin-Secret": ADMIN_SECRET},
         )
         assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+@pytest.mark.slow
+async def test_retrieval_tuning_loop_full_lifecycle():
+    """End-to-end: switch loop A to auto_apply, trigger run-now, verify session persists.
+
+    Slow test (~8 min minimum because each benchmark takes 60-120s and the
+    full loop lifecycle is sense (1 benchmark) + verify (1 benchmark)).
+    With a broken LLM gateway, each benchmark will time out per case (~14 min
+    per benchmark × 2 benchmarks = ~28 min) — but the loop will still complete
+    with decision='revert' and outcome='no_change' because composite delta = 0.
+    Skip this test in CI by default; run manually when validating closed-loop
+    behavior end-to-end.
+
+    Use NOVA_RUN_SLOW_QUALITY_TESTS=1 to opt in:
+        NOVA_RUN_SLOW_QUALITY_TESTS=1 pytest tests/test_quality_v2.py -v -m slow
+    """
+    if os.getenv("NOVA_RUN_SLOW_QUALITY_TESTS") != "1":
+        pytest.skip("Slow test — set NOVA_RUN_SLOW_QUALITY_TESTS=1 to run")
+    if not ADMIN_SECRET:
+        pytest.skip("NOVA_ADMIN_SECRET not set")
+
+    import asyncio as aio
+    async with httpx.AsyncClient(base_url=ORCHESTRATOR_URL, timeout=600.0) as client:
+        h = {"X-Admin-Secret": ADMIN_SECRET}
+
+        # 1. Switch loop A to auto_apply for the test
+        r = await client.patch(
+            "/api/v1/quality/loops/retrieval_tuning/agency",
+            headers=h, json={"agency": "auto_apply"},
+        )
+        assert r.status_code == 200
+
+        try:
+            # 2. Run-now
+            r = await client.post(
+                "/api/v1/quality/loops/retrieval_tuning/run-now", headers=h,
+            )
+            assert r.status_code == 200
+
+            # 3. Wait up to 30 minutes for full lifecycle (covers slow LLM timeouts)
+            sessions: list[dict] = []
+            for _ in range(180):  # 180 × 10s = 30 min
+                await aio.sleep(10)
+                r = await client.get(
+                    "/api/v1/quality/loops/retrieval_tuning/sessions?limit=1", headers=h,
+                )
+                sessions = r.json()
+                if sessions and sessions[0].get("completed_at"):
+                    break
+
+            assert sessions, "loop session never recorded"
+            session = sessions[0]
+            assert session["completed_at"], "loop session never completed"
+            # Decision must be one of the terminal states the auto_apply path produces
+            assert session["decision"] in ("persist", "revert", "alert_only", "auto"), (
+                f"unexpected decision: {session['decision']}"
+            )
+            assert session["outcome"] in ("improved", "no_change", "regressed", "aborted"), session["outcome"]
+
+        finally:
+            # 4. Restore alert_only agency
+            await client.patch(
+                "/api/v1/quality/loops/retrieval_tuning/agency",
+                headers=h, json={"agency": "alert_only"},
+            )
