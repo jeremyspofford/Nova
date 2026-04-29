@@ -22,6 +22,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 COPY orchestrator/app/ app/
 
+# Quality benchmark fixtures — loaded by app.quality_router via parents[2]
+# from /app/app/quality_router.py, which resolves to /benchmarks here.
+COPY benchmarks/ /benchmarks/
+
 EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

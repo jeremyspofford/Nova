@@ -3,15 +3,26 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from uuid import uuid4
 
 import httpx
 from app.auth import AdminDep
 from app.db import get_pool
+from app.quality_loop.cases import BenchmarkCase, load_cases
+from app.quality_loop.score import SCORER_REGISTRY
+from app.quality_loop.snapshot import capture_snapshot
+from app.quality_loop.teardown import teardown_benchmark_engrams
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 quality_router = APIRouter(tags=["quality"])
+
+# Cases directory — relative to /app/app/quality_router.py inside the container,
+# parents[2] is /, so /benchmarks/quality/cases. Locally:
+# orchestrator/app/quality_router.py → parents[2] is the repo root.
+_CASES_DIR = Path(__file__).resolve().parents[2] / "benchmarks" / "quality" / "cases"
 
 
 class ScoreBucket(BaseModel):
@@ -161,194 +172,339 @@ async def get_quality_summary(
     }
 
 
-@quality_router.post("/api/v1/benchmarks/run-quality", status_code=202)
-async def run_quality_benchmark(
+@quality_router.post("/api/v1/quality/benchmarks/run", status_code=202)
+async def run_quality_benchmark_v2(
     _admin: AdminDep,
     category: str | None = None,
 ):
-    """Kick off a quality benchmark run as a background task.
+    """Kick off a fixture-driven quality benchmark run.
 
-    Seeds test engrams, runs conversations, scores results, and writes
-    to quality_benchmark_runs. Returns run_id for tracking.
+    Captures a config snapshot, loads cases from
+    benchmarks/quality/cases/*.yaml, runs each in-process via
+    run_agent_turn, scores against the unified vocabulary, and tears
+    down seeded engrams in a finally block. Returns run_id immediately;
+    actual work runs in a background task.
     """
     pool = get_pool()
+
+    snapshot_id, _ = await capture_snapshot("benchmark_run")
 
     async with pool.acquire() as conn:
         run_id = await conn.fetchval(
             """
-            INSERT INTO quality_benchmark_runs (status, metadata)
-            VALUES ('running', $1)
+            INSERT INTO quality_benchmark_runs
+                (status, metadata, config_snapshot_id, vocabulary_version)
+            VALUES ('running', $1::jsonb, $2, 2)
             RETURNING id::text
             """,
-            {"category_filter": category},
+            json.dumps({"category_filter": category}),
+            snapshot_id,
         )
 
-    # Run benchmark in background
-    asyncio.create_task(_run_benchmark_background(run_id, category))
-
+    asyncio.create_task(_run_benchmark_v2(run_id, category))
     return {"run_id": run_id, "status": "running"}
 
 
-async def _run_benchmark_background(run_id: str, category: str | None = None):
-    """Execute benchmark cases and post results. Runs as a background task."""
-    import uuid as _uuid
+@quality_router.post("/api/v1/benchmarks/run-quality", status_code=202)
+async def run_quality_benchmark_legacy(
+    _admin: AdminDep,
+    category: str | None = None,
+):
+    """Legacy alias. Will be removed once dashboard migrates."""
+    return await run_quality_benchmark_v2(_admin, category)
 
-    # Use container-internal URLs
-    orch_base = "http://localhost:8000"
-    memory_base = "http://memory-service:8002"
-    # Use the current (possibly rotated) admin secret rather than the env fallback
-    from app.auth import get_admin_secret
-    admin_headers = {"X-Admin-Secret": await get_admin_secret()}
 
-    # Inline benchmark cases (benchmarks package isn't in the container)
-    cases = [
-        {"name": "simple_preference_recall", "category": "factual_recall", "seed_engrams": [{"content": "The user's favorite programming language is Rust", "source_type": "chat"}], "messages": ["What's my favorite programming language?"], "expect_memory_hit": True},
-        {"name": "entity_recall", "category": "factual_recall", "seed_engrams": [{"content": "Nova is deployed on a machine with an AMD RX 7900 XTX GPU", "source_type": "chat"}], "messages": ["What GPU does my Nova machine have?"], "expect_memory_hit": True},
-        {"name": "preference_update", "category": "contradiction", "seed_engrams": [{"content": "The user prefers Python for all backend work", "source_type": "chat"}, {"content": "The user has switched to Go for backend services", "source_type": "chat"}], "messages": ["What language do I prefer for backend work?"], "expect_memory_hit": True},
-        {"name": "health_check_tool", "category": "tool_selection", "seed_engrams": [], "messages": ["Is the memory service healthy right now?"], "expect_tool_call": "check_service_health"},
-        {"name": "unknown_topic", "category": "hallucination", "seed_engrams": [], "messages": ["What's my cat's name?"], "expect_no_hallucination": True},
-        {"name": "recent_work_recall", "category": "temporal", "seed_engrams": [{"content": "Last week the user was debugging the cortex thinking loop", "source_type": "chat"}], "messages": ["What was I working on last week?"], "expect_memory_hit": True},
-    ]
-    if category:
-        cases = [c for c in cases if c["category"] == category]
+# ── Tool-call instrumentation ─────────────────────────────────────────────────
+# run_agent_turn does not surface tool_calls in the returned TaskResult, so we
+# patch app.tools.execute_tool for the duration of a benchmark case to record
+# tool invocations. Benchmarks run serially, so a module-level dict keyed by
+# session_id is safe.
+_BENCHMARK_TOOLS_USED: dict[str, list[str]] = {}
 
-    results = {
-        "run_id": run_id,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "cases": [],
-        "category_scores": {},
-    }
 
+class _ToolTracker:
+    """Async context manager that records tool calls per session_id."""
+
+    def __init__(self, session_id: str) -> None:
+        self.session_id = session_id
+        self._original = None
+
+    async def __aenter__(self) -> "_ToolTracker":
+        from app.agents import runner as runner_mod
+        _BENCHMARK_TOOLS_USED[self.session_id] = []
+        self._original = runner_mod.execute_tool
+
+        async def _tracking_execute_tool(name: str, arguments: dict) -> str:  # type: ignore[no-redef]
+            try:
+                _BENCHMARK_TOOLS_USED[self.session_id].append(name)
+            except Exception:  # noqa: BLE001 — never block real tool calls
+                pass
+            return await self._original(name, arguments)
+
+        runner_mod.execute_tool = _tracking_execute_tool
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        from app.agents import runner as runner_mod
+        if self._original is not None:
+            runner_mod.execute_tool = self._original
+
+    def calls(self) -> list[str]:
+        return list(_BENCHMARK_TOOLS_USED.get(self.session_id, []))
+
+
+async def _run_benchmark_v2(run_id: str, category: str | None) -> None:
+    """Execute fixture-driven benchmark cases, score against unified vocabulary."""
     pool = get_pool()
+    cases = load_cases(_CASES_DIR, category=category)
+
+    if not cases:
+        await _mark_failed(pool, run_id, "no benchmark cases found")
+        return
+
+    seeded_engram_ids: list[str] = []
+    case_results: list[dict] = []
+    error_summary_parts: list[str] = []
 
     try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            for case in cases:
-                log.info("Benchmark [%s]: running %s", run_id[:8], case["name"])
-                tag = str(_uuid.uuid4())[:8]
-
-                # Seed engrams
-                engram_ids = []
-                for engram in case.get("seed_engrams", []):
-                    r = await client.post(
-                        f"{memory_base}/api/v1/engrams/ingest",
-                        json={
-                            "raw_text": f"[benchmark:{tag}] {engram['content']}",
-                            "source_type": engram.get("source_type", "chat"),
-                        },
-                    )
-                    if r.status_code == 201:
-                        engram_ids.extend(r.json().get("engram_ids", []))
-                    await asyncio.sleep(2)
-
-                # Run conversation
-                agents_r = await client.get(f"{orch_base}/api/v1/agents", headers=admin_headers)
-                agent_id = None
-                if agents_r.status_code == 200:
-                    agents_list = agents_r.json()
-                    if isinstance(agents_list, list):
-                        for a in agents_list:
-                            if a.get("name", "").lower() in ("chat", "default", "nova"):
-                                agent_id = a["id"]
-                                break
-                        if not agent_id and agents_list:
-                            agent_id = agents_list[0].get("id")
-
-                responses = []
-                if agent_id:
-                    for msg in case.get("messages", []):
-                        r = await client.post(
-                            f"{orch_base}/api/v1/tasks",
-                            json={"agent_id": agent_id, "messages": [{"role": "user", "content": msg}]},
-                            headers=admin_headers,
-                            timeout=120,
-                        )
-                        if r.status_code in (200, 201, 202):
-                            task_id = r.json().get("task_id", r.json().get("id"))
-                            for _ in range(60):
-                                sr = await client.get(f"{orch_base}/api/v1/tasks/{task_id}", headers=admin_headers)
-                                if sr.status_code == 200:
-                                    task = sr.json()
-                                    if task.get("status") in ("complete", "failed", "cancelled", "clarification_needed", "pending_human_review"):
-                                        responses.append(task)
-                                        break
-                                await asyncio.sleep(2)
-
-                # Score
-                scores = {}
-                for resp in responses:
-                    output = resp.get("final_output", resp.get("output", ""))
-                    if isinstance(output, dict):
-                        output = json.dumps(output)
-                    output_lower = (output or "").lower()
-
-                    if case.get("expect_memory_hit"):
-                        seeded_terms = []
-                        for engram in case.get("seed_engrams", []):
-                            words = engram["content"].lower().split()
-                            seeded_terms.extend([w for w in words if len(w) > 4][:3])
-                        hits = sum(1 for t in seeded_terms if t in output_lower)
-                        scores["memory_hit"] = min(1.0, hits / max(len(seeded_terms), 1))
-
-                    if case.get("expect_tool_call"):
-                        tools = resp.get("metadata", {}).get("tools_used", [])
-                        scores["tool_selection"] = 1.0 if case["expect_tool_call"] in tools else 0.0
-
-                    if case.get("expect_no_hallucination"):
-                        hedging = any(p in output_lower for p in ["don't know", "don't have", "no information", "not sure", "can't find", "no memory"])
-                        scores["no_hallucination"] = 1.0 if hedging else 0.0
-
-                results["cases"].append({
-                    "name": case["name"],
-                    "category": case["category"],
-                    "scores": scores,
-                    "composite": sum(scores.values()) / max(len(scores), 1),
-                    "seeded_engrams": len(engram_ids),
-                    "responses": len(responses),
+        for case in cases:
+            log.info("Benchmark[%s]: running %s", run_id[:8], case.name)
+            try:
+                case_seeded, case_scores = await _run_single_case(case, run_id)
+                seeded_engram_ids.extend(case_seeded)
+                case_results.append({
+                    "name": case.name,
+                    "category": case.category,
+                    "scores": case_scores,
+                    "composite": (
+                        sum(case_scores.values()) / len(case_scores)
+                        if case_scores else 0.0
+                    ),
+                })
+            except Exception as e:
+                log.exception("Case %s failed", case.name)
+                error_summary_parts.append(f"{case.name}: {e}")
+                case_results.append({
+                    "name": case.name,
+                    "category": case.category,
+                    "scores": {},
+                    "composite": 0.0,
+                    "error": str(e)[:200],
                 })
 
-        # Aggregate
-        by_cat: dict[str, list[float]] = {}
-        for cr in results["cases"]:
-            by_cat.setdefault(cr["category"], []).append(cr["composite"])
-        results["category_scores"] = {cat: round(sum(s) / len(s), 4) for cat, s in by_cat.items()}
-        all_composites = [cr["composite"] for cr in results["cases"]]
-        composite = round((sum(all_composites) / len(all_composites)) * 100, 2) if all_composites else 0.0
-        results["completed_at"] = datetime.now(timezone.utc).isoformat()
+        # Aggregate dimension_scores by averaging across cases
+        dim_totals: dict[str, list[float]] = {}
+        for cr in case_results:
+            for dim, score in cr["scores"].items():
+                dim_totals.setdefault(dim, []).append(score)
+        dimension_scores = {
+            dim: round(sum(scores) / len(scores), 4)
+            for dim, scores in dim_totals.items()
+        }
 
-        # Write results to DB
+        all_composites = [cr["composite"] for cr in case_results if cr.get("scores")]
+        composite = (
+            round((sum(all_composites) / len(all_composites)) * 100, 2)
+            if all_composites else 0.0
+        )
+
         async with pool.acquire() as conn:
             await conn.execute(
                 """
                 UPDATE quality_benchmark_runs
-                SET status = 'complete',
+                SET status = 'completed',
                     completed_at = NOW(),
                     composite_score = $2,
-                    category_scores = $3,
-                    case_results = $4
-                WHERE id = CAST($1 AS uuid)
+                    dimension_scores = $3::jsonb,
+                    case_results = $4::jsonb,
+                    error_summary = $5
+                WHERE id = $1::uuid
                 """,
-                run_id, composite,
-                results["category_scores"],
-                results["cases"],
+                run_id,
+                composite,
+                json.dumps(dimension_scores),
+                json.dumps(case_results),
+                "; ".join(error_summary_parts) if error_summary_parts else None,
             )
-        log.info("Benchmark [%s] complete: %.1f%% composite", run_id[:8], composite)
+        log.info("Benchmark[%s] completed: %.1f composite", run_id[:8], composite)
 
-    except Exception as e:
-        log.exception("Benchmark [%s] failed: %s", run_id[:8], e)
-        try:
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    UPDATE quality_benchmark_runs
-                    SET status = 'failed', completed_at = NOW(),
-                        metadata = metadata || $2
-                    WHERE id = CAST($1 AS uuid)
-                    """,
-                    run_id, {"error": str(e)},
+    finally:
+        if seeded_engram_ids:
+            deleted = await teardown_benchmark_engrams(seeded_engram_ids)
+            log.info(
+                "Benchmark[%s] teardown: %d/%d engrams deleted",
+                run_id[:8], deleted, len(seeded_engram_ids),
+            )
+
+
+async def _run_single_case(
+    case: BenchmarkCase,
+    run_id: str,
+) -> tuple[list[str], dict[str, float]]:
+    """Seed engrams, run conversation, score per-dimension.
+
+    Returns (seeded_engram_ids, scores_by_dimension).
+    """
+    from app.agents.runner import run_agent_turn
+    from app.model_resolver import resolve_default_model
+    from app.store import ensure_primary_agent
+
+    tag = run_id[:8]
+    seeded_ids: list[str] = []
+
+    # Seed benchmark engrams via the memory-service ingestion endpoint.
+    async with httpx.AsyncClient(timeout=120) as client:
+        for engram in case.seed_engrams:
+            r = await client.post(
+                "http://memory-service:8002/api/v1/engrams/ingest",
+                json={
+                    "raw_text": f"[benchmark:{tag}] {engram['content']}",
+                    "source_type": engram.get("source_type", "chat"),
+                    "source_metadata": {"benchmark_run_id": run_id},
+                },
+            )
+            if r.status_code in (200, 201):
+                seeded_ids.extend(r.json().get("engram_ids", []))
+            # Give the ingestion worker a beat to drain before the next ingest.
+            await asyncio.sleep(1)
+
+    # Resolve a real agent — _build_nova_context and other helpers walk the
+    # agent registry, so we cannot use a synthetic ID. ensure_primary_agent
+    # is idempotent and returns the existing Nova primary if one exists.
+    primary = await ensure_primary_agent()
+    agent_id = str(primary.id)
+    model = primary.config.model or await resolve_default_model()
+    system_prompt = primary.config.system_prompt
+
+    # One disposable session per case so memory cache and engram queue
+    # don't conflate cases. Tool tracker keys off this same session_id.
+    session_id = f"benchmark-{run_id[:8]}-{case.name}"
+
+    responses: list[dict] = []
+    async with _ToolTracker(session_id) as tracker:
+        # Build conversation incrementally so multi-turn cases feed prior
+        # exchanges back to the model.
+        messages: list[dict] = []
+        for msg in case.conversation:
+            user_msg = msg.get("user", "")
+            if not user_msg:
+                continue
+            messages.append({"role": "user", "content": user_msg})
+            task_id = uuid4()
+            try:
+                result = await run_agent_turn(
+                    agent_id=agent_id,
+                    task_id=task_id,
+                    session_id=session_id,
+                    messages=messages,
+                    model=model,
+                    system_prompt=system_prompt,
+                    api_key_id=None,
+                    explicit_model=True,  # don't reroute via classifier
+                    agent_name=primary.config.name,
                 )
-        except Exception:
-            pass
+            except Exception as e:
+                log.warning("Benchmark[%s] case %s turn failed: %s",
+                            run_id[:8], case.name, e)
+                break
+
+            response_text = result.response or ""
+            responses.append({
+                "content": response_text,
+                "status": result.status.value if result.status else None,
+                "error": result.error,
+                "tools_used": tracker.calls(),
+            })
+            # Append the assistant turn so the next user message has context.
+            messages.append({"role": "assistant", "content": response_text})
+
+        tools_used = tracker.calls()
+
+    # Score per declared dimension using the last response.
+    last_response = responses[-1] if responses else {}
+    response_text = last_response.get("content", "") or ""
+    response_metadata = {"tools_used": tools_used}
+
+    last_user_msg = ""
+    if case.conversation:
+        last_user_msg = case.conversation[-1].get("user", "") or ""
+
+    scores: dict[str, float] = {}
+    for dim, rule in case.scoring.items():
+        if dim not in SCORER_REGISTRY:
+            log.warning("unknown dimension in case %s: %s", case.name, dim)
+            continue
+        mode, fn = SCORER_REGISTRY[dim]
+        try:
+            if dim == "memory_relevance":
+                # Retrieved engram IDs aren't surfaced from run_agent_turn
+                # today; intersection with seeded_ids approximates retrieval.
+                # Until the runner threads engram_ids back, we treat any
+                # response that mentions the seed text as a "hit" via
+                # downstream dimensions; here we pass empty retrieved.
+                scores[dim] = await fn(rule, [], seeded_ids)
+            elif dim == "instruction_adherence":
+                scores[dim] = await fn(rule, last_user_msg, response_text)
+            elif dim == "tool_accuracy":
+                scores[dim] = fn(rule, response_metadata)
+            elif mode == "async":
+                scores[dim] = await fn(rule, response_text)
+            else:
+                scores[dim] = fn(rule, response_text)
+        except Exception as e:
+            log.warning("scorer %s failed for %s: %s", dim, case.name, e)
+            scores[dim] = 0.0
+
+    return seeded_ids, scores
+
+
+async def _mark_failed(pool, run_id: str, error: str) -> None:
+    """Mark a benchmark run as failed with an error message."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE quality_benchmark_runs
+            SET status = 'failed', completed_at = NOW(), error_summary = $2
+            WHERE id = $1::uuid
+            """,
+            run_id, error,
+        )
+
+
+@quality_router.get("/api/v1/quality/benchmarks/runs")
+async def list_benchmark_runs(
+    _admin: AdminDep,
+    limit: int = Query(10, ge=1, le=50),
+):
+    """List recent benchmark runs (v2 path)."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id::text, started_at, completed_at, status,
+                   composite_score, dimension_scores, case_results,
+                   metadata, config_snapshot_id::text, error_summary
+            FROM quality_benchmark_runs
+            ORDER BY started_at DESC
+            LIMIT $1
+            """,
+            limit,
+        )
+    return [
+        {
+            "id": r["id"],
+            "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+            "completed_at": r["completed_at"].isoformat() if r["completed_at"] else None,
+            "status": r["status"],
+            "composite_score": float(r["composite_score"]) if r["composite_score"] else None,
+            "dimension_scores": r["dimension_scores"] or {},
+            "case_results": r["case_results"] or [],
+            "metadata": r["metadata"] or {},
+            "config_snapshot_id": r["config_snapshot_id"],
+            "error_summary": r["error_summary"],
+        }
+        for r in rows
+    ]
 
 
 @quality_router.post("/api/v1/benchmarks/quality-results")
