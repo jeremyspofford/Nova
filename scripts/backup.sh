@@ -5,11 +5,34 @@
 # Creates a database backup when the Recovery UI is unavailable.
 # For normal operation, use the dashboard: Settings > Backups or /recovery
 #
-# Usage:
-#   ./scripts/backup.sh                  # Backup to ./backups/
-#   BACKUP_DIR=/mnt/nas ./scripts/backup.sh  # Custom location
-#
 set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Nova Emergency Backup Script
+
+Creates a tarball containing a Postgres dump (and any associated state) for
+disaster recovery. For routine backups use the Recovery UI in the dashboard
+(Settings → System → Recovery & Services); this script is the offline /
+emergency path.
+
+Usage:
+  ./scripts/backup.sh
+  BACKUP_DIR=/mnt/nas ./scripts/backup.sh
+
+Environment:
+  BACKUP_DIR     Directory to write the tarball (default: ./backups)
+
+Options:
+  --help, -h     Show this help message and exit
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h|-help) usage; exit 0 ;;
+  esac
+done
 
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 TIMESTAMP=$(date -u +%Y-%m-%d_%H-%M-%S)

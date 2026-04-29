@@ -1,8 +1,37 @@
 #!/usr/bin/env bash
-# Nova Platform setup script (non-interactive backend)
+# Nova Platform install script (non-interactive backend)
 # Called by ./install wizard or directly. Reads .env for configuration.
 # Reads models.yaml to determine which Ollama models to pull on startup.
 set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Nova Platform Install (non-interactive backend)
+
+Backend script invoked by ./install (the user-facing wizard) or directly
+for non-interactive setup. Reads .env for configuration and models.yaml
+for the Ollama model pull list, then brings up every Nova service.
+
+Most users should run ./install instead — this script assumes .env is
+already configured.
+
+Usage:
+  ./scripts/install.sh
+  ./scripts/install.sh --derive-mode-only
+
+Options:
+  --derive-mode-only   Run only the NOVA_INFERENCE_MODE → COMPOSE_PROFILES /
+                       LLM_ROUTING_STRATEGY derivation, write the result to
+                       \$ENV_FILE, and exit. Used by the test suite.
+  --help, -h           Show this help message and exit
+
+Environment:
+  ENV_FILE             Path to .env (default: <repo>/.env). Overridable for
+                       test isolation.
+  NOVA_INFERENCE_MODE  hybrid | local-only | cloud-only. If unset and
+                       interactive, the script prompts the user.
+USAGE
+}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -18,6 +47,7 @@ DERIVE_MODE_ONLY=false
 for arg in "$@"; do
   case "$arg" in
     --derive-mode-only) DERIVE_MODE_ONLY=true ;;
+    --help|-h|-help)    usage; exit 0 ;;
   esac
 done
 

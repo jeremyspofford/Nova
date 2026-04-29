@@ -1,7 +1,35 @@
 #!/usr/bin/env bash
-# Nova AI Platform — Interactive Setup Wizard
+# Nova AI Platform — Interactive Install Wizard
 # Compatible with bash 3.2+ (macOS default). No associative arrays.
 set -uo pipefail
+
+usage() {
+  cat <<USAGE
+Nova AI Platform — Install Wizard
+
+Interactive setup for Nova. Walks you through:
+  • Prerequisites check (Docker, Docker Compose, ports)
+  • Inference mode selection (hybrid / local-only / cloud-only)
+  • Optional cloud-provider API key entry (Groq, Cerebras, Gemini, ChatGPT)
+  • Remote access configuration (Cloudflare Tunnel or Tailscale, optional)
+  • Writing .env, hardware detection, image build, model pulls, service start
+
+Run from the cloned repo root:
+  ./install
+
+After install, change inference mode / target / models from the dashboard
+(Settings → AI & Models). To remove Nova entirely later: ./uninstall.
+
+Options:
+  --help, -h     Show this help message and exit
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h|-help) usage; exit 0 ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="${SCRIPT_DIR}"

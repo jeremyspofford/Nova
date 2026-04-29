@@ -5,11 +5,32 @@
 # Restores a database backup when the Recovery UI is unavailable.
 # For normal operation, use the dashboard: /recovery
 #
-# Usage:
-#   ./scripts/restore.sh                               # Lists available backups
-#   ./scripts/restore.sh ./backups/nova-backup-*.tar.gz # Restore specific backup
-#
 set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Nova Emergency Restore Script
+
+Restores a Postgres dump created by ./scripts/backup.sh. For routine
+restores use the Recovery UI in the dashboard; this is the offline path.
+
+Usage:
+  ./scripts/restore.sh                                   List available backups
+  ./scripts/restore.sh ./backups/nova-backup-<TS>.tar.gz Restore specific tarball
+
+Environment:
+  BACKUP_DIR     Directory to look for backup tarballs (default: ./backups)
+
+Options:
+  --help, -h     Show this help message and exit
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h|-help) usage; exit 0 ;;
+  esac
+done
 
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 

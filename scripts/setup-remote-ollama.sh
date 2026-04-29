@@ -1,8 +1,32 @@
 #!/usr/bin/env bash
 # Nova AI Platform — Remote Ollama Setup
 # Run this ON your GPU machine to prepare it as a remote AI inference server.
-# Usage: bash setup-remote-ollama.sh
 set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Nova Remote Ollama Setup
+
+Run this ON the GPU machine you want Nova to use as a remote inference
+server. The script installs Ollama (if missing), configures it to listen
+on all interfaces (so Nova can reach it across the LAN), pulls Nova's
+default models, and prints the URL to paste into Nova's Settings →
+AI & Models → External target.
+
+Usage:
+  curl -fsSL https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh | bash
+  bash ./scripts/setup-remote-ollama.sh
+
+Options:
+  --help, -h     Show this help message and exit
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h|-help) usage; exit 0 ;;
+  esac
+done
 
 BOLD="\033[1m"
 GREEN="\033[32m"

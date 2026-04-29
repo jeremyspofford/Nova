@@ -10,15 +10,23 @@ Built by [Aria Labs](https://arialabs.ai).
 
 You need [Docker Desktop](https://docker.com/products/docker-desktop) (which includes Docker Compose) and [Git](https://git-scm.com/). Nothing else — Python, Node.js, Postgres, Redis, and Ollama all run inside containers.
 
-Copy this whole block and paste it in your terminal:
+**Fastest** — clone and launch the wizard in one command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/arialabs/nova/main/scripts/bootstrap.sh | bash
+```
+
+**Or** if you'd rather see the source before running anything:
 
 ```bash
 git clone https://github.com/arialabs/nova.git
 cd nova
-./setup
+./install
 ```
 
-The `./setup` wizard will:
+Either way lands you in the same install wizard.
+
+The `./install` wizard will:
 
 1. Check Docker is installed and running
 2. Ask how you want to use Nova:

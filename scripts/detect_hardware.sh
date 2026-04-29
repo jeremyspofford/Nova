@@ -1,9 +1,32 @@
 #!/usr/bin/env bash
 # Nova Hardware Detection Script
 # Detects GPU, CPU, RAM, and disk and writes to a JSON file.
-# Usage: ./detect_hardware.sh [output_path]
-# Default output: data/hardware.json
 set -euo pipefail
+
+usage() {
+  cat <<USAGE
+Nova Hardware Detection
+
+Detects GPU vendor (NVIDIA / AMD ROCm), GPU model and VRAM per device,
+Docker GPU runtime availability, CPU cores, total RAM, and free disk
+space. Writes the result as JSON for the recovery service to consume.
+
+Usage:
+  ./scripts/detect_hardware.sh [output_path]
+
+Arguments:
+  output_path    Where to write hardware.json (default: <repo>/data/hardware.json)
+
+Options:
+  --help, -h     Show this help message and exit
+USAGE
+}
+
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h|-help) usage; exit 0 ;;
+  esac
+done
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
