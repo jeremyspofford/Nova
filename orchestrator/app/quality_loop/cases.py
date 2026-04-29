@@ -46,6 +46,11 @@ def load_cases(cases_dir: Path, category: str | None = None) -> list[BenchmarkCa
             data = yaml.safe_load(yaml_path.read_text()) or []
         except yaml.YAMLError as e:
             raise ValueError(f"malformed YAML in {yaml_path}: {e}") from e
+        if not isinstance(data, list):
+            raise ValueError(
+                f"{yaml_path}: expected a YAML list of cases "
+                f"(did you forget the leading '- ' on the first case?)"
+            )
         for raw in data:
             _validate_case(raw, yaml_path)
             cases.append(

@@ -7,7 +7,7 @@ import pytest
 from app.quality_loop.cases import load_cases, BenchmarkCase
 
 
-def test_load_cases_finds_all_seven_categories(tmp_path):
+def test_load_cases_finds_all_seven_categories():
     """Loader walks the cases dir and returns one list per category."""
     cases_dir = Path(__file__).resolve().parents[2] / "benchmarks" / "quality" / "cases"
     cases = load_cases(cases_dir)
@@ -44,4 +44,12 @@ def test_invalid_yaml_raises(tmp_path):
     bad = tmp_path / "broken.yaml"
     bad.write_text("- name: missing_required_fields\n")
     with pytest.raises((ValueError, KeyError)):
+        load_cases(tmp_path)
+
+
+def test_dict_yaml_raises_clear_error(tmp_path):
+    """Top-level dict (instead of list) raises a clear error."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("name: lone_case\ncategory: factual_recall\nconversation: []\nscoring: {}\n")
+    with pytest.raises(ValueError, match="expected a YAML list of cases"):
         load_cases(tmp_path)
