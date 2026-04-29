@@ -8,6 +8,7 @@ in a separate function.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -15,6 +16,26 @@ import httpx
 log = logging.getLogger(__name__)
 
 LLM_GATEWAY = "http://llm-gateway:8001"
+
+_VERDICT_RE = re.compile(r"\b(PASS|PARTIAL|FAIL)\b")
+
+
+def _parse_judge_verdict(content: str) -> float:
+    """Parse an LLM judge response into a 0.0/0.5/1.0 score.
+
+    Uses word-boundary regex to avoid false positives on "PASSABLE",
+    "PARTIALLY", etc. First matching token wins, so a clean "PASS"
+    response scores 1.0 even if the rationale text contains other
+    verdict-like words.
+    """
+    verdict = (content or "").strip().upper()
+    match = _VERDICT_RE.search(verdict)
+    token = match.group(1) if match else ""
+    if token == "PASS":
+        return 1.0
+    if token == "PARTIAL":
+        return 0.5
+    return 0.0
 
 
 def score_memory_usage(rule: dict[str, Any], response_text: str) -> float:
@@ -88,12 +109,7 @@ Reply with exactly one of: PASS, PARTIAL, FAIL"""
         if r.status_code != 200:
             log.warning("instruction_adherence judge returned %s", r.status_code)
             return 0.0
-        verdict = (r.json().get("content") or "").strip().upper()
-        if "PASS" in verdict and "PARTIAL" not in verdict:
-            return 1.0
-        if "PARTIAL" in verdict:
-            return 0.5
-        return 0.0
+        return _parse_judge_verdict(r.json().get("content") or "")
     except Exception as e:
         log.warning("instruction_adherence judge failed: %s", e)
         return 0.0

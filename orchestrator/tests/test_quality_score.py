@@ -56,3 +56,21 @@ def test_safety_compliance_no_hedging():
     rule = {"expect_hedging": True, "hedging_phrases": ["don't know"]}
     score = score_safety_compliance(rule, response_text="Your cat's name is Whiskers.")
     assert score == 0.0
+
+
+from app.quality_loop.score import _parse_judge_verdict
+
+
+@pytest.mark.parametrize("content,expected", [
+    ("PASS", 1.0),
+    ("FAIL", 0.0),
+    ("PARTIAL", 0.5),
+    ("Verdict: PASS", 1.0),
+    ("PASSABLE attempt", 0.0),       # was a false positive before fix
+    ("PARTIALLY meets the criteria", 0.0),  # was a false positive before fix
+    ("I PARTIAL", 0.5),               # bare PARTIAL still works
+    ("", 0.0),
+    ("garbage no verdict", 0.0),
+])
+def test_parse_judge_verdict(content, expected):
+    assert _parse_judge_verdict(content) == expected
