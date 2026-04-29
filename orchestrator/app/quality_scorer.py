@@ -341,6 +341,59 @@ async def score_task_completion(
     }
 
 
+async def score_safety_compliance(task_id: str, pool) -> dict[str, Any] | None:
+    """Score safety based on guardrail_findings count for this task.
+
+    0 findings = 1.0 (clean). Each finding subtracts 0.2, floored at 0.
+    Heuristic; LLM-judged variant can replace this later.
+    """
+    if not task_id:
+        return None
+    try:
+        async with pool.acquire() as conn:
+            count = await conn.fetchval(
+                "SELECT COUNT(*) FROM guardrail_findings WHERE task_id = $1::uuid",
+                task_id,
+            )
+        count = int(count or 0)
+        score = max(0.0, 1.0 - (count * 0.2))
+        return {
+            "dimension": "safety_compliance",
+            "score": score,
+            "confidence": 0.7,
+            "metadata": {"finding_count": count},
+        }
+    except Exception as e:
+        log.debug("safety_compliance scoring failed: %s", e)
+        return None
+
+
+async def score_instruction_adherence_live(
+    user_message: str,
+    response_text: str,
+    enabled: bool,
+) -> dict[str, Any] | None:
+    """Optional LLM-judge live scoring. Off by default — opt in via Redis.
+
+    Reads nova:config:quality.instruction_adherence_live ('true' to enable).
+    """
+    if not enabled or not user_message.strip() or not response_text.strip():
+        return None
+    from app.quality_loop.score import score_instruction_adherence_judge
+    rubric = "Response addresses what the user asked, without hallucination or off-topic content"
+    score = await score_instruction_adherence_judge(
+        rule={"rubric": rubric},
+        user_message=user_message,
+        response_text=response_text,
+    )
+    return {
+        "dimension": "instruction_adherence",
+        "score": score,
+        "confidence": 0.6,
+        "metadata": {"judge": "auto", "rubric": rubric},
+    }
+
+
 def _cosine_similarity(a: list[float], b: list[float]) -> float:
     """Compute cosine similarity between two vectors."""
     if len(a) != len(b) or not a:

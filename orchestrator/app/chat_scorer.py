@@ -21,10 +21,12 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from app.quality_scorer import (
+    score_instruction_adherence_live,
     score_memory_recall,
     score_memory_relevance,
     score_memory_usage,
     score_response_coherence,
+    score_safety_compliance,
     score_tool_accuracy,
 )
 
@@ -303,7 +305,7 @@ async def _process_new_messages() -> int:
                 # agent_sessions has no conversation_id; join through tasks table
                 session_output = None
                 session_row = await conn.fetchrow(
-                    """SELECT s.output FROM agent_sessions s
+                    """SELECT s.output, t.id AS task_id FROM agent_sessions s
                        JOIN tasks t ON t.id = s.task_id
                        WHERE t.conversation_id = $1
                        ORDER BY s.completed_at DESC NULLS LAST LIMIT 1""",
@@ -322,6 +324,41 @@ async def _process_new_messages() -> int:
                     user_text, assistant_text, had_tool_calls=had_tools
                 )
                 quality_scores.append(coherence)
+
+                # Safety compliance — derived from guardrail_findings on the matched task
+                task_id_for_scoring = None
+                if session_row and session_row.get("task_id"):
+                    task_id_for_scoring = str(session_row["task_id"])
+                elif assistant_row.get("metadata"):
+                    meta = assistant_row["metadata"]
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
+                    task_id_for_scoring = meta.get("task_id")
+
+                if task_id_for_scoring:
+                    safety = await score_safety_compliance(task_id_for_scoring, pool)
+                    quality_scores.append(safety)
+
+                # Instruction adherence — opt-in via Redis runtime config (db1)
+                try:
+                    import redis.asyncio as aioredis
+                    from app.config_sync import _gateway_redis_url
+                    _r = aioredis.from_url(_gateway_redis_url(), decode_responses=True)
+                    try:
+                        flag = await _r.get("nova:config:quality.instruction_adherence_live")
+                    finally:
+                        await _r.aclose()
+                    enabled = flag is not None and flag.strip().lower() in ("true", "1", "yes")
+                except Exception:
+                    enabled = False
+
+                if enabled:
+                    adherence = await score_instruction_adherence_live(
+                        user_message=user_text,
+                        response_text=assistant_text,
+                        enabled=True,
+                    )
+                    quality_scores.append(adherence)
 
                 written = await _write_quality_scores(
                     conn, str(conv_id), str(assistant_row["id"]), quality_scores
