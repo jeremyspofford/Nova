@@ -76,6 +76,20 @@ def _select_goal(stale_goals: list[dict], scheduled_goal_ids: list[str]) -> dict
     return stale_goals[idx]
 
 
+async def _all_children_terminated(parent_goal_id: str) -> bool:
+    """True when every child goal has terminal status (completed | failed | cancelled)."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT
+                  COUNT(*) AS total,
+                  COUNT(*) FILTER (WHERE status IN ('completed', 'failed', 'cancelled')) AS done
+               FROM goals WHERE parent_goal_id = $1::uuid""",
+            parent_goal_id,
+        )
+    return row["total"] > 0 and row["total"] == row["done"]
+
+
 @dataclass
 class CycleState:
     """Accumulated state for one cycle."""
@@ -537,6 +551,25 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
         if spec:
             return f"Speccing phase: goal {goal_id} spec generated and transitioned to review"
         return f"Speccing phase: goal {goal_id} failed (LLM unavailable or missing scope)"
+    elif maturation_phase == "building":
+        from .maturation.building import run_building
+        msg = await run_building(goal_id)
+        return msg
+    elif maturation_phase == "waiting":
+        # Parent waiting on children. Don't dispatch new work for this goal directly;
+        # instead check if all children have terminated, and if so advance to verifying.
+        ready = await _all_children_terminated(goal_id)
+        if ready:
+            pool = get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE goals SET maturation_status = 'verifying', updated_at = NOW() WHERE id = $1::uuid",
+                    goal_id,
+                )
+            from .journal import emit_journal
+            await emit_journal(goal_id, "waiting.children_complete", {})
+            return f"Children all terminated → goal {goal_id} advancing to verifying"
+        return f"Waiting on children for goal {goal_id} (no-op cycle)"
     elif maturation_phase == "verifying":
         from .maturation.verifying import run_verifying
         ok = await run_verifying(goal_id)
