@@ -28,9 +28,17 @@ def test_speccing_produces_spec_and_transitions_to_review():
             "estimated_files_changed": 6,
             "summary": "Adds a webhook service touching auth and dashboard.",
         }
+        # Force review_policy='all' so the goal always lands in review after
+        # speccing — regardless of cost-based auto-approval introduced in the
+        # decomposition feature. This test's intent is the speccing → review
+        # transition specifically.
         httpx.patch(
             f"{BASE}/goals/{gid}",
-            json={"maturation_status": "speccing", "scope_analysis": scope_seed},
+            json={
+                "maturation_status": "speccing",
+                "scope_analysis": scope_seed,
+                "review_policy": "all",
+            },
             headers=HEADERS,
         )
         detail: dict = {}
