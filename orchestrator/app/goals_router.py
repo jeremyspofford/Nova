@@ -461,7 +461,8 @@ async def delete_goal_comment(goal_id: UUID, comment_id: UUID, _user: UserDep):
 
 # ── Goal Maturation ──────────────────────────────────────────────────────────
 
-@goals_router.post("/api/v1/goals/{goal_id}/approve-spec")
+@goals_router.post("/api/v1/goals/{goal_id}/review/approve")
+@goals_router.post("/api/v1/goals/{goal_id}/approve-spec")  # legacy alias
 async def approve_spec(goal_id: UUID, _user: UserDep):
     """Approve a goal's spec and route into the building phase.
 
@@ -489,7 +490,8 @@ class RejectSpecRequest(BaseModel):
     feedback: str
 
 
-@goals_router.post("/api/v1/goals/{goal_id}/reject-spec")
+@goals_router.post("/api/v1/goals/{goal_id}/review/reject")
+@goals_router.post("/api/v1/goals/{goal_id}/reject-spec")  # legacy alias
 async def reject_spec(goal_id: UUID, req: RejectSpecRequest, _user: UserDep):
     """Reject a goal's spec, sending it back to speccing with feedback."""
     pool = get_pool()

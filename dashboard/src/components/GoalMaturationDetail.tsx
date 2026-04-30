@@ -8,14 +8,35 @@ import { Button } from './ui/Button'
  * Minimal goal shape needed to render the maturation detail panel. Wider
  * Goal types (e.g. the canonical `Goal` from `../api`) are assignable to this.
  */
+export interface SpecChild {
+  title: string
+  description?: string
+  hint?: string
+  estimated_cost_usd?: number
+  depends_on?: number[]
+  estimated_complexity?: string
+}
+
+export interface VerificationCommand {
+  cmd: string
+  cwd?: string | null
+  timeout_s?: number
+}
+
+export interface SuccessCriterion {
+  statement: string
+  check: string
+  check_arg: string
+}
+
 export interface GoalForMaturation {
   id: string
   maturation_status?: string | null
   scope_analysis?: unknown | null
   spec?: string | null
-  spec_children?: any[] | null
-  verification_commands?: any[] | null
-  success_criteria_structured?: any[] | null
+  spec_children?: SpecChild[] | null
+  verification_commands?: VerificationCommand[] | null
+  success_criteria_structured?: SuccessCriterion[] | null
   review_policy?: string
 }
 
@@ -46,7 +67,7 @@ export function GoalMaturationDetail({
 
   const approve = useMutation({
     mutationFn: () =>
-      apiFetch<void>(`/api/v1/goals/${goal.id}/approve-spec`, { method: 'POST' }),
+      apiFetch<void>(`/api/v1/goals/${goal.id}/review/approve`, { method: 'POST' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['goals'] })
       onSuccess?.('Spec approved.')
@@ -56,7 +77,7 @@ export function GoalMaturationDetail({
 
   const reject = useMutation({
     mutationFn: (text: string) =>
-      apiFetch<void>(`/api/v1/goals/${goal.id}/reject-spec`, {
+      apiFetch<void>(`/api/v1/goals/${goal.id}/review/reject`, {
         method: 'POST',
         body: JSON.stringify({ feedback: text }),
       }),
@@ -110,7 +131,7 @@ export function GoalMaturationDetail({
             <div>
               <div className="text-xs uppercase text-content-tertiary tracking-wide mb-2">Children Cortex plans to spawn</div>
               <div className="space-y-1.5">
-                {goal.spec_children.map((c: any, i: number) => (
+                {goal.spec_children.map((c, i) => (
                   <div key={i} className="rounded-md bg-surface-card-hover px-3 py-2 text-xs">
                     <div className="font-mono font-medium text-content-primary">
                       {i + 1}. {c.title}
@@ -120,10 +141,10 @@ export function GoalMaturationDetail({
                       <span>${(c.estimated_cost_usd || 0).toFixed(2)}</span>
                       <span>·</span>
                       <span>{c.estimated_complexity || 'unknown'}</span>
-                      {c.depends_on?.length > 0 && (
+                      {c.depends_on && c.depends_on.length > 0 && (
                         <>
                           <span>·</span>
-                          <span>depends on: {c.depends_on.map((d: number) => `#${d + 1}`).join(', ')}</span>
+                          <span>depends on: {c.depends_on.map((d) => `#${d + 1}`).join(', ')}</span>
                         </>
                       )}
                     </div>
@@ -137,7 +158,7 @@ export function GoalMaturationDetail({
             <div>
               <div className="text-xs uppercase text-content-tertiary tracking-wide mb-2">Verification commands</div>
               <ul className="text-xs font-mono space-y-1">
-                {goal.verification_commands.map((v: any, i: number) => (
+                {goal.verification_commands.map((v, i) => (
                   <li key={i} className="text-content-secondary">• {v.cmd}</li>
                 ))}
               </ul>
@@ -204,14 +225,16 @@ export function GoalMaturationDetail({
   )
 }
 
-function explainPolicy(goal: any): string {
+function explainPolicy(goal: GoalForMaturation): string {
   const policy = goal.review_policy || 'cost-above-2'
   if (policy === 'all') return 'Review policy: every level requires approval.'
-  if (policy === 'scopes-sensitive')
-    return `Review policy: scopes-sensitive — affects ${(goal.scope_analysis?.affected_scopes || []).join(', ')}.`
+  if (policy === 'scopes-sensitive') {
+    const scope = goal.scope_analysis as { affected_scopes?: string[] } | null | undefined
+    return `Review policy: scopes-sensitive — affects ${(scope?.affected_scopes || []).join(', ')}.`
+  }
   if (policy.startsWith('cost-above-')) {
     const threshold = policy.split('-').pop()
-    const cost = goal.spec_children?.reduce((a: number, c: any) => a + (c.estimated_cost_usd || 0), 0) || 0
+    const cost = goal.spec_children?.reduce((a: number, c) => a + (c.estimated_cost_usd || 0), 0) || 0
     return `Review policy: cost-above-$${threshold} — estimated $${cost.toFixed(2)} ≥ $${threshold}.`
   }
   if (policy === 'top-only') return 'Review policy: top-only — top-level approval, autonomous below.'

@@ -77,13 +77,18 @@ def _select_goal(stale_goals: list[dict], scheduled_goal_ids: list[str]) -> dict
 
 
 async def _all_children_terminated(parent_goal_id: str) -> bool:
-    """True when every child goal has terminal status (completed | failed | cancelled)."""
+    """True when every child goal has terminal status (completed | failed | cancelled | paused).
+
+    Paused is treated as terminal so a parent waiting on a budget-exhausted child
+    doesn't poll forever — the child needs human intervention, but the parent
+    should still advance to verifying so it can report partial progress.
+    """
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """SELECT
                   COUNT(*) AS total,
-                  COUNT(*) FILTER (WHERE status IN ('completed', 'failed', 'cancelled')) AS done
+                  COUNT(*) FILTER (WHERE status IN ('completed', 'failed', 'cancelled', 'paused')) AS done
                FROM goals WHERE parent_goal_id = $1::uuid""",
             parent_goal_id,
         )
@@ -91,13 +96,16 @@ async def _all_children_terminated(parent_goal_id: str) -> bool:
 
 
 async def _all_tasks_terminated(goal_id: str) -> bool:
-    """True when every goal_tasks row for this goal points to a task with terminal status."""
+    """True when every goal_tasks row for this goal points to a task with terminal status.
+
+    Paused is treated as terminal — see _all_children_terminated docstring.
+    """
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """SELECT
                   COUNT(*) AS total,
-                  COUNT(*) FILTER (WHERE t.status IN ('complete', 'failed', 'cancelled')) AS done
+                  COUNT(*) FILTER (WHERE t.status IN ('complete', 'failed', 'cancelled', 'paused')) AS done
                FROM goal_tasks gt
                JOIN tasks t ON gt.task_id = t.id
                WHERE gt.goal_id = $1::uuid""",

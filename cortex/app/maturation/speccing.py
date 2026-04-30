@@ -10,6 +10,44 @@ from ..db import get_pool
 
 log = logging.getLogger(__name__)
 
+def _should_auto_approve(goal, envelope) -> tuple[bool, str]:
+    """Return (auto_approve, reason). Implements the documented review_policy rules."""
+    # Note: goal here is an asyncpg Row — needs review_policy + parent_goal_id columns
+    # Make sure run_speccing's SELECT includes them.
+    policy = goal.get("review_policy") if isinstance(goal, dict) else goal["review_policy"]
+    if policy == "all":
+        return False, "policy=all"
+    if policy == "top-only":
+        # Subgoals (have parent_goal_id) auto-approve under top-only
+        parent = goal.get("parent_goal_id") if isinstance(goal, dict) else goal["parent_goal_id"]
+        if parent:
+            return True, "top-only — not top-level"
+        return False, "top-only — top-level requires approval"
+    if policy and policy.startswith("cost-above-"):
+        try:
+            threshold = float(policy.split("-")[-1])
+        except (ValueError, IndexError):
+            return False, f"policy={policy} (unparseable threshold)"
+        children = envelope.get("spec_children") or []
+        total = sum(float(c.get("estimated_cost_usd") or 0.0) for c in children)
+        if total < threshold:
+            return True, f"cost-above-${threshold:.0f} — estimated ${total:.2f} below threshold"
+        return False, f"cost-above-${threshold:.0f} — estimated ${total:.2f} ≥ threshold"
+    if policy == "scopes-sensitive":
+        # Look at parent's scope_analysis — if no sensitive scopes, auto-approve.
+        scope = goal.get("scope_analysis") if isinstance(goal, dict) else goal["scope_analysis"]
+        if isinstance(scope, str):
+            try:
+                scope = json.loads(scope)
+            except json.JSONDecodeError:
+                scope = {}
+        affected = (scope or {}).get("affected_scopes") or []
+        if any(s in affected for s in ("security", "infra", "data")):
+            return False, f"scopes-sensitive — touches {affected}"
+        return True, "scopes-sensitive — no sensitive scopes affected"
+    return False, f"unknown policy={policy}"
+
+
 SPEC_PROMPT = """Generate an engineering plan for this goal.
 
 Goal: {title}
@@ -65,7 +103,8 @@ async def run_speccing(goal_id: str) -> dict | None:
     pool = get_pool()
     async with pool.acquire() as conn:
         goal = await conn.fetchrow(
-            """SELECT title, description, scope_analysis, max_cost_usd, depth, max_depth, current_plan
+            """SELECT title, description, scope_analysis, max_cost_usd, depth, max_depth,
+                      current_plan, review_policy, parent_goal_id
                FROM goals WHERE id = $1::uuid""",
             goal_id,
         )
@@ -99,7 +138,7 @@ async def run_speccing(goal_id: str) -> dict | None:
         parent_hint=parent_hint,
         depth=goal["depth"],
         max_depth=goal["max_depth"],
-        max_cost=f"{goal['max_cost_usd']:.2f}",
+        max_cost=f"{goal['max_cost_usd'] or 5.00:.2f}",
     )
 
     llm = get_llm()
@@ -153,6 +192,9 @@ async def run_speccing(goal_id: str) -> dict | None:
             "_fallback": True,
         }
 
+    auto_approve, reason = _should_auto_approve(goal, envelope)
+    next_status = "building" if auto_approve else "review"
+
     async with pool.acquire() as conn:
         await conn.execute(
             """UPDATE goals SET
@@ -161,21 +203,28 @@ async def run_speccing(goal_id: str) -> dict | None:
                   verification_commands = $3::jsonb,
                   success_criteria_structured = $4::jsonb,
                   complexity = COALESCE(complexity, CASE WHEN $5 THEN 'simple' ELSE 'complex' END),
-                  maturation_status = 'review',
+                  maturation_status = $6,
+                  spec_approved_at = CASE WHEN $7 THEN NOW() ELSE spec_approved_at END,
+                  spec_approved_by = CASE WHEN $7 THEN 'cortex (auto)' ELSE spec_approved_by END,
                   updated_at = NOW()
-               WHERE id = $6::uuid""",
+               WHERE id = $8::uuid""",
             envelope["spec_markdown"],
             json.dumps(envelope.get("spec_children") or []),
             json.dumps(envelope.get("verification_commands") or []),
             json.dumps(envelope.get("success_criteria_structured") or []),
             envelope.get("_fallback", False),
+            next_status,
+            auto_approve,
             goal_id,
         )
 
     from ..journal import emit_journal
     await emit_journal(goal_id, "speccing.complete",
         {"children_count": len(envelope.get("spec_children") or []),
-         "fallback": envelope.get("_fallback", False)})
-    log.info("Speccing complete for goal %s — transitioned to review (children=%d)",
-             goal_id, len(envelope.get("spec_children") or []))
+         "fallback": envelope.get("_fallback", False),
+         "auto_approved": auto_approve,
+         "next_phase": next_status,
+         "reason": reason})
+    log.info("Speccing complete for goal %s — transitioned to %s (children=%d, auto=%s, %s)",
+             goal_id, next_status, len(envelope.get("spec_children") or []), auto_approve, reason)
     return envelope

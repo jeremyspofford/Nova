@@ -8,6 +8,26 @@ log = logging.getLogger(__name__)
 
 _TAIL_LIMIT = 4000  # bytes per stream
 
+# LLM-generated verification commands must START with one of these tokens.
+# This is a defense-in-depth check — cortex runs in its own container, but a
+# malicious or compromised LLM could otherwise execute arbitrary shell.
+ALLOWED_PREFIXES = (
+    "pytest", "python -m pytest", "python3 -m pytest",
+    "npm test", "npm run", "pnpm test", "pnpm run", "yarn test",
+    "make", "cargo test", "go test",
+    "ruff", "mypy", "pyright", "tsc", "npx tsc",
+    "docker compose ps",
+    "curl -sf",
+    "true", "false",  # for testing the verifier itself
+)
+
+
+def _is_allowed(cmd: str) -> bool:
+    """True if cmd's first token (or two-word prefix for `python -m pytest`-style)
+    matches the allowlist. Whitespace-tolerant; case-sensitive."""
+    stripped = cmd.strip()
+    return any(stripped == p or stripped.startswith(p + " ") for p in ALLOWED_PREFIXES)
+
 
 async def run_commands(cmd_specs: list[dict]) -> list[dict]:
     """Execute each cmd spec and return per-command result dicts.
@@ -23,6 +43,17 @@ async def run_commands(cmd_specs: list[dict]) -> list[dict]:
         if not cmd:
             results.append({"cmd": "", "exit_code": -1,
                             "stdout_tail": "", "stderr_tail": "empty cmd", "duration_ms": 0})
+            continue
+
+        if not _is_allowed(cmd):
+            results.append({
+                "cmd": cmd,
+                "exit_code": -4,
+                "stdout_tail": "",
+                "stderr_tail": f"command rejected: not in allowlist ({len(ALLOWED_PREFIXES)} prefixes)",
+                "duration_ms": 0,
+            })
+            log.warning("Rejected non-allowlisted command: %s", cmd[:120])
             continue
 
         start = asyncio.get_event_loop().time()

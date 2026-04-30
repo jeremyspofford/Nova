@@ -513,7 +513,17 @@ export interface Goal {
     hint?: string
     estimated_cost_usd?: number
     depends_on?: number[]
+    estimated_complexity?: string
   }> | null
+  verification_commands?: Array<{ cmd: string; cwd?: string | null; timeout_s?: number }> | null
+  success_criteria_structured?: Array<{ statement: string; check: string; check_arg: string }> | null
+  review_policy?: string
+  depth?: number
+  max_depth?: number
+  max_retries?: number
+  retry_count?: number
+  spec_approved_at?: string | null
+  spec_approved_by?: string | null
 }
 
 export interface GoalIteration {
