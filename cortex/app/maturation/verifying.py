@@ -13,7 +13,7 @@ from ..config import settings
 from ..db import get_pool
 from ..journal import emit_journal, emit_notification
 from ..reflections import record_reflection, check_approach_blocked
-from ..stimulus import emit, GOAL_COMPLETED
+from ..stimulus import emit, GOAL_COMPLETED, SUBGOAL_TERMINATED
 from .aggregator import aggregate
 from .commands import run_commands
 from .criteria import evaluate_criteria
@@ -41,6 +41,12 @@ async def run_verifying(goal_id: str) -> str:
         await _mark_complete(goal_id)
         await emit_journal(goal_id, "verify.pass", {"attempt": attempt})
         await emit(GOAL_COMPLETED, "cortex", payload={"goal_id": goal_id})
+        if goal["parent_goal_id"]:
+            await _wake_parent(goal["parent_goal_id"])
+            await emit(SUBGOAL_TERMINATED, "cortex",
+                payload={"goal_id": goal_id,
+                         "parent_goal_id": str(goal["parent_goal_id"]),
+                         "outcome": "completed"})
         return f"Verification passed → completed (attempt {attempt})"
 
     if outcome == "fail":
@@ -177,6 +183,19 @@ async def _mark_complete(goal_id):
         )
 
 
+async def _wake_parent(parent_goal_id) -> None:
+    """Null parent's last_checked_at so the next cycle's stale-goal query picks it up
+    immediately for re-check (e.g. _all_children_terminated for waiting parents)."""
+    if not parent_goal_id:
+        return
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE goals SET last_checked_at = NULL WHERE id = $1::uuid",
+            str(parent_goal_id),
+        )
+
+
 async def _on_verify_fail(goal_id, goal, attempt, cmd_results, quartet_review, criteria_eval):
     """Re-spec or escalate. Returns one-line outcome."""
     # Reflection.
@@ -268,6 +287,11 @@ async def _escalate(goal_id, goal, attempt, reason: str) -> str:
                    WHERE id = $1::uuid""",
                 goal_id,
             )
+        await _wake_parent(goal["parent_goal_id"])
+        await emit(SUBGOAL_TERMINATED, "cortex",
+            payload={"goal_id": goal_id,
+                     "parent_goal_id": str(goal["parent_goal_id"]),
+                     "outcome": "failed"})
         await emit_journal(goal_id, "verify.escalate.parent",
             {"reason": reason, "parent_goal_id": str(goal["parent_goal_id"])})
         return f"Verification exhausted → propagated to parent ({reason})"

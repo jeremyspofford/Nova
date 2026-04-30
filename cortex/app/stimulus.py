@@ -42,6 +42,7 @@ GOAL_COMMENTED = "goal.commented"
 GOAL_STUCK = "goal.stuck"
 GOAL_COMPLETED = "goal.completed"
 GOAL_BUDGET_PAUSED = "goal.budget_paused"
+SUBGOAL_TERMINATED = "subgoal.terminated"  # any terminal: completed | failed | cancelled
 
 _redis: aioredis.Redis | None = None
 
