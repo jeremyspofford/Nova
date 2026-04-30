@@ -1,9 +1,12 @@
 """Cortex journal — narrates thinking to a reserved conversation."""
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 from uuid import UUID
+
+import redis.asyncio as aioredis
 
 from .config import settings
 from .db import get_pool
@@ -12,6 +15,16 @@ log = logging.getLogger(__name__)
 
 JOURNAL_ID = UUID(settings.journal_conversation_id)
 CORTEX_USER_ID = UUID(settings.cortex_user_id)
+
+_notify_redis: aioredis.Redis | None = None
+
+
+async def _get_notify_redis() -> aioredis.Redis:
+    """Get or create the Redis connection used for notification publishes."""
+    global _notify_redis
+    if _notify_redis is None:
+        _notify_redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    return _notify_redis
 
 
 async def write_entry(
@@ -102,3 +115,57 @@ async def read_user_replies_since(since: datetime) -> list[dict]:
         }
         for r in rows
     ]
+
+
+async def emit_journal(
+    goal_id: str | None,
+    event: str,
+    payload: dict | None = None,
+) -> None:
+    """Structured journal entry for goal-lifecycle events.
+
+    Wraps write_entry so journal queries can filter by event/goal_id.
+    Body shape: 'event=<event> goal=<id> payload=<json>'
+    Metadata: {event, goal_id, payload}
+    """
+    content = f"event={event} goal={goal_id or '-'}"
+    if payload:
+        content += f" payload={json.dumps(payload, default=str)}"
+    metadata: dict = {"event": event, "goal_id": str(goal_id) if goal_id else None}
+    if payload:
+        metadata["payload"] = payload
+    try:
+        # write_entry signature (cortex/app/journal.py:17):
+        #   write_entry(content: str, entry_type: str = "narration", metadata: dict | None = None)
+        await write_entry(content=content, entry_type="goal_event", metadata=metadata)
+    except Exception as e:
+        # Journal failures must never break the maturation pipeline.
+        log.warning("emit_journal failed (event=%s goal=%s): %s", event, goal_id, e)
+
+
+async def emit_notification(
+    goal_id: str,
+    kind: str,
+    title: str,
+    link: str | None = None,
+) -> None:
+    """Publish a goal notification to the existing nova:notifications Redis pub/sub channel.
+
+    Existing consumers:
+      - orchestrator/app/pipeline_router.py:1232 — SSE stream subscribes to nova:notifications
+      - orchestrator/app/auto_friction.py:28 — friction logger subscribes to the same channel
+
+    Dashboard reads the SSE stream at GET /api/v1/pipeline/notifications/stream.
+    No new HTTP endpoint or websocket plumbing required.
+    """
+    payload = {
+        "kind": kind,
+        "goal_id": str(goal_id),
+        "title": title,
+        "link": link or f"/goals/{goal_id}",
+    }
+    try:
+        redis = await _get_notify_redis()
+        await redis.publish("nova:notifications", json.dumps(payload))
+    except Exception as e:
+        log.warning("emit_notification failed (kind=%s goal=%s): %s", kind, goal_id, e)
