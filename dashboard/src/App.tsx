@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { getAuthHeaders, apiFetch } from './api'
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from './hooks/useIsMobile'
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
@@ -13,7 +13,7 @@ import { DebugProvider } from './stores/debug-store'
 import { AuthProvider, useAuth } from './stores/auth-store'
 import { ToastProvider } from './components/ToastProvider'
 import { useToast } from './components/ToastProvider'
-import { useNotifications, toastVariantFor, type PipelineNotification } from './hooks/useNotifications'
+import { useNotifications, toastVariantFor, isGoalNotification, type PipelineNotification } from './hooks/useNotifications'
 import { Login } from './pages/Login'
 import { Chat } from './pages/Chat'
 import { Usage } from './pages/Usage'
@@ -153,11 +153,26 @@ function MobileGuard({ children }: { children: React.ReactNode }) {
 function NotificationListener() {
   const qc = useQueryClient()
   const { addToast } = useToast()
+  const navigate = useNavigate()
   const handleNotification = useCallback((n: PipelineNotification) => {
+    if (isGoalNotification(n)) {
+      if (n.kind === 'goal_stuck') {
+        qc.invalidateQueries({ queryKey: ['goals'] })
+        addToast({
+          variant: 'warning',
+          message: n.title,
+          action: {
+            label: 'View',
+            onClick: () => navigate(n.link || `/goals/${n.goal_id}`),
+          },
+        })
+      }
+      return
+    }
     qc.invalidateQueries({ queryKey: ['pipeline-tasks'] })
     qc.invalidateQueries({ queryKey: ['attention-count'] })
     addToast({ variant: toastVariantFor(n.type), message: n.body || n.title })
-  }, [qc, addToast])
+  }, [qc, addToast, navigate])
   useNotifications(handleNotification)
   return null
 }

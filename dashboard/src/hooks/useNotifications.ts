@@ -1,12 +1,25 @@
 import { useEffect } from "react";
 import type { ToastVariant } from "../components/ui/Toast";
 
-export interface PipelineNotification {
-  type: string;
+export interface TaskNotification {
+  type: string; // "complete" | "failed" | "error" | "warning" | ...
   task_id: string;
   title: string;
   body: string;
   timestamp: string;
+}
+
+export interface GoalNotification {
+  kind: string; // "goal_stuck" | ...
+  goal_id: string;
+  title: string;
+  link?: string;
+}
+
+export type PipelineNotification = TaskNotification | GoalNotification;
+
+export function isGoalNotification(n: PipelineNotification): n is GoalNotification {
+  return "kind" in n && "goal_id" in n;
 }
 
 const TYPE_TO_VARIANT: Record<string, ToastVariant> = {
