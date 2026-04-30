@@ -16,6 +16,13 @@ from ..journal import emit_journal
 
 log = logging.getLogger(__name__)
 
+# Budget cascade ratio: sum of children.estimated_cost_usd must be ≤ this fraction
+# of parent's remaining budget. Mirrored in speccing.SPEC_PROMPT — keep in sync.
+CHILD_BUDGET_RATIO = 0.85
+# Fallback parent budget when goals.max_cost_usd is NULL (legacy rows or
+# manually-created goals that skipped the budget step).
+DEFAULT_PARENT_MAX_COST_USD = 5.0
+
 
 async def run_building(goal_id: str) -> str:
     """Materialize spec_children. Returns a one-line outcome description for cycle journal."""
@@ -60,9 +67,12 @@ def _decode_jsonb(raw):
 
 
 def _cap_children_budget(children: list[dict], goal) -> list[dict]:
-    """Scale children proportionally so sum ≤ 0.85 × parent remaining."""
-    parent_remaining = max(0.0, (goal["max_cost_usd"] or 5.0) - (goal["cost_so_far_usd"] or 0.0))
-    cap = parent_remaining * 0.85
+    """Scale children proportionally so sum ≤ CHILD_BUDGET_RATIO × parent remaining."""
+    parent_remaining = max(
+        0.0,
+        (goal["max_cost_usd"] or DEFAULT_PARENT_MAX_COST_USD) - (goal["cost_so_far_usd"] or 0.0),
+    )
+    cap = parent_remaining * CHILD_BUDGET_RATIO
     total = sum(float(c.get("estimated_cost_usd") or 0.0) for c in children)
     if total <= 0 or total <= cap:
         return children
@@ -144,7 +154,8 @@ async def _materialize_as_tasks(goal, children: list[dict]) -> str:
         children = [{"title": goal["title"], "description": goal["description"] or "",
                      "hint": "(simple goal — single task)"}]
 
-    task_ids = []
+    task_ids: list[str] = []
+    dispatch_errors: list[str] = []
     for idx, c in enumerate(children):
         body = (
             f"[Cortex goal] {c.get('title') or goal['title']}: "
@@ -158,15 +169,41 @@ async def _materialize_as_tasks(goal, children: list[dict]) -> str:
                 headers={"Authorization": f"Bearer {settings.cortex_api_key}"},
             )
             r.raise_for_status()
-            task_ids.append(r.json().get("task_id"))
+            tid = r.json().get("task_id")
+            if tid:
+                task_ids.append(tid)
+            else:
+                dispatch_errors.append(f"child {idx}: orchestrator returned no task_id")
         except Exception as e:
             log.warning("Task dispatch failed for goal %s child %d: %s", goal["id"], idx, e)
+            dispatch_errors.append(f"child {idx}: {type(e).__name__}: {e}")
+
+    # If every dispatch failed, do not advance to verifying — a passing health check
+    # would otherwise mark the goal complete with no actual work done. Roll back to
+    # review so a human can investigate.
+    if not task_ids:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """UPDATE goals SET maturation_status = 'review', updated_at = NOW()
+                       WHERE id = $1::uuid""",
+                    goal["id"],
+                )
+                await conn.execute(
+                    """INSERT INTO comments (entity_type, entity_id, author_type, author_name, body)
+                       VALUES ('goal', $1::uuid, 'nova', 'cortex',
+                               'Building failed: all task dispatches failed.\n' || $2)""",
+                    goal["id"], "\n".join(f"- {e}" for e in dispatch_errors),
+                )
+        await emit_journal(str(goal["id"]), "building.dispatch_failed",
+            {"attempted": len(children), "errors": dispatch_errors})
+        log.warning("Goal %s: all %d task dispatches failed — rolled back to review",
+                    goal["id"], len(children))
+        return f"Building: all {len(children)} dispatches failed → review"
 
     async with pool.acquire() as conn:
         async with conn.transaction():
             for idx, task_id in enumerate(task_ids):
-                if task_id is None:
-                    continue
                 await conn.execute(
                     """INSERT INTO goal_tasks (goal_id, task_id, sequence, status)
                        VALUES ($1::uuid, $2::uuid, $3, 'pending')
@@ -178,5 +215,6 @@ async def _materialize_as_tasks(goal, children: list[dict]) -> str:
                 goal["id"],
             )
 
-    await emit_journal(str(goal["id"]), "building.tasks_dispatched", {"task_count": len(task_ids)})
+    await emit_journal(str(goal["id"]), "building.tasks_dispatched",
+        {"task_count": len(task_ids), "failed": len(dispatch_errors)})
     return f"Building: dispatched {len(task_ids)} tasks → verifying"
