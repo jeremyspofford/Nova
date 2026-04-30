@@ -163,7 +163,7 @@ async def _materialize_as_tasks(goal, children: list[dict]) -> str:
         )
         try:
             r = await orch.post(
-                "/api/v1/tasks",
+                "/api/v1/pipeline/tasks",
                 json={"user_input": body, "goal_id": str(goal["id"]),
                       "metadata": {"source": "cortex.building", "child_index": idx}},
                 headers={"Authorization": f"Bearer {settings.cortex_api_key}"},

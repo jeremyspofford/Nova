@@ -115,7 +115,7 @@ async def _quartet_verify(goal) -> dict:
     )
     try:
         r = await orch.post(
-            "/api/v1/tasks",
+            "/api/v1/pipeline/tasks",
             json={"user_input": prompt, "goal_id": str(goal["id"]),
                   "metadata": {"source": "cortex.verifying", "kind": "verification"}},
             headers={"Authorization": f"Bearer {settings.cortex_api_key}"},
@@ -126,7 +126,7 @@ async def _quartet_verify(goal) -> dict:
         # Poll for completion (verification task should be fast)
         for _ in range(90):  # up to 3 min
             await asyncio.sleep(2)
-            tr = await orch.get(f"/api/v1/tasks/{task_id}",
+            tr = await orch.get(f"/api/v1/pipeline/tasks/{task_id}",
                                 headers={"Authorization": f"Bearer {settings.cortex_api_key}"})
             if tr.status_code != 200:
                 continue
