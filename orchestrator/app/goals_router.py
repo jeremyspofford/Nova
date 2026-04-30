@@ -65,6 +65,17 @@ class UpdateGoalRequest(BaseModel):
     scope_analysis: dict | None = None  # admin-only seeding for maturation tests
     spec: str | None = None              # admin-only seeding for maturation tests
     spec_rejection_feedback: str | None = None  # admin-only seeding for maturation tests
+    # New fields for goal decomposition (migration 067)
+    spec_children: list[dict] | None = None
+    verification_commands: list[dict] | None = None
+    success_criteria_structured: list[dict] | None = None
+    review_policy: str | None = None
+    depth: int | None = None
+    max_depth: int | None = None
+    max_retries: int | None = None
+    retry_count: int | None = None
+    spec_approved_at: datetime | None = None
+    spec_approved_by: str | None = None
 
 
 class GoalResponse(BaseModel):
@@ -100,6 +111,14 @@ class GoalResponse(BaseModel):
     spec_approved_at: datetime | None = None
     spec_approved_by: str | None = None
     source_recommendation_id: UUID | None = None
+    spec_children: list[dict] | None = None
+    verification_commands: list[dict] | None = None
+    success_criteria_structured: list[dict] | None = None
+    review_policy: str | None = None
+    depth: int | None = None
+    max_depth: int | None = None
+    max_retries: int | None = None
+    retry_count: int | None = None
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -141,21 +160,26 @@ async def create_goal(req: CreateGoalRequest, user: UserDep):
 async def list_goals(
     _user: UserDep,
     status: str | None = Query(default=None),
+    parent_goal_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, le=200),
 ):
-    """List goals, optionally filtered by status."""
+    """List goals, optionally filtered by status and/or parent_goal_id."""
     pool = get_pool()
+    where: list[str] = []
+    args: list = []
+    if status:
+        where.append(f"status = ${len(args) + 1}")
+        args.append(status)
+    if parent_goal_id:
+        where.append(f"parent_goal_id = ${len(args) + 1}::uuid")
+        args.append(parent_goal_id)
+    where_clause = (" WHERE " + " AND ".join(where)) if where else ""
+    args.append(limit)
     async with pool.acquire() as conn:
-        if status:
-            rows = await conn.fetch(
-                "SELECT * FROM goals WHERE status = $1 ORDER BY priority DESC, created_at DESC LIMIT $2",
-                status, limit,
-            )
-        else:
-            rows = await conn.fetch(
-                "SELECT * FROM goals ORDER BY priority DESC, created_at DESC LIMIT $1",
-                limit,
-            )
+        rows = await conn.fetch(
+            f"SELECT * FROM goals{where_clause} ORDER BY priority DESC, created_at DESC LIMIT ${len(args)}",
+            *args,
+        )
     return [_row_to_goal(r) for r in rows]
 
 
@@ -223,10 +247,15 @@ async def update_goal(goal_id: UUID, req: UpdateGoalRequest, _user: UserDep):
     set_parts = []
     values = []
     # Columns stored as JSONB need explicit cast + JSON-serialized text so asyncpg
-    # doesn't reject dict values.
-    JSONB_COLUMNS = {"scope_analysis"}
+    # doesn't reject dict/list values.
+    JSONB_COLUMNS = {
+        "scope_analysis",
+        "spec_children",
+        "verification_commands",
+        "success_criteria_structured",
+    }
     for i, (key, val) in enumerate(updates.items(), start=1):
-        if key in JSONB_COLUMNS and isinstance(val, dict):
+        if key in JSONB_COLUMNS and isinstance(val, (dict, list)):
             set_parts.append(f"{key} = ${i}::jsonb")
             values.append(json.dumps(val))
         else:
@@ -266,17 +295,44 @@ async def update_goal(goal_id: UUID, req: UpdateGoalRequest, _user: UserDep):
 
 
 @goals_router.delete("/api/v1/goals/{goal_id}", status_code=204)
-async def delete_goal(goal_id: UUID, _user: UserDep):
-    """Cancel and delete a goal."""
+async def delete_goal(
+    goal_id: UUID,
+    _user: UserDep,
+    cascade: bool = Query(default=False),
+):
+    """Cancel and delete a goal.
+
+    When cascade=true, recursively delete all subgoals. parent_goal_id has
+    ON DELETE SET NULL (not CASCADE), so we explicitly recurse one level
+    at a time until no descendants remain.
+    """
     pool = get_pool()
     async with pool.acquire() as conn:
         created_via = await conn.fetchval("SELECT created_via FROM goals WHERE id = $1", goal_id)
         if created_via == "system":
             raise HTTPException(status_code=403, detail="System goals cannot be deleted")
-        result = await conn.execute("DELETE FROM goals WHERE id = $1", goal_id)
+        async with conn.transaction():
+            if cascade:
+                # Repeatedly delete leaves under the subtree until none remain.
+                while True:
+                    deleted = await conn.execute(
+                        """DELETE FROM goals WHERE id IN (
+                               WITH RECURSIVE descendants AS (
+                                   SELECT id FROM goals WHERE parent_goal_id = $1
+                                   UNION ALL
+                                   SELECT g.id FROM goals g
+                                   JOIN descendants d ON g.parent_goal_id = d.id
+                               )
+                               SELECT id FROM descendants
+                           )""",
+                        goal_id,
+                    )
+                    if deleted == "DELETE 0":
+                        break
+            result = await conn.execute("DELETE FROM goals WHERE id = $1", goal_id)
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Goal not found")
-    log.info("Goal deleted: %s", goal_id)
+    log.info("Goal deleted: %s (cascade=%s)", goal_id, cascade)
 
 
 def _row_to_goal(row) -> GoalResponse:
@@ -292,6 +348,24 @@ def _row_to_goal(row) -> GoalResponse:
             scope = json.loads(scope)
         except (json.JSONDecodeError, TypeError):
             scope = None
+    spec_children = row.get("spec_children")
+    if isinstance(spec_children, str):
+        try:
+            spec_children = json.loads(spec_children)
+        except (json.JSONDecodeError, TypeError):
+            spec_children = None
+    verification_commands = row.get("verification_commands")
+    if isinstance(verification_commands, str):
+        try:
+            verification_commands = json.loads(verification_commands)
+        except (json.JSONDecodeError, TypeError):
+            verification_commands = None
+    success_criteria_structured = row.get("success_criteria_structured")
+    if isinstance(success_criteria_structured, str):
+        try:
+            success_criteria_structured = json.loads(success_criteria_structured)
+        except (json.JSONDecodeError, TypeError):
+            success_criteria_structured = None
     return GoalResponse(
         id=row["id"],
         title=row["title"],
@@ -325,6 +399,14 @@ def _row_to_goal(row) -> GoalResponse:
         spec_approved_at=row.get("spec_approved_at"),
         spec_approved_by=row.get("spec_approved_by"),
         source_recommendation_id=row.get("source_recommendation_id"),
+        spec_children=spec_children,
+        verification_commands=verification_commands,
+        success_criteria_structured=success_criteria_structured,
+        review_policy=row.get("review_policy"),
+        depth=row.get("depth"),
+        max_depth=row.get("max_depth"),
+        max_retries=row.get("max_retries"),
+        retry_count=row.get("retry_count"),
     )
 
 
