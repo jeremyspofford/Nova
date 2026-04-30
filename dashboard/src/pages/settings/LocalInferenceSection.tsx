@@ -185,6 +185,7 @@ export function LocalInferenceSection({ entries, onSave, saving, inline }: Confi
   const wolMac = useConfigValue(entries, "llm.wol_mac", "");
   const customUrl = useConfigValue(entries, "inference.custom_url", "");
   const customAuth = useConfigValue(entries, "inference.custom_auth_header", "");
+  const keepAlive = useConfigValue(entries, "inference.keep_alive", "30m");
   const [testingConnection, setTestingConnection] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -581,6 +582,19 @@ export function LocalInferenceSection({ entries, onSave, saving, inline }: Confi
           No GPU detected and no remote server configured. Consider using Ollama (CPU) or configure cloud providers below.
         </div>
       )}
+
+      {/* Ollama tuning — keep-alive controls model resident time */}
+      <div className="mt-4 pt-4 border-t border-border-subtle">
+        <ConfigField
+          label="Ollama Keep-Alive"
+          configKey="inference.keep_alive"
+          value={keepAlive}
+          onSave={onSave}
+          saving={saving}
+          placeholder="30m"
+          description={'How long Ollama keeps a model loaded after the last request. Examples: "5m", "30m", "1h", "-1" for forever, "0" to unload immediately. Longer = fewer reload pauses, more RAM held.'}
+        />
+      </div>
     </>
   );
 

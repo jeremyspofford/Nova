@@ -200,6 +200,10 @@ class OllamaProvider(ModelProvider):
         }
         if request.tools:
             body["tools"] = [_tool_to_ollama(t) for t in request.tools]
+        from app.registry import get_ollama_keep_alive
+        keep_alive = await get_ollama_keep_alive()
+        if keep_alive:
+            body["keep_alive"] = keep_alive
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
             resp = await client.post("/api/chat", json=body)
@@ -231,6 +235,10 @@ class OllamaProvider(ModelProvider):
         }
         if request.tools:
             body["tools"] = [_tool_to_ollama(t) for t in request.tools]
+        from app.registry import get_ollama_keep_alive
+        keep_alive = await get_ollama_keep_alive()
+        if keep_alive:
+            body["keep_alive"] = keep_alive
 
         async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
             async with client.stream("POST", "/api/chat", json=body) as resp:
@@ -264,11 +272,16 @@ class OllamaProvider(ModelProvider):
 
     async def embed(self, request: EmbedRequest) -> EmbedResponse:
         await self._ensure_healthy()
+        from app.registry import get_ollama_keep_alive
+        keep_alive = await get_ollama_keep_alive()
+        body: dict = {
+            "model": request.model or self._default_model,
+            "input": request.texts,
+        }
+        if keep_alive:
+            body["keep_alive"] = keep_alive
         async with httpx.AsyncClient(base_url=self._base_url, timeout=settings.ollama_request_timeout) as client:
-            resp = await client.post("/api/embed", json={
-                "model": request.model or self._default_model,
-                "input": request.texts,
-            })
+            resp = await client.post("/api/embed", json=body)
             resp.raise_for_status()
             data = resp.json()
 

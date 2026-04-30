@@ -10,7 +10,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import secrets
 from pathlib import Path
 from typing import Any
@@ -87,31 +86,87 @@ def get_pool() -> asyncpg.Pool:
 
 
 def _split_sql(sql: str) -> list[str]:
-    """Split SQL text into individual statements, respecting $$ dollar-quoting.
+    """Split SQL into statements, respecting strings, dollar-quotes, and comments.
 
-    Naive str.split(";") breaks PL/pgSQL DO blocks that contain semicolons
-    inside $$ ... $$ quoted bodies.  This splitter tracks dollar-quote regions
-    and only treats `;` as a statement separator when outside them.
+    Naive splitting breaks on `;` inside string literals (e.g. regex patterns)
+    and PL/pgSQL DO blocks. This tokenizer tracks:
+      - Single-quoted strings, including E'...' / e'...' escape strings
+        (with '' as escaped quote and \\ as escape inside E-strings)
+      - Dollar-quoted strings ($$...$$ and $tag$...$tag$)
+      - Line comments (-- ... newline)
+      - Block comments (/* ... */)
+
+    Comments and string contents are preserved so Postgres can parse them
+    natively. Only `;` outside all of the above is treated as a separator.
     """
     statements: list[str] = []
     current: list[str] = []
-    in_dollar_quote = False
+    n = len(sql)
     i = 0
-    while i < len(sql):
-        if sql[i : i + 2] == "$$":
-            in_dollar_quote = not in_dollar_quote
-            current.append("$$")
-            i += 2
-        elif sql[i] == ";" and not in_dollar_quote:
+    while i < n:
+        c = sql[i]
+        # Line comment: keep verbatim through newline so positions stay aligned
+        if c == "-" and i + 1 < n and sql[i + 1] == "-":
+            j = sql.find("\n", i)
+            end = n if j == -1 else j
+            current.append(sql[i:end])
+            i = end
+            continue
+        # Block comment
+        if c == "/" and i + 1 < n and sql[i + 1] == "*":
+            j = sql.find("*/", i + 2)
+            end = n if j == -1 else j + 2
+            current.append(sql[i:end])
+            i = end
+            continue
+        # E-string / e-string prefix: consume the prefix, then fall through to '
+        if c in ("E", "e") and i + 1 < n and sql[i + 1] == "'":
+            current.append(c)
+            i += 1
+            c = sql[i]
+        # Single-quoted string (regular or E-prefixed)
+        if c == "'":
+            current.append(c)
+            i += 1
+            while i < n:
+                if sql[i] == "'" and i + 1 < n and sql[i + 1] == "'":
+                    current.append("''")  # escaped quote
+                    i += 2
+                    continue
+                if sql[i] == "\\" and i + 1 < n:
+                    current.append(sql[i:i + 2])  # backslash escape (E-strings)
+                    i += 2
+                    continue
+                current.append(sql[i])
+                if sql[i] == "'":
+                    i += 1
+                    break
+                i += 1
+            continue
+        # Dollar-quoted string ($tag$...$tag$, tag may be empty)
+        if c == "$":
+            tag_close = sql.find("$", i + 1)
+            # Tag must be empty or a valid identifier — bail out on whitespace
+            if tag_close != -1 and "\n" not in sql[i + 1:tag_close] and " " not in sql[i + 1:tag_close]:
+                tag = sql[i:tag_close + 1]
+                end = sql.find(tag, tag_close + 1)
+                if end != -1:
+                    current.append(sql[i:end + len(tag)])
+                    i = end + len(tag)
+                    continue
+            current.append(c)
+            i += 1
+            continue
+        # Statement separator
+        if c == ";":
             stmt = "".join(current).strip()
             if stmt:
                 statements.append(stmt)
             current = []
             i += 1
-        else:
-            current.append(sql[i])
-            i += 1
-    # Handle trailing statement without semicolon
+            continue
+        current.append(c)
+        i += 1
     stmt = "".join(current).strip()
     if stmt:
         statements.append(stmt)
@@ -155,10 +210,9 @@ async def _run_schema_migrations() -> None:
                 continue
 
             sql = sql_file.read_text()
-            sql_stripped = re.sub(r"--[^\n]*", "", sql)
 
             async with conn.transaction():
-                for stmt in _split_sql(sql_stripped):
+                for stmt in _split_sql(sql):
                     await conn.execute(stmt)
                 await conn.execute(
                     "INSERT INTO schema_migrations (version) VALUES ($1)", version

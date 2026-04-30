@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from .clients import get_orchestrator
 from .config import settings
 from .cycle import run_cycle
 from .db import get_pool
@@ -16,6 +17,28 @@ from .stimulus import brpop_stimulus, close_redis
 log = logging.getLogger(__name__)
 
 _task: asyncio.Task | None = None
+
+
+async def _is_brain_enabled() -> bool:
+    """Read features.brain_enabled from orchestrator. Default false on any
+    failure — safer to over-sleep than to over-spend LLM cycles when the
+    config plane is unreachable.
+    """
+    try:
+        orch = get_orchestrator()
+        resp = await orch.get(
+            "/api/v1/config/features.brain_enabled",
+            headers={"X-Admin-Secret": settings.admin_secret},
+            timeout=5.0,
+        )
+        if resp.status_code == 200:
+            value = resp.json().get("value")
+            return value is True or str(value).lower() == "true"
+        # 404 = key not set yet → treat as off (default)
+        return False
+    except Exception as e:
+        log.debug("Failed to read features.brain_enabled: %s — treating as off", e)
+        return False
 
 
 async def start() -> None:
@@ -53,9 +76,11 @@ async def _loop() -> None:
 
     while True:
         try:
-            # Check if enabled
-            if not settings.enabled:
-                log.debug("Cortex disabled — sleeping %ds", timeout)
+            # Check the runtime UI toggle (features.brain_enabled). Default off
+            # so a fresh install / unconfigured Nova doesn't burn LLM cycles
+            # before the operator opts in via /settings#brain.
+            if not await _is_brain_enabled():
+                log.debug("Brain disabled — sleeping %ds", timeout)
                 await asyncio.sleep(timeout)
                 continue
 

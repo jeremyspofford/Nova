@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { getAuthHeaders, apiFetch } from './api'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useIsMobile } from './hooks/useIsMobile'
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppLayout } from './components/layout/AppLayout'
 import { CommandPalette } from './components/CommandPalette'
 import { StartupScreen } from './components/StartupScreen'
@@ -106,8 +106,18 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
   const [checked, setChecked] = useState(false)
   const [needsOnboarding, setNeedsOnboarding] = useState(false)
 
+  // /recovery is the escape hatch when the orchestrator is down — it must reach
+  // its route even if the onboarding-config fetch fails. Without this bypass,
+  // the catch branch flips needsOnboarding=true and redirects to /onboarding,
+  // which then ALSO fails because onboarding talks to the same dead orchestrator.
+  // AuthGate has the matching bypass; the gates need to agree.
+  const isRecoveryRoute = window.location.pathname === '/recovery'
+
   useEffect(() => {
-    if (window.location.pathname === '/onboarding') { setChecked(true); return }
+    if (window.location.pathname === '/onboarding' || isRecoveryRoute) {
+      setChecked(true)
+      return
+    }
     fetch('/api/v1/config/onboarding.completed', {
       headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
     })
@@ -118,10 +128,10 @@ function OnboardingGate({ children }: { children: React.ReactNode }) {
         setChecked(true)
       })
       .catch(() => { setNeedsOnboarding(true); setChecked(true) })
-  }, [])
+  }, [isRecoveryRoute])
 
   if (!checked) return null
-  if (needsOnboarding && window.location.pathname !== '/onboarding') {
+  if (needsOnboarding && window.location.pathname !== '/onboarding' && !isRecoveryRoute) {
     window.location.href = '/onboarding'
     return null
   }
@@ -152,9 +162,31 @@ function NotificationListener() {
   return null
 }
 
-/** Prefetch Brain graph data so it's cached before user navigates to /brain */
+/** Brain feature toggle — read from platform_config (default false).
+ *  Gates the autonomous thinking loop AND the dashboard's graph prefetch
+ *  + 3D keep-alive. Toggle lives in /settings#brain. */
+function useBrainEnabled(): boolean {
+  const { data } = useQuery<{ value: unknown } | null>({
+    queryKey: ['features.brain_enabled'],
+    queryFn: async () => {
+      try {
+        return await apiFetch('/api/v1/config/features.brain_enabled')
+      } catch {
+        return null
+      }
+    },
+    staleTime: 30_000,
+  })
+  return data?.value === true || data?.value === 'true'
+}
+
+/** Prefetch Brain graph data so it's cached before user navigates to /brain.
+ *  Skipped entirely when brain is disabled — the engram graph query is one of
+ *  the heavier reads in the dashboard (up to 2,000 nodes). */
 function BrainPrefetcher() {
+  const enabled = useBrainEnabled()
   useEffect(() => {
+    if (!enabled) return
     queryClient.prefetchQuery({
       queryKey: ['engram-stats'],
       queryFn: () => apiFetch('/mem/api/v1/engrams/stats'),
@@ -165,8 +197,30 @@ function BrainPrefetcher() {
       queryFn: () => apiFetch('/mem/api/v1/engrams/graph/lightweight?max_nodes=2000'),
       staleTime: 30_000,
     })
-  }, [])
+  }, [enabled])
   return null
+}
+
+/** Tiny CTA shown at /brain when the feature is off — opens settings. */
+function BrainDisabledCTA() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950">
+      <div className="max-w-md text-center space-y-4 p-8">
+        <h1 className="text-2xl font-semibold text-content-primary">Brain is disabled</h1>
+        <p className="text-content-tertiary text-sm leading-relaxed">
+          The autonomous thinking loop and 3D engram graph are turned off to save resources.
+          Enable them in Settings — note that the graph can significantly slow the dashboard
+          on lower-spec hardware.
+        </p>
+        <a
+          href="/settings#brain"
+          className="inline-block px-4 py-2 text-sm font-medium rounded bg-accent text-white hover:opacity-90"
+        >
+          Open Brain settings
+        </a>
+      </div>
+    </div>
+  )
 }
 
 /** Routes + Brain keep-alive — must be inside BrowserRouter */
@@ -174,21 +228,23 @@ function RoutedContent() {
   const location = useLocation()
   const isMobile = useIsMobile()
   const isBrainRoute = location.pathname === '/brain'
+  const brainEnabled = useBrainEnabled()
   const [brainMounted, setBrainMounted] = useState(false)
 
-  // Deferred Brain mount — background init after browser idle, or immediate if user opens /brain
+  // Deferred Brain mount — background init after browser idle. Skipped when
+  // brain is disabled to avoid the heavy WebGL canvas + graph fetch.
   useEffect(() => {
-    if (isMobile) return
+    if (isMobile || !brainEnabled) return
     const ric = window.requestIdleCallback ?? ((cb: IdleRequestCallback) => window.setTimeout(cb, 2000))
     const cic = window.cancelIdleCallback ?? clearTimeout
     const id = ric(() => setBrainMounted(true), { timeout: 5000 })
     return () => cic(id)
-  }, [isMobile])
+  }, [isMobile, brainEnabled])
 
   // If user navigates to /brain before idle fires, mount immediately
   useEffect(() => {
-    if (isBrainRoute && !brainMounted && !isMobile) setBrainMounted(true)
-  }, [isBrainRoute, brainMounted, isMobile])
+    if (isBrainRoute && !brainMounted && !isMobile && brainEnabled) setBrainMounted(true)
+  }, [isBrainRoute, brainMounted, isMobile, brainEnabled])
 
   return (
     <>
@@ -202,8 +258,16 @@ function RoutedContent() {
 
         {/* Routes WITH sidebar */}
         <Route path="/" element={<HomeRoute />} />
-        {/* Brain: mobile redirects to chat, desktop renders nothing (keep-alive below handles it) */}
-        <Route path="/brain" element={isMobile ? <Navigate to="/chat" replace /> : null} />
+        {/* Brain: mobile redirects to chat. Desktop: keep-alive renders the canvas if enabled,
+            else show a CTA that points to settings. */}
+        <Route
+          path="/brain"
+          element={
+            isMobile
+              ? <Navigate to="/chat" replace />
+              : (brainEnabled ? null : <BrainDisabledCTA />)
+          }
+        />
         <Route path="/chat" element={<AppLayout fullWidth><ErrorBoundary><Chat /></ErrorBoundary></AppLayout>} />
         <Route path="/tasks" element={<MobileGuard><AppLayout><ErrorBoundary><Tasks /></ErrorBoundary></AppLayout></MobileGuard>} />
         <Route path="/friction" element={<MobileGuard><AppLayout><ErrorBoundary><Friction /></ErrorBoundary></AppLayout></MobileGuard>} />

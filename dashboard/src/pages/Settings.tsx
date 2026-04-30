@@ -43,6 +43,7 @@ import { MaintenanceSection } from './settings/MaintenanceSection'
 import { EngramSourcesSection } from './settings/EngramSourcesSection'
 import { RouterStatusSection } from './settings/RouterStatusSection'
 import { MemoryProviderSection } from './settings/MemoryProviderSection'
+import { BrainSection } from './settings/BrainSection'
 import EditorSection from './settings/EditorSection'
 import { useNovaIdentity } from '../hooks/useNovaIdentity'
 import { useAuth } from '../stores/auth-store'
@@ -117,6 +118,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Memory',
     icon: Brain,
     items: [
+      { id: 'brain', label: 'Brain', icon: Brain },
       { id: 'memory-provider', label: 'Memory Provider', icon: Database },
       { id: 'self-model', label: 'Self-Model', icon: Brain },
       { id: 'engram-sources', label: 'Engram Sources', icon: Database },
@@ -724,6 +726,12 @@ export function Settings() {
         )}
 
         {/* ── Memory ───────────────────────────────────────────────────── */}
+
+        {show('brain') && (
+          <div id="brain">
+            <BrainSection entries={entries} onSave={handleSave} saving={saveMutation.isPending} />
+          </div>
+        )}
 
         {show('memory-provider') && (
           <div id="memory-provider">

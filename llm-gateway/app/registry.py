@@ -306,6 +306,18 @@ async def get_prefer_subscription() -> bool:
     return val.lower() in ("true", "1", "yes")
 
 
+async def get_ollama_keep_alive() -> str:
+    """Return the keep_alive duration to pass on Ollama requests.
+
+    Reads `nova:config:inference.keep_alive` (UI-configurable). Empty string
+    means "use Ollama default" (server reads OLLAMA_KEEP_ALIVE env, default 5m).
+    Accepted formats: duration string ("30m", "1h"), seconds ("1800"), "-1"
+    for forever, "0" to unload immediately. Validation is left to Ollama —
+    any string that fails to parse is rejected by the server with a 400.
+    """
+    return await _get_redis_config("inference.keep_alive", "")
+
+
 # ── Ollama model names (models that route to Ollama by default) ──────────────
 
 _OLLAMA_MODELS = {
