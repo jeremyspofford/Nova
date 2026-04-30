@@ -13,9 +13,9 @@ export interface GoalForMaturation {
   maturation_status?: string | null
   scope_analysis?: unknown | null
   spec?: string | null
-  spec_children?: any[]
-  verification_commands?: any[]
-  success_criteria_structured?: any[]
+  spec_children?: any[] | null
+  verification_commands?: any[] | null
+  success_criteria_structured?: any[] | null
   review_policy?: string
 }
 

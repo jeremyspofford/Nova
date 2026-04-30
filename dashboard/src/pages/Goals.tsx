@@ -81,6 +81,45 @@ function MaturationStages({ current, compact }: { current: string; compact?: boo
   )
 }
 
+// ── Spawned subgoals affordance ─────────────────────────────────────────────────
+
+function SpawnedChildrenLine({ goalId, count }: { goalId: string; count: number }) {
+  const [open, setOpen] = useState(false)
+  const { data: children } = useQuery<Goal[]>({
+    queryKey: ['goal-children', goalId],
+    queryFn: () => apiFetch<Goal[]>(`/api/v1/goals?parent_goal_id=${goalId}`),
+    enabled: open,
+    staleTime: 10_000,
+  })
+
+  const summary = children
+    ? `Spawned ${count} subgoals → ${children.filter(c => c.status === 'completed').length} done · ${children.filter(c => c.status === 'active').length} active · ${children.filter(c => c.maturation_status === 'review').length} need review`
+    : `Spawned ${count} subgoals (click to load)`
+
+  return (
+    <div onClick={e => e.stopPropagation()}>
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="text-caption text-accent hover:underline"
+      >
+        {summary}
+      </button>
+      {open && children && (
+        <ul className="mt-1 ml-4 space-y-0.5 list-disc list-inside">
+          {children.map(c => (
+            <li key={c.id} className="text-caption text-content-secondary">
+              <span className="font-medium">{c.title}</span> · {c.status}
+              {c.maturation_status && (
+                <span className="text-content-tertiary"> ({c.maturation_status})</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 type StatusFilter = 'all' | 'active' | 'paused' | 'completed' | 'failed'
 
 const STATUS_FILTERS: { id: StatusFilter; label: string; color: SemanticColor }[] = [
@@ -644,6 +683,11 @@ function GoalCard({ goal }: { goal: Goal }) {
               <p className="text-caption text-content-secondary line-clamp-2">
                 {goal.description}
               </p>
+            )}
+            {goal.spec_children && goal.spec_children.length > 0 && (
+              <div className="mt-1.5">
+                <SpawnedChildrenLine goalId={goal.id} count={goal.spec_children.length} />
+              </div>
             )}
           </div>
 

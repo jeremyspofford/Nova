@@ -507,6 +507,13 @@ export interface Goal {
   maturation_status?: string | null
   scope_analysis?: unknown | null
   spec?: string | null
+  spec_children?: Array<{
+    title: string
+    description?: string
+    hint?: string
+    estimated_cost_usd?: number
+    depends_on?: number[]
+  }> | null
 }
 
 export interface GoalIteration {
