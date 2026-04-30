@@ -8,12 +8,44 @@ Urgency is based on:
 """
 from __future__ import annotations
 
+import json
 import logging
 
 from ..db import get_pool
 from . import DriveContext, DriveResult
 
 log = logging.getLogger(__name__)
+
+
+async def _filter_dep_blocked(goals: list[dict]) -> list[dict]:
+    """Remove children whose depends_on siblings haven't completed."""
+    pool = get_pool()
+    out: list[dict] = []
+    for g in goals:
+        plan = g.get("current_plan") or {}
+        if isinstance(plan, str):
+            try:
+                plan = json.loads(plan)
+            except json.JSONDecodeError:
+                plan = {}
+        deps = plan.get("depends_on") if isinstance(plan, dict) else None
+        if not deps or not g.get("parent_goal_id"):
+            out.append(g)
+            continue
+        # Find sibling spawn_indices among completed/cancelled siblings
+        async with pool.acquire() as conn:
+            done = await conn.fetch(
+                """SELECT (current_plan->>'spawn_index')::int AS idx
+                   FROM goals
+                   WHERE parent_goal_id = $1::uuid
+                     AND status IN ('completed','cancelled')
+                     AND current_plan ? 'spawn_index'""",
+                g["parent_goal_id"],
+            )
+        done_idx = {r["idx"] for r in done if r["idx"] is not None}
+        if all(d in done_idx for d in deps):
+            out.append(g)
+    return out
 
 
 async def assess(ctx: DriveContext | None = None) -> DriveResult:
@@ -28,7 +60,8 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
             """
             SELECT id, title, description, current_plan, priority, progress,
                    iteration, max_iterations, cost_so_far_usd, max_cost_usd,
-                   check_interval_seconds, last_checked_at, maturation_status
+                   check_interval_seconds, last_checked_at, maturation_status,
+                   parent_goal_id
             FROM goals
             WHERE status = 'active'
               AND (
@@ -36,13 +69,19 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
                 (last_checked_at IS NULL
                  OR last_checked_at < NOW() - (check_interval_seconds || ' seconds')::interval)
                 -- OR has active maturation phase (not review — that waits for human)
-                OR maturation_status IN ('scoping', 'speccing', 'building', 'verifying')
+                OR maturation_status IN ('triaging', 'scoping', 'speccing', 'building', 'waiting', 'verifying')
               )
               AND (maturation_status IS NULL OR maturation_status != 'review')
               AND (max_iterations IS NULL OR iteration < max_iterations)
               AND (max_cost_usd IS NULL OR COALESCE(cost_so_far_usd, 0) < max_cost_usd)
-            ORDER BY priority DESC
-            LIMIT 5
+            ORDER BY
+                -- Active maturation goals first regardless of priority
+                CASE WHEN maturation_status IN ('triaging','scoping','speccing','building','waiting','verifying')
+                     THEN 0 ELSE 1 END,
+                priority DESC,
+                last_checked_at NULLS FIRST,
+                created_at DESC
+            LIMIT 10
             """,
         )
 
@@ -53,6 +92,9 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
             WHERE g.status = 'active' AND t.status IN ('queued', 'running')
             """
         )
+
+    # Filter dep-blocked children outside the connection scope
+    stale_goals = await _filter_dep_blocked([dict(g) for g in stale_goals])
 
     if active_count == 0 and (ctx is None or not ctx.stimuli_of_type(
         "message.received", "goal.created", "goal.schedule_due",
