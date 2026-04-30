@@ -13,6 +13,10 @@ export interface GoalForMaturation {
   maturation_status?: string | null
   scope_analysis?: unknown | null
   spec?: string | null
+  spec_children?: any[]
+  verification_commands?: any[]
+  success_criteria_structured?: any[]
+  review_policy?: string
 }
 
 /**
@@ -96,6 +100,53 @@ export function GoalMaturationDetail({
       )}
 
       {inReview && (
+        <div className="space-y-3">
+          <div className="text-xs text-content-tertiary">
+            <strong className="text-content-secondary">Why review?</strong>{' '}
+            {explainPolicy(goal)}
+          </div>
+
+          {goal.spec_children && goal.spec_children.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-content-tertiary tracking-wide mb-2">Children Cortex plans to spawn</div>
+              <div className="space-y-1.5">
+                {goal.spec_children.map((c: any, i: number) => (
+                  <div key={i} className="rounded-md bg-surface-card-hover px-3 py-2 text-xs">
+                    <div className="font-mono font-medium text-content-primary">
+                      {i + 1}. {c.title}
+                    </div>
+                    <div className="text-content-tertiary mt-0.5">hint: {c.hint || c.description}</div>
+                    <div className="flex items-center gap-2 mt-1 text-content-tertiary">
+                      <span>${(c.estimated_cost_usd || 0).toFixed(2)}</span>
+                      <span>·</span>
+                      <span>{c.estimated_complexity || 'unknown'}</span>
+                      {c.depends_on?.length > 0 && (
+                        <>
+                          <span>·</span>
+                          <span>depends on: {c.depends_on.map((d: number) => `#${d + 1}`).join(', ')}</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {goal.verification_commands && goal.verification_commands.length > 0 && (
+            <div>
+              <div className="text-xs uppercase text-content-tertiary tracking-wide mb-2">Verification commands</div>
+              <ul className="text-xs font-mono space-y-1">
+                {goal.verification_commands.map((v: any, i: number) => (
+                  <li key={i} className="text-content-secondary">• {v.cmd}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {inReview && (
         <div className="flex items-start gap-2">
           <Button
             variant="primary"
@@ -151,4 +202,18 @@ export function GoalMaturationDetail({
       )}
     </div>
   )
+}
+
+function explainPolicy(goal: any): string {
+  const policy = goal.review_policy || 'cost-above-2'
+  if (policy === 'all') return 'Review policy: every level requires approval.'
+  if (policy === 'scopes-sensitive')
+    return `Review policy: scopes-sensitive — affects ${(goal.scope_analysis?.affected_scopes || []).join(', ')}.`
+  if (policy.startsWith('cost-above-')) {
+    const threshold = policy.split('-').pop()
+    const cost = goal.spec_children?.reduce((a: number, c: any) => a + (c.estimated_cost_usd || 0), 0) || 0
+    return `Review policy: cost-above-$${threshold} — estimated $${cost.toFixed(2)} ≥ $${threshold}.`
+  }
+  if (policy === 'top-only') return 'Review policy: top-only — top-level approval, autonomous below.'
+  return `Review policy: ${policy}`
 }
