@@ -70,8 +70,15 @@ async def test_building_spawns_subgoals_for_complex_goal():
             assert titles == ["child A", "child B"]
             for k in kids:
                 assert k["depth"] == 1, f"child depth should be 1, got {k['depth']}"
-                assert k["maturation_status"] == "triaging", (
-                    f"child should start in triaging, got {k['maturation_status']}"
+                # Children skip triage — speccing already classified each via
+                # estimated_complexity, so they spawn directly into scoping with
+                # complexity prefilled. See cortex/app/maturation/building.py.
+                assert k["maturation_status"] == "scoping", (
+                    f"child should start in scoping, got {k['maturation_status']}"
+                )
+                assert k["complexity"] == "complex", (
+                    f"child complexity should be prefilled from estimated_complexity, "
+                    f"got {k.get('complexity')}"
                 )
         finally:
             await c.delete(f"{ORCH}/api/v1/goals/{goal_id}?cascade=true", headers=HEADERS)

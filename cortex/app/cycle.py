@@ -90,6 +90,22 @@ async def _all_children_terminated(parent_goal_id: str) -> bool:
     return row["total"] > 0 and row["total"] == row["done"]
 
 
+async def _all_tasks_terminated(goal_id: str) -> bool:
+    """True when every goal_tasks row for this goal points to a task with terminal status."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """SELECT
+                  COUNT(*) AS total,
+                  COUNT(*) FILTER (WHERE t.status IN ('complete', 'failed', 'cancelled')) AS done
+               FROM goal_tasks gt
+               JOIN tasks t ON gt.task_id = t.id
+               WHERE gt.goal_id = $1::uuid""",
+            goal_id,
+        )
+    return row["total"] > 0 and row["total"] == row["done"]
+
+
 @dataclass
 class CycleState:
     """Accumulated state for one cycle."""
@@ -556,10 +572,12 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
         msg = await run_building(goal_id)
         return msg
     elif maturation_phase == "waiting":
-        # Parent waiting on children. Don't dispatch new work for this goal directly;
-        # instead check if all children have terminated, and if so advance to verifying.
-        ready = await _all_children_terminated(goal_id)
-        if ready:
+        # Parent waiting on children OR simple-goal waiting on dispatched pipeline
+        # tasks. Don't dispatch new work directly; check if either gate is open
+        # (all subgoal children terminated, or all goal_tasks rows terminated).
+        children_done = await _all_children_terminated(goal_id)
+        tasks_done = await _all_tasks_terminated(goal_id)
+        if children_done or tasks_done:
             pool = get_pool()
             async with pool.acquire() as conn:
                 await conn.execute(
@@ -567,17 +585,13 @@ async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> st
                     goal_id,
                 )
             from .journal import emit_journal
-            await emit_journal(goal_id, "waiting.children_complete", {})
-            return f"Children all terminated → goal {goal_id} advancing to verifying"
-        return f"Waiting on children for goal {goal_id} (no-op cycle)"
+            gate = "children_complete" if children_done else "tasks_complete"
+            await emit_journal(goal_id, f"waiting.{gate}", {})
+            return f"{gate.replace('_', ' ').title()} → goal {goal_id} advancing to verifying"
+        return f"Waiting on children/tasks for goal {goal_id} (no-op cycle)"
     elif maturation_phase == "verifying":
         from .maturation.verifying import run_verifying
-        ok = await run_verifying(goal_id)
-        return (
-            f"Verifying phase: goal {goal_id} marked completed (health checks passed)"
-            if ok else
-            f"Verifying phase: goal {goal_id} rolled back to review (health checks failed)"
-        )
+        return await run_verifying(goal_id)
 
     # Check if this approach has already failed (oscillation prevention)
     try:

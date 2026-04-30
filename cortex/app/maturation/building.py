@@ -104,7 +104,13 @@ def _inherited_policy(parent, child) -> str:
 
 
 async def _materialize_as_subgoals(goal, children: list[dict]) -> str:
-    """Create child goal rows; advance parent → waiting. Emits journal entries."""
+    """Create child goal rows; advance parent → waiting. Emits journal entries.
+
+    Spawned children skip triage — speccing already classified each via
+    estimated_complexity, so we drop them straight into the `scoping` phase
+    and prefill `complexity` so building's depth/complexity routing works on
+    the next maturation step. Cycle's existing scoping branch picks them up.
+    """
     pool = get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -116,12 +122,14 @@ async def _materialize_as_subgoals(goal, children: list[dict]) -> str:
                     "spawn_index": idx,
                 }
                 policy = _inherited_policy(goal, c)
+                child_complexity = c.get("estimated_complexity") or "complex"
                 await conn.execute(
                     """INSERT INTO goals (
                           title, description, parent_goal_id, depth, max_depth,
                           review_policy, max_cost_usd, max_retries,
-                          maturation_status, status, created_by, current_plan
-                       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'triaging','active','cortex',$9::jsonb)""",
+                          maturation_status, status, created_by, current_plan,
+                          complexity
+                       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'scoping','active','cortex',$9::jsonb,$10)""",
                     c.get("title") or f"subgoal {idx + 1}",
                     c.get("description") or "",
                     goal["id"],
@@ -131,6 +139,7 @@ async def _materialize_as_subgoals(goal, children: list[dict]) -> str:
                     float(c.get("estimated_cost_usd") or 0.0) or None,
                     goal["max_retries"],
                     json.dumps(child_plan),
+                    child_complexity,
                 )
             await conn.execute(
                 "UPDATE goals SET maturation_status = 'waiting', updated_at = NOW() WHERE id = $1::uuid",
@@ -210,11 +219,13 @@ async def _materialize_as_tasks(goal, children: list[dict]) -> str:
                        ON CONFLICT (goal_id, task_id) DO NOTHING""",
                     goal["id"], task_id, idx,
                 )
+            # Park in 'waiting' until pipeline tasks finish. The cycle's waiting
+            # branch advances to verifying once _all_tasks_terminated() is true.
             await conn.execute(
-                "UPDATE goals SET maturation_status = 'verifying', updated_at = NOW() WHERE id = $1::uuid",
+                "UPDATE goals SET maturation_status = 'waiting', updated_at = NOW() WHERE id = $1::uuid",
                 goal["id"],
             )
 
     await emit_journal(str(goal["id"]), "building.tasks_dispatched",
         {"task_count": len(task_ids), "failed": len(dispatch_errors)})
-    return f"Building: dispatched {len(task_ids)} tasks → verifying"
+    return f"Building: dispatched {len(task_ids)} tasks → waiting"

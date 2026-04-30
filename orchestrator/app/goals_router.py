@@ -463,16 +463,17 @@ async def delete_goal_comment(goal_id: UUID, comment_id: UUID, _user: UserDep):
 
 @goals_router.post("/api/v1/goals/{goal_id}/approve-spec")
 async def approve_spec(goal_id: UUID, _user: UserDep):
-    """Approve a goal's spec.
+    """Approve a goal's spec and route into the building phase.
 
-    Routes directly to 'verifying' — the building phase (sub-goal spawn) is
-    deferred until goal decomposition lands. Until then, humans implement the
-    approved spec manually, then 'verifying' kicks in to validate the result.
+    With goal decomposition landed, an approved spec flows review → building.
+    The cortex `building` executor materializes spec_children — either as
+    sub-goal rows (complex) or flat pipeline tasks (simple) — and advances the
+    parent to `waiting`. Verifying runs only after children/tasks terminate.
     """
     pool = get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            """UPDATE goals SET maturation_status = 'verifying',
+            """UPDATE goals SET maturation_status = 'building',
                    spec_approved_at = NOW(), spec_approved_by = $1, updated_at = NOW()
                WHERE id = $2 AND maturation_status = 'review'
                RETURNING *""",
