@@ -2,7 +2,7 @@
 const lines = [
   { prompt: '~', command: 'git clone https://github.com/arialabs/nova.git' },
   { prompt: '~', command: 'cd nova' },
-  { prompt: '~/nova', command: './setup' },
+  { prompt: '~/nova', command: './install' },
 ];
 ---
 
@@ -40,7 +40,7 @@ const lines = [
         ))}
         <div class="flex items-center gap-0 text-sm mt-4" style="animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both; animation-delay: 800ms;">
           <span class="text-emerald-500/80 text-xs">✓</span>
-          <span class="text-stone-600 text-xs ml-2">Nova is running at http://localhost:3001</span>
+          <span class="text-stone-600 text-xs ml-2">Nova is running at http://localhost:3000</span>
         </div>
       </div>
     </div>
@@ -56,7 +56,7 @@ const lines = [
         <p class="text-sm font-medium text-stone-300">Remote GPU</p>
         <p class="text-[13px] text-stone-500 mt-1 leading-relaxed">
           Got a separate machine with a GPU? Run the remote setup script on it, then re-run
-          <code class="text-teal-400/80 bg-teal-900/15 px-1.5 py-0.5 rounded text-xs font-medium" style="font-family: 'JetBrains Mono', monospace;">./setup</code>
+          <code class="text-teal-400/80 bg-teal-900/15 px-1.5 py-0.5 rounded text-xs font-medium" style="font-family: 'JetBrains Mono', monospace;">./install</code>
           and choose "Remote GPU".
         </p>
         <a href="/deployment/" class="inline-flex items-center gap-1 text-[13px] text-teal-400/80 hover:text-teal-300 mt-2 transition-colors">
