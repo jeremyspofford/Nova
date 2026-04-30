@@ -27,6 +27,14 @@ async def _get_notify_redis() -> aioredis.Redis:
     return _notify_redis
 
 
+async def close_notify_redis() -> None:
+    """Close the notification Redis connection. Call at shutdown."""
+    global _notify_redis
+    if _notify_redis is not None:
+        await _notify_redis.aclose()
+        _notify_redis = None
+
+
 async def write_entry(
     content: str,
     entry_type: str = "narration",
@@ -135,8 +143,6 @@ async def emit_journal(
     if payload:
         metadata["payload"] = payload
     try:
-        # write_entry signature (cortex/app/journal.py:17):
-        #   write_entry(content: str, entry_type: str = "narration", metadata: dict | None = None)
         await write_entry(content=content, entry_type="goal_event", metadata=metadata)
     except Exception as e:
         # Journal failures must never break the maturation pipeline.
@@ -144,7 +150,7 @@ async def emit_journal(
 
 
 async def emit_notification(
-    goal_id: str,
+    goal_id: str | UUID,
     kind: str,
     title: str,
     link: str | None = None,
