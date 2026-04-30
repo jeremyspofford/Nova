@@ -302,9 +302,9 @@ async def delete_goal(
 ):
     """Cancel and delete a goal.
 
-    When cascade=true, recursively delete all subgoals. parent_goal_id has
-    ON DELETE SET NULL (not CASCADE), so we explicitly recurse one level
-    at a time until no descendants remain.
+    When cascade=true, recursively delete all subgoals. The parent_goal_id
+    foreign key uses NO ACTION (Postgres default — neither CASCADE nor
+    SET NULL), so we explicitly recurse to clean the subtree.
     """
     pool = get_pool()
     async with pool.acquire() as conn:
