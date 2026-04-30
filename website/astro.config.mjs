@@ -8,7 +8,7 @@ export default defineConfig({
     starlight({
       title: 'Nova',
       social: [
-        { icon: 'github', label: 'GitHub', href: 'https://github.com/arialabs/nova' },
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/jeremyspofford/nova' },
       ],
       customCss: ['./src/styles/global.css'],
       sidebar: [

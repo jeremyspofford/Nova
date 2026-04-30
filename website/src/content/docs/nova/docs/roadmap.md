@@ -3,7 +3,7 @@ title: "Roadmap"
 description: "Nova's development roadmap -- completed phases and upcoming work."
 ---
 
-Nova is under active development. This page summarizes the major phases of the project. For the full internal roadmap with implementation details, see the [docs/roadmap.md](https://github.com/arialabs/nova/blob/main/docs/roadmap.md) file in the repository.
+Nova is under active development. This page summarizes the major phases of the project. For the full internal roadmap with implementation details, see the [docs/roadmap.md](https://github.com/jeremyspofford/nova/blob/main/docs/roadmap.md) file in the repository.
 
 ## Vision
 
@@ -118,4 +118,4 @@ Nova Cloud at `nova.arialabs.ai` -- a hosted version where users sign up and use
 
 ## Contributing
 
-Nova is open source. Check the full [roadmap](https://github.com/arialabs/nova/blob/main/docs/roadmap.md) for detailed implementation plans, or dive into the codebase to start contributing.
+Nova is open source. Check the full [roadmap](https://github.com/jeremyspofford/nova/blob/main/docs/roadmap.md) for detailed implementation plans, or dive into the codebase to start contributing.

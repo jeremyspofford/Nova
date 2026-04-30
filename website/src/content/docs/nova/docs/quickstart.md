@@ -14,7 +14,7 @@ No Python, Node.js, or database installs required -- everything runs in containe
 ## Install — copy/paste
 
 ```bash
-git clone https://github.com/arialabs/nova.git
+git clone https://github.com/jeremyspofford/nova.git
 cd nova
 ./install
 ```
@@ -50,7 +50,7 @@ If you have a separate machine with a GPU for AI inference:
 
 ```bash
 # Run this ON the GPU machine:
-bash <(curl -s https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh)
+bash <(curl -s https://raw.githubusercontent.com/jeremyspofford/nova/main/scripts/setup-remote-ollama.sh)
 ```
 
 Then re-run `./install` on the Nova machine and choose "Remote GPU". The wizard will ask for the GPU machine's IP address and configure Wake-on-LAN if desired.

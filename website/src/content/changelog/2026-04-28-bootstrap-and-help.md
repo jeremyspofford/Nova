@@ -8,7 +8,7 @@ Two small DX improvements that make Nova nicer to start and nicer to live with.
 **`scripts/bootstrap.sh` + curl-pipe-bash one-liner.** New users can now install Nova with a single command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/arialabs/nova/main/scripts/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jeremyspofford/nova/main/scripts/bootstrap.sh | bash
 ```
 
 The bootstrap script checks for `git` and `docker`, clones the repo (defaults to `./nova`, override with `NOVA_DIR=<path>`), and re-attaches the install wizard to the controlling terminal so you land directly in the mode-selection prompt. Pass `--no-install` to clone without launching the wizard, or just keep using the `git clone && cd nova && ./install` flow if you'd rather audit the source first — both routes hit the same wizard.

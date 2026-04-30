@@ -6,7 +6,7 @@ description: "Development and production commands, GPU overlays, remote GPU setu
 ## Quick start
 
 ```bash
-git clone https://github.com/arialabs/nova.git
+git clone https://github.com/jeremyspofford/nova.git
 cd nova
 ./install
 ```
@@ -57,7 +57,7 @@ Nova supports a split topology where the main stack runs on one machine and GPU 
 1. **On the GPU machine**, run the remote setup script:
 
 ```bash
-bash <(curl -s https://raw.githubusercontent.com/arialabs/nova/main/scripts/setup-remote-ollama.sh)
+bash <(curl -s https://raw.githubusercontent.com/jeremyspofford/nova/main/scripts/setup-remote-ollama.sh)
 ```
 
 2. **On the Nova machine**, set the remote URL in `.env`:
