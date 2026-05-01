@@ -25,6 +25,11 @@ from __future__ import annotations
 
 import logging
 
+from ..prompt_safety import (
+    TAG_TASK_OUTPUT,
+    TAG_USER_REQUEST,
+    wrap_untrusted,
+)
 from ..schemas import GuardrailOutput
 from .base import BaseAgent, PipelineState
 
@@ -109,11 +114,21 @@ class GuardrailAgent(BaseAgent):
     async def run(self, state: PipelineState) -> dict:
         task_output = state.completed.get("task", {})
 
+        # Both the original request and the task output are untrusted.
+        # The Guardrail Agent expects to see potentially-malicious content here —
+        # wrapping in XML helps it cleanly distinguish "what the user asked" from
+        # "what the task agent produced" without prose-style headings being
+        # spoofable by attacker payloads (e.g. text containing "**Task Agent output:**").
+        task_inner = (
+            f"output: {task_output.get('output', '')}\n\n"
+            f"files_changed: {', '.join(task_output.get('files_changed', []))}\n\n"
+            f"explanation: {task_output.get('explanation', '')}"
+        )
         output_text = (
-            f"**Original request:**\n{state.task_input}\n\n"
-            f"**Task Agent output:**\n{task_output.get('output', '')}\n\n"
-            f"**Files changed:** {', '.join(task_output.get('files_changed', []))}\n\n"
-            f"**Explanation:**\n{task_output.get('explanation', '')}"
+            "Original request:\n"
+            + wrap_untrusted(state.task_input, TAG_USER_REQUEST)
+            + "\n\nTask Agent output:\n"
+            + wrap_untrusted(task_inner, TAG_TASK_OUTPUT)
         )
 
         # ── Tier 1: fast scan ──────────────────────────────────────────────
@@ -143,11 +158,15 @@ class GuardrailAgent(BaseAgent):
                 temperature=0.1,
                 max_tokens=4096,
             )
+            # Tier 1 findings include attacker-quoted evidence, so wrap them.
+            findings_text = wrap_untrusted(
+                str(tier1_result["findings"]), TAG_TASK_OUTPUT,
+            )
             tier2_messages = [
                 {"role": "system", "content": TIER2_SYSTEM},
                 self._user_message(
                     f"Task output to review:\n\n{output_text}\n\n"
-                    f"Tier 1 findings:\n{tier1_result['findings']}"
+                    f"Tier 1 findings:\n{findings_text}"
                 ),
             ]
             tier2_result = await tier2_agent.think_json(

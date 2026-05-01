@@ -25,6 +25,11 @@ from __future__ import annotations
 
 import logging
 
+from ..prompt_safety import (
+    TAG_TASK_OUTPUT,
+    TAG_USER_REQUEST,
+    wrap_untrusted,
+)
 from ..schemas import DecisionOutput
 from .base import BaseAgent, PipelineState
 
@@ -65,20 +70,29 @@ Return ONLY valid JSON:
         guardrail = state.completed.get("guardrail",  {})
         review    = state.completed.get("code_review", {})
 
+        # Findings/issues lists contain attacker-quoted evidence and descriptions
+        # (the Guardrail Agent quotes payload text as proof of injection). We
+        # render them as plain text inside an XML-wrapped TASK_OUTPUT block so
+        # that any close-tag injection in evidence cannot escape the boundary.
+        guardrail_lines = "\n".join(
+            f"- [{f['severity'].upper()}] {f['type']}: {f['description']}"
+            for f in guardrail.get("findings", [])
+        )
+        review_lines = "\n".join(
+            f"- [{i['severity'].upper()}] {i['description']}"
+            for i in review.get("issues", [])
+        )
+        findings_inner = (
+            f"task_output_summary: {task.get('output', 'N/A')}\n\n"
+            f"guardrail_findings:\n{guardrail_lines}\n\n"
+            f"code_review_verdict: {review.get('verdict', 'unknown')}\n"
+            f"code_review_issues:\n{review_lines}"
+        )
         content = (
-            f"**Original request:**\n{state.task_input}\n\n"
-            f"**Task Agent output summary:**\n{task.get('output', 'N/A')}\n\n"
-            f"**Guardrail findings:**\n"
-            + "\n".join(
-                f"- [{f['severity'].upper()}] {f['type']}: {f['description']}"
-                for f in guardrail.get("findings", [])
-            )
-            + f"\n\n**Code Review verdict:** {review.get('verdict', 'unknown')}\n"
-            "**Code Review issues:**\n"
-            + "\n".join(
-                f"- [{i['severity'].upper()}] {i['description']}"
-                for i in review.get("issues", [])
-            )
+            "Original request:\n"
+            + wrap_untrusted(state.task_input, TAG_USER_REQUEST)
+            + "\n\nFindings to weigh:\n"
+            + wrap_untrusted(findings_inner, TAG_TASK_OUTPUT)
         )
 
         messages = [

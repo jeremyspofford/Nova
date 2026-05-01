@@ -21,6 +21,12 @@ from __future__ import annotations
 
 import logging
 
+from ..prompt_safety import (
+    TAG_CONTEXT,
+    TAG_TASK_OUTPUT,
+    TAG_USER_REQUEST,
+    wrap_untrusted,
+)
 from ..schemas import CodeReviewOutput
 from .base import BaseAgent, PipelineState
 
@@ -93,11 +99,13 @@ fundamentally broken or a security risk."""
         context = state.completed.get("context", {})
         task    = state.completed.get("task", {})
 
-        context_block = (
-            f"**Architecture & conventions:** {context.get('curated_context', 'N/A')}\n"
-            f"**Key patterns:** {', '.join(context.get('key_patterns', []))}"
-            if context else ""
-        )
+        context_block = ""
+        if context:
+            ctx_inner = (
+                f"Architecture & conventions: {context.get('curated_context', 'N/A')}\n"
+                f"Key patterns: {', '.join(context.get('key_patterns', []))}"
+            )
+            context_block = wrap_untrusted(ctx_inner, TAG_CONTEXT) + "\n\n"
 
         iteration_note = (
             f"\n\nNote: This is review iteration {iteration}. "
@@ -105,13 +113,20 @@ fundamentally broken or a security risk."""
             else ""
         )
 
+        task_inner = (
+            f"output: {task.get('output', '')}\n\n"
+            f"files_changed: {', '.join(task.get('files_changed', []))}\n\n"
+            f"explanation: {task.get('explanation', '')}"
+        )
+
         review_content = (
-            f"**Original request:**\n{state.task_input}\n\n"
-            + (f"{context_block}\n\n" if context_block else "")
-            + f"**Task Agent output:**\n{task.get('output', '')}\n\n"
-            f"**Files changed:** {', '.join(task.get('files_changed', []))}\n\n"
-            f"**Explanation:**\n{task.get('explanation', '')}"
-            f"{iteration_note}"
+            "Original request:\n"
+            + wrap_untrusted(state.task_input, TAG_USER_REQUEST)
+            + "\n\n"
+            + context_block
+            + "Task Agent output:\n"
+            + wrap_untrusted(task_inner, TAG_TASK_OUTPUT)
+            + iteration_note
         )
 
         messages = [
