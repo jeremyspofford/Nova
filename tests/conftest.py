@@ -87,6 +87,45 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+def pytest_sessionstart(session):
+    """Sweep leaked `nova-test-*` goals from cortex's queue before any test runs.
+
+    Tests that crash mid-poll or are Ctrl-C'd leave goals behind. Cortex's
+    serve drive then services those leaked goals ahead of fresh test goals,
+    starving new tests within their poll windows. Worst case observed: 10
+    leaked goals from accumulated runs; fresh maturation tests timed out
+    waiting their turn.
+
+    Not async — uses sync httpx so it runs cleanly in the session-start hook.
+    Fail-soft: if the orchestrator isn't reachable, log and continue.
+    """
+    if not ADMIN_SECRET:
+        return
+    try:
+        with httpx.Client(timeout=5) as client:
+            r = client.get(
+                f"{ORCHESTRATOR_URL}/api/v1/goals?status=active",
+                headers={"X-Admin-Secret": ADMIN_SECRET},
+            )
+            if r.status_code != 200:
+                return
+            goals = r.json()
+            test_goals = [
+                g for g in goals
+                if (g.get("title") or "").lower().startswith("nova-test-")
+            ]
+            if not test_goals:
+                return
+            print(f"\n[conftest] Sweeping {len(test_goals)} leaked nova-test-* goals…")
+            for g in test_goals:
+                client.delete(
+                    f"{ORCHESTRATOR_URL}/api/v1/goals/{g['id']}?cascade=true",
+                    headers={"X-Admin-Secret": ADMIN_SECRET},
+                )
+    except Exception as e:
+        print(f"\n[conftest] Goal-sweep skipped: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Session-scoped async clients (function-scoped to avoid event loop issues)
 # ---------------------------------------------------------------------------

@@ -375,6 +375,22 @@ Role schema and basic enforcement shipped. Full data isolation remains.
 - Per-user settings (appearance, default model, notifications)
 - Role-based nav visibility (Guest sees Chat only, Viewer is read-only)
 - Expiry check on every request + Redis deny-list for immediate revocation
+
+**Audit findings (2026-05-01) — backlog, not production-blocking for single-tenant deploys:**
+
+A targeted audit identified specific tier-1 (read leakage) and tier-2 (write-side) gaps where queries don't filter by tenant_id. These are **not blocking the single-tenant production path** but should be addressed before any multi-tenant SaaS launch.
+
+Read-side gaps (any authenticated user can read another tenant's row by guessing UUID):
+- `goals_router.py`: list, single-read, stats, scope, iterations, artifacts, comments
+- `pipeline_router.py`: tasks list, task detail, findings, reviews, sessions, artifacts
+
+Write-side gaps (INSERTs hardcode/default tenant_id instead of pulling from `user.tenant_id`):
+- `goals_router.py:135` (POST /api/v1/goals)
+- `goals_router.py:438` (POST /api/v1/goals/{id}/comments)
+- `goals_router.py:318` (DELETE /api/v1/goals/{id} — no tenant check)
+- `pipeline_router.py:147` (POST /api/v1/pipeline/tasks)
+
+When work resumes: stage per route group (goals → pipeline → comments), one PR per group, with regression tests asserting "user A's request can't read user B's row."
 - `/invite/{code}` route with registration flow
 - Audit logging for role changes, invites, deactivations
 
