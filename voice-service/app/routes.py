@@ -1,6 +1,7 @@
 """Voice API endpoints — transcribe audio, synthesize speech, list voices."""
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import time as _time
@@ -97,7 +98,8 @@ async def require_auth(request: Request):
     auth_header = request.headers.get("Authorization", "")
 
     current_secret = await get_admin_secret()
-    if admin_secret and admin_secret == current_secret:
+    # Constant-time comparison — see orchestrator/app/auth.py for rationale.
+    if admin_secret and current_secret and hmac.compare_digest(admin_secret, current_secret):
         return
 
     if auth_header.startswith("Bearer sk-nova-"):

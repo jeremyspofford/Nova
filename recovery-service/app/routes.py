@@ -1,5 +1,6 @@
 """Recovery service API routes."""
 
+import hmac
 import logging
 import time
 from typing import Any
@@ -115,9 +116,12 @@ async def _check_admin(
     x_admin_secret: str = Header(default=""),
 ):
     """Validate admin access. Accepts JWT Bearer or X-Admin-Secret."""
-    # Check admin secret (Redis-backed for runtime rotation, env fallback)
-    if x_admin_secret and x_admin_secret == await _get_admin_secret():
-        return
+    # Check admin secret (Redis-backed for runtime rotation, env fallback).
+    # Constant-time comparison defeats timing attacks on the secret.
+    if x_admin_secret:
+        expected = await _get_admin_secret()
+        if expected and hmac.compare_digest(x_admin_secret, expected):
+            return
 
     # Check JWT Bearer token
     if authorization and authorization.startswith("Bearer "):

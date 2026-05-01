@@ -1,6 +1,7 @@
 """Nova Chat Bridge — multi-platform chat integration."""
 from __future__ import annotations
 
+import hmac
 import json
 import logging
 import time as _time
@@ -71,6 +72,19 @@ ADAPTERS: list[PlatformAdapter] = [
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # FC-002: refuse to start with the literal default or empty admin secret.
+    import os
+    if settings.nova_admin_secret in ("", "nova-admin-secret-change-me"):
+        if os.getenv("NOVA_ALLOW_DEFAULT_ADMIN_SECRET") != "1":
+            raise RuntimeError(
+                "NOVA_ADMIN_SECRET is unset or set to the literal default. "
+                "Run scripts/install.sh to generate a strong secret, "
+                "or set NOVA_ALLOW_DEFAULT_ADMIN_SECRET=1 to bypass (dev/test only)."
+            )
+        log.warning(
+            "NOVA_ADMIN_SECRET bypass active — do not use this configuration in production."
+        )
+
     active = []
     for adapter in ADAPTERS:
         if adapter.is_configured():
@@ -158,7 +172,9 @@ async def adapter_status():
 async def reload_telegram(request: Request):
     """Reload Telegram adapter with new config. Called by dashboard after saving bot token."""
     admin_secret = request.headers.get("X-Admin-Secret", "")
-    if admin_secret != await _get_admin_secret():
+    expected = await _get_admin_secret()
+    # Constant-time comparison — defeats timing-attack inference of secret bytes.
+    if not (admin_secret and expected and hmac.compare_digest(admin_secret, expected)):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     # Read new token from Redis runtime config (DB 1 = nova:config:* store)

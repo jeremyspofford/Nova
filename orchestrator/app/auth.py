@@ -15,6 +15,7 @@ token — it authenticates AdminDep endpoints only.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import time as _time
@@ -179,6 +180,44 @@ async def _apply_rate_limit(api_key_id: UUID, rate_limit_rpm: int) -> None:
         )
 
 
+# Anti-brute-force on admin auth. Threshold is per-IP and only counts FAILED
+# attempts — a successful admin request never increments. Window is 5 minutes;
+# 10 fails locks the IP out for the rest of that window. Tunable via env in
+# future if real ops experience demands it.
+_ADMIN_FAIL_WINDOW_SECONDS = 300
+_ADMIN_FAIL_THRESHOLD = 10
+
+
+async def _admin_failures_key(ip: str) -> str:
+    window = int(_time.time() / _ADMIN_FAIL_WINDOW_SECONDS)
+    return f"nova:admin-auth-fail:{ip}:{window}"
+
+
+async def _admin_failure_count(ip: str) -> int:
+    """Read current failure count for an IP without incrementing."""
+    try:
+        redis = get_redis()
+        raw = await redis.get(await _admin_failures_key(ip))
+        return int(raw) if raw else 0
+    except Exception:
+        log.debug("Admin failure count read failed for %s", ip)
+        return 0
+
+
+async def _record_admin_failure(ip: str) -> int:
+    """Increment failure counter for IP. Returns new count."""
+    try:
+        redis = get_redis()
+        rkey = await _admin_failures_key(ip)
+        count = await redis.incr(rkey)
+        if count == 1:
+            await redis.expire(rkey, _ADMIN_FAIL_WINDOW_SECONDS * 2)
+        return count
+    except Exception:
+        log.debug("Admin failure counter unavailable")
+        return 0  # fail-open on counter error so legit admins aren't locked out
+
+
 async def require_api_key(
     request: Request,
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
@@ -235,9 +274,27 @@ async def require_admin(
     if getattr(request.state, "is_trusted_network", False):
         return
 
-    # Check admin secret first (Redis-backed with env fallback for zero-downtime rotation)
-    if x_admin_secret and x_admin_secret == await get_admin_secret():
-        return
+    # Brute-force throttle: if this IP already exceeded the failure threshold
+    # within the current window, reject up-front with 429. This runs BEFORE the
+    # secret/JWT check so an attacker can't even attempt comparisons.
+    client_ip = request.client.host if request.client else "unknown"
+    fail_count = await _admin_failure_count(client_ip)
+    if fail_count >= _ADMIN_FAIL_THRESHOLD:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Too many failed admin auth attempts. "
+                f"Retry in {_ADMIN_FAIL_WINDOW_SECONDS // 60} minutes."
+            ),
+        )
+
+    # Check admin secret first (Redis-backed with env fallback for zero-downtime rotation).
+    # Constant-time comparison to defeat timing attacks: an attacker measuring response
+    # latency must not be able to learn how many leading bytes of their guess matched.
+    if x_admin_secret:
+        expected = await get_admin_secret()
+        if expected and hmac.compare_digest(x_admin_secret, expected):
+            return
 
     # Check JWT from admin user
     if authorization and authorization.startswith("Bearer "):
@@ -250,6 +307,9 @@ async def require_admin(
         except Exception:
             pass
 
+    # Auth failed — record for brute-force throttle. Successful auth never touches
+    # the counter, so legitimate admins don't accumulate failures over time.
+    await _record_admin_failure(client_ip)
     raise HTTPException(status_code=403, detail="Invalid admin secret")
 
 

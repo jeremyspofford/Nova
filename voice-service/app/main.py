@@ -37,6 +37,19 @@ async def close_redis() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # FC-002: refuse to start with the literal default or empty admin secret.
+    import os
+    if settings.nova_admin_secret in ("", "nova-admin-secret-change-me"):
+        if os.getenv("NOVA_ALLOW_DEFAULT_ADMIN_SECRET") != "1":
+            raise RuntimeError(
+                "NOVA_ADMIN_SECRET is unset or set to the literal default. "
+                "Run scripts/install.sh to generate a strong secret, "
+                "or set NOVA_ALLOW_DEFAULT_ADMIN_SECRET=1 to bypass (dev/test only)."
+            )
+        log.warning(
+            "NOVA_ADMIN_SECRET bypass active — do not use this configuration in production."
+        )
+
     log.info("Voice service starting on http://0.0.0.0:%d", settings.service_port)
     yield
     log.info("Voice service shutting down")
