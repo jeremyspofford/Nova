@@ -51,6 +51,18 @@ async def assess(ctx: DriveContext | None = None) -> DriveResult:
     composite = float(data.get("composite", 100.0))
     dimensions = data.get("dimensions", {})
 
+    # No quality data yet → no signal. Without this guard, an empty summary
+    # ({"dimensions": {}, "composite": 0.0}) reads as "maximum regression"
+    # and the drive wins every cycle while having nothing real to do.
+    if not dimensions and composite == 0.0:
+        return DriveResult(
+            name="quality",
+            priority=3,
+            urgency=0.0,
+            description="no quality data yet",
+            context={},
+        )
+
     if composite < _HEALTHY_COMPOSITE:
         gap = (_HEALTHY_COMPOSITE - composite) / _HEALTHY_COMPOSITE
         urgency = max(urgency, min(0.8, gap * 1.5))

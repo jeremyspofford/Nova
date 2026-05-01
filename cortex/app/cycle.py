@@ -544,8 +544,34 @@ async def _execute_action(drive: DriveResult, plan: str, state: CycleState) -> s
         return await _execute_reflect(drive, plan, state)
     elif drive.name == "learn":
         return await _execute_learn(drive, plan, state)
+    elif drive.name == "quality":
+        return await _execute_quality(drive, state)
     else:
         return f"Drive '{drive.name}' has no executor"
+
+
+async def _execute_quality(drive: DriveResult, state: CycleState) -> str:
+    """Quality drive winner — invoke the existing quality.react() handler.
+
+    react() triggers a quality loop only when memory dimensions are weak;
+    cooldown is enforced by the orchestrator's loop scheduler itself, so
+    we don't add a second layer here.
+    """
+    ctx = DriveContext(
+        stimuli=[],
+        memory_context="",
+        budget_tier="best",
+        cycle_count=state.cycle_number,
+    )
+    try:
+        await quality.react(ctx, drive)
+    except Exception as e:
+        log.warning("Quality drive react failed: %s", e)
+        return f"quality react failed: {e}"
+    weak = drive.context.get("weak_dimensions") or []
+    if weak:
+        return f"quality loop triggered for weak dims: {', '.join(weak)}"
+    return f"quality assessed: {drive.description}"
 
 
 async def _execute_serve(drive: DriveResult, plan: str, state: CycleState) -> str:
